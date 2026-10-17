@@ -1,0 +1,21 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "balance": "VerifiedOfficial"
+  },
+  "fixture_sha256": "0924d907272438ddd36d70794014143977eda5952d3ad95dc11fc523c8dcc095",
+  "http": {
+    "method": "GET",
+    "path": "/v1/credits",
+    "status": 200
+  },
+  "notes": "The documented GET /v1/credits response example, verbatim.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Charm Hyper API Credits (docs/api/credits.html), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "583502b6030b0d97a25b1815f3bcfd274c606a286c01d32763492d847007cfb1",
+  "source_url": "https://hyper.charm.land/docs/api/credits.html",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "charm.hyper.credits_api"
+}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 )
 
@@ -54,16 +54,16 @@ func (o GetRelationsOptions) withDefaults() GetRelationsOptions {
 
 type getRelationsTool struct {
 	opts  GetRelationsOptions
-	cg    codeintel.Provider
+	cg    codeintelapi.Provider
 	audit audit.Writer
 }
 
-func newGetRelationsTool(opts GetRelationsOptions, cg codeintel.Provider, w audit.Writer) Tool {
+func newGetRelationsTool(opts GetRelationsOptions, cg codeintelapi.Provider, w audit.Writer) Tool {
 	if w == nil {
 		w = audit.NewNoopWriter()
 	}
 	if cg == nil {
-		cg = codeintel.Unavailable()
+		cg = codeintelapi.Unavailable()
 	}
 	return &getRelationsTool{
 		opts:  opts.withDefaults(),
@@ -79,7 +79,7 @@ func (*getRelationsTool) Description() string {
 		"\"what calls handleClick within 2 hops\" and get back a flat list of " +
 		"reachable symbols with their depth + the edge that brought them in. " +
 		"Returns metadata only (name, fqn, kind, file, start_line); use " +
-		"get_symbols for bodies. Single anchor per call — when the same `name` " +
+		"get_symbols for bodies. Single anchor per call - when the same `name` " +
 		"appears in multiple scopes, pin via `fqn`. CONTAINS edges may be empty " +
 		"in some codebases; an empty result with `degraded: true` is normal."
 }
@@ -232,6 +232,22 @@ func (t *getRelationsTool) Invoke(ctx context.Context, raw json.RawMessage) (any
 			Reason:   "code index unavailable; fall back to get_file",
 			Warnings: []string{WarningIndexUnavailable},
 		}
+		// D-307: off by choice. Reason is this tool's explanation field, so
+		// it carries the shared "turn it on in Settings" sentence.
+		if codeintelapi.IsDisabled(t.cg) {
+			res.Reason = codeIntelDisabledNote + "; fall back to get_file"
+			res.Warnings = appendWarning(res.Warnings, WarningCodeIntelDisabled)
+			t.recordAudit(args, res, abs, started)
+			return res, nil
+		}
+		// Corpus archival P2.3: an archived project reaches here looking
+		// exactly like a never-indexed one. Reason is the field this tool
+		// already uses to explain itself, so the honest explanation replaces
+		// the generic one rather than being bolted alongside it.
+		if note, archived := archivedNote(ctx, t.cg, args.ProjectRoot); archived {
+			res.Reason = note
+			res.Warnings = appendWarning(res.Warnings, WarningProjectArchived)
+		}
 		t.recordAudit(args, res, abs, started)
 		return res, nil
 	}
@@ -273,7 +289,7 @@ func (t *getRelationsTool) Invoke(ctx context.Context, raw json.RawMessage) (any
 			OK:      false,
 			Results: []getRelationsRow{},
 			Reason: fmt.Sprintf(
-				"get_relations: ambiguous anchor; %d symbols named %q in %s — supply fqn to disambiguate",
+				"get_relations: ambiguous anchor; %d symbols named %q in %s - supply fqn to disambiguate",
 				len(anchors), args.Name, rel,
 			),
 			Candidates: candidates,
@@ -354,20 +370,20 @@ func (t *getRelationsTool) Invoke(ctx context.Context, raw json.RawMessage) (any
 // relationDirectionFor maps the kind enum to the codeintel
 // RelationDirection. Returns (_, false) for invalid kinds so callers
 // can return a transport error.
-func relationDirectionFor(kind string) (codeintel.RelationDirection, bool) {
+func relationDirectionFor(kind string) (codeintelapi.RelationDirection, bool) {
 	switch kind {
 	case "callers":
-		return codeintel.RelationCallers, true
+		return codeintelapi.RelationCallers, true
 	case "callees":
-		return codeintel.RelationCallees, true
+		return codeintelapi.RelationCallees, true
 	case "contains":
-		return codeintel.RelationContains, true
+		return codeintelapi.RelationContains, true
 	default:
 		return 0, false
 	}
 }
 
-func anchorView(a codeintel.SymbolMatch, rootResolved string) *getRelationsAnchor {
+func anchorView(a codeintelapi.SymbolMatch, rootResolved string) *getRelationsAnchor {
 	v := &getRelationsAnchor{
 		Name:      a.Name,
 		FQN:       a.FQN,

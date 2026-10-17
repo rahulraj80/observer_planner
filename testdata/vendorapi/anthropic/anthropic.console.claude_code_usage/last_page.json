@@ -1,0 +1,71 @@
+{
+  "data": [
+    {
+      "actor": {
+        "email_address": "user@emaildomain.com",
+        "type": "user_actor"
+      },
+      "core_metrics": {
+        "commits_by_claude_code": 1,
+        "lines_of_code": {
+          "added": 10,
+          "removed": 2
+        },
+        "num_sessions": 2,
+        "pull_requests_by_claude_code": 0
+      },
+      "customer_type": "subscription",
+      "date": "2025-08-08T00:00:00Z",
+      "is_remote": true,
+      "model_breakdown": [
+        {
+          "estimated_cost": {
+            "amount": 7,
+            "currency": "USD"
+          },
+          "model": "claude-sonnet-5",
+          "tokens": {
+            "cache_creation": 0,
+            "cache_read": 100,
+            "input": 900,
+            "output": 300
+          }
+        }
+      ],
+      "organization_id": "12345678-1234-5678-1234-567812345678",
+      "terminal_type": "web",
+      "tool_actions": {
+        "edit_tool": {
+          "accepted": 1,
+          "rejected": 0
+        }
+      },
+      "subscription_type": "team"
+    },
+    {
+      "actor": {
+        "api_key_name": "ci-key",
+        "type": "api_actor"
+      },
+      "core_metrics": {
+        "commits_by_claude_code": 0,
+        "lines_of_code": {
+          "added": 0,
+          "removed": 0
+        },
+        "num_sessions": 1,
+        "pull_requests_by_claude_code": 0
+      },
+      "customer_type": "api",
+      "date": "2025-08-08T00:00:00Z",
+      "is_remote": false,
+      "model_breakdown": [],
+      "organization_id": "12345678-1234-5678-1234-567812345678",
+      "terminal_type": "vscode",
+      "tool_actions": {},
+      "subscription_type": null
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

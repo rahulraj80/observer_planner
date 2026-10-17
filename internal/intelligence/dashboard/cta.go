@@ -16,7 +16,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/configapply"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -197,7 +196,7 @@ func (s *Server) ctaRoutingShadowPlan(ctx context.Context) ([]*configapply.Chang
 	// Skipped when the shadow policy isn't a known template (a custom
 	// inline policy can't be expressed via the template map); marked
 	// already-active when the current policy already matches.
-	if _, known := routing.TemplateByName(sh.PolicyName); known {
+	if routingTemplateKnown(sh.PolicyName) {
 		changes = append(changes, &configapply.Change{
 			Section:         "routing",
 			Key:             "policy",

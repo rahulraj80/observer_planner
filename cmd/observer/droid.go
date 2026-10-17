@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // newDroidCmd implements `observer droid` — launches Factory AI's droid CLI
@@ -40,10 +42,12 @@ func newDroidCmd() *cobra.Command {
 		Use:   "droid [-- droid-args...]",
 		Short: "Launch Factory's droid; with --continue-from, seed a handover as droid's positional prompt",
 		Long: "Wraps Factory AI's droid CLI (`droid`). This launcher is NON-PROXIED\n" +
-			"— droid's built-in-model path has no base-URL knob and its BYOK lane\n" +
+			"- droid's built-in-model path has no base-URL knob and its BYOK lane\n" +
 			"is unprobed, so pointing it at the proxy would be a guess. Token\n" +
 			"capture happens via observer's local droid adapter (session JSONL +\n" +
 			"the settings.json sidecar's session-level cumulative counts).\n\n" +
+			"droid's `--model` flag is only available on the headless `droid exec`\n" +
+			"subcommand; the interactive session has no model selection.\n\n" +
 			"With --continue-from <session-id> the launcher distills a handover\n" +
 			"from that session and seeds it as droid's trailing positional prompt\n" +
 			"(delivery=inject_prompt), so droid opens an interactive session\n" +
@@ -51,8 +55,13 @@ func newDroidCmd() *cobra.Command {
 			"All arguments after the subcommand are forwarded to droid. Use `--`\n" +
 			"to separate observer flags from droid flags. NEVER touches\n" +
 			"FACTORY_API_KEY or stored auth.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach gate (attach-all-launchers): default-on attach hands the PTY
 			// to the daemon. Seed-only spec (droid is launched non-proxied — no
 			// proxy env, no escape-hatch flag); incompatible when a handoff fork
@@ -105,7 +114,7 @@ func newDroidCmd() *cobra.Command {
 				// two-prompt check does not misread it, which makes THIS
 				// the check that owns the case.
 				if droidHeadlessScan.leads(args) {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE droid session, but you forwarded a non-interactive subcommand (e.g. `exec`) — drop it, or run the handover through `droid exec` yourself")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE droid session, but you forwarded a non-interactive subcommand (e.g. `exec`) - drop it, or run the handover through `droid exec` yourself")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer droid: %v\n", err)
 					return err
 				}
@@ -139,7 +148,13 @@ func newDroidCmd() *cobra.Command {
 				continueDir = cwd
 			}
 
-			return runSeedOnlyLaunch("droid", bin, args, continueDir)
+			// Best-effort attribution config: a load failure just disables
+			// the launch seed (recordLaunchSeed treats "" as off).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+			}
+			return runSeedOnlyLaunchSeeded(configPath, dbPath, "droid", "droid", bin, args, continueDir)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
@@ -150,7 +165,6 @@ func newDroidCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "droid")
 	resume = registerResumeFlag(cmd, "droid")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 

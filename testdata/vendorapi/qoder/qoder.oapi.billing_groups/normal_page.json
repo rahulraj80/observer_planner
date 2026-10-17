@@ -1,0 +1,34 @@
+{
+  "billingGroups": [
+    {
+      "id": "unassigned",
+      "organizationId": "org_xxx",
+      "name": "Unassigned",
+      "isUnassigned": true,
+      "memberCount": 4,
+      "limitAmount": -1,
+      "currentUsed": 320,
+      "isBlocked": false
+    },
+    {
+      "id": "9bcb59cb-07e6-4a2d-9655-56aaf16b0e34",
+      "organizationId": "org_xxx",
+      "name": "Platform",
+      "description": "Platform cost center",
+      "isUnassigned": false,
+      "memberCount": 12,
+      "limitAmount": 10000,
+      "currentUsed": 4250,
+      "isBlocked": false,
+      "creatorId": "550e8400-e29b-41d4-a716-446655440000",
+      "createdAt": "2026-08-01T08:00:00Z",
+      "updatedAt": "2026-08-10T09:30:00Z"
+    }
+  ],
+  "maxResults": 20,
+  "nextToken": "cursor_from_response",
+  "selectedPeriod": {
+    "periodStart": "2026-08-01T00:00:00Z",
+    "periodEnd": "2026-09-01T00:00:00Z"
+  }
+}

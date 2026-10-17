@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].path": "VerifiedOfficial",
+    "items[].sizeBytes": "VerifiedOfficial",
+    "items[].updatedAt": "VerifiedOfficial"
+  },
+  "fixture_sha256": "f4cadd618f85b26eceb884214465333f1dac00614fff8947f88d60686bdfa7a2",
+  "http": {
+    "method": "GET",
+    "path": "/v1/agents/{id}/artifacts",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Artifacts\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.artifacts"
+}

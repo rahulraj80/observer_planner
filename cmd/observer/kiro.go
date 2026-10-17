@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // kiroContinueSubcommand is the subcommand the `--continue-from` launch
@@ -46,9 +48,11 @@ func newKiroCmd() *cobra.Command {
 		Aliases: []string{"kiro-cli"},
 		Short:   "Launch Kiro CLI (kiro-cli); with --continue-from, seed a handover via kiro-cli chat",
 		Long: "Wraps AWS's Kiro CLI (`kiro-cli`). Kiro talks to SigV4-signed AWS\n" +
-			"endpoints with no base-URL knob, so this launcher is NON-PROXIED —\n" +
+			"endpoints with no base-URL knob, so this launcher is NON-PROXIED -\n" +
 			"token capture happens via observer's local kiro-cli dual-store\n" +
 			"adapter, not the proxy.\n\n" +
+			"Model selection is scoped to the `chat` subcommand: pass\n" +
+			"`-- chat --model <m>` to select which model the chat session uses.\n\n" +
 			"With --continue-from <session-id> the launcher distills a handover\n" +
 			"from that session and seeds it via `kiro-cli chat \"<handover>\"`\n" +
 			"(the chat subcommand's positional prompt, delivery=inject_prompt),\n" +
@@ -57,8 +61,13 @@ func newKiroCmd() *cobra.Command {
 			"All arguments after the subcommand are forwarded to kiro-cli. Use\n" +
 			"`--` to separate observer flags from kiro-cli flags. NEVER touches\n" +
 			"API keys or AWS credentials.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach gate (attach-all-launchers): default-on attach hands the PTY
 			// to the daemon. Seed-only spec (kiro-cli is native-exempt — no proxy
 			// env, no escape-hatch flag); kiro's chat is interactive with no
@@ -103,7 +112,7 @@ func newKiroCmd() *cobra.Command {
 				// and exits instead of opening the session seeded. Fail fast,
 				// before the (comparatively expensive) handoff render.
 				if forwardedFlagConflict(args, "--no-interactive") {
-					err := fmt.Errorf("--continue-from opens an interactive seeded session, but you forwarded --no-interactive — drop it (use `observer handoff` for a file-only carry)")
+					err := fmt.Errorf("--continue-from opens an interactive seeded session, but you forwarded --no-interactive - drop it (use `observer handoff` for a file-only carry)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer kiro: %v\n", err)
 					return err
 				}
@@ -137,7 +146,13 @@ func newKiroCmd() *cobra.Command {
 				continueDir = cwd
 			}
 
-			return runSeedOnlyLaunch("kiro-cli", bin, args, continueDir)
+			// Best-effort attribution config: a load failure just disables
+			// the launch seed (recordLaunchSeed treats "" as off).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+			}
+			return runSeedOnlyLaunchSeeded(configPath, dbPath, "kiro-cli", "kiro-cli", bin, args, continueDir)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
@@ -148,7 +163,6 @@ func newKiroCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "kiro-cli")
 	resume = registerResumeFlag(cmd, "kiro-cli")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 

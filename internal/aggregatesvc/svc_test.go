@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_aggregate_share
+
 package aggregatesvc
 
 import (
@@ -6,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 
 	"github.com/marmutapp/superbased-observer/internal/aggregate"
 	"github.com/marmutapp/superbased-observer/internal/aggregateclient"
@@ -420,7 +424,7 @@ func TestPreview_NoLedgerNoSend_EvenWhenDisabled(t *testing.T) {
 func TestSubmitMonth_FixtureDB_ExpectedPayload(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agg.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agg.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

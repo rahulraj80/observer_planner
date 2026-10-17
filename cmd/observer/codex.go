@@ -67,7 +67,7 @@ func newCodexCmd() *cobra.Command {
 		Long: "Wraps `codex` with `-c openai_base_url='\"<proxy>/v1\"'` injected\n" +
 			"into argv so the Responses API request lands at the observer proxy.\n" +
 			"Both auth paths (API-key sk-... and ChatGPT-Plus JWT) flow through\n" +
-			"the same override — the proxy detects the bearer shape and routes\n" +
+			"the same override - the proxy detects the bearer shape and routes\n" +
 			"to api.openai.com vs chatgpt.com/backend-api/codex/responses\n" +
 			"automatically.\n\n" +
 			"All arguments after the subcommand are forwarded to codex. Use\n" +
@@ -83,8 +83,13 @@ func newCodexCmd() *cobra.Command {
 			"`--detect-only` to inspect without running codex, or\n" +
 			"`--no-app-server-check` to silence. See\n" +
 			"docs/codex-shared-app-server-gotcha.md.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			return runCodexLauncher(cmd.Context(), codexLauncherOptions{
 				configPath:       configPath,
 				proxyURL:         proxyURL,
@@ -112,7 +117,7 @@ func newCodexCmd() *cobra.Command {
 	cmd.Flags().StringVar(&proxyURL, "proxy", "", "Override the observer proxy URL (default: http://127.0.0.1:<cfg.proxy.port>)")
 	cmd.Flags().StringVar(&codexPath, "codex-path", "", "Path to the codex binary (default: resolve `codex` on PATH)")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false,
-		"Terminate detected shared codex app-servers (e.g., VS Code Codex extension) before exec. Operator-hostile but bounded — see docs/codex-shared-app-server-gotcha.md.")
+		"Terminate detected shared codex app-servers (e.g., VS Code Codex extension) before exec. Operator-hostile but bounded - see docs/codex-shared-app-server-gotcha.md.")
 	cmd.Flags().BoolVar(&noAppServerCheck, "no-app-server-check", false,
 		"Skip pre- and post-flight detection of shared codex app-servers. For scripts that have verified the host is clean.")
 	cmd.Flags().BoolVar(&detectOnly, "detect-only", false,
@@ -151,9 +156,8 @@ func newCodexCmd() *cobra.Command {
 	// combinable with --attach (the daemon owns the resumed PTY).
 	if capCodex, _ := integration.For("codex"); capCodex.Resume.Kind == integration.ResumeNative {
 		cmd.Flags().StringVar(&resume, "resume", "",
-			"Resume a CLOSED codex session by its id: launches `codex resume <id>`, reattaching the tool's REAL prior session — NOT a distilled fork. Composes with proxy routing (`codex -c openai_base_url=… resume <id>`). Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
+			"Resume a CLOSED codex session by its id: launches `codex resume <id>`, reattaching the tool's REAL prior session - NOT a distilled fork. Composes with proxy routing (`codex -c openai_base_url=… resume <id>`). Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
 	}
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
@@ -175,8 +179,16 @@ type codexLauncherOptions struct {
 	noAttach         bool
 	noProxy          bool
 	noProxyRoute     bool
-	resume           string
-	stderr           interface{ Write([]byte) (int, error) }
+	// routeSkipReason records WHY this launch skips codex's `-c openai_base_url`
+	// override, so the ONE notice printed for it says the true thing.
+	// noProxyRoute alone cannot answer that: the launcher SETS it on the
+	// proxy-down neutralize path, which used to make codexLaunchArgs claim
+	// "--no-proxy-route set" for a launch that passed no such flag — two
+	// contradictory notices for one outcome (Q1 probe, P2). Meaningful only when
+	// noProxyRoute is true; see codexRouteSkipNotice.
+	routeSkipReason proxyFallbackReason
+	resume          string
+	stderr          interface{ Write([]byte) (int, error) }
 }
 
 // runCodexLauncher resolves the proxy URL, prepares the child argv with
@@ -199,6 +211,14 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: opts.configPath})
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// P6 item 5: refuse a bare launch of an org-disallowed tool (node.features
+	// tools.disallow). "codex" is codex's integration-registry key. A PEEK
+	// here (review M3-10): an attached launch is counted by the daemon's
+	// inner `observer codex`, the bare path below counts it itself.
+	if err := refuseIfToolDisallowedPeekCfg(cfg, "codex", opts.stderr); err != nil {
+		return err
 	}
 
 	// Attach mode (session-attach design Phase 1 + resilient-attach WP-C): hand
@@ -260,6 +280,10 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 	if outcome.handled {
 		return attachErr
 	}
+	// The bare path starts codex itself: count the grant use here (M3-10).
+	if err := refuseIfToolDisallowedCfg(cfg, "codex", opts.stderr); err != nil {
+		return err
+	}
 
 	// Native resume (session-attach design Phase 3): `observer codex --resume
 	// <id>` prepends the `resume <id>` subcommand to codex's argv. The final
@@ -287,7 +311,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 		defer release()
 		opts.codexArgs = injectCodexResume(opts.codexArgs, opts.resume)
 		fmt.Fprintf(opts.stderr,
-			"observer codex: native resume — reattaching session %s via `codex resume` (real session, not a fork)\n",
+			"observer codex: native resume - reattaching session %s via `codex resume` (real session, not a fork)\n",
 			opts.resume)
 		// Session-attach Phase 2 (P2-1): when this is a daemon-spawned launcher
 		// (a live OOB channel), announce the RESUMED session id on the trusted
@@ -312,7 +336,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 			// Detection failure is non-fatal — surface so the operator
 			// can investigate, then continue with the normal exec path.
 			fmt.Fprintf(opts.stderr,
-				"observer codex: warning — could not enumerate shared codex app-servers: %v (continuing without pre-flight check)\n",
+				"observer codex: warning - could not enumerate shared codex app-servers: %v (continuing without pre-flight check)\n",
 				derr)
 		}
 		preflight = procs
@@ -365,7 +389,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 			ProxyURL:       proxyURL,
 			ProxyReachable: proxyUp,
 			PreflightProcs: preflight,
-			Misconfigs:     findCodexConfigMisconfigs(codexHomeRoots(), proxyURL),
+			Misconfigs:     findCodexConfigMisconfigs(codexHomeRoots(), proxyURL, codexActiveProfile(opts.codexArgs)),
 		})
 	}
 
@@ -392,7 +416,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 	configOffenders := codexConfigsRoutingToProxy(effectiveCodexHomeRoots(), proxyURL, activeProfile)
 	if foreign := codexConfigsRoutingToProxy(codexForeignHomeRoots(), proxyURL, activeProfile); len(foreign) > 0 {
 		fmt.Fprintf(opts.stderr,
-			"observer codex: note — a cross-mount codex config still routes to the observer proxy (%s) but will NOT be loaded by this launch (effective CODEX_HOME is %s); ignoring it for the routing decision. Remove it if it's stale.\n",
+			"observer codex: note - a cross-mount codex config still routes to the observer proxy (%s) but will NOT be loaded by this launch (effective CODEX_HOME is %s); ignoring it for the routing decision. Remove it if it's stale.\n",
 			strings.Join(foreign, ", "), effectiveCodexHome())
 	}
 	switch fb := decideProxyFallback(proxyFallbackInputs{
@@ -412,19 +436,32 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 		// Bypass the proxy: make codexLaunchArgs skip the `-c openai_base_url`
 		// override so codex reaches its own default provider (which works even
 		// with our proxy down). opts is a by-value copy, so flipping noProxyRoute
-		// here is launch-local. reasonNoProxyRouteClean already had noProxyRoute
-		// set; the reasonProxyDownClean case adds the honest "why" notice
-		// (codexLaunchArgs prints the mechanics line).
-		if fb.reason == reasonProxyDownClean {
-			fmt.Fprintf(opts.stderr,
-				"observer codex: proxy unreachable at %s — launching codex WITHOUT proxy routing for this run (turns are NOT captured until the daemon is back — start it with `observer start`).\n",
-				proxyURL)
-		}
+		// here is launch-local. The REASON travels with it so exactly ONE notice
+		// is printed for this outcome, by codexLaunchArgs, naming the true cause
+		// (P2: this branch used to print its own "proxy unreachable" line and
+		// then codexLaunchArgs printed a second, contradictory "--no-proxy-route
+		// set" line for the same skipped route).
 		opts.noProxyRoute = true
+		opts.routeSkipReason = fb.reason
 	}
 	// proxyRouteProceed → the routed launch below injects `-c openai_base_url`.
+	warnCodexProviderBypass(opts, activeProfile)
 
-	return runCodexChild(ctx, opts, proxyURL, preflight)
+	return runCodexChild(ctx, opts, proxyURL, preflight, cfg.Observer.DBPath)
+}
+
+// warnCodexProviderBypass prints one notice when a routed launch's selected
+// codex provider (e.g. amazon-bedrock) will bypass the proxy anyway: the
+// launcher's `-c openai_base_url` injection only reaches the built-in openai
+// provider, so staying silent would imply proxy-exact capture. Skipped for a
+// bypass launch or when the caller passed their own routing override.
+func warnCodexProviderBypass(opts codexLauncherOptions, activeProfile string) {
+	if opts.noProxyRoute || hasUserCodexConfigOverride(opts.codexArgs) {
+		return
+	}
+	if note := codexProviderBypassNotice(effectiveCodexHomeRoots(), activeProfile); note != "" {
+		fmt.Fprintln(opts.stderr, note)
+	}
 }
 
 // runCodexChild resolves the codex binary, applies any --continue-from handover,
@@ -432,10 +469,11 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 // codexLaunchArgs), wires OOB rollout-discovery for a daemon-spawned launch, and
 // execs codex — forwarding the exit code. preflight carries the app-server
 // processes detected upstream so the post-flight capture-rate check can reuse
-// them. Extracted from runCodexLauncher to keep its cyclomatic complexity in
-// bounds; the caller reaches it only on a proxyRouteProceed / neutralized
-// verdict.
-func runCodexChild(ctx context.Context, opts codexLauncherOptions, proxyURL string, preflight []codexipc.Process) error {
+// them; dbPath is the observer DB (cfg.Observer.DBPath) for the best-effort
+// launch-seed attribution row. Extracted from runCodexLauncher to keep its
+// cyclomatic complexity in bounds; the caller reaches it only on a
+// proxyRouteProceed / neutralized verdict.
+func runCodexChild(ctx context.Context, opts codexLauncherOptions, proxyURL string, preflight []codexipc.Process, dbPath string) error {
 	bin, binErr := resolveToolBin("codex", opts.codexPath, "--codex-path", opts.configPath, opts.stderr)
 	if binErr != nil {
 		return binErr
@@ -456,9 +494,29 @@ func runCodexChild(ctx context.Context, opts codexLauncherOptions, proxyURL stri
 	}
 
 	args := codexLaunchArgs(opts, codexArgs, proxyURL)
+	evidence := budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
+	switch {
+	case opts.noProxyRoute:
+		evidence.Route = budgetLaunchRouteDirect
+	case !hasUserCodexConfigOverride(codexArgs):
+		evidence = budgetLaunchEvidence{Route: budgetLaunchRouteObserverProxy, ProxyURL: proxyURL}
+	}
+	evidence.Executable = bin
+	evidence.Arguments = args
+	if err := enforceBudgetControlledLaunch(ctx, opts.configPath, "codex", evidence); err != nil {
+		return err
+	}
 
 	child := exec.Command(bin, args...)
-	child.Env = os.Environ()
+	// Never leak the trusted OOB channel's env into the untrusted tool child.
+	//
+	// DI-04b: a node-shim codex (npm channel, #!/usr/bin/env node) needs node
+	// on the CHILD's PATH; widen it with the shim's own dir + the login-only
+	// dirs the resolver saw (additive; the daemon PATH survives in order).
+	child.Env = applyChildPATH(scrubOOBEnv(os.Environ()), daemonLoginPathDirs(), bin)
+	if evidence.Route == budgetLaunchRouteObserverProxy {
+		child.Env = withOTelRouteMarker(child.Env, "codex") // T-536: this run's export is proxied
+	}
 	child.Dir = continueDir // "" inherits the caller's cwd; set by --continue-from to the source project root
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
@@ -474,7 +532,7 @@ func runCodexChild(ctx context.Context, opts codexLauncherOptions, proxyURL stri
 	// rollouts are snapshotted BEFORE the child starts so the child's own new
 	// file is detectable; the watch itself runs on a goroutine after Start so it
 	// never delays the child's startup or I/O.
-	discoverSession := oobChannelActive() && opts.resume == "" && opts.continueFrom == ""
+	discoverSession := oobChannelActive() && opts.resume == "" && opts.continueFrom == "" && !terminalNativeDiscoveryAvailable(genericAdapterRegistry().Get("codex"))
 	var (
 		discoverRoots       []string
 		discoverPreexisting map[string]struct{}
@@ -497,6 +555,11 @@ func runCodexChild(ctx context.Context, opts codexLauncherOptions, proxyURL stri
 	if err := child.Start(); err != nil {
 		return fmt.Errorf("exec codex: start: %w", err)
 	}
+	// Direct process attribution (migration 086): record the child pid now
+	// that Start has made it knowable; retract the seed when the child is
+	// reaped. Best-effort both ways — a seeding failure never affects the
+	// launch (see cmd/observer/launchseed.go).
+	recordLaunchSeed(dbPath, "codex", continueDir, child.Process.Pid, opts.stderr)
 	// discCancel is hoisted out of the discoverSession block so it can be
 	// fired the INSTANT child.Wait returns (F1), before the post-flight scan.
 	var discCancel context.CancelFunc
@@ -569,8 +632,8 @@ func codexLaunchArgs(opts codexLauncherOptions, codexArgs []string, proxyURL str
 		// earlier and FAILS CLOSED (codexNoProxyRouteConflict, B3-1), so by the
 		// time we get here no config re-routes us: launch codex untouched.
 		args := append([]string{}, codexArgs...)
-		fmt.Fprintf(opts.stderr,
-			"observer codex: --no-proxy-route set — launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured).\n")
+		fmt.Fprintln(opts.stderr,
+			codexRouteSkipNotice(opts.routeSkipReason, proxyURL, runningAsDaemonChild()))
 		return args
 	}
 	args, info := prepareCodexArgs(codexArgs, proxyURL)
@@ -583,6 +646,44 @@ func codexLaunchArgs(opts codexLauncherOptions, codexArgs []string, proxyURL str
 			proxyURL)
 	}
 	return args
+}
+
+// codexRouteSkipNotices maps the decideProxyFallback REASON that made a launch
+// skip codex's `-c openai_base_url` override onto the ONE notice printed for it.
+// A data table, not an if-ladder (CLAUDE.md #5), with exactly one row per
+// outcome — which is the whole point: before it, a proxy-down neutralize printed
+// its own "proxy unreachable … WITHOUT proxy routing" line at the decision site
+// AND, because it expressed itself by flipping opts.noProxyRoute, a second
+// "--no-proxy-route set" line at the argv site, claiming a flag the caller (a
+// dashboard launch) never passed. Two stated reasons, one skipped route.
+//
+// Only the two NEUTRALIZE reasons have rows; the fail-closed and routed reasons
+// never reach the skip branch. Each row takes the same injected facts so the
+// table stays uniform: the resolved proxy URL and whether this process is a
+// daemon-spawned child (which decides the honest advice clause — see
+// proxyDownAdvice).
+var codexRouteSkipNotices = map[proxyFallbackReason]func(proxyURL string, daemonChild bool) string{
+	reasonNoProxyRouteClean: func(string, bool) string {
+		return "observer codex: --no-proxy-route set - launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured)."
+	},
+	reasonProxyDownClean: func(proxyURL string, daemonChild bool) string {
+		return fmt.Sprintf(
+			"observer codex: proxy not reachable at %s - launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured for this run; %s).",
+			proxyURL, proxyDownAdvice(daemonChild))
+	},
+}
+
+// codexRouteSkipNotice resolves the single notice for a skipped proxy route.
+// An unlisted reason falls back to the operator-flag row: opts.noProxyRoute is
+// literally "the operator asked for no routing", so that is the honest reading
+// of a skip whose reason never travelled (a caller that sets the flag without
+// walking decideProxyFallback). Pure — the daemon-child fact is injected.
+func codexRouteSkipNotice(reason proxyFallbackReason, proxyURL string, daemonChild bool) string {
+	row, ok := codexRouteSkipNotices[reason]
+	if !ok {
+		row = codexRouteSkipNotices[reasonNoProxyRouteClean]
+	}
+	return row(proxyURL, daemonChild)
 }
 
 // runCodexConfigPreflight runs the V6-2 $CODEX_HOME/config.toml base-URL
@@ -600,18 +701,19 @@ func runCodexConfigPreflight(opts codexLauncherOptions, proxyURL string) {
 	if opts.noAppServerCheck {
 		return
 	}
-	misconfigs := findCodexConfigMisconfigs(codexHomeRoots(), proxyURL)
+	profile := codexActiveProfile(opts.codexArgs)
+	misconfigs := findCodexConfigMisconfigs(codexHomeRoots(), proxyURL, profile)
 	switch {
 	case len(misconfigs) == 0:
 		// silent happy path
 	case opts.writeConfig:
 		runWriteCodexConfig(opts.stderr, misconfigs)
 		// Re-check so a partial failure still warns the operator.
-		if warn := checkCodexConfigTOMLBaseURL(codexHomeRoots(), proxyURL); warn != "" {
+		if warn := checkCodexConfigTOMLBaseURL(codexHomeRoots(), proxyURL, profile); warn != "" {
 			fmt.Fprintln(opts.stderr, warn)
 		}
 	default:
-		if warn := checkCodexConfigTOMLBaseURL(codexHomeRoots(), proxyURL); warn != "" {
+		if warn := checkCodexConfigTOMLBaseURL(codexHomeRoots(), proxyURL, profile); warn != "" {
 			fmt.Fprintln(opts.stderr, warn)
 			fmt.Fprintln(opts.stderr,
 				"observer codex: re-run with --write-config to auto-fix (creates a .bak before mutating).")
@@ -724,7 +826,7 @@ func rejectIncompatibleCodexAttachFlags(opts codexLauncherOptions) error {
 func rejectIncompatibleCodexResumeFlags(opts codexLauncherOptions) error {
 	switch {
 	case opts.continueFrom != "":
-		return errors.New("observer codex: --resume (native, reattaches the REAL session) is mutually exclusive with --continue-from (distilled fork into a NEW session) — pick one")
+		return errors.New("observer codex: --resume (native, reattaches the REAL session) is mutually exclusive with --continue-from (distilled fork into a NEW session) - pick one")
 	case opts.carry != "":
 		return errors.New("observer codex: --carry only applies to --continue-from and cannot be combined with --resume")
 	case opts.fromMessage != 0:
@@ -765,7 +867,7 @@ func runDetectOnly(stderr interface{ Write([]byte) (int, error) }, procs []codex
 		fmt.Fprintln(stderr, "observer codex: no shared codex app-servers detected; proxy capture should be reliable.")
 		return nil
 	}
-	fmt.Fprintf(stderr, "observer codex: detected %d shared codex app-server(s) — V5-1 bypass risk:\n", len(procs))
+	fmt.Fprintf(stderr, "observer codex: detected %d shared codex app-server(s) - V5-1 bypass risk:\n", len(procs))
 	for _, p := range procs {
 		fmt.Fprintf(stderr, "  PID %-6d  %-16s  %s\n", p.PID, p.Source, displayPath(p))
 	}
@@ -782,10 +884,10 @@ func runExclusiveTermination(ctx context.Context, stderr interface{ Write([]byte
 	fmt.Fprintf(stderr, "observer codex: terminating %d shared codex app-server(s) per --exclusive:\n", len(procs))
 	for _, p := range procs {
 		if err := codexipc.Terminate(ctx, p.PID); err != nil {
-			fmt.Fprintf(stderr, "  PID %-6d  %-16s  — failed: %v\n", p.PID, p.Source, err)
+			fmt.Fprintf(stderr, "  PID %-6d  %-16s - failed: %v\n", p.PID, p.Source, err)
 			continue
 		}
-		fmt.Fprintf(stderr, "  PID %-6d  %-16s  — terminated\n", p.PID, p.Source)
+		fmt.Fprintf(stderr, "  PID %-6d  %-16s - terminated\n", p.PID, p.Source)
 	}
 	fmt.Fprintln(stderr, "observer codex: re-launch your VS Code Codex extension / Codex Desktop manually after this run.")
 }
@@ -800,7 +902,7 @@ func emitPreflightWarning(stderr interface{ Write([]byte) (int, error) }, procs 
 		pidParts = append(pidParts, fmt.Sprintf("PID %d (%s)", p.PID, p.Source))
 	}
 	fmt.Fprintf(stderr,
-		"observer codex: detected %d shared codex app-server(s) — %s; capture may be incomplete. "+
+		"observer codex: detected %d shared codex app-server(s) - %s; capture may be incomplete. "+
 			"Pass --exclusive to terminate them before this run, --no-app-server-check to silence, "+
 			"or see docs/codex-shared-app-server-gotcha.md.\n",
 		len(procs), strings.Join(pidParts, ", "))
@@ -918,7 +1020,7 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 	if r.ProxyReachable {
 		fmt.Fprintf(stderr, "  PASS  proxy reachable at %s\n", r.ProxyURL)
 	} else {
-		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s — start `observer start` or `observer proxy start`\n", r.ProxyURL)
+		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s - start `observer start` or `observer proxy start`\n", r.ProxyURL)
 		failed++
 	}
 
@@ -929,13 +1031,13 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 		for _, p := range r.PreflightProcs {
 			labels = append(labels, fmt.Sprintf("PID %d (%s)", p.PID, p.Source))
 		}
-		fmt.Fprintf(stderr, "  FAIL  V5-1: %d shared codex app-server(s) running — %s. Pass --exclusive to terminate them, or close the VS Code Codex extension / Codex Desktop.\n",
+		fmt.Fprintf(stderr, "  FAIL  V5-1: %d shared codex app-server(s) running - %s. Pass --exclusive to terminate them, or close the VS Code Codex extension / Codex Desktop.\n",
 			len(r.PreflightProcs), strings.Join(labels, ", "))
 		failed++
 	}
 
 	if len(r.Misconfigs) == 0 {
-		fmt.Fprintln(stderr, "  PASS  every $CODEX_HOME/config.toml correctly sets openai_base_url (V6-2: clean)")
+		fmt.Fprintln(stderr, "  PASS  every $CODEX_HOME/config.toml routes codex's selected provider to the proxy (V6-2: clean)")
 	} else {
 		for _, m := range r.Misconfigs {
 			var detail string
@@ -946,8 +1048,11 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 				detail = "key missing"
 			case configTOMLMissingFile:
 				detail = "file missing"
+			case configTOMLProviderMismatch:
+				fmt.Fprintf(stderr, "  FAIL  %s - model_provider=%q base_url=%q (want %s). Point that provider at the proxy or run `observer init --codex --force`.\n", m.ConfigPath, m.Provider, m.CurrentValue, m.WantURL)
+				continue
 			}
-			fmt.Fprintf(stderr, "  FAIL  V6-2: %s — %s. Pass --write-config to auto-fix (creates a .bak before mutating).\n", m.ConfigPath, detail)
+			fmt.Fprintf(stderr, "  FAIL  V6-2: %s - %s. Pass --write-config to auto-fix (creates a .bak before mutating).\n", m.ConfigPath, detail)
 		}
 		failed++
 	}
@@ -956,7 +1061,7 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 		fmt.Fprintln(stderr, "observer codex --verify: all checks passed; `observer codex` should capture every turn.")
 		return nil
 	}
-	fmt.Fprintf(stderr, "observer codex --verify: %d check(s) failed — fix above and re-verify.\n", failed)
+	fmt.Fprintf(stderr, "observer codex --verify: %d check(s) failed - fix above and re-verify.\n", failed)
 	return exitErr(1)
 }
 

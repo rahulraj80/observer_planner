@@ -7,69 +7,29 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 )
 
-// Kind classifies how a run was started. The two kinds are structurally
-// distinct so a handoff-continue is never confused with a fresh agent launch.
-type Kind string
+// Kind classifies how a run was started. It is the core
+// internal/termcore.Kind (lane MP-L1K, T-715), re-exported here so the
+// terminal stack keeps its spelling while core packages name a kind without
+// importing the terminals component.
+type Kind = termcore.Kind
 
+// The run kinds; see internal/termcore for each kind's meaning.
 const (
-	// KindHandoff — a "continue this session" launch (--continue-from). It
-	// carries a source session id (the session continued FROM), which is NOT a
-	// correlation target.
-	KindHandoff Kind = "handoff"
-	// KindFresh — a fresh agent launch with no source session. It has no
-	// session id at all until the tool creates one after startup.
-	KindFresh Kind = "fresh"
-	// KindAttach — a daemon-owned PTY spawned on behalf of the operator's own
-	// terminal via the attach socket (session-attach design §3, Phase 1). Unlike
-	// KindFresh, the spawn is requested by the CLI attach client over the
-	// owner-only AF_UNIX socket rather than by a dashboard POST; it is recorded
-	// and feed-published like every other run so an attach session is a
-	// first-class run identity.
-	KindAttach Kind = "attach"
-	// KindResume — a NATIVE resume launch (session-attach design §3, Phase 3):
-	// the dashboard spawns a daemon-owned PTY running the tool's own resume
-	// mechanism (claude `--resume <id>`, codex `resume <id>`) so a CLOSED
-	// session reopens its ACTUAL prior conversation — NOT a distilled fork
-	// (that is KindHandoff). Like KindHandoff it carries the resumed session as
-	// SourceSessionID (the session reopened FROM), which is NOT a correlation
-	// target. Unlike the CLI attach bypass it is a dashboard-initiated launch,
-	// so termsvc gates it through the SAME fresh-launch Policy allow-lists.
-	KindResume Kind = "resume"
+	KindHandoff = termcore.KindHandoff
+	KindFresh   = termcore.KindFresh
+	KindAttach  = termcore.KindAttach
+	KindResume  = termcore.KindResume
+	KindSSH     = termcore.KindSSH
+	KindGUI     = termcore.KindGUI
 )
 
-// Valid reports whether k is a known kind.
-func (k Kind) Valid() bool {
-	return k == KindHandoff || k == KindFresh || k == KindAttach || k == KindResume
-}
-
-// remoteSensitiveKinds is the set of run kinds classified as remote-VIEW
-// sensitive (session-attach design §3.2). Both kinds bind a daemon-owned
-// terminal to a REAL external transcript — an attach session the operator
-// started outside the dashboard (KindAttach) or a native reopen of a closed
-// session's ACTUAL prior conversation (KindResume) — whose TUI can echo API
-// keys / customer data. A fresh/handoff launch has no such pre-existing
-// transcript, so it is not remote-sensitive. Whether a remote caller may SEE a
-// sensitive-kind PTY is governed by the [remote].allow_terminal_view toggle,
-// which now DEFAULTS TRUE (view-on-by-default; the remote WRITE/drive path is
-// unchanged) — set allow_terminal_view = false to restore the deny-read
-// posture. This table only marks the kinds the toggle applies to; it is a data
-// set (not an if-chain) so a new sensitive kind is one row (CLAUDE.md #5).
-var remoteSensitiveKinds = map[Kind]bool{
-	KindAttach: true,
-	KindResume: true,
-}
-
-// IsRemoteSensitiveKind reports whether a run kind is remote-VIEW sensitive: its
-// live PTY is hidden from a remote-exposed snapshot and its websocket refused
-// for a remote caller WHEN [remote].allow_terminal_view is off (§3.2). That
-// toggle now defaults TRUE, so such PTYs are visible by default; the mechanism
-// (and the off-switch) is unchanged. Used at BOTH the dashboard visibleSnapshot
-// / WS gates and the cmd adapter's IsRemoteSensitiveSession so the two dispatch
-// on ONE shared table, never a per-site if-chain. An unknown kind is not
-// sensitive (fresh/handoff are the honest non-sensitive floor).
-func IsRemoteSensitiveKind(k Kind) bool { return remoteSensitiveKinds[k] }
+// IsRemoteSensitiveKind reports whether a run kind is remote-VIEW sensitive
+// (termcore.IsRemoteSensitiveKind, the one shared table).
+func IsRemoteSensitiveKind(k Kind) bool { return termcore.IsRemoteSensitiveKind(k) }
 
 // Source identifies where a correlation observation came from. Ordered by
 // trustworthiness: an out-of-band signal from the trusted launcher channel is
@@ -138,7 +98,7 @@ var sourceConfidence = []struct {
 // considered established enough to attach cost/status/decoration/action links
 // (plan §2.1a — "links attach only once a correlation is established"). Below
 // it a run shows metadata only, honestly uncorrelated.
-const MinLinkConfidence = 0.50
+const MinLinkConfidence = termcore.MinLinkConfidence
 
 // Run is the pure in-memory identity of one terminal launch. It is the model
 // the store persists (internal/store/termrun.go) and the application service
@@ -166,6 +126,19 @@ type Run struct {
 	EndedAt *time.Time
 	// ExitCode is the run's exit code; nil while running.
 	ExitCode *int
+	// PID is the DETACHED child's process id, known only for KindGUI and only
+	// AFTER the spawn returns (migration 095). A PTY run deliberately leaves it
+	// nil: the PTY handle is that run's identity and the child pid is the
+	// termsession manager's business, not the run row's. nil is the honest
+	// "no pid recorded", never a zero-value 0.
+	PID *int
+	// WrapApplied reports whether the GUI launch's routing wrap actually
+	// reached the child (internal/guilaunch). KindGUI only; false is the honest
+	// zero for every other kind, which carries no wrap concept at all.
+	WrapApplied bool
+	// WrapNote is the grounded reason a wrap did not apply, or the caveat that
+	// qualifies one that did (a cold-start-only app). KindGUI only.
+	WrapNote string
 }
 
 // Correlation is one scored link from a run to an observed agent session.

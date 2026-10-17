@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/advisor"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
+	"github.com/marmutapp/superbased-observer/internal/selfobs/conformance"
+	"github.com/marmutapp/superbased-observer/internal/selfobs/run"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -52,13 +54,38 @@ func newAdviseCmd() *cobra.Command {
 				ProjectRoot:   projectRoot,
 				MinConfidence: cfg.Advisor.MinConfidence,
 				MinSavingsUSD: cfg.Advisor.MinSavingsUSD,
-				CostEngine:    cost.NewEngine(cfg.Intelligence),
+				CostEngine:    acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default()),
 				GuardMode:     guardMode,
 				RoutingMode:   routingMode,
 				RoutingShadow: shadow,
+				ContextWindow: advisorContextWindows(cmd.Context(), store.New(database)),
 			})
 			if err != nil {
 				return err
+			}
+			if cfg.SelfObs.Enabled {
+				sink, cleanup, serr := buildSelfObsSink(cfg, slog.Default())
+				if serr == nil {
+					emitSelfObsRun(sink, run.DecisionRun{
+						RunID: fmt.Sprintf("advisor-%d", days),
+						// The --project filter is a RAW filesystem path. It must
+						// never travel as sbo.run.trace_id, which the gateway
+						// classify tier retains verbatim as operational metadata
+						// at every capture level (finding B-B5). Hash it: runs
+						// over the same project still correlate, the path itself
+						// never leaves the node. Empty stays empty.
+						TraceID:   run.CorrelationID(projectRoot),
+						Trigger:   "manual",
+						Component: conformance.ComponentAdvisor,
+						Decisions: []string{
+							fmt.Sprintf("suggestions:%d", len(rep.Suggestions)),
+							fmt.Sprintf("sessions:%d", rep.SessionsScanned),
+						},
+						CostUSD: rep.TotalSavingsUSD,
+						Outcome: "verified",
+					})
+					cleanup()
+				}
 			}
 			if jsonOut {
 				body, _ := json.MarshalIndent(rep, "", "  ")
@@ -121,7 +148,7 @@ func printAdvise(w io.Writer, r advisor.Report) {
 // save $X; here is how") — plan Phase 4. Pull-based: pipe it wherever a
 // scheduler wants it.
 func printAdviseDigest(w io.Writer, r advisor.Report) {
-	fmt.Fprintf(w, "# Observer advisor digest — last %d day(s)\n\n", r.WindowDays)
+	fmt.Fprintf(w, "# Observer advisor digest - last %d day(s)\n\n", r.WindowDays)
 	fmt.Fprintf(w, "**Avoidable spend: $%.2f** across %d suggestions (%d sessions scanned).\n\n",
 		r.TotalSavingsUSD, len(r.Suggestions), r.SessionsScanned)
 	byCat := map[string]float64{}
@@ -157,7 +184,7 @@ func advisorPostureInputs(ctx context.Context, cfg config.Config, st *store.Stor
 	if cfg.Routing.Enabled {
 		routingMode = cfg.Routing.Mode
 	}
-	rep, err := st.AdviseShadowSignal(ctx, days, routingPriceFn(cost.NewEngine(cfg.Intelligence)))
+	rep, err := st.AdviseShadowSignal(ctx, days, routingPriceFn(acquireProcessCostEngine(ctx, cfg, nil, slog.Default())))
 	if err != nil {
 		return guardMode, routingMode, nil
 	}
@@ -169,4 +196,13 @@ func advisorPostureInputs(ctx context.Context, cfg config.Config, st *store.Stor
 		MinDecisions:    rep.MinDecisions,
 		Ready:           rep.ReadyToPromote,
 	}
+}
+
+// advisorContextWindows returns the Tokenomics context-window resolver the
+// advisor sizes sessions against: the same store composition routing and
+// the session gauge read (org rail, then feed, then compiled snapshot). A
+// load error degrades to the table's seed rung, never to a failure.
+func advisorContextWindows(ctx context.Context, st *store.Store) func(string) (int64, bool) {
+	windows, _ := st.LoadModelContextWindows(ctx)
+	return windows.Resolve
 }

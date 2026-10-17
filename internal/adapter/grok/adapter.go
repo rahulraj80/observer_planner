@@ -149,10 +149,12 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	lineNum := 0
 	for {
 		if ctx.Err() != nil {
+			st.applyIdentities(&res)
 			return res, ctx.Err()
 		}
 		lineStr, readErr := reader.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
+			st.applyIdentities(&res)
 			return res, fmt.Errorf("grok.ParseSessionFile: read: %w", readErr)
 		}
 		hasNewline := strings.HasSuffix(lineStr, "\n")
@@ -183,7 +185,26 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			break
 		}
 	}
+	st.applyIdentities(&res)
 	return res, nil
+}
+
+// applyIdentities backfills the Project Identity Resolver v2 bundle onto
+// every event in res, keyed by resolved project root. A grok session
+// carries at most one sessionMeta in the non-unified case (st.summary)
+// but the unified log shape can multiplex several sessions (and thus
+// several distinct project roots) into one file, hence metaCache.
+func (st *parseState) applyIdentities(res *adapter.ParseResult) {
+	byRoot := map[string]git.Identity{}
+	if st.summary != nil && st.summary.projectRoot != "" {
+		byRoot[st.summary.projectRoot] = st.summary.identity
+	}
+	for _, m := range st.metaCache {
+		if m != nil && m.projectRoot != "" {
+			byRoot[m.projectRoot] = m.identity
+		}
+	}
+	adapter.ApplyProjectIdentityByRoot(res, byRoot)
 }
 
 // parseState carries the per-call mutable bookkeeping the handlers need.
@@ -214,11 +235,24 @@ type parseState struct {
 	metaCache map[string]*sessionMeta
 }
 
-// sessionMeta is the resolved model + project-root + branch for a session.
+// sessionMeta is the resolved model + project-root + branch + remote for a
+// session.
 type sessionMeta struct {
 	model       string
 	projectRoot string
 	gitBranch   string
+	gitRemote   string
+	// identity is the Project Identity Resolver v2 bundle (2026-09-06,
+	// §3.1 / W1) resolved alongside gitBranch/gitRemote by
+	// resolveProjectRoot, applied to every event in the ParseResult via
+	// adapter.ApplyProjectIdentity before ParseSessionFile returns.
+	identity git.Identity
+	// effortLevel is the session's reasoning-effort SETTING
+	// (summary.json's `reasoning_effort`, e.g. "low"/"medium"/"high") —
+	// a session-wide config knob, not per-turn reasoning content.
+	// Threaded into ActionMetadata.EffortLevel at every emission site,
+	// mirroring how model/gitBranch/gitRemote already ride sessionMeta.
+	effortLevel string
 }
 
 // loadSummary reads and resolves the summary.json sibling of an
@@ -243,34 +277,46 @@ func (a *Adapter) resolveMeta(summaryPath string) *sessionMeta {
 	if err := json.Unmarshal(body, &s); err != nil {
 		return nil
 	}
-	m := &sessionMeta{model: s.CurrentModelID, gitBranch: s.HeadBranch}
-	m.projectRoot = resolveProjectRoot(s.GitRootDir, s.Info.Cwd)
+	m := &sessionMeta{model: s.CurrentModelID, gitBranch: s.HeadBranch, effortLevel: strings.TrimSpace(s.ReasoningEffort)}
+	m.projectRoot, m.gitRemote, m.identity = resolveProjectRoot(s.GitRootDir, s.Info.Cwd)
 	return m
 }
 
-// resolveProjectRoot resolves a session's project root from its
-// git_root_dir (primary) or cwd (fallback), translating a foreign-OS path
-// and stat-gating it before git.Resolve.
-func resolveProjectRoot(gitRootDir, cwd string) string {
+// effortMetadata folds a session's reasoning-effort SETTING into an
+// ActionMetadata, returning nil when the session never surfaced one (so
+// rows from summary-less or effort-less sessions keep a NULL metadata
+// column rather than an empty-but-allocated one).
+func effortMetadata(effort string) *models.ActionMetadata {
+	if effort == "" {
+		return nil
+	}
+	return &models.ActionMetadata{EffortLevel: effort}
+}
+
+// resolveProjectRoot resolves a session's project root (and its normalized
+// git remote) from its git_root_dir (primary) or cwd (fallback),
+// translating a foreign-OS path and stat-gating it before git.Resolve.
+func resolveProjectRoot(gitRootDir, cwd string) (root, remote string, id git.Identity) {
 	candidate := strings.TrimSpace(gitRootDir)
 	if candidate == "" {
 		candidate = strings.TrimSpace(cwd)
 	}
 	if candidate == "" {
-		return ""
+		return "", "", git.Identity{}
 	}
 	candidate = crossmount.TranslateForeignPath(candidate)
 	if _, err := os.Stat(candidate); err != nil {
 		// The path doesn't exist on this host (a foreign path we couldn't
 		// translate): return it verbatim rather than letting git.Resolve
 		// CWD-prefix the observer's own root onto it.
-		return filepath.Clean(candidate)
+		return filepath.Clean(candidate), "", git.Identity{}
 	}
-	info, err := git.Resolve(candidate)
+	identity, err := git.ResolveIdentity(candidate, git.IdentityOptions{})
 	if err != nil {
-		return filepath.Clean(candidate)
+		return filepath.Clean(candidate), "", git.Identity{}
 	}
-	return info.Root
+	// identity.Remote is already NormalizeRemote'd by ResolveIdentity.
+	return identity.Root, identity.Remote, identity
 }
 
 // meta returns the resolved metadata for the current updates.jsonl parse,
@@ -356,12 +402,14 @@ func (st *parseState) emitUserPrompt(line *acpLine, res *adapter.ParseResult) {
 			ProjectRoot:   m.projectRoot,
 			Timestamp:     ts,
 			GitBranch:     m.gitBranch,
+			GitRemote:     m.gitRemote,
 			Model:         st.modelFor(),
 			Tool:          models.ToolGrok,
 			ActionType:    models.ActionSessionStart,
 			Target:        "startup",
 			RawToolName:   "grok.session_start",
 			Success:       true,
+			Metadata:      effortMetadata(m.effortLevel),
 		})
 	}
 	text := strings.TrimSpace(line.Params.Update.Content.firstText())
@@ -376,6 +424,7 @@ func (st *parseState) emitUserPrompt(line *acpLine, res *adapter.ParseResult) {
 		ProjectRoot:   m.projectRoot,
 		Timestamp:     ts,
 		GitBranch:     m.gitBranch,
+		GitRemote:     m.gitRemote,
 		Model:         st.modelFor(),
 		Tool:          models.ToolGrok,
 		ActionType:    models.ActionUserPrompt,
@@ -383,6 +432,7 @@ func (st *parseState) emitUserPrompt(line *acpLine, res *adapter.ParseResult) {
 		RawToolName:   "grok.user_prompt",
 		RawToolInput:  scrubbed,
 		Success:       true,
+		Metadata:      effortMetadata(m.effortLevel),
 	})
 	// A new user turn clears any dangling reasoning from a prior turn.
 	st.pendingReasoning = ""
@@ -404,6 +454,7 @@ func (st *parseState) emitAssistantMessage(line *acpLine, res *adapter.ParseResu
 		ProjectRoot:   m.projectRoot,
 		Timestamp:     tsFor(line),
 		GitBranch:     m.gitBranch,
+		GitRemote:     m.gitRemote,
 		Model:         st.modelFor(),
 		Tool:          models.ToolGrok,
 		ActionType:    models.ActionAssistantMessage,
@@ -411,6 +462,7 @@ func (st *parseState) emitAssistantMessage(line *acpLine, res *adapter.ParseResu
 		RawToolName:   "grok.assistant_message",
 		ToolOutput:    st.adapter.scrubber.String(contentcap.Cap(text, contentcap.DefaultMaxBytes)),
 		Success:       true,
+		Metadata:      effortMetadata(m.effortLevel),
 	}
 	if st.pendingReasoning != "" {
 		ev.PrecedingReasoning = st.adapter.scrubber.String(st.pendingReasoning)
@@ -433,6 +485,7 @@ func (st *parseState) emitToolCall(line *acpLine, res *adapter.ParseResult) {
 		ProjectRoot:   m.projectRoot,
 		Timestamp:     tsFor(line),
 		GitBranch:     m.gitBranch,
+		GitRemote:     m.gitRemote,
 		Model:         st.modelFor(),
 		Tool:          models.ToolGrok,
 		ActionType:    mapToolName(u.Title),
@@ -440,6 +493,7 @@ func (st *parseState) emitToolCall(line *acpLine, res *adapter.ParseResult) {
 		RawToolName:   u.Title,
 		RawToolInput:  scrubbedInput,
 		Success:       true,
+		Metadata:      effortMetadata(m.effortLevel),
 	}
 	if st.pendingReasoning != "" {
 		ev.PrecedingReasoning = st.adapter.scrubber.String(st.pendingReasoning)
@@ -466,6 +520,13 @@ func (st *parseState) applyToolUpdate(line *acpLine, res *adapter.ParseResult) {
 	}
 	idx, ok := st.pendingCall[u.ToolCallID]
 	if !ok || idx >= len(res.ToolEvents) {
+		// No cross-tick ActionOutcomeUpdate here, unlike the CC-shaped
+		// adapters: a grok action's SourceEventID is the ACP line's
+		// _meta.eventId (st.eventID(line, 0)), NOT the toolCallId, so
+		// the update's (source_file, source_event_id) key cannot be
+		// reconstructed from an update record alone. Exposure is low —
+		// tool_call and its updates arrive milliseconds apart on the
+		// same ACP stream, so a poll tick rarely splits them.
 		return
 	}
 	ev := &res.ToolEvents[idx]
@@ -524,6 +585,7 @@ func (a *Adapter) handleUnified(st *parseState, raw string, _ int, res *adapter.
 		SessionID:       line.Sid,
 		ProjectRoot:     meta.projectRoot,
 		GitBranch:       meta.gitBranch,
+		GitRemote:       meta.gitRemote,
 		Timestamp:       parseUnifiedTS(line.Ts),
 		Tool:            models.ToolGrok,
 		Model:           meta.model,

@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "events": "VerifiedOfficial",
+    "events[]": "VerifiedOfficial",
+    "events[].description": "VerifiedOfficial",
+    "events[].eventId": "VerifiedOfficial",
+    "events[].eventTime": "VerifiedOfficial",
+    "events[].user": "VerifiedOfficial",
+    "events[].user.email": "Inferred",
+    "events[].user.userId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "07c78a33048afb89bee97f88b4b6ca12df0e9b84925a614bc9b0e019a4d71628",
+  "http": {
+    "method": "GET",
+    "path": "/audit/teams/{teamId}/events",
+    "query": {
+      "pageSize": "100",
+      "orderBy": "TIME_ASCENDING",
+      "eventTimeFrom": "2025-01-15T00:00:00Z",
+      "eventTimeTo": "2025-01-16T00:00:00Z",
+      "pageToken": "550e8400-e29b-41d4-a716-446655440000"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: nextPageToken absent (the reference says it is set when there are more events; that it is omitted, not empty, on the last page is Inferred from proto-JSON). The user's email is empty (documented: may not always be populated).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "xAI Management API reference (audit.md, billing.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b0ec3ad3bec4d19d346800315f6ccb5708906b0ef51f910c482154fd929a7873",
+  "source_url": "https://docs.x.ai/developers/rest-api-reference/management/audit.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "xai.mgmt.audit_events"
+}

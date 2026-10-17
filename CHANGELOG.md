@@ -4,7 +4,7 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
-### Added
+### Added (observer_planner fork)
 
 - **Daily Briefing (Phase A of `docs/design/standup-briefing.md`).** A
   data-only stand-up page at `/briefing` that tells yesterday's story in one
@@ -80,6 +80,2925 @@ All notable changes to SuperBased Observer are documented here.
     scheduler beside the org digest that sends the composed briefing for the
     last completed UTC day.
   - `web2` Daily Briefing page (`/briefing`) + sidebar entry.
+
+### Changed
+
+- **Org dashboard, Settings > Plane B mode tells the truth about what is in flight (T-777, D-617).**
+  With no mode change requested the page now says "No mode change requested" and lists what a change
+  to Gateway Mode would need, instead of seven "pending" checks for a change nobody asked for. The
+  Request selector offers only the other mode. While a change to Gateway Mode is pending, the server
+  checks `mode_capability` and `adapter_route_matrix` itself (marked "Checked by the server", with the
+  evidence and the time), and the other five checks get a Record result button (pass or fail with a
+  required note, showing who recorded it and when). Machines whose member was removed or deactivated,
+  or that left the org, no longer count toward (or block) the capability check. API:
+  `GET /api/org/plane-b/mode` gains `change_pending`, `pending_generation`, `gates_required` and
+  `gate_catalog`, and returns gates only while a change to Gateway Mode is pending (generation 0 and an
+  empty list otherwise); each gate gains `title`, `about`, `kind`, `why_manual`, `source` and
+  `server_check`; capability gains `departed` and `departed_nodes`. `POST /api/org/plane-b/preflight`
+  now refuses a generation other than the pending one (409) and a pass or fail without a note (400).
+
+## [1.36.0] - 2026-10-10
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). 1.36.0 is one combined release (D-400): it supersedes the held 1.35.0, which
+never shipped as a stable release, so everything below is new since 1.34.0. Where a note says "1.35",
+it means the 1.35.0 release candidates that went out on `edge` and every build after them, this one
+included. On top of the 1.35 work it carries modular packaging (components, prebuilt editions, custom
+builds, distro-aware updates), the enterprise vendor API connections (synthetic, awaiting live
+validation), the post-1.35 correctness and security rounds, and the move to Go 1.26. It is
+`v1.36.0-rc.5` plus the two dashboard fixes from the rc.5 roll (T-762, T-763); how the release
+candidates got here is at the end of this section ("What changed during the release candidates").
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Read this before upgrading (1.36.0)
+
+The first nine items need a decision or an action from you; the rest describe behaviour that changed.
+
+- **Leaving an organization no longer blocks your AI tools, and a managed node now fails open by
+  default when its organization's budget cannot be verified.** After `observer unenroll` a managed
+  node used to keep refusing every proxied request with `B-625` ("the organization requires a budget
+  on this managed node and none has been verified") until a re-enrol or a daemon restart. Now B-625
+  never fires without a live enrolment, the running daemon recomposes onto your own `[guard.budget]`
+  numbers without a restart, and a managed node whose org budget is not verified yet (right after
+  enrolling, the org unreachable since start, a document that did not verify) runs on its own numbers
+  and logs it. An organization that wants the old blocking answer pins the new
+  `guard.budget.fail_closed = true` through node governance. `observer unenroll` is now an ordered,
+  structured leave (`observer unenroll --plan` previews it; the dashboard's Leave dialog lists the same
+  steps) that tells the organization it left (a `node_left` audit row, best effort) and ends as a plain
+  individual node with your local data and config kept. Re-enrolling from the dashboard with an
+  enrolment link works again on estates whose front end answers `/healthz` itself, and every refusal on
+  that page now says what the server actually answered.
+
+- **The leave fail-safe never drops your budgets on a slow read, and still applies your own caps.**
+  (REVIEW-4, D-521.) A managed node no longer treats a failed enrolment read (a busy database, a
+  checkpoint, a 2 s timeout) as "not enrolled": the last composed budget, the organization's caps and
+  yours, keeps applying until the node confirms it left. After a confirmed leave, or a re-enrol whose
+  budget has not arrived yet, requests are checked against your own `[guard.budget]` caps instead of
+  no caps at all. `observer <tool>` and the dashboard's New Terminal now agree with the proxy: a leave
+  that stopped partway does not block launches, and an expired or unverifiable managed grant starts the
+  tool with a warning unless the organization set `guard.budget.fail_closed`. That setting now follows
+  the organization you belong to without a daemon restart. A leave whose credentials step fails can be
+  run again, and your AI tools' proxy routes are only removed once the leave has completed. The
+  dashboard's live budget stream accepts at most 16 viewers at a time (the banner falls back to
+  polling).
+
+- **Only the org's super admin can publish the node components policy (D-524).** Publishing, rolling
+  out (create, approve, stage, promote), rolling back or waiving `node.components` now needs the super
+  admin as well as `write:policy`, matching the rule for granting `components.govern`. Anyone else gets
+  `403 super_admin_required` with the reason (audited), the assistant's proposals for it need the super
+  admin to approve, and Organization > Node components keeps Publish disabled with the reason while Check
+  still works. Halting a rollout and every other policy family are unchanged. A `node.components` version
+  a plain policy admin published before this release stays published: review the family's history.
+
+- **Republish any `node.governance` feature.lock (MODPKG-16).** Before this release a published
+  feature.lock was dropped from the signed `node.governance` body, so it never reached a node: a lock you
+  published looked in force on the org dashboard while every node ignored it. After upgrading the org
+  server, publish each existing feature.lock again so nodes receive it. A lock that forces on a feature
+  whose component the `node.components` policy blocks is now refused at publish (`409 cross_rail_error`).
+
+- **Proxy route and Claude Code settings.** The daemon is the proxy on `:8820`: take the proxy route off
+  before stopping the old daemon and put it back after the new one is up (`scripts/restart-daemon.sh` does
+  this in one step), or a session pointed at the proxy gets `ConnectionRefused`. On its first start the new
+  daemon's hook auto-registration (`[observer.hooks] auto_register`, default on) rewrites an Observer hook
+  or MCP command written by an older binary once, to the command this release registers: the npm or pip
+  launcher (`<prefix>/bin/observer`) when Observer was installed that way, so the next package upgrade no
+  longer breaks it. `observer init` and the auto-registration now render that command and its
+  `--config` argument the same way, so they no longer rewrite each other's entries (T-725); keep a copy
+  of `settings.json` if you compare it byte for byte. Leaving an organization removes a proxy route
+  (Claude Code `ANTHROPIC_BASE_URL`, Codex `base_url`) only when the enrolment wrote it, and only after
+  the leave has completed.
+
+- **New hook events, and Codex asks you to trust them.** This release registers two more Claude Code
+  hook events (`TaskCreated`, `TaskCompleted`) and three more Codex events (`SessionEnd`,
+  `SubagentStart`, `SubagentStop`). Codex holds a newly registered hook until you trust it: open Codex
+  once and run `/hooks` to mark every Observer entry trusted (`observer init` prints the count). Until
+  then Codex runs the hooks it already trusted and skips the new ones.
+
+- **The first start migrates the database, and on a large one that takes a while.** The new daemon
+  applies the schema changes on its first start, before the dashboard and the proxy answer. Measured on a
+  2 vCPU machine it takes about 7 seconds per 500,000 token rows, mostly migration 151's index builds.
+  Keep the proxy route off until the new daemon is up (the item above). While the old daemon still runs,
+  `observer status`, `doctor` and other commands from the new binary read the database without migrating
+  it and say the running daemon is older; restarting the daemon finishes the upgrade.
+
+- **The minimal edition compiles the proxy out; the dashboard can be compiled out too.** The prebuilt
+  `minimal` node edition (staged artifact, not published to npm, PyPI or the Marketplace) is built
+  without `capture.proxy` (34 omit tags in all): it captures through hooks and the watcher, has no
+  accurate proxy token tier and no conversation compression, and its launchers say the build has no proxy
+  instead of routing to a dead port. It keeps the local dashboard. The dashboard (`ui.dashboard`) can now
+  be compiled out as well, through a custom build (`sbo-components build --manifest`); such a build
+  starts headless with one reason and every pointer at Settings > Components names the CLI instead. The
+  `developer` and `managed` editions keep both; the published channels still ship the `full` product.
+  `observer doctor <tool>` for an adapter an edition leaves out now says "not in this build" (T-726).
+
+- **Go 1.26 to build from source.** Every binary is built with Go 1.26.9, `golang.org/x/crypto`
+  v0.57.0 and `golang.org/x/net` v0.60.0; building from source needs Go 1.26 or later, and CI lints with golangci-lint v2 (see Security
+  below).
+
+- **Code intelligence is now opt-in.** The in-process code index (`[codeintel]`: symbols, imports,
+  call graph) is heavy on CPU and disk, so it now runs only when you turn it on: one click under
+  **Settings > Intelligence > Code intelligence**, or `[codeintel].enabled = true`. A config that never
+  set `[codeintel].enabled` used to inherit "on" and is now off; if that install already has an index,
+  `observer start` prints a one-line note, the index is kept and ages out through
+  `[codeintel].retention_days`. A config that sets `enabled` either way is untouched; set it to `true`
+  to keep the old behaviour. While it is off, the MCP symbol tools (`search_symbols`, `get_symbols`,
+  `get_relations`) stay registered and answer `degraded` with a `codeintel_disabled` warning
+  (`get_symbols` still returns its regex fallback), `observer index` declines, body-collapse
+  compression does nothing, and `observer doctor` reports `codeintel: off by choice` as a pass. On an
+  org-managed machine an org pin of `codeintel.enabled` still wins either way. Org Code intelligence
+  panels stay empty for machines that have not opted in or been pinned on.
+- **Roll order for orgs: developer machines first, then the org server (or together).** Nodes on
+  1.34.0-rc.7 to rc.11 that newly enrol by token into a 1.35.0 org server show "Governance: ALTERED"
+  (a known node-side signature bug, GRANT-INTEG-2, fixed in this release; a stored grant verifies again
+  after the node upgrades, with no re-enrolment). Default managed enrolment tokens now carry a
+  governance grant, so every new token enrolment of an old node hits it.
+- **Older nodes and node.governance.** Released nodes from v1.31 to v1.34.0 (every release candidate
+  included) reject a whole node.governance body that names a section, schema or key they do not know,
+  and then keep their old body. The org server now projects each node's body to what that build
+  compiles (section vocabulary, body schema and key generation, judged by full version precedence, so
+  a release candidate counts as older than its release) and re-signs it at the same version. Residual
+  limit: a v1.33 node that upgrades to v1.34 can lack the `projects` section until the org's next
+  publish.
+- **Org server rollbacks now have hazards; run the preflight first.** `observer-org upgrade preflight
+  --rollback-to <version>` refuses a rollback while any of these is in use, and you should not roll
+  back around it:
+  - **Binding v2 signatures.** Policy and guard-bundle deliveries to new nodes are now signed bound to
+    the org, the developer and the node's advertised target. Rolling the org server back below this
+    build makes those nodes refuse every policy delivery (they keep their last body) until it rolls
+    forward again.
+  - **Developer-dashboard tab overrides.** Ship dashboard overrides and per-tab hiding in the same roll,
+    and never roll the org server back to a build without per-tab vocabulary while overrides carry tabs.
+  - **Budget rail versions.** Rolling back below this build makes nodes refuse the lower budget-rail
+    versions until the counter catches up.
+  - Also guard fallbacks, lock-override grants and AI tool settings policies in force (other live
+    grants warn).
+- **Compound model budgets are now enforced at the AI gateway.** `member_model` and `team_model`
+  budgets were shown on the node and the Budgets page but never projected to the gateway; from this
+  release the gateway enforces them.
+- **About 14 launch verbs now honour an org-disallowed tool.** The org's disallowed-tool gate moved onto
+  the shared launcher helpers, so seeded `observer <tool>` launchers that never refused an
+  org-disallowed tool now do (a closed hole). A tool grant still launches it.
+- **Distinct approvers are always required.** `require_distinct_approver` is fixed on: nobody approves
+  their own request, direct grant or extension, except a solo super-admin who is the only holder of the
+  key (audited as `self_approved`). A PUT of `false` is accepted with a warning so older admin pages keep
+  working.
+- **Budget ids and grant fields follow a capability, not a version (T-505, T-625).** The org server puts
+  the named `budget_id` and the request-grant fields (the offline revert) on the signed budget rail only
+  for a budget fetch that advertises `?policy_caps=budget_grants.v1`, which every 1.35 build sends,
+  release candidates and demo builds included. So 1.35.0-rc.14 and later rc nodes DO receive budget ids
+  and the banner and Requests links name the budget. A node that does not send the token (any build
+  before 1.35) keeps the id-less body and still receives the granted amount in its cap. No version is
+  compared, so a `dev` build of 1.35 is treated the same; release-runbook step 3d is retired.
+- **Budget requests and the new request types need a 1.35 org server (T-538, D-342).** A budget
+  increase request without a budget id, and the new request types `page_access` and `config_edit`, are
+  accepted only by a 1.35 org server: a released server still requires `budget_id` and answers 400 to
+  the new types. Roll the org server and the nodes together.
+- **A node OTLP receiver opened beyond loopback now needs a token (T-538, D-343).** With
+  `[ingest.otel].allow_non_loopback = true`, every exporter must send the `X-Observer-Edge-Token` header
+  (gRPC `x-observer-edge-token`) holding the value in the `otlp-ingest-token` file beside the node
+  database; a request without it gets 401, and if the token cannot be resolved the receiver does not
+  start. Loopback-only receivers (the default) are unchanged. While the receiver requires the token,
+  Observer refuses to wire a tool's own exporter at it (no token is ever written into a vendor file).
+- **Enforce-mode org budgets now stop tools that do not route through the proxy (T-519, D-332).**
+  The daemon publishes its own budget decision and each tool's pre-send hook denies at the cap (the next
+  prompt where the tool has a prompt hook, else the next tool call). Tools that used to keep running past
+  a hard cap (Cursor among them) are now stopped; tools with no pre-send seam are flagged after send.
+  The per-tool answer is the "Budget hook stop" column in `docs/adapter-parity.md`.
+- **Recover dropped prompts after upgrading.** Codex 0.148 and later (Codex Desktop, `codex exec`) wrote
+  each user prompt in a record Observer did not read, so most prompts were missing; run
+  `observer backfill --codex-rescan` once to recover them. Codex subagent rollouts already stored under a
+  file-name id keep it until a rescan that is tracked on its own (T-583). Qwen Code counted reasoning tokens twice: run
+  `observer backfill --qwen-code-rescan`.
+- **Managed enrolment tokens.** A managed token now defaults to the full managed authority set (23
+  authorities, narrowable). Managed tokens minted earlier with no authority stay ungoverned and must be
+  re-minted.
+- **Cost display.** The org admin dashboard always shows dollars. Settings > Display holds one choice,
+  "Developer dashboards show: Dollar costs (default) / Token usage only". The previous admin-facing
+  setting is retired and NOT carried over; an org that wants developers on token usage selects it once.
+  A node that cannot verify the org's display policy shows tokens, not dollars.
+- **Security: org enrichment of individual-tenancy members (INTEL-7).** In `observer-org` v1.33.0
+  through v1.34.0 org enrichment could enrich an individual-tenancy member's sessions without opt-in
+  (latent unless an admin enabled org enrichment, which is off by default). Until you run this build,
+  do not enable org enrichment on an org with individual-tenancy members. After upgrading, purge the
+  hidden results under Intelligence > Session enrichment or with
+  `observer-org intel purge-individual --confirm`.
+- **Cloud Intelligence plans (hosted service).** Plan v3 and the GPT-6 Luna route ship inactive until
+  the service is deployed and attested. When it is rolled, `SBCI_PADDLE_PRICES` must move to
+  `plus_beta:3` together with cloud migration 0041, or Plus sells fewer enrichments than Free.
+- **Components and distros (modular packaging).** Nothing changes for an existing install: every
+  channel still ships the full product, and a node with no `[components]` block runs everything it ran
+  before. New: `observer components` and Settings > Components choose what runs (inactive components
+  start nothing and their routes answer `component_not_installed`); an org can govern a managed node's
+  components with a `node.components` policy, which needs the new `components.govern` authority
+  (super-admin only to grant); a developer can ask the org for a missing component on the Requests page
+  (new request type `component_enable`). On a managed enrolment the local `[components]` block cannot
+  narrow the node (it is ignored with a warning); the OS-pinned local ceiling stays the one local limit.
+  The Projects alignment judge tier is in the public source tree (`internal/judgeclient`). The
+  minimal, developer and managed editions are published as GitHub release archives with an edition
+  installer (`install.sh` / `install.ps1`, see Added); npm, PyPI and the VS Code extension still ship
+  the full build.
+- **Migrations.** Node 148 to 161 (158 component purge plans, 159 the enrolment grant's signed initial
+  component set, 160 the local ceiling's last-known set, 161 the update state's distro columns; all
+  node-local); org server 192 to 231; PostgreSQL 0058 to 0098 (0063 is a PostgreSQL-only type fix; 206 /
+  0073 add the vendor export tables; 231 / 0098 the org signing key history); cloud 0041. On the org
+  server run `observer-org upgrade preflight` and then `observer-org migrate` before starting the new
+  image. Take an org database backup before upgrading; the PostgreSQL
+  model-filter index build holds writes on the token tables for about 18 seconds, before the server
+  serves traffic.
+
+### Added
+
+- **Edition installer (T-729).** `scripts/install.sh` (Linux and macOS, x64 and arm64) and
+  `scripts/install.ps1` (Windows) install the minimal, developer, managed or full edition: `--edition`
+  (a menu on a terminal; `developer` otherwise), `--version` (default the latest final release; a
+  pre-release only when named), `--prefix` (default `/usr/local/bin` when root or writable, else
+  `~/.local/bin`; `%LOCALAPPDATA%\SuperBased\Observer\bin` on Windows), `--from-dir` for air-gapped
+  installs, `--dry-run`, `--uninstall` (runs `observer uninstall --all` first and keeps the binary if
+  that fails) and, on Linux with systemd, an offer to turn on `integration.service` and run `observer
+  service install --now`. The archive must match the release's `SHA256SUMS`, and its vendor
+  signature (`<archive>.sig`, the raw Ed25519 signature the update system already verifies) must
+  verify against the vendor key compiled into the installer; a mismatch or a bad signature is refused,
+  an unsigned archive or a machine with no Ed25519 verifier is a warning unless
+  `--require-signature`. Every `v*` tag now publishes the minimal, developer and managed edition
+  archives for the five platforms (`observer-<tag>-<edition>-<os>-<arch>.tar.gz`, `.zip` on Windows;
+  the full edition keeps today's names), their `.sig` files, the signed `release-index.json` and both
+  installers as release assets, all in `SHA256SUMS`. No telemetry; curl or wget.
+- **Distro-aware updates (manifest v2).** Publishing a release on the org server now also writes a
+  distro-aware v2 document beside the unchanged v1 one, served at `/api/agent/update/manifest/v2`
+  with the vendor-signed release index. Nodes built as `minimal`, `developer` or `managed` update
+  within their distro, and move to another distro only when the org's signed component policy names
+  it, the local ceiling allows it and the channel's distro epoch has advanced. An older node or an
+  older org server keeps working exactly as before. Agent migration 161 adds the distro columns to
+  `update_state`; org server migration 220 (PostgreSQL 0087) adds `distro` and `components_digest`
+  to `org_update_artifacts` and the `org_update_release_indexes` and `org_update_publications`
+  tables. See `docs/enterprise-updates.md` "Distro-aware updates".
+
+- **Modular packaging, governance round 3 (MODPKG, lane MP-GOV3).** The org dashboard has a
+  **Node components** page (Organization > Node components) to compose, check and publish the
+  `node.components` policy: it shows the stranding estimate and the cross-rail findings and asks for
+  the stranded-count acknowledgement before publishing. A `node.governance` feature.lock that forces on
+  a feature whose component the `node.components` policy blocks is now an error and refuses the publish
+  (`409 cross_rail_error`, either order). Fixed: a published feature.lock was dropped from the signed
+  `node.governance` body and never reached a node (ledger MODPKG-16); republish an existing lock to
+  deliver it. A teams-to-enterprise grant replacement now carries the managed initial component set
+  under a second signature, so older nodes accept it unchanged and newer nodes verify the set (org
+  server migration 227, PostgreSQL 0094). Settings > Components shows the separately installed artifacts
+  (browser and VS Code extensions, plugin shims, helpers), also on `GET /api/components` as
+  `artifact_states`.
+- **Scheduled component purges in the org audit log (MODPKG, lane MP-GOV4).** A node now reports, on
+  the component posture it already pushes, the state and due date of each purge a `node.components`
+  policy scheduled on it (enum values only; no counts or plan ids), and the org server writes an audit
+  row (`node_component_purges_changed`) each time a node's list changes: scheduled, eligible, ran,
+  expired or cancelled. Updates > Fleet versions carries the list per node and counts the nodes with an
+  open purge. Optional both ways: older nodes and older servers keep working. Org server migration 228
+  (PostgreSQL 0095) adds one column to `org_node_component_posture`.
+- **Custom builds from a component manifest, staged (modular packaging P7, lane MP-CUST).** A
+  `sbo-distro.v1` manifest names a prebuilt base (minimal, developer, managed or full) and adds or
+  omits components; `sbo-components build --manifest` resolves it to one compiled set, builds with the
+  matching omit tags and stamps the binary as distro `custom` with its components digest and custom
+  distro id, and `sbo-components proof` checks it like a prebuilt distro. A custom build updates only
+  from its own manifest's build named in the vendor-signed release index; `vendorsign index` carries
+  custom archives, and `go run ./web/compgen -manifest` leaves the pages of omitted components out of
+  its web bundle. The vendor build job (`custom-build.yml`) is manual-dispatch only with an ephemeral
+  key and publishes nothing; there is no hosted build service and no org-signed custom build yet. No
+  migrations. See `docs/custom-builds.md`.
+
+- **Prebuilt distros, staged (modular packaging P3).** `scripts/build-distro.sh <minimal|developer|managed|full>`
+  (and `make distro-build`, `make distro-all`) builds one distro with tags read from the component
+  catalog, plus its `go version -m` buildinfo, a CycloneDX SBOM and a proof record. The proof gate
+  (`sbo-components proof`) reads the tags back out of the binary, checks with `go list -deps` that every
+  excluded component claiming compile-out is absent, that the linked modules equal the closure, and that
+  the binary reports its own distro. A distro binary started with no `[components]` block runs its
+  distro's default set; a component the distro excludes whose code this release still carries is inert
+  and not selectable and is listed as `distro_out`. CI builds, proves and smoke-tests the four distros
+  on every pull request and vets and tests every omit-tag variant; `distro-staging.yml` builds all
+  platforms on demand as workflow artifacts. Nothing is published, signed or tagged by any of it.
+- **Download this build's SBOM.** `GET /api/components/sbom` returns the CycloneDX SBOM of the running
+  binary (the same document the release pipeline renders per artifact).
+- **Local component ceiling keeps its last valid set.** When the OS-pinned ceiling source fails a check
+  after a valid read, the last valid set stays in force (node migration 160) instead of falling to core
+  only.
+- **Model filter.** The node dashboard top bar filters by model, with the list narrowed by the chosen
+  tool, project and window (a selected model outside the selection stays selected and says "no data in
+  this selection"). Spend pages narrow to that model's own turns; session and action pages keep whole
+  sessions that used it. The org dashboard gains a global Tool / Project / Model filter row, kept in the
+  URL only. New indexes make model filtering about 100x faster for rare models.
+- **Join and manage an organization from the node dashboard.** Settings > Enrolment joins by code, link
+  or IdP sign-in, shows the consent and the org's grant, the status, Push now, re-enrol and Leave.
+  Leave removes a proxy route (Claude Code `ANTHROPIC_BASE_URL`, Codex `base_url`) only when the
+  enrolment wrote it, and the confirm names exactly what goes and what stays. **Share history** sends
+  activity captured before enrolment (the twin of `observer org backfill --all --confirm`) and warns when
+  older sessions came from a previous enrolment. **Re-send changed rows** is the twin of
+  `observer org resync`, and the page shows `observer org push-status`'s push cadence. The CLI and the
+  page run one enrolment sequence. AI tool settings > Organization and the org dashboard's invite
+  screens point at the page. (T-642)
+- **AI tool settings.** A new node dashboard page and `observer agent-config` read and edit each AI
+  tool's own settings and instruction files: By tool, Projects, All AI tools, Instructions, Coverage and
+  History tabs plus a raw editor. Every save is checked and previewed first, then written atomically
+  under a lock and read back; secrets show only as present or absent; Observer-owned entries are
+  refused; settings stored inside editor apps are read-only with a note. A per-adapter catalogue of about
+  4,700 settings and a 21-key common vocabulary sit underneath it, and `docs/adapter-settings-reference.md`
+  is generated from them. `observer config set` gains the same checks (`--dry-run`, `--yes`), and saving
+  `config.toml` from the dashboard runs the same sanity check.
+- **Org AI tool settings policies.** Org admins author AI tool settings for the org, a team or a member,
+  by tool and project, in web2 (Coding-agent policies > AI tool settings), with a pre-publish check and a
+  team-conflict gate. Managed machines apply and lock them (form, raw editor and CLI refuse, naming the
+  policy), re-assert drift twice and then back off within the hour, and report `config_drift` to Fleet
+  State. An empty signed body withdraws the locks and keeps the written values. Individual machines are
+  never touched. Re-enrolling into another org clears the previous org's policy first.
+- **Access requests and grants.** A developer can request an exception, a budget increase, or tool,
+  model or feature access from the node (form, CLI `observer request access`, or the "request access"
+  link every org block now carries). Admins decide in the Requests page and the Approvals inbox; a
+  grant has an expiry (perpetual grants are super-admin only and flagged for re-review after 90 days),
+  reaches the machine over a signed rail, and is shown as Issued until a machine confirms it. Grants
+  change real enforcement on the tool hook, the prompt gate, the proxy, the launchers and New Terminal,
+  the org AI gateway, and the node-feature and pinned-setting gates. Requests made offline wait in an
+  outbox. See `docs/access-grants.md`.
+- **Hook parity across AI tools.** Claude Code's hook model now reaches the other tools:
+  - **Tool-call gates** (deny, and ask where the host supports it) for Codex (shell, `apply_patch` per
+    file and MCP), Cursor, Qoder, Antigravity, Grok Build, Goose, Cline CLI, Qwen Code, Factory Droid,
+    Gemini CLI (BeforeTool, plus a BeforeAgent prompt gate), Copilot CLI (preToolUse) and Muse
+    (PreToolUse, plus a UserPromptSubmit prompt gate), each live-verified and auto-registered by
+    `observer start`. Gates for Poolside, zcode, Command Code, Windsurf / Devin Desktop, the Devin CLI
+    (new writer for `~/.config/devin/config.json`), Mistral vibe, Cline, Junie, Crush and Open
+    Interpreter are written by `observer init` only until each is verified on a real install.
+  - **A plugin shim** gates OpenCode, Kilo CLI and pi tool calls (and Command Code mods), and shows a
+    withheld or rewritten prompt to the developer in the tool's own UI. Hermes gains a blocking
+    `pre_tool_call` gate.
+  - **Deny-only hosts** turn an enforced ask into a deny whose reason says how to proceed.
+  - **Failure modes.** Gate hooks fail closed on Observer's own timeout or crash only while enforcement
+    is in force, with a plain reason; observe-only hooks stay fail-open; every failure is recorded.
+  - **Lifecycle and tasks.** Session start and end, compaction (Claude Code and Cursor) and Claude Code
+    task events are recorded; Cursor retries of one turn fold into one row.
+  - **Health.** `observer adapters --hooks`, `observer doctor --hooks` and `--probe-hook`, and a coverage
+    card on the Security page show every binding as registered, trusted, current or not. Codex hook
+    trust is detected and explained (Observer never trusts its own hooks for you). A vendor switch that
+    turns hooks off (for example Claude Code `disableAllHooks`) raises a doctor warning and a guard event.
+- **Prompt guard coverage.** Tools with no pre-send seam (Freebuff, Kilo Code CLI, Mistral vibe, Kimi
+  Code unrouted, Pi, Prime Agent) get a post-hoc flag and a desktop toast, and every coverage
+  surface names the reason. OpenCode Zen is routed through the proxy.
+- **Dashboard controls for former CLI-only flows.** Each runs the CLI's own code:
+  - Settings > Connected tools: Set up and **Remove Observer's wiring** (hooks, MCP server, proxy route)
+    for every adapter with a hook or MCP surface, with a preview and a refusal when the file changed
+    since Observer wrote it; a per-adapter **Run checks** (the `observer doctor <tool>` report); and,
+    with the daemon in WSL, a Windows-side home picker (`observer init --windows-*-home`).
+  - Settings > Health: each doctor finding links to the control that fixes it, and `observer doctor
+    --json` gains an optional `Remediations` field.
+  - Settings > Profiles: per-tool and per-project profile assignment with a change preview.
+  - A forced database integrity check (above `integrity_check_max_gb`) as a cancelable background job.
+  - Security: test a command, re-judge history, check or write native permission rules, MCP scan and
+    compliance summary.
+  - Proxy-route undo, egress lint, score, patterns, calibration, summarize, pricing sync, MCP
+    wrap / relay / doctor, adopt-defaults, update history, benchmark dry run, spend and delete, and the
+    resolved profile view.
+  - The MCP access card names the relay's Turn on control instead of a command.
+- **Command wrapping for Windows shells with a WSL daemon.** `observer shell-wrap enable --target
+  windows` (or the target switch on Settings > Terminal) installs `.cmd` shims in
+  `%USERPROFILE%\.observer\shims` and a marked, removable PowerShell profile block. A tool with a
+  Windows build runs on Windows with its routing taken from the WSL daemon (which also applies the org
+  disallow gate and managed budget admission); a Unix-only tool runs `observer <verb>` in WSL; anything
+  that cannot route runs unrouted with a notice. The Windows user PATH is never edited (cmd.exe users
+  add the folder themselves). Copilot CLI, Gemini CLI, Grok and Codex launch without routing on this
+  target and say so.
+- **Cursor Cloud Agent capture.** Cloud Agent (`bc-`) chats viewed in the Cursor IDE are captured again,
+  under the `[cursor]` placeholder project: session start and end, and the agent's reasoning as a
+  harness row. Tokens stay honestly absent. For Cloud Agents that ran before this release, run
+  `observer backfill --cursor-hook-usage`.
+- **Budget warnings.** Org-governed warnings at 75%, 90% and 100% of a cap, for the admin and the
+  developer, on by default, including per-tool and per-model caps. The banner's level is the current
+  reading (a raised cap clears "exceeded"), its label names the state ("Budget exceeded: requests
+  blocked", "(warning only)", "(report only)", "Approaching budget"), and every banner state offers
+  **Ask for a budget increase**, prefilled with the budget that ran out.
+- **Org changes reach active machines in seconds.** An active node holds a policy-version probe open
+  (it asks for 20 s, the server caps it at 25 s and answers the moment a version moves), so an org
+  policy, budget or grant change is picked up in about 1 to 3 seconds instead of 30; idle nodes keep
+  the push cadence.
+- **Org Cloud Intelligence parity.** Managed and individual machines get the same enrichment
+  experience: consent for individual-tenancy members (which an org can make a condition of membership,
+  never switched on silently), node-built evidence over a signed rail, per-session Preview and Enrich,
+  the org's full control set per org, team and member, weekly project digests, and purges that stick and
+  reach the node even while the feature is off.
+- **Developer dashboards (managed machines).** Managed machines hide the org-level pages by default;
+  admins choose Hidden, Read-only or Visible per page, Settings section and tab, org-wide or per team or
+  member.
+- **Guard bundles for individual members** and **Remove from audience**, with need-to-know headers.
+- **Org guard fallbacks** for managed machines: block guarded calls while a developer's guard policy is
+  invalid, and refuse a New Terminal launch of a proxied tool when no sandbox is available.
+- **New Terminal** lists Junie, Poolside, Crush and Aider, and Zed has a GUI launch row (Homebrew, winget,
+  install script).
+- **Arena** has a model picker per harness; agent step limits and the assistant's per-turn budget are
+  free numeric fields.
+- **Uninstall** tools that were installed from the dashboard.
+- **Node.js runtime check** before guided install and launch of npm-distributed CLIs, with a copyable
+  install command; `observer doctor` reports the same.
+- **Compound budget scopes** (developer, team or project by tool or model, and "every developer,
+  separately") and service accounts.
+- **Docs.** `docs/adapter-parity.md` (the one living adapter parity record) and the generated
+  `docs/adapter-settings-reference.md`, both drift-checked in CI.
+- **Ask for a budget increase without knowing a budget id.** The Requests page offers a picker of the
+  budgets your machine knows (whose budget, period, cap and current use, defaulting to the one that ran
+  out); the org server settles the request against your own budgets. The guard's budget deny line points
+  at `/requests?new=budget`. New request types: access to a page the org hid (`page_access`), a time-limited
+  config edit (`config_edit`, at most 30 days) and "Something else". Org admins pick members, budgets,
+  pages and settings from lists in web2 instead of typing ids.
+- **OpenTelemetry from every AI tool.** The node receiver ingests any vendor's own OTLP export (JSON or
+  protobuf), not only Claude Code's, under the same capture and scrub rules; where a tool also routes
+  through the proxy, the proxy owns its token counts. `observer init --otlp-export <tools>` and Connected
+  tools > Set up > Telemetry export point Claude Code, Codex, Gemini CLI or Qwen Code's own exporter at
+  the node (opt-in per tool, removable; a collector of your own is never touched).
+- **Vendor team usage on the org server (unverified live).** Settings > Vendor exports receives Cursor
+  Enterprise and Claude Cowork team-wide OTLP exports, or polls the Cursor Admin API, with one source per
+  tool, a scoped machine credential, held unmatched identities and an audited read. Vendor rows are shown,
+  not counted in spend. See `docs/teams-operations.md` section 15.
+- **Machine identities in web2.** Settings > Machine identities creates service accounts and mints,
+  rotates and revokes ingest credentials (secret shown once); deactivating an account revokes its
+  credentials.
+- **Member deactivation.** An org admin can deactivate a member (bearers and sessions revoked by default,
+  reversible, never self, the super admin or the last admin) from web2 or `observer-org users deactivate`.
+- **Server maintenance from web2.** Support bundle, scrub content, log requeue, import archive, purge
+  subject, update sync, resolve projects, digest send and seven Agent Access verbs run from the org
+  dashboard as audited background jobs (the CLI's own code); entity ids are picked from lists.
+- **Weekly project digests on developer machines.** A developer sees the org's weekly digest, read-only,
+  for projects they pushed sessions in before that week ended; cost, provider, model and tokens are left
+  out.
+- **Administrator-managed AI tool settings (MDM).** The org AI tool policy renders into each vendor's
+  managed layer (a file, a `.mobileconfig` or an HKLM `.reg`) with an honest per-value hold, from web2
+  (Device management) or `observer-org agent-config mdm`.
+- **Closed date ranges.** Both dashboards take a custom from / to range, not only "last N days".
+- **Node dashboard parity.** A model filter, a notification bell (budget, requests, guard, cache, update
+  and org notices; read and dismiss per item), Projects filters, the request-class split in session
+  detail and a top-bar Export.
+- **Remote systems and launch policy from the dashboard.** Terminals > Settings edits SSH profiles and
+  the launch policy (both previewed and saved through the config save pipeline) instead of telling you
+  to edit `config.toml`; a remote machine's host name is shown.
+- **MCP server reputation** has a control on the Security page (the same code as
+  `observer guard mcp reputation`).
+- **AI tool settings, round 2.** Instruction blocks, the org view of each managed machine's settings
+  inventory (audited, needs `read:content`), secret-shaped values scrubbed instead of withheld, project
+  common values, pickers instead of typed ids, and enforcement of tracked instruction files.
+
+### Changed
+
+- **Organization > Node components is picked, not typed (D-571).** Require, Allow, Deny and "Deny, a
+  grant may override" are multi-select pickers over the node component catalog: single components by
+  title under their class, and whole groups (a class, an id group such as `adapter.*`, a stability
+  level) with how many components each matches. A choice already in another list, or a Require choice
+  that matches a component a Deny choice also matches (or the reverse), is listed greyed out with the
+  reason. The options come from `GET /api/org/policy-resource/node.components/vocab`, built from the
+  same catalog the publish check uses. The stranding estimate, Check and Publish work as before.
+- **The org dashboard offers lists instead of text boxes wherever the options are known (D-571).**
+  Policy rollout target version, egress provider and effort, the model fields (egress, routing rules,
+  pricing, reprice, intelligence providers, enrichment and overrides) with model suggestions, node
+  feature tool lists, the governance action allowlist, update ring manifests, members and timezone,
+  project rule groups, grant rules and targets (tools, models, features, components), invite emails,
+  client labels, sign-in domains, scopes, claims and IdP groups, Agent Access environments, workspaces,
+  groups, issuers and rule versions, control-write budgets, machine identity scopes, mirror versions,
+  AI gateway upstreams, machine ids, observability filters and annotation keys. Fields whose list is
+  only a suggestion keep free entry. `observer-org` maintenance actions now refuse a release channel
+  other than stable, lts or edge, and an MCP rollback mode other than observe or enforce. The audit of
+  every field is `docs/audits/pickers-audit-2026-10-10.md`.
+- **`observer obs admission setup` picks the judge hosting and the local server from numbered menus.**
+  An answer outside the menu asks again instead of silently leaving the judge unchanged.
+- **Node dashboard: known values are picked, not typed (D-571).** Every field whose valid values the
+  daemon already knows is a picker fed by the endpoint that owns the set: the Actions and Security
+  session filters (recent sessions), the request rule, tool, model, component and feature, the rule
+  editor's override rule and MCP server, the Policies routing criterion, cohort, content class, model,
+  user and cohort map, the guardrail topics and judge model, the Terminals allowed project root, the
+  Remote tailnet host, the experiment tool, the MCP package lookup, the SSH jump host, the Arena context
+  files, AI tool setting string values, and in Settings the enabled adapters, compress types,
+  per-action allowlist, project allow and deny lists, disabled rule ids, dialect targets, MCP retrieval
+  tools, summary models, profile keys and the reprice model. A genuinely open field keeps a "use what I
+  typed" row, and a value set by hand in config.toml stays visible.
+- **Cloud portal: session correction tags are picked (D-571).** Taxonomy tags come from the curated
+  vocabulary grouped Activity / Area / Outcome; suggested tags stay free-form with the session's own
+  offered back.
+- **CLI: interactive prompts pick from a list (D-571).** `observer obs admission setup` picks the local
+  judge model from the server's `/v1/models`, searches the priced models for a hosted provider, and
+  adopts starter templates from one checklist; `observer init` picks the browser extension id from the
+  unpacked SuperBased extensions found in the browser profiles (paste stays an option), and its
+  component chooser shows the feature groups as one checklist (numbers toggle, enter accepts, b steps
+  back) instead of one question per group.
+- **Cloud Intelligence allowances (Signed-in Free and Plus).** Signed-in Free rises to 100 enrichments a
+  day and 3,000 a month; Plus to 500 a day and 15,000 a month (plan v3). Both plans enrich on GPT-6 Luna
+  with a 1,024-token output ceiling (a truncated answer is retried, then refunded, never stored). Open
+  assignments move to v3, and renewals can no longer schedule a v3 subscriber back onto an older
+  version.
+- **One indexing switch.** `[compression.indexing].enabled = false` now also stops the hook path from
+  writing tool-output excerpts (before, only the watcher obeyed it).
+- **Copilot CLI launches** unrouted on a GitHub-subscription sign-in with a plain one-line note; it is
+  routed only when a BYOK key and a model are set (a key without a model is refused, and a non-OpenAI
+  provider type launches unrouted). `observer gemini` routes only API-key sessions.
+- **`observer pi`** always gives pi a model and never switches yours: a default on another provider
+  launches unrouted with a notice.
+- **Antigravity (agy) prompt hook is warn-only.** On agy 1.3.0 the PreInvocation hook fires before every
+  model call and Observer reads the prompt from `transcript_full.jsonl`, so it is registered again beside
+  PreToolUse; it can warn, not block, and a tool-less side request carrying the prompt is seen by no hook.
+- **Guard: an unresolved directory before a recursive delete asks instead of blocking.** A delete that
+  resolves to a root, home, root-depth wildcard or a path outside the project is still denied (R-101);
+  a relative recursive delete after a directory change Observer cannot resolve now asks (new R-102 row),
+  so ordinary cleanups such as `cd $PROJECT_DIR && rm -rf build` are no longer hard-blocked.
+- **A malformed `guard-policy.toml`** keeps the built-in rules and the org bundle in force and is
+  reported loudly (doctor, a guard event, a Security banner); the dashboard editor refuses to save one.
+  Managed machines follow the org's fallback setting.
+- **Guided installs** run from your home folder, show the exact package-manager command when a program
+  the vendor script needs is missing, and never stop at an interactive prompt (Goose installs
+  non-interactively). Observer never runs `sudo`, except the Tailscale guided setup, where you type the
+  password yourself.
+- **Platform tabs restructure.** Long pages in both dashboards are deep-linkable tabs; old URLs
+  redirect. The node session drawer keeps its tab in `?dtab=`.
+- **Terminals** keep their original colours in light and dark mode. The New Terminal picker no longer
+  overflows. IntelliJ IDEA installs the unified product.
+- **Org admin writes are audited atomically.** Every org admin write route records its audit row in the
+  same transaction (or before the change on split stores); a failed audit answers `audit_failed` and
+  changes nothing. Publishes take a two-step confirm, and a stale editor gets `409 version_conflict`
+  (Policies, setup wizard, guard bundles, developer dashboards).
+- **Enrolment push cadence.** Enrolment leaves `push_interval_seconds` unset; the documented default
+  applies.
+- **Every dashboard config write goes through one save pipeline.** Section forms, SSH profiles, launch
+  policy, pricing, process capture, profile assignments, sandbox settings and experiments all preview
+  (`?dry_run=1`), refuse a file changed since you loaded it (`409 config_changed`), validate, read back
+  and audit. `observer config set` refuses to save when the org posture cannot be read.
+- **Token usage mode reaches every surface.** An org that shows developers token usage only now gets it
+  in exports, server prose, the CLI and the statusline too, not only the dashboard pages.
+- **Spend keeps counting what developer machines report.** Whatever vendor source an org picks, node
+  rows still count for spend, budgets and alerts (operator ruling D-359); vendor rows are shown, not
+  counted, until a live comparison approves them.
+- **Analytics pollers follow current vendor docs (unverified live).** Claude Code Enterprise Analytics
+  for `api_kind = enterprise`, local and remote rows summed per user-day; Codex and OpenAI Platform usage
+  paged at the documented limits and Platform usage shown as its own entry, never as Codex; Copilot
+  metrics from the current report and billing from AI credits, one day at a time; the Cursor Admin API
+  asks for all usage.
+- **The capture pill says what it means.** "Active", "No Claude Code", "Not routed" or "Checking"
+  instead of "Paused" whenever Claude Code was not routed. The sidebar watcher line follows the watcher,
+  not the Claude Code route, and Cursor's chat `store.db` no longer counts as misrouted.
+- **Daemon restarts are safe.** The daemon exits promptly on SIGTERM (a second SIGTERM is honoured, a 20 s
+  watchdog dumps stacks), and `scripts/restart-daemon.sh` waits for every daemon holding the database,
+  including one that already released its port, before relaunching.
+- **Hook writers are byte-idempotent.** Re-registering an unchanged hook leaves the file's bytes and line
+  endings alone.
+- **Command wrapping carries its config.** A shim enabled under a non-default `--config` runs observer
+  with that config; on an org-governed machine a broken `config.toml` refuses the launch instead of
+  running it unrouted.
+
+### Fixed
+
+- **Hooks and MCP entries survive an npm or pip upgrade (D-590 U1).** They used to name the binary
+  inside `node_modules/@superbased/observer-<platform>/` or `site-packages/observer/_bin/`, a path the
+  next `npm install -g` or `pip install -U` moves or deletes, so every hook failed after an upgrade.
+  `observer init`, `observer start`'s auto-registration and the hook probe now register the package
+  manager's own launcher (`<prefix>/bin/observer` for npm, the console script for pip) when one on PATH,
+  or in its usual place, runs this binary; otherwise the real path as before. On Windows npm keeps the
+  real path, because a `.cmd` shim cannot be an MCP stdio command.
+- **A stale Observer MCP entry is repaired without `--force` (D-590 U2).** An `observer serve` entry
+  whose command no longer exists (the binary an upgrade removed), or that runs this same install, is now
+  treated as Observer's own and rewritten by `observer init`; `observer start` repairs such an entry in
+  place (it never adds one). `observer doctor` names the exact command to run, with `--force` only where
+  init would really refuse.
+- **Commands from a newly installed binary no longer migrate the database under the running daemon
+  (D-590 U3).** After an npm or pip upgrade, `observer status`, `doctor`, `components status` and every
+  other command except `start`/`watch`/`proxy`/`update` and the capture paths (hooks, `serve`,
+  launchers) read the database without migrating it while another observer process holds it, and print
+  "the running daemon is vX (schema N); restart it to finish the upgrade". The daemon's lockfile now
+  records its version, and `observer doctor` gains a `daemon.version` check comparing it with the CLI.
+- **install.sh and install.ps1 no longer install a second copy over an npm or pip install (D-590 U4).**
+  They now look first: another `observer` on PATH (npm, pip or another copy) or a daemon running another
+  binary is listed with its version, the installer says which copy a shell runs now and after the next
+  login, and offers the package manager's own upgrade command. A second copy is installed only on an
+  explicit menu answer or `--force` (`-Force`); `--yes` or a pipe without `--force` stops with the
+  explanation. The edition defaults to the existing install's (npm and pip ship `full`), and with a
+  daemon from another install running, Next steps never start a second one and no service is offered.
+- **`observer init` and the auto-registration render one command (D-590 U5).** `--config` is written
+  only when it names a config other than `~/.observer/config.toml`, in both, so neither rewrites the
+  other's entries.
+- **A busy database no longer logs a spend-verdict WARN (D-590 U6).** The spend-verdict refresh retries
+  `SQLITE_BUSY` with a short backoff (250 ms to 2 s); a lock that outlasts the retries is logged at debug.
+- **Upgrade hints name the command that applies (D-590 U7).** The npm postinstall prints the
+  `observer service upgrade` line only for a daemon running under the systemd unit and the
+  route-off, stop, `observer start` order otherwise. `observer service upgrade` with no unit explains that
+  restart path, and `upgrade` is listed in `observer service --help`.
+- **The Codex trust hint counts the hooks it registered (D-590 U8)** instead of a fixed number, in
+  `observer init` and the enrolment's client wiring.
+- **`observer doctor` flags a proxy route on another port (D-590 U9).** A Claude Code or Codex route to a
+  loopback port other than `[proxy].port` is a `proxy.route_port` warning naming the `observer init`
+  command that rewrites it.
+- **`observer init` routes to the configured proxy port (D-591).** It wrote every Claude Code and Codex
+  proxy route on 8820, the `--proxy-port` default, even when `[proxy].port` named another port, so those
+  routes reached no proxy. The route port is now `--proxy-port` when given, else `[proxy].port`, else
+  8820, the order `observer org enroll --wire-clients` already used.
+- **The Cursor watcher reads only your own CLI log directory (D-590 U10).** It used to glob every
+  `/tmp/cursor-agent-logs-*`, including other users' on a shared machine. It now reads only
+  `cursor-agent-logs-<uid>` or `-<username>`, and only when that directory is owned by you.
+- **`observer guard status` on a node that never enrolled says "not enrolled" (D-590 U11)** instead of
+  reporting the organization's budget as unreachable.
+- **`/api/components` reports how the binary was installed (D-590 U12):** a `binary_install` object
+  (channel `npm` / `pip` / `other`, version, and whether hooks register the launcher; no path, because a
+  remote viewer can read the route). `observer components status` prints the binary's path, version and
+  channel.
+- **The antigravity bridge is described honestly on Linux (D-590 U13).** Outside WSL its component state
+  now says it ships for a daemon running under WSL and is not used here, instead of a generic "not
+  applicable"; the Linux packages keep shipping it for WSL2.
+- **An in-place upgrade no longer leaves the old daemon running behind a "started" message (T-753).**
+  Re-running install.sh, or `npm install -g` over an older version, replaced the binary underneath the
+  running daemon, offered the background service again, and `observer service install --now` then
+  printed "Service enabled + started." because `systemctl start` on a running unit does nothing; the
+  old process kept running the deleted binary. install.sh now says "Upgraded X -> Y", does not offer
+  the service again, and hands a unit that runs this install to the new `observer service upgrade`:
+  it rewrites the unit for the new binary (keeping its `--config` / `--recipe` / `--port`, refreshing
+  its Description) and restarts the daemon with `systemctl try-restart` only when nothing can be
+  routed through it (no proxy listener, or no proxy route present and no open proxy connection).
+  Otherwise it leaves the daemon running and prints the safe order, because the daemon is the proxy.
+  `observer service install --now` on a running unit applies the same rule, and plain `install` no
+  longer calls a running unit "not started". install.ps1 renames a running `observer.exe` aside
+  instead of failing, says "Upgraded X -> Y" and names the still-running pid with the safe order; the
+  npm package's new print-only postinstall names a daemon still running the replaced binary. Neither
+  installer nor npm restarts anything itself. The "integration.service is off in every edition" next
+  step now says it is off by default and that the command turns it on.
+- **The npm restart hint now fires on a real npm 10 global upgrade (T-756).** npm 10 renames the old
+  package directory aside to `@superbased/.observer-<platform>-<random>/` and runs postinstall before it
+  deletes that directory, so the running daemon's executable did not read "(deleted)" yet and the hint
+  stayed silent (rc.4 roll, node 5). The postinstall now also counts a daemon whose `@superbased`
+  observer binary lives under such a retired dot-directory, or is any binary other than the one this
+  install put in place. It still only prints.
+- **Every `observer` command group refuses an unknown subcommand (T-757).** `observer service instal`
+  (and the same typo under any other group) printed help and exited 0. A group now fails with exit 1,
+  names the unknown word, suggests the nearest subcommand when there is one and points at the group's
+  `--help`; a bare group still prints its help. One helper covers the whole command tree, extending
+  the T-746 fix for `observer org`; groups that take a positional value keep their own rule.
+- **Security > Rules > "+ Add override" lets you pick the rule again (T-762).** The node dashboard's
+  override editor locked its Rule picker whenever it was handed a starting row, and "+ Add override"
+  always handed it a blank one, so it opened as "Edit override -" with an empty, disabled picker and no
+  override could be added (rc.5 roll). Each opener now says how it opens the editor: "+ Add override"
+  lets you pick the rule, "Override" on an effective rule opens a new override locked to that rule, and
+  "Edit" on an existing override keeps its rule and saves in place.
+- **"Grant an exception" no longer greets you with an error (T-763).** The org dashboard's proactive
+  grant dialog sent the empty form to the server's preview at once and showed its reply, "user_id and
+  type are required", in red before any input. The dialog now checks the member and the grant type
+  itself, keeps Grant disabled until both are chosen, says what to choose in plain words ("Choose a
+  member.") only after you have used the form, and asks the server for its decision once the form is
+  complete.
+- **The Agent Access doctors pass on the compose and Helm shape (T-751).** There the agentgateway
+  sidecar runs the stock image, whose own binary is a different build from the upstream release asset
+  the binary pin names, so `observer-mcpgw doctor` D12 could only skip (no binary in the companion's
+  container) and, pointed at the image's binary, failed G7. The image digest is now the pin on that
+  shape: `--agentgateway-image` (default `$OBSERVER_MCPGW_AGENTGATEWAY_IMAGE`, which the production
+  compose and the Helm chart now set from the sidecar image) passes D12 on the release digest and
+  fails another digest or a tag-only reference; with `--agentgateway-bin` the binary's `--version` must
+  still be v1.6.0. `observer-org doctor agent-access` and `upgrade preflight` take the same flag.
+- **The Fleet versions skew banner names the newest release candidate.** It read "to 1.36.0-rc.1"
+  while three nodes ran 1.36.0-rc.3: the board compared versions by their X.Y.Z core only, so two
+  release candidates of one release tied and map order picked one. The board's oldest and newest
+  versions now use full SemVer precedence (rc.3 above rc.1, rc.10 above rc.9, a release above its
+  candidates), with a stable tie-break for versions that differ only in build metadata.
+- **A machine that left and re-enrolled with a new machine key is no longer refused (T-747).** After a
+  structured leave and a reinstall that dropped `~/.observer`, the re-enrolled node's new machine key
+  was a `409 machine_key_conflict` and its machine-scoped grants were withheld until an admin reset
+  the key. A managed node's leave notice now carries its machine key's proof and the org server
+  retires that key (audited `machine_key_retire`); when the leave could not do that (an older node,
+  an unreachable server), the bearer of a fresh admin-minted enrolment of the same member replaces
+  the key (`replaced`, audited with the enrolment token). A bearer alone, an older bearer, and a
+  self-minted or IdP device-code enrolment still cannot move a key.
+- **The installers name real commands, and `observer org <unknown>` fails (T-746).** install.sh and
+  install.ps1 printed `observer org enroll <link>` and `observer org unenroll`, which did not exist,
+  and `observer org` with an unknown word printed help and exited 0, so the enrolment silently did
+  not happen. They now print `observer enroll --link <enrolment link>` and `observer unenroll`;
+  `observer org <unknown>` exits 1 naming the real commands; `observer org enroll` and `observer org
+  unenroll` run the top-level commands (hidden aliases); the enrolment's config.toml comment, the
+  config editor and `observer mcp doctor` name `observer enroll`. A test checks every command the
+  installers print against the command tree.
+- **Uninstall from a root-owned prefix changes nothing; no-proxy wording; `init --all` with no tool
+  (T-744).** `install.sh --uninstall` from a directory you cannot write (a root-owned
+  `/usr/local/bin`) stopped the service and removed every hook before failing to delete the binary;
+  it now checks first, changes nothing and prints the per-user commands plus the one `sudo rm -f`.
+  The minimal edition's next steps no longer promise a proxy, the systemd unit's Description names
+  what `observer start` runs on the node (`watcher + dashboard` without capture.proxy), and
+  `observer init --all` on a machine with no AI tool says so after any component note instead of
+  printing only `mcp skipped`.
+- **Accepting the installer's service offer no longer skips the component chooser (T-745).** The offer
+  writes `[components] add = ["integration.service"]` before the first `observer init`, and any
+  `[components]` block skipped the chooser, so the documented install, yes, init flow never showed it
+  and recorded no edition. An add-only block (no `distro`, no `remove`) now runs the chooser with
+  those components shown as already on and records the edition base; a block naming a distro or a
+  remove is still a recorded choice.
+- **The component chooser asks about browser chat capture (D-561).** It never did, so capture.browser
+  stayed on unless you ran `observer components remove capture.browser`. "Browser chat capture" is
+  now a feature group carrying the five browser-chat adapters bundled with it, asked where the build
+  includes it and shown unavailable where it does not; "capture only the detected tools" no longer
+  turns those adapters off behind it.
+- **`observer init` and `observer enroll` wire only the components you chose, and only tools you have
+  (T-730, T-742).** Without `--config`, init and the enrolment's `--wire-clients` step treated every
+  component as active, so they wired hooks, MCP entries and proxy routes for adapters you had removed
+  (on a fresh full install, ~20 tools you never installed, including a new `~/.claude/settings.json`
+  route) and skipped adapters you had added on a minimal or managed build. They now read the default
+  config and its governance like the daemon does. A component teardown also no longer creates an empty
+  config directory for every tool it checks (that is what made those tools look installed), and
+  removing the deepseek or openclaw plugin shim on a machine that never had one is quiet instead of an
+  error.
+- **The first components choice on a fresh install writes a minimal config.toml (T-741).** With no
+  `config.toml` yet, the first `[components]` write (the init chooser, `observer components select`,
+  Settings > Components) re-serialized every default: a 665-line file with no comments that also
+  pinned a disabled, empty `[org_client]` block, so a later enrolment left pushing off. A save to a
+  missing file now writes only the keys it set.
+- **An individual enrolment in an enterprise-posture org is offered an individual grant (T-740).** The
+  enterprise auto-grant (every extract.* token, `settings.pin`, the enforce tokens and a managed consent
+  class) was signed into every enrolment under the enterprise posture, individual ones included, so the
+  node listed 22 managed-only authorities and then refused the grant. It now applies to managed
+  enrolments only (one table, `enrolGrantShapes`); an individual token carries exactly what it was minted
+  with, and the Invite form sends an individual token's selection as shown, so nothing ticked offers
+  nothing.
+- **The install-time component chooser starts from your build and adds only what you pick (T-731, T-733,
+  T-737, T-734).** It always wrote `distro = "developer"`, even from a minimal binary (which then warned
+  about ten components that build lacks); it now writes the binary's own distro. Accepting every default
+  now writes exactly that distro's defaults: a "yes" to a group used to add every id in it (developer
+  defaults turned on routing, remote access, the sandbox, the MCP relay and update management) and the
+  `add` list repeated ids that were already on. On a minimal build a detected AI tool can be turned on in
+  step 1, the summary counts every component the result leaves off, and unavailable groups print with
+  step 2. On an org-managed node the chooser writes no distro and offers only what a local choice may
+  add, saying so before it asks, instead of refusing your answers at the summary. Start at login (the
+  system service) is now offered as its own group.
+- **`observer service install` offers to turn the system service on instead of only refusing (T-734).**
+  `integration.service` is off in every distro, so the documented `observer service install --now`
+  refused on a fresh machine. On a terminal it now explains why and asks to turn it on (the same as
+  `observer components add integration.service`), then installs; piped runs, org-managed nodes and
+  builds without the service keep the one-line refusal.
+- **`observer enroll` warns about a stopped proxy only for routes it left in place (T-736).** It told a
+  node with no `~/.claude` that Claude Code now routes through the proxy via `~/.claude/settings.json`
+  although nothing had been written. The warning now names the tools whose route points at the proxy
+  and prints nothing when there are none.
+- **The org Fleet marks nodes that left, and the posture page labels exclusions by their reason (T-738).**
+  A node that ran `observer unenroll` (or whose member was deactivated) stayed an ordinary row that slid
+  to "offline / no contact"; Fleet versions now marks it "left", from the node's structured leave at or
+  after its last contact or from the directory, and says how many rows left. Collection & posture
+  labelled every structural exclusion "excluded (service account)", including an ordinary developer
+  whose grant was only wider than the live document; each row now names its reason (holds authority the
+  fleet document cannot carry, excluded until the next re-issue, or excluded by an admin). Its Excluded
+  tile counts the rows it lists and no longer counts up from 0: in a background tab the browser runs no
+  animation frame, so the tile stayed at 0.
+- **Component status, doctor and service wording say what is true (T-732, T-739).** With no
+  `[components]` block, `observer components status` and `observer doctor` said every component was
+  active on distro and managed builds too, then listed the inactive ones; they now say the build's
+  defaults (or the organization's selection) are active, with the count. On a managed node doctor
+  printed "(policy source unauthorized)"; it now says in words what decides. The leftovers check
+  ignores components the build does not contain (capture.browser warned on a minimal build),
+  `observer components --help` no longer calls the feature read-only, and `observer service install` no
+  longer says the service is the proxy on a node where the proxy is not active.
+- **A node that is not enrolled no longer warns about the org bearer keychain (T-735).** `observer proxy
+  start` opened the org bearer store on every node and, on a machine without an OS keychain, warned
+  about a fallback it would never use. It now opens it quietly when `[org_client]` is not enabled; the
+  warning stays armed for the first enrolment. The one goose `FOREIGN KEY constraint failed` on a first
+  scan after the upgrade (node 3, data complete afterwards) is recorded in `docs/goose-adapter.md`; its
+  writer was not pinned.
+- **`observer uninstall --all` and `observer init --all` on a machine with no AI tool say so (D-553).**
+  They printed "no tools selected and none auto-detected - pass ... --all" even though `--all` was
+  passed; they now say `--all` found no supported AI tool installed and there is nothing to do.
+- **`observer start` no longer rewrites an equivalent Claude Code hook (T-725).** A daemon started from a
+  different binary path (say `observer.135`) replaced every existing `.../bin/observer hook claude-code
+  <event>` entry in `~/.claude/settings.json` with its own path plus `--config`, so each relaunch changed
+  the user's file. Startup auto-registration now keeps an existing observer hook that is equivalent (same
+  tool and event, same native or WSL-bridge shape, a binary that still runs, the same effective config
+  file) and leaves the file byte-identical; it rewrites only a missing or broken hook and logs each
+  rewrite with its reason. `observer init` still points every hook at the binary you run it from.
+- **`observer update status` agrees with the daemon on auto-apply (T-727).** On a managed node whose
+  enrolment grant puts it on the managed-fleet default, the CLI said "auto-apply off - the default for a
+  BYO node" while the daemon log and the org Fleet row said on: the CLI read only `admin_managed` from
+  the config. It now resolves the enrolment grant the way the daemon does and goes through the daemon's
+  one auto-apply resolver.
+- **Leaving an organization turns sharing off in config.toml; re-enrolling rewrites the address (T-728).**
+  After Leave, `config.toml` still said `[org_client] enabled = true` with the address of the organization
+  just left (on the operator's node, a retired server), and a re-enrol never rewrote an existing block.
+  Leave now sets `enabled = false` once the leave has completed, as a one-line edit that keeps every comment
+  and every other setting, and says so; a re-enrol sets it back to `true` and writes the new
+  `org_server_url` the same way. The leave plan now also names the per-organization machine key as kept:
+  it is the machine's identity, grants nothing without the org credentials Leave removes, and keeping it
+  lets a return to the same organization reuse its registration instead of a 409 that needs an admin reset.
+- **WebSocket upgrade passthrough off the deprecated `ReverseProxy.Director` (LINT-126-2).** The proxy's
+  upgrade passthrough now uses `Rewrite` (Go 1.26) and sends the upstream the same headers as before:
+  the client's `Forwarded` / `X-Forwarded-*` values are kept (Rewrite would strip them), the client address
+  is appended to `X-Forwarded-For`, and no `X-Forwarded-Host` / `X-Forwarded-Proto` is added that was not
+  sent. No change for clients or upstreams.
+- **Builds without a component say so everywhere (T-726).** `observer doctor <tool>` for an adapter the
+  build leaves out answers "not in this build" and names the builds that include it (it used to say
+  "active - no adapter"); a teardown step whose undo verb the build lacks says to run it from a build
+  that includes the component; the OpAMP routes of an org image without `org.opamp` answer
+  `not_in_image` from every binary that links the org server package; and the session MCP-call panel of
+  a build without the relay returns the session id and an empty `calls` list, the full build's shape.
+- **The minimal edition passes its proof again.** A build with `sbo_omit_ui_export_xlsx` left the
+  spreadsheet export out but did not report it, so the binary listed `ui.export-xlsx` as inert instead of
+  compiled out and `sbo-components proof` refused the `minimal` edition. The binary now reports it.
+- **`observer update apply` / `rollback` no longer run under a daemon that has no dashboard.** A build
+  without the dashboard (or `observer start --no-dashboard`) answers no update endpoint, and the CLI used
+  to apply, or restore a database snapshot, underneath the running daemon. It now reads the daemon's start
+  lock and refuses with the reason and the fix: let the daemon's update loop apply it, or stop the daemon
+  (proxy route off first) and run the verb again. `--dry-run` still runs.
+- **Builds without the API proxy or the dashboard stop describing them.** `observer privacy` no longer lists
+  a proxy listener such a build never binds, the bare `observer` greeting describes what `observer start`
+  runs in this build and sees a headless daemon, OTLP exports keep their token rows when this node serves no
+  proxy, and the Components pointers name the CLI verb when there is no Settings page.
+- **Release tooling:** the omit-tag test files whose code a tag compiles out now carry that tag, and the
+  public-tree obs sweep matches obs build lines with extra conjuncts.
+- **`observer enroll` no longer moves a running daemon's hooks.** Its AI tool wiring step registered
+  hooks and MCP against whichever binary ran the enrol, so an enrol from a second build pointed Claude
+  Code's hooks away from the running daemon. It now uses the running daemon's binary and says so;
+  `observer init` still points them at the binary you run it from. `observer org push-status` also
+  stops printing a stale 900 s fallback interval. (T-642)
+
+- **Ingestion stalls on large machines.** Several causes, all fixed:
+  - Replacing a tool-output excerpt scanned the whole full-text table (about one second per tool result
+    at 500,000 rows) on both the watcher and the hook path; it is now an index seek (0.67 ms).
+  - The initial scan ran before the watcher started, so one slow tree starved every other tool; it now
+    runs in the background, round-robin across adapters.
+  - The guard's budget cache aged on transcript time, so a replayed backlog paid two slow budget queries
+    per action even with no budget configured; the cache uses the guard's own clock, and no lookup runs
+    when nothing reads a budget.
+  - Files whose unread tail exceeded `max_file_size_mb` were skipped forever; they are now read in
+    capped windows.
+  - The cross-OS process sweep, root registration and the Codex poller no longer repeat full passes.
+  - The managed (org budget) token read is bounded to the budget window (from about 3 to 4.6 seconds to
+    under 1 second on a large database), so a large managed machine no longer times out its budget
+    lookup.
+- **Sessions that never reached the org.** After the startup orphan sweep, SQLite could reuse session
+  row ids at or below the push cursor, so new sessions never shipped. The cursor is now clamped in the
+  same transaction, `observer org status` shows a real "eligible" count, and leaving an org clears the
+  push history.
+- **Lost lifecycle events.** Compaction and session-end events that arrive before the watcher has
+  ingested the session are held and retried instead of failing on a missing session.
+- **Droid hooks never fired:** Observer wrote `hooks.json` under a wrapper Droid ignores. It now writes
+  the root-level shape and repairs older files.
+- **Per-project profile writer** wrote a zero-valued `[compression]` block that turned compression off
+  for the project, followed a symlinked `.observer`, and accepted the home directory.
+- **Quickstart dev sign-in** failed its CSRF check (403).
+- Connected tools showed hooks "off" right after registration, and probed only Claude Code, Cursor and
+  Codex; it now probes every registered hook.
+- Governed machines logged 404 console errors for hidden sections; Fleet State showed `node.features` as
+  local-only even when published.
+- Managed machines now consent to `node.features`, including machines enrolled before this fix (added
+  once at `observer start`), so org feature locks apply.
+- Mistral vibe 2.25's unified session store is captured.
+- A grant minted on the enrolment-token rail no longer reads as tampered; an org's first policy publish
+  reaches nodes within seconds.
+- A member on two or more teams can reserve at the AI gateway again.
+- **Codex prompts dropped on Codex 0.148 and later** (see the upgrade notes); a forced rescan now reads a
+  file over the size cap whole, window by window, instead of only its first window.
+- **Codex subagent lineage.** A subagent rollout whose `session_meta.source` is an object lost its whole
+  `session_meta` (real id, `thread_source`, `parent_thread_id`); it decodes now.
+- **One prompt, counted once.** A Codex prompt both the hook and the rollout recorded is counted once in
+  the Messages tab, the Projects prompt counts, the cost predictor and the Cloud Intelligence prompt
+  sample.
+- **Devin was stopped on every launch** under a managed hard USD cap, because the budget walk treated
+  Devin's in-store `_versions/current` symlink as unreadable; links inside the store are walked now.
+- **A policy stop inside a New Terminal** is explained at the terminal for wrapped launches too, instead
+  of a bare `EXITED (255)`.
+- **Qwen Code reasoning counted twice** and **Gemini CLI duplicate events** (see the upgrade notes for
+  the Qwen rescan; Gemini needs none).
+- **Split control / data org deployments.** About fifteen org dashboard handler families answered 404
+  "no org", and the machine identity routes failed, when control and data lived in different databases.
+- **`observer-healthcheck -print`** exists, so a roll can read the Agent Access hop state from inside the
+  distroless image; an idle or zero-vserver hop counts as healthy.
+- **Ingestion stalls, second round.** Five more full-text excerpt reads (the MCP `get_action_details`
+  tool, retention, the reasoning backfill) seek by index instead of scanning the table
+  (`get_action_details` for 25 ids: 14.3 s to 18 ms), and the initial scan serves whichever adapter lane
+  is ready instead of waiting on a stuck one.
+
+### Security
+
+- **`golang.org/x/net` v0.60.0 (HTTP/2 advisories).** `golang.org/x/net` moves from v0.58.0 to v0.60.0
+  and closes five advisories in its `http2` package that `govulncheck` found reachable from Observer code
+  (the proxy, the org server, the AI gateway and `observer-mcpgw`): GO-2026-6612 (double flow-control
+  refund on server streams), GO-2026-6603 (server memory exhaustion through Trailer headers),
+  GO-2026-6610 (malformed framing headers forwarded by a reverse proxy), GO-2026-6611 (CPU exhaustion
+  through repeated initial window changes) and GO-2026-6617 (server crash through an HPACK encoder race).
+  The image CVE gate for `observer-mcpgw` would otherwise have blocked the release. Minimum version
+  selection moves `golang.org/x/crypto` to v0.57.0, `x/sys` v0.48.0, `x/text` v0.42.0, `x/term` v0.46.0,
+  `x/sync` v0.23.0, and the indirect `x/mod` v0.41.0 / `x/tools` v0.49.0. No code changed; the stdlib
+  half of these advisories was already fixed by Go 1.26.9.
+
+- **Agent Access sidecar: stock agentgateway v1.6.0 (glibc CVE-2026-19499).** The digest-pinned agentgateway
+  sidecar moves from v1.5.0 to the stable v1.6.0 (the upstream `agentgateway/agentgateway` image,
+  tag `v1.6.0`, digest `sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c`; the
+  full image reference is in the Agent Access compose files and `docs/agent-access-cve-patch-runbook.md`),
+  whose image carries Wolfi glibc 2.44-r7. That closes CVE-2026-19499 (High, glibc `strfmon` overflow), whose dated
+  exception expired today and would have failed the Agent Access image CVE gate, and two High `hickory-resolver`
+  advisories in v1.5.0's lockfile (ledger AA-45). v1.6.0's breaking changes concern LLM routes only; the MCP hop
+  config is unchanged. If you mirror the sidecar yourself, mirror the new digest and set `AGENTGATEWAY_IMAGE`
+  (compose / OpenTofu) or let the chart's new `agentAccess.sidecar.image` default take it (Helm);
+  `observer-mcpgw doctor` now expects agentgateway 1.6.0.
+
+- **Signed-rail and component governance fixes from the fourth adversarial review.** The org server's
+  boot re-sign of routing policies, announcements and update manifests now verifies a stored document
+  only against keys the server has itself served (a new org signing key history, server migration 231 /
+  PostgreSQL 0098), never against the key the document's own row names, so a forged row can no longer be
+  re-signed under the org key; rotating the key file keeps working (ledger SIGN-2). A managed node keeps
+  an initial component set it inherited from an earlier grant together with the grant that signed it, so
+  an edited set no longer re-verifies (MODPKG-17 (1)). A fleet grant replacement the super admin issues
+  now carries `components.govern` and the managed initial component set; anyone else's names those
+  members as excluded with the reason (MODPKG-17 (4)). A scheduled component purge waits instead of
+  deleting while the node runs on a last-known-good `node.components` policy, and records its request
+  before the delete (MODPKG-17 (3), (4)). The `distro-staging` workflow no longer expands its dispatch
+  version into shell (CI-INPUT-1).
+
+- **A member can no longer lock a colleague out of their machine-scoped grants (REVIEW-4, ledger
+  GRANT-16 / GRANT-17 / GRANT-18).** Machine keys now bind the (member, machine) pair (org server
+  migration 229 / PostgreSQL 0096, existing keys copied in), so registering someone else's machine id
+  only ever affects your own grants. Key registration is audited in the same transaction as the write
+  and a concurrent registration is a 409 instead of a silent replacement. The admin reset takes an
+  optional member. A node now keeps one machine key per organization, so leaving an organization and
+  coming back no longer ends in a permanent key conflict.
+- **Audit and retention fixes on the org server (REVIEW-4, ledger AUDITSTORE-1, VCONN-14, VCONN-15).**
+  The node scheduled-purge audit row is written to the org database before the change (it was lost on
+  split control / data deployments); three vendor connection tables declared as aging out are now
+  pruned; and unlinking a vendor identity restores all of the held call's identities (migration 230 /
+  PostgreSQL 0097).
+
+- **Go 1.26 toolchain and `golang.org/x/crypto` v0.56.0.** Every binary is now built with Go 1.26.9
+  (`go 1.26.0`, `toolchain go1.26.9`), which lets `golang.org/x/crypto` move to v0.56.0 and closes
+  GO-2026-6354 and GO-2026-6355 (`x/crypto/ssh` denial of service; never reachable from Observer code, but
+  carried in every binary). The org server, MCP gateway, cloud and deploy images build on `golang:1.26`;
+  the two dated image-scan exceptions for those advisories (ledger AA-47) are removed. Building from
+  source now needs Go 1.26 or later. CI lints with golangci-lint v2.12.2 (the v1 linter cannot read a
+  Go 1.26 module); `.golangci.yml` moved to the v2 schema with the same rule set.
+- **Guard rule holes closed:** a leading shell keyword (`{`, `if ... then`, `do`, `!`) hid a command from
+  every rule (for example `{ rm -rf /; }` was allowed under enforce); directory changes and links made in
+  the same command (`cd`, `pushd`, `ln -s`, `mklink` and more) could steer a recursive delete around
+  R-101; a HOME under `/tmp` exempted `rm -rf ~`; Cline CLI's `run_commands` batches were never judged.
+  Interpreter one-liners (`python -c`, `node -e` and others) that read or delete a protected or secret
+  path are now judged by the same rules as shell commands.
+- **Signed rails bound to the org and the developer (binding v2),** sticky once a node has held a bound
+  envelope; a 404 or an unsigned answer never clears a node's cached policy; a withdrawal is a signed
+  tombstone. Re-enrolling clears every identity-bound signed cache, so one org's policy cannot survive
+  into another.
+- **Hook posture file** is signed by the daemon and expires after 3 minutes, so a forged or stale
+  posture cannot open or wrongly close a gate.
+- **No credential reaches the wrong provider:** a proxied request for an unknown `/up/<id>` lane is
+  refused (502) and a malformed lane address answers 400 before any upstream request.
+- **Credential-bearing vendor files** (zcode, Junie, Qwen, Hermes and every MCP config Observer writes)
+  are edited only inside Observer's own entries, keep their file mode, and are never backed up or
+  checksummed by Observer.
+- **Self-approval of grants is refused** (see the upgrade notes), rule severity and lock status are
+  resolved on the server, and a grant on a shared budget row is refused.
+- **Need-to-know:** a composed guard bundle names only the developer's own teams, and a member or team
+  bundle's free-text note no longer reaches every recipient. A hidden settings section reveals nothing,
+  not even which secrets exist.
+- **INTEL-7** (see the upgrade notes).
+- **Third adversarial review (REVIEW-3) folded.** The machine inventory filter could skip the
+  `read:content` gate (`state=observed%20`); a dashboard ops job ran as the host user, so its launcher
+  could approve their own Agent Access rollback; a deactivated service account's credentials still
+  authenticated; the vendor usage read was not audited; the OTLP token file was accepted with any mode or
+  owner; a pushed project hash opened another project's digest history; purge-subject could sign out a
+  member without `admin:members`. All fixed. See `docs/security.md` (REVIEW3-* rows).
+- **Vendor export credentials are exclusive at every request,** not only when minted (EA-F10), and every
+  org route reads the org from the control store.
+- **Guard: sensitive paths follow `cd`, PowerShell script blocks are judged.** A protected path reached
+  through an earlier directory change is judged like the full path, and a recursive delete inside a
+  PowerShell script block is judged (a pipeline `$_` target and an uncalled function definition ask;
+  everything else keeps its verdict).
+- **Hook-path budget stops are fresh.** A stop older than 2 minutes is ignored, the file is removed on
+  unenrol and rewritten when damaged, and a transient spend read failure stops tools only after three
+  failed ticks (an operator ruling; structural failures still stop at once).
+- **The notification state write** needs the dashboard's confirm token and is audited.
+
+### What changed during the release candidates
+
+None of the five 1.36.0 release candidates was tagged or published: each was built locally and rolled
+to the demo org server and nodes, and the notes above stayed one list throughout. What each candidate
+added:
+
+rc.2 replaces rc.1, which was built and rolled to the demo but never tagged or published, so this
+section carries rc.1's notes and what changed after it as one list. New since rc.1: the edition
+installer (`scripts/install.sh`, `scripts/install.ps1`) and the edition archives as release assets
+(T-729), the follow-ups found during the rc.1 roll (T-725, T-727, T-728, LINT-126-2) and the
+install and enrolment fixes from the fresh-install check on the demo nodes (T-730 to T-742).
+
+rc.3 replaces rc.2, which was rolled to the demo org server and nodes 1 to 5 but never tagged or
+published; this section stays one list. New since rc.2: `golang.org/x/net` 0.60.0 for four `http2`
+advisories (lane XNET), the agentgateway sidecar re-pinned to v1.6.0, closing AA-45 (lane AGW16),
+the fixes from the rc.2 roll (T-744 to T-747 and the browser capture question, lane FIX-RC2), and
+release clean-ups: the Antigravity HTTP/2 clients moved off the deprecated `x/net` `http2.Transport`
+with no behaviour change, the installer scripts executable again, and the Agent Access task-grant
+refusal re-grounded on agentgateway v1.6.0 (T-749).
+
+rc.4 replaces rc.3, which was pushed to `origin` and rolled to the demo org server and nodes 1 to 5
+but never tagged or published; this section stays one list. New since rc.3: the fixes from the rc.3
+roll (lane FIX-RC3). An in-place upgrade no longer leaves the old daemon running behind a "started"
+message: install.sh hands a running unit to the new `observer service upgrade`, which restarts the
+daemon only when nothing can be routed through it and otherwise prints the safe restart order, and
+install.ps1 and the npm package name a daemon still running the replaced binary without restarting
+anything (T-753). The Agent Access doctors check the compose and Helm sidecar by its image digest
+(T-751), and the Fleet versions skew banner orders release candidates by full SemVer precedence.
+
+rc.5 replaces rc.4, which was pushed to `origin` and rolled to the demo org server and nodes 1 to 5
+but never tagged or published; this section stays one list. New since rc.4: the fixes from the rc.4
+roll (lane FIX-RC4): the npm restart hint now fires on an npm 10 global upgrade, which moves the old
+package aside before the new postinstall runs (T-756), and every `observer` command group refuses an
+unknown subcommand with exit 1 and a hint instead of printing its help and exiting 0 (T-757). And
+the pickers rule (lanes PICKERS and PICKERS-2, D-571): wherever the valid values are a known set, the
+org dashboard, the node dashboard, the cloud portal and the interactive CLI prompts offer a list to
+pick from instead of a text box, starting with Organization > Node components, and a choice that
+cannot be used is listed greyed out with the reason (the `### Changed` entries).
+
+1.36.0 replaces rc.5, which was pushed to `origin` and rolled to the demo org server and nodes 1 to 5
+but never tagged or published. New since rc.5: the two dashboard fixes from the rc.5 roll (lane
+FIX-RC5): Security > Rules > "+ Add override" lets you pick the rule again (T-762), and the org
+dashboard's "Grant an exception" dialog no longer shows a server error before any input (T-763).
+
+## [1.34.0] — 2026-10-01
+
+Stable release on the `stable` channel (npm dist-tags `latest` + `stable`, PyPI, VS Code Marketplace and
+Open VSX). It promotes `v1.34.0-rc.11` unchanged except for one release-script fix, and collects
+everything that shipped on `edge` across `1.34.0-rc.1` through `rc.11` (`rc.9` was tagged but never
+published). The per-RC sections below carry the full notes. Headlines since 1.33.0:
+
+- Agent Access: SuperBased-minted agent identity and a governed MCP gateway (`observer-mcpgw`), off by
+  default and inert when off (see `docs/agent-access.md`).
+- Pricing chain: the full Tokenomics rate set reaches org and node pricing, the compiled price table is
+  regenerated from the signed feed v9, model context windows come from Tokenomics, the org pricing feed
+  gains a grade gate, and OpenAI Ultrafast turns are priced.
+- Org guardrail control wave, the org admin assistant reaching every admin route, the shared design kit
+  across the node and org dashboards, opt-in retroactive re-pricing, sandboxed-terminal containment, and a
+  node dashboard performance pass.
+- Enterprise deployment: cosign-signed `observer-org`, `observer-postgres` and `harness-gateway` images
+  in the private registry, plus the release-pipeline fixes found while cutting the first pre-release tags.
+- The VS Code extension publishes for the first time since 1.33.0 (the Marketplace refuses pre-release
+  versions, so no RC reached it).
+
+Upgrading from 1.33.0: node binaries run their agent migrations on `observer start` (head 147). On the
+org server run `observer-org upgrade preflight` and then `observer-org migrate` before starting the new
+image (server head 191, PostgreSQL head 0057; PostgreSQL 0032 needs `btree_gist`, see the rc.10 notes).
+On a node that was enrolled before rc.10, run `observer org resync` once (dry run by default, `--confirm`
+to queue).
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+- fix(release): the CHANGELOG price-snapshot check no longer misses a line that is present.
+
+## [1.34.0-rc.11] — 2026-10-01
+
+Pre-release on the `edge` channel; everything since rc.10 (2026-09-30): the pricing-chain arc (every
+Tokenomics rate component reaches org and node pricing; context windows come from Tokenomics, not a
+hard-coded table), the org pricing-feed grade gate, OpenAI Ultrafast pricing, the compiled price table
+regenerated from the signed feed v9, and the tokcron approval flow. This is also the first release that
+carries the rc.10 public-CI fixes (mcprelay signal tests `//go:build !windows`, the taxgen theme
+selectors, `admission_verify_test.go` scrubbed from the public tree, `projectskills_identity_test.go`) to
+the public repository. Migrations: server 190-191 / PostgreSQL 0056-0057 (additive); no new agent
+migrations (head stays 147). On the org server run `observer-org upgrade preflight` and then
+`observer-org migrate` before starting the new image.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+- feat(pricing): the full Tokenomics rate set reaches org and node pricing - the reasoning rate, the per-request fee, the other-TTL cache write, image and audio rates, the fast multiplier and the grade ride the feed rows, `org_model_prices` (server 190 / pg 0056, nine nullable columns) and the signed org pricing document, all additive with presence semantics. An enrolled node's fast-mode premium now comes from the org rail. The reasoning rate is applied to separately tracked reasoning tokens; the request / image / audio / other-TTL rates are carried and shown in `observer pricing status`. A quoted `long_context_threshold` of 0 means FLAT on the feed, snapshot and org paths alike; prices are rounded to 1e-10 at every decode boundary.
+- feat(org-pricing): the feed's grade now gates auto-apply vs park: a row below the configured minimum grade parks in auto mode (unknown mode or grade parks), through the existing park / approve flow. Mode and minimum grade live in `org_pricing_feed_settings` (server 191 / pg 0057), seeded once from `[pricing_feed].mode` and then dashboard-owned: `GET/PUT /api/org/pricing/feed/settings` (`read:budgets` / `write:pricing`, audited), a Pricing-page card and an assistant tool.
+- fix(org-pricing): `observer-org pricing status` no longer fails on PostgreSQL (it wrote on a read-only store); a new read-only org lookup serves it.
+- feat(routing): model context windows come from the Tokenomics data (the org document's windows, then the feed, then the compiled snapshot), never a hard-coded prefix table. An unknown window never excludes a candidate and never assumes a default; a switch to such a model carries the new reason code `context_window_unknown` (labelled on the Routing page). The advisor's balloon detector sizes sessions against the same composition, keeping its model-tag guess only for models the data does not cover yet.
+- feat(cost): an OpenAI Ultrafast turn (`service_tier: "ultrafast"`) is priced as the exact `<model>-ultrafast` price key from any rung; with no such key it bills the standard rate and records a pricing warning, never the Fast multiplier. A request-side `service_tier: "fast"` now counts as Fast. Proxy path only for now (non-proxied Codex and offline re-pricers do not store the tier yet).
+- feat(pricing): the compiled price table is regenerated from the signed Tokenomics feed v9 (maker prices over resellers, Claude Sonnet 5.5 at $2 / $10, the GPT-6 and Grok long-context tiers, gpt-6-astra-ultrafast, gpt-5.6-cyber, gpt-6.1-sol, gpt-realtime-2.1) and now carries context windows for 86 models. Claude Sonnet 4.5 is FLAT (Anthropic states no long-context premium); xAI's inclusive ">= 200K tokens" tier is encoded as threshold 199999.
+- feat(model-pricing): Tokenomics migrations 0032 (every rate component, a context-window fallback, `long_context_flat`, presence fill from the same maker's next-best card) and 0033 (the xAI inclusive threshold); the evidence gate reads real vendor pages (table structure, tier sections, multiples of the base rate) - a by-the-README OpenAI + xAI capture now passes 87/87 and 64/64 rows.
+- feat(tokcron): a price proposal is approved by ONE file (`APPROVAL.md`, `APPROVE: yes`) and `approve.sh` then runs unattended; the clone-of-prod rehearsal and prod load only the approved overlay files with prod's own identity; the rehearsal base mirrors prod's catalog state (`snapshot-prod.sh`), and `refresh` refuses before review when the local "before" differs from prod's export; a same-value cache-write slot move is an acknowledgement, a changed value is still refused.
+- fix(deploy): a working-tree `observer-org` build no longer embeds OpenTofu provider caches (1.08 GB -> 112 MB): `make tofu-validate` keeps its data under `~/.cache/observer-tofu`, a test fails if a `.terraform` directory is embedded, and `build-orgserver` enforces a 200 MB budget. Release images were never affected (they build from `git archive`).
+- test: CI timing flakes fixed (pricing-policy deadline, config-grid wall clock); the cross-engine context-gauge fixtures run on a model id the compiled snapshot does not name, so the "no catalog" rows stay meaningful as the snapshot grows.
+
+## [1.34.0-rc.10] — 2026-09-30
+
+`v1.34.0-rc.9` was tagged but never published: its release build failed (the web apps did not declare `lucide-react`, which the shared design kit imports) and its public snapshot did not compile (`release.sh` committed the unpatched `no_obs` stubs). rc.10 carries the same changes plus those two fixes.
+
+Pre-release on the `edge` channel; everything since rc.8 (2026-09-21): Agent Access (off by default), the
+post-Agent-Access backlog and its two live-verification rounds, the finish round (the shared design kit,
+maker-over-reseller prices and Claude Sonnet 5.5, code-vs-comment lines, commit ownership, org session
+gauges, the org daily spend summary), opt-in retroactive re-pricing, sandboxed-terminal containment, a
+node dashboard performance pass and chart time granularity, with the review folds of each round.
+Migrations: agent 127-147 (node-local or additive; they run on `observer start`), server 160-189 /
+PostgreSQL 0026-0055. On the org server run `observer-org upgrade preflight` and then
+`observer-org migrate` before starting the new image (PostgreSQL 0032 needs `btree_gist`; on Azure
+Flexible Server see the `btree_gist` entry below). Node binaries need updating too. On a node that was
+enrolled before this release, run `observer org resync` once (dry run by default; `--confirm` to queue)
+so rows that changed or were corrected on the node before the re-send lane existed reach the org.
+
+- chore(config): the flat `[org_client.share]` `obs_summary` / `obs_traces` / `obs_content` / `obs_eval_summary` aliases are removed from the schema - the same leak as the code-graph blocks: the struct fields still existed, so every dashboard save / `observer config set` wrote them back and every observer process kept printing their deprecation lines. A config still carrying them keeps loading (the keys are ignored; `[org_client.share.obs]` is the only spelling read); `observer start` / `observer config migrate` rewrite them on disk (config-migrate step 5, `config_version = 5`): leftovers beside the nested keys are stripped with the nested values kept, a flat key with no nested counterpart is moved onto it, and a never-migrated file still has its values carried by step 2. What ships to an org is unchanged. A new invariant pins that no key the migrate registry retires can come back as a config field.
+- chore(config,codeintel): the legacy `[compression.code_graph]` / `[intelligence.code_graph]` config blocks are removed from the schema. They outlived their one-release deprecation window because the config structs still existed, so every dashboard save / `observer config set` wrote them back and the deprecation warnings never stopped. A config still carrying them keeps loading (the keys are ignored); `observer start` / `observer config migrate` now strip them (config-migrate step 4; a never-migrated file still has its values carried onto `[codeintel]` first). The dead Settings -> Intelligence "Code graph" toggle is gone - `codeintel.enabled` is the switch.
+- feat(agent-access): Agent Access - SuperBased-minted agent identity and a governed MCP gateway (optional, OFF by default: `[agent_access].enabled` on the org server, `[mcp_relay].enabled` on the node; both inert and byte-identical when off). A new companion binary `observer-mcpgw` (roles sts / pdp / xds / front / connect / egress) runs a Go MCP policy front in front of a stock, digest-pinned agentgateway v1.5.0 (ADR-0007, data plane A2). Every governed MCP call is authorised by one in-process policy decision point and recorded before it acts in a per-org hash-chained audit (async by default, fail-closed only when neither a leased sequence block nor the spool is writable). Tokens: RFC 8693 exchange for node relays, `client_credentials` (private_key_jwt incl. `jwks_uri`, mTLS, client secret, `sbo_mcp_` API keys), an OAuth 2.1 authorization server with DCR and CIMD for direct MCP clients, and end-user OBO. Bearer by default, DPoP / mTLS opt-in per virtual server. See `docs/agent-access.md`.
+- feat(agent-access): MCP server registry, virtual servers, grants (incl. team and project subjects, fail-closed without trusted context), single-author policy publish with optional four-eyes, snapshot pinning with drift alerts, per-user OAuth connections (sealed per record; My Connections in the org dashboard; the connect callback lands on the dashboard origin), TOCTOU-safe parked approvals bound to the request digest and the live connection pin, MCP server / tool token budgets (`budgets.scope` gains `mcp_server` / `mcp_tool`), shadow-MCP discovery from node inventories, and an MCP-calls panel in the node session detail and the org session drawer. Org migrations 163-173 (PostgreSQL 0029-0039), node migrations 131-134.
+- feat(agent-access): `observer-org agent-access` - the full admin CLI (`server`, `vserver`, `grant`, `policy`, `agent`, `credential`, `key`, `approval`, `connection`, `audit`, `reset-bootstrap`, `purge-subject <id>`, `reapply`). Routed verbs run the dashboard's own handler in-process and write the same audit row as `cli:<os-user>`; `purge-subject` is the DSAR / deprovision cascade (credentials, API keys, OAuth AS grants, crypto-erased vault connections and IdP artifacts, task bindings, dashboard sessions, member generation; audit tables never touched).
+- feat(agent-access): `observer-org agent-access reapply --since <T> --from <source>` re-applies, forward only, the security actions a point-in-time restore silently undoes (purges, credential / API-key / OAuth-client revokes, connection and IdP-artifact erasures, agent / server retirements and quarantines, private-network locks, key rotations and retirements, the policy-generation floor, member session revokes) from the pre-restore database (read-only), the split data store, or a saved `/api/org/audit` page - never the MCP WORM export. Each step probes, applies only if missing and re-probes through the seam the original used; `--dry-run` writes nothing; a real run (`--confirm`) writes one `agent_access.reapply` audit row and then makes every restored refreshable connection due for refresh so reused tokens are re-detected. Run it before the restored server takes traffic.
+- feat(agent-access): node `observer mcp {status|relay|wrap|unwrap|connect|doctor}` (the older `observer mcp-relay` spelling stays); the node dashboard Security page gains an "MCP access" section and `GET /api/mcp-access/status`; the VS Code extension gains an "MCP access" status item.
+- feat(agent-access): `observer-org doctor agent-access` (probes AA1-AA10, each naming its failure mode), Agent Access rows in `observer-org upgrade preflight` (schema range, normalized listener conflicts, key-ring health, the observer-mcpgw same-tag lockstep and agentgateway pin), an `agent-access.json` support-bundle section, and an Agent Access alert rule set (pdp_down, pdp_degraded, audit_degraded, xds_nack, sts_down, replay_store_down, control_store_down, stale_replica, jwks_rotation_stall, mcp_budget_breach, vault_refresh_failures; mailed under `[dashboard].obs_alert_email`). `[agent_access].companion_health_urls` lists several companions for split and multi-replica deployments: `pdp_down` then pages only when every companion is down and `pdp_degraded` warns per down companion.
+- feat(agent-access): backpressure on the MCP front: PDP decision deadline `pdp_decision_timeout` (default 1 s; ~250 ms stays the latency target), per-call upstream deadline `hop_call_timeout` (120 s; first byte for SSE), a per-upstream circuit breaker (`hop_breaker_failures` 5, `hop_breaker_cooldown` 10 s) and an overload shed (`front_max_in_flight` 1024). All answer a retryable 503 + `Retry-After`; nothing retries a call.
+- feat(agent-access): Azure Key Vault signing keys rotate through the product: `observer-org agent-access key rotate` adds (or, with `--akv-key-version`, adopts) a Key Vault key version to the ring through the same ACK-gated activation, `--emergency` included; an identity that cannot create versions gets a 409 that prints the exact `az keyvault key create` + `key rotate --akv-key-version` step. The front's own key cache is bounded by `min(invalidation_max_staleness, jwks_cache_seconds)`, so `key retire` takes effect at every running front without a restart (a key-set outage answers 503 + `Retry-After`, never 401).
+- feat(deploy,charts,release,supply-chain): Agent Access in every deployment shape, off by default everywhere, with one topology: `observer-mcpgw` and the agentgateway sidecar share the org's network namespace and sit behind the existing TLS terminator on ONE origin (the STS paths to :8850, `/mcp/*` and its protected-resource metadata to :8851, everything else to :8443; no new DNS name, certificate or public port). Org compose (production + dev) gains a `docker-compose.agent-access.yaml` override, an inert `[agent_access]` block, a Caddyfile with the path routes, `keygen.sh agent-access-env` and preflight checks (`OBSERVER_AGENT_ACCESS_COMPANION=external` keeps the separate-host companion supported); Helm chart 0.3.0 gains `agentAccess.*` (companion in the worker pod by default); `observer-org deploy plan --set agent_access=on` renders the whole switch (config, .env, the override, tfvars, RUNBOOK checklist and route table); every Azure and AWS OpenTofu root gains `agent_access` (session key minted in Key Vault / Secrets Manager, Caddy / HAProxy / Application Gateway / ALB path routes, first-boot cosign verification, and refusal of a bundle that disagrees). At zero virtual servers the companion writes an idle hop config, so the sidecar stays up and the companion reports ready.
+- feat(supply-chain): doc3 §18 gate 7 as code - `.github/workflows/agent-access-images.yml` (runs on every `v*` tag, separately from the npm / PyPI / Marketplace release) builds `observer-mcpgw` from an archive of the tag, emits SPDX + CycloneDX SBOMs, gates on a grype CVE scan against the ruled patch SLA, pushes by digest, cosign-signs keylessly with SBOM attestations and SLSA provenance, and mirrors the agentgateway image only after verifying upstream's signature and provenance, then counter-signs it. `scripts/agent-access-supply-chain-check.sh` is the one policy owner (pins / identity / upstream / verify / gate); dated, ledgered exceptions live in `deploy/observer-mcpgw/cve-exceptions.json`; `roll-a2.sh` verifies before every pull. The air-gap kit carries both images once that run has published them. Publishing needs registry credentials; without them the jobs build, scan and skip publish.
+- feat(org-assistant): the admin assistant reaches every admin route: its closed tool table grows 58 -> 212 rows (every admin route is mirrored by a row or carries a reasoned exclusion, pinned by `TestEveryAdminRouteIsReachableOrExcluded`), then 212 -> 247 with the Agent Access admin routes (4 read views, 31 route rows - 30 writes plus a simulate read - under the domains `agent_access` and `mcp`; minted secrets go once to the approver, never into the transcript; the approve / reject decision routes stay human-only). `admin:agent_principals`, `admin:agent_keys`, `write:mcp_registry` and `write:mcp_policy` become privileged keys: granting or widening them (dashboard or assistant) needs the super admin.
+- fix(agent-access): the PDP no longer serves its last-known-good policy forever (`invalidation_max_staleness` is enforced at decision time; `/healthz` goes not-ready past it); an agentgateway dying mid-response is answered with a retryable error and audited `hop_unavailable` instead of `ok`; the front's hop client pools connections; the front refetches the key ring within 1 s of an unknown kid (was 30 s: a 401 storm after every rotation); a node relay no longer reports a refused policy version as running.
+- fix(agent-access): honest readiness and retryable outages: a NEW policy publication that fails to compile is refused and the replica keeps last-known-good (then fails closed at `invalidation_max_staleness`); the rendered `hop.yaml` is checked with the pinned agentgateway's `--validate-only` before it replaces the live file; `/healthz` gains `audit_store_error` and `dpop_replay`, `audit_degraded` pages on a data-store outage and now clears on recovery (it was sticky until restart), and a new `control_store_down` alert rule; an ineffective node relay point reports `accepted_inert`, never `effective`; the relay keeps a still-valid cached token while the STS is down and fails closed only within 5 s of expiry; transient store outages at the token endpoint answer 503 `temporarily_unavailable` + `Retry-After: 2`; a `refresh_token` rotation is undone when the mint fails, so a retry is no longer mistaken for reuse.
+- fix(agent-access): security fixes from the session-3 adversarial reviews (ledger `docs/security.md` AA-13..AA-23, AA-GEN-1): an ambient HTTP proxy no longer bypasses the egress SSRF guard (explicit `[agent_access].egress_proxy_url` instead); approval redemption is fenced on the live connection; duplicate JSON members are refused before any decoding; approval previews require `read:content`; SCIM and team-admin roster changes commit atomically with the member-generation fence; every revocation strictly advances the member floor; a zero-estimate MCP call's quota reservation persists the unit it was checked against; discovery retention prunes the control store on split deployments.
+- fix(agent-access): `deploy/observer-mcpgw/docker-compose.a2.yaml` sets `stop_grace_period: 45s` (Docker's 10 s default cut the companion's drain short); the `istio.io/istio` dependency moves past GO-2026-5363 / GO-2026-5289 (govulncheck: 0 reachable in all three binaries).
+- fix(deploy,observer-org): PostgreSQL migration 0032 creates `btree_gist`, which Azure Database for PostgreSQL Flexible Server refuses unless it is in `azure.extensions`: the Azure OpenTofu module now allow-lists `BTREE_GIST` (a drift test fails when the lineage creates an extension the module does not allow), and `observer-org upgrade preflight` gains a `<plane> extensions` row per PostgreSQL store that refuses before migrate when a pending migration needs an extension the server will not allow, printing the exact fix. A server not managed by the module (for example an existing demo estate) needs the printed `az postgres flexible-server parameter set` step before the roll that carries 0032.
+- fix(support-bundle): doctor.txt ran with the support-bundle command's own arguments (cobra reads os.Args when args are nil) and never held the doctor's output; config.redacted.toml no longer carries URL userinfo (a proxy password in `[agent_access].egress_proxy_url` / `serving_replicas`).
+- feat(sessions): Tok/s has one owner. The Messages table's throughput used to divide output tokens by the gap to the next row (idle time read as generation time); it now divides by a measured per-call duration - the proxy's request time, the tool's own recorded per-call time (devin, hermes, poolside, muse, legacy copilot, cowork) or spans reconstructed from the Claude Code / Codex transcript - and shows "not measured" otherwise; the gap is shown only as "Elapsed". The node Messages tab, the cockpit and the org session drawer render the same value (`token_usage.gen_ms` / `gen_basis` ship on the org wire as metadata). Agent migration 136, server 174 / pg 0040. See `docs/message-throughput.md`.
+- feat(pricing): frontier model price refresh (2026-09-23: Anthropic, OpenAI, xAI, Cognition) folded onto the seed with presence semantics (a dimension the snapshot omits keeps the seed value; a stated one wins, a quoted zero included); a feed replay / downgrade floor; cache reads a vendor does not price surface as unpriced instead of $0. `org_model_prices.long_context_threshold` becomes nullable (server 175 / pg 0041): NULL keeps the node's seed long-context tier, a quoted 0 means negotiated flat; `orgcontract.PricingPolicyRow.LongContextThreshold` is `*int64` on the signed rail (compatible both ways).
+- feat(model-pricing): tokcron, an approval-gated refresh job for the Tokenomics data behind the public pricing feed: it re-fetches vendor endpoints, gates hand-captured prices against vendor pages it fetched itself, rehearses on a local database and writes a proposal only when the feed would change; only the operator's interactive approve step (re-proved on a throwaway clone of production) reaches production. See `model-pricing/deploy/tokcron/README.md`.
+- feat(org): bulk developer import - `POST /api/org/members/import` (dry run, up to 200 rows, preflighted refusals before any mint, itemized per-row status and honest delivery `notifier_invoked` / `no_notifier_configured`, audited) and an Import developers dialog on the Provisioning page (paste or CSV).
+- feat(guard): control coverage per tool - one row per tool joining the tool-call enforcement channel, the prompt-submit posture, budget admission and route proof, on `observer adapters`, `observer doctor <tool>`, `GET /api/org/guard/coverage` and the org Security page.
+- fix(org): every session-scoped org read and every org correlation that joined on a bare session id is now bound to the session's owner (sessions are keyed by id AND user; a same-id session pushed by another developer can no longer be read through, merged into, or counted against a colleague's), including Live, the monthly report, LOC aggregates, the route matrix and coding-job evidence (an ambiguous owner is refused rather than guessed); task prose, the raw action target and the raw `project_root` are served only to callers holding `read:content` (ledger ORG-SCOPE-1 / ORG-CONTENT-1 / ORG-SCOPE-3).
+- fix(org): project display names never show a hash-seeded placeholder when a repository name is known (one resolver for the Projects list, project detail, sessions, budgets and team views); the org Tools page gains a per-tool version histogram (`GET /api/org/tools/versions`).
+- fix(alignment): the Projects-page local LLM judge (tier J) refuses to send org-owned or unknown-authority evidence to a non-loopback endpoint unless it is org-pinned; loopback detection is an exact host match (ledger JUDGE-1).
+- fix(cursor): Cursor IDE sessions no longer lose their token rows - the hook writes tokens first under their own deadline, Cursor's own hooks log is replayed as a backstop (deduplicated against the live hook), root-less events resolve to the session's real project root, and stale hook entries left by a lost build are healed on registration (`observer doctor` check `cursor.hooks`; `observer backfill --cursor-hook-usage` recovers history).
+- fix(deploy): the Azure env-sync re-applies a secret rotated in Key Vault to an already-rendered `.env` value and tracks what it applied per key (pending / committed / operator_override), so a crash on either side of the write is recoverable and an operator's own value is never overwritten (D-DEMO-16).
+- fix(configschema): the committed `[mcp_relay]` annotation rows that the embedded config schema was generated from (`make verify-config-schema` is green again).
+- docs(agent-access): operator reference `docs/agent-access.md` (incl. a per-profile enable checklist); runbooks for key rotation, restart while routed, audit degraded, vault refresh and CVE patching; `docs/agent-access-production-gates.md` (doc3 §18: gates 1-3 and 5 pass locally; the gate-4 reapply tool is built but the drill has not run; gate 7 is built as code with enablement pending registry credentials; live client interop not run); the vendor pen-test scope `docs/agent-access-pentest-scope.md`. Not yet done: push and deploy, the estate soak, the external penetration test, the six-agent security sweep, the live Azure Key Vault and client-interop checks.
+
+- feat(projects): a new **Skills** tab on the node Projects detail panel (and `observer project <id|root> --skills`) shows every skill a project can load (`.claude/skills/<name>/SKILL.md` and `~/.claude/skills`), how each changed across the project's commits (versions identified by git blob id; added/modified/deleted, reintroduced, exact-content moves), and per session three separate facts: the version the Claude Code hook OBSERVED on disk at session start (SessionStart incl. resume/compact), the version committed at the commit the git REFLOG says HEAD was on, and the version each Skill-tool invocation used (PostToolUse, joined by tool_use_id). Sessions before capture read "not captured", never a guessed version; "uncommitted"/"untracked"/"ignored" come only from the status porcelain. Capture: hook snapshots (fail-open, 250 ms budget) + a read-only git step riding the commit scanner tick (reflog, `ls-tree`, status) through the one `gitview` envelope, with `GIT_NO_LAZY_FETCH=1` added for this step only (a partial clone never fetches). Reflog entries sharing one second are ordered by the reflog itself, and a session whose chosen second holds several commits reads "HEAD moved several times in one second" rather than a guess; same-second commits are ordered by ancestry. Agent migration 135 adds seven NODE-LOCAL tables (privacy sentinel + seeded test); `[projects].skill_history` (default on) and `skill_history_skew_seconds` (default 120). Existing endpoints are byte-identical. See `docs/projects-page.md` "Skills: versions across commits and sessions".
+- fix(teams): the org session drawer's message rows are derived by the SAME pure code as the node's Messages tab (new `internal/sessionmsg`): orphaned actions, proxy/JSONL twins, codex multi-call turns (new wire column `token_usage.turn_id`, server migration 160 / pg 0026), user-prompt keying and Copilot shadow rows now fold identically on both sides; web2 labels a body that exists but joins no row "captured, not aligned" instead of "not shared" and joins tool bodies by id.
+- perf(projects): one union activity query, one windowed LOC loader and agent migration 130's three covering indexes replace four correlated EXISTS probes and a whole-ledger LOC scan per Projects read; every project window is half-open `[since, until)`.
+- fix(projects): the Projects page's spend figures (detail panel, the `/projects` list, and every `usd` ROI proxy) now go through the process cost engine's own per-turn dedup+pricing pipeline instead of a second, drifted implementation - closes several undercounting bugs (session-cumulative adapters like droid/goose/crush double-counted against their own proxy rows; a proxy turn's project was silently dropped whenever `api_turns.project_id` was NULL, which is every grounded install; a codex-shaped turn's reasoning-token split could double-bill). The commit count shown on the detail panel, the `/projects` list and the ROI proxies is now the same reachable-only predicate everywhere.
+- fix: the Projects-page Commits/Prompts/Spend tabs now surface a "row caps hit" notice (matching the existing Overview banner) whenever a request-time linkage cap actually truncated their data, and flag a prompt's committed/uncommitted status as uncertain when it was computed over a capped input; the underlying prompt-linkage query and the task-report rollup are both faster (a new covering index and batched, no-longer-N+1 task queries).
+- fix(predict): codex rate-limit snapshots were silently dropped when a client reported `plan_type: null` with a populated window; codex's 5h/weekly window label is now derived from the window's own duration instead of its `primary`/`secondary` position (a single-window plan was rendering its weekly cap under the "5-hour" label). The next-message predictor's limit gauge gained an honest "not visible" state (CLI, dashboard, `/api/session/<id>/predict`) for tools where no local usage-limit signal can exist (cursor, grokbot), replacing the misleading "route through the proxy" hint. Run `observer backfill --codex-rescan` if your codex rate-limit history has a gap.
+- fix(tools): the Connected Tools page now flags compiled-in default adapters that are missing from a hand-written `enabled_adapters` list (a warn banner + a "not enabled (new default)" pill, one owner: the `adopt-defaults` diff), and `observer config adopt-defaults --write` states honestly that the daemon must be restarted before the new adapters capture anything.
+- Node dashboard: a new Projects page detail panel (`web/src/components/ProjectDetailPanel.tsx`,
+  `web/src/components/projectdetail/`) with six tabs — Overview, Spend, Commits, Prompts, Tasks,
+  Guidance — answering "is the money I put into API tokens turning into shipped work?" per project.
+  The list view (`web/src/pages/Projects.tsx`) grows additive spend/AI-lines/commit/capture columns;
+  an empty corpus keeps a byte-identical legacy `/api/projects` payload. See `docs/projects-page.md`.
+- Commit capture: a new read-only, HEAD-only `git log` scanner (`internal/commitscan`, `internal/commitlog`,
+  daemon-lifetime, never a git hook install, `[projects].commit_scan` default on, 120s ticker) populates
+  three new node-local tables (`project_commits`, `project_commit_files`, `project_commit_scan`, migration
+  127) with reachability revalidation every tick so a rebased/reset commit is flagged, never deleted.
+  `observer backfill --commits` runs a full-history pass; `observer doctor` gains a `commit-capture` line.
+- Prompt-to-commit attribution + ROI: a pure `internal/projectroi` package links each AI edit to its
+  owning prompt, applies a per-file supersede rule, then matches against commits within a configurable
+  link window (`[projects].commit_link_window_days`, default 14 days) to produce a `committed` /
+  `partial` / `uncommitted` / `superseded` / `no_edits` status per prompt. Eight ROI proxies (spend per
+  AI line reached, AI-files-reached share, spend with no linked commit, spend per commit/per completed
+  task, prompts/turns per commit, cache-read share) each ship their formula and an honesty caveat;
+  nothing is called "dead" or "line survival" — file-level reach is stated as exactly that.
+- Projects page spend is priced at READ time through the process cost engine (recorded cost wins when
+  > 0; otherwise the turn's full token bundle is priced at its own timestamp), de-duplicated per turn
+  across the proxy and transcript captures with the cost engine's own identity rule, and reports
+  `spend.unpriced_turns` (turns with no recorded cost and no pricing entry) on the API, the Overview
+  tile, the `/projects` list (`spend_unpriced_turns_30d`) and the CLI - a corpus that stores $0 in its
+  cost columns no longer renders $0.00 (found on this repo's own corpus during the 2026-09-22 review).
+- `observer project <id|root> [--days N] [--json]` prints the same per-project summary the dashboard's
+  detail panel shows, through the one shared composition (`dashboard.ComposeProjectDetail`).
+- Commit capture reports a fourth state, `error` (the last scan failed and none has succeeded since),
+  instead of hiding a failing scanner behind `ok`; full-history scans are paged (500 commits per
+  bounded git call, 60 s each) so `observer backfill --commits` completes on a large repository; a
+  project rooted in a subdirectory of a repository is scanned with its subtree as the pathspec (file
+  paths re-based onto the project root) instead of being credited with the whole repository's history.
+- Alignment grading (delivered vs. missed): a three-tier design — always-on local heuristics (tier L),
+  an opt-in local/configured LLM judge (tier J), and Cloud Intelligence grading under the existing
+  `extended_evidence_deep_review` purpose (tier C, `observer cloud grade-commit`). Tier C ships its node
+  contract and request path in this release; the hosted executor is honestly `not_available: hosted kind
+  not deployed` until it exists, never a fabricated grade.
+
+- Guard, proxy lane: goose's built-in `developer__shell` tool is now in the response-side tool
+  table (`responseToolShape`), so a shell command goose intends to run is evaluated and flagged
+  like Bash/run_command; before, goose shell calls were invisible to the proxy's response scan.
+  Grounded on the demo estate 2026-09-21 (session 7). Response-side scanning stays flag-only.
+- Org dashboard, Guard tab: the bundle editor's rows are called RULES ("+ Add rule", "Rules (n)",
+  "Remove rule"); before, "+ Add override" shared a card with "Developer may override" (the
+  developer exception), one word with two meanings, which made a multi-rule bundle read as a
+  one-rule form. The `[[override]]` TOML key is unchanged.
+- Org fleet findings: the evaluator's GRANTED set now includes the authority of the fleet grant-replacement
+  generation a member acked under the enterprise posture (through the posture-owned
+  `AckedAuthorityByMember` seam), not only the member's enrolment token. Before, every node that accepted
+  the org's own fleet document was raised as `authority_divergence` ("accepted authority that was never
+  granted") the moment it reported - D-DEMO-14, found on the demo estate on the first policy-acks after
+  rc.8. A member that accepted tokens beyond its acked document is still flagged; an orphaned ack row
+  never resurrects a deprovisioned member; on a split control store without the posture tables the fold
+  is empty by construction and every other error is surfaced.
+- Org CLI: `observer-org policy publish --team <id>` (repeatable) publishes a TEAM-scoped guard bundle
+  through the same path the dashboard's Guard tab uses (composed strictest-wins on the org-wide floor
+  for members of those teams); without `--team` the command is unchanged (org-wide). The wave contract
+  named the CLI and only the API/dashboard had it.
+- Node, org governance: the effective-policy-state reporter is now constructed on every org-client node
+  and stays dormant until its channel is enabled, so an org raise of the `policy_state` share (enterprise
+  default body, `extract.policy_state` authority) reaches a managed node whose local
+  `[org_client.share].policy_state` was left off. Before, that raise had no reporter to act on: the node
+  never posted a policy-ack and the org's fleet findings read every governed developer as
+  `governance_lapsed` ("never reported a governance state") - D-DEMO-13, found on the demo estate the
+  moment the rc.8 sweeper started. Individual nodes are unchanged (the org cannot raise the share there).
+
+- feat(ui): dashboards UI pass 1 (web, web2, cloud portal): one shared CSS motion layer (route enter, stagger, count-up, reduced-motion safe, transform / opacity only, no animation library); one query cache per app (concurrent requests deduplicated, stale-while-revalidate across mounts, visible staleness instead of old data shown as current); terminals follow the app theme by default and can be pinned light or dark in the terminal header; the shared Tailwind preset's opacity fix revives ~880 classes that rendered nothing, and `fg-3` text meets WCAG AA; web2 and the portal are route-split (first-paint JS: web -18%, web2 -79%, portal -55%); quiet sessions poll every 60 s instead of 8 s. Report `docs/audits/dashboards-ui-review-2026-09-27.md`.
+- feat(ui): UI pass 2: the Cost chart overlays its series; the "Actions over time" legend no longer overlaps the top y-axis label; a query-key bug that requested `/null` is fixed; one shared slide-over with a focus trap; the open drawer and its tab live in the URL; filters are route-aware; the cloud portal's buttons, cards and switches come from the shared primitives.
+- feat(ui): the shared design kit across all three apps (plan `docs/plans/dashboard-visual-upgrade-tracker-2026-09-28.md`, WS1-WS10): real vendor logos for every tool key with capture-surface pips and a monogram for an unknown tool (attributions in `shared/lib/THIRD_PARTY_ICONS.md`); model-family, host and IdP marks and one shared model-id renderer; an SVG brand mark, branded loader and boot screens; one icon system; one tone vocabulary so the same status reads the same colour and pill everywhere; illustrated empty states, loading and error states, and a permission-denied state (a 403 is a denial, not an error); live signals (live dot, meters, progress rings) and number tweens; one Modal / Toggle / ConfirmButton / CopyOnClick / Tooltip; table hover and zebra rows; chart legends; branded sign-in shells for the org dashboard and the portal; radial gauges in the session detail.
+- feat(ui): finish-round UI pass 3: a density toggle (comfortable / compact) in all three apps; the node's hand-rolled tables move onto one DataTable (sorting, numeric alignment, a loading state), now a single shared component with web2's row expansion; filters in the URL (node: window, range, tool, project, search; org: `?days=` on every route); sidebar collapse on the node and org dashboards; the web2 Spend figure counts up; the Security pages and org Settings fit a 390 px screen; a 403 on any chart or panel renders the shared permission-denied state. Behaviour changes: a cache row flagged by the engine is amber (warn) everywhere; destructive deletes need a two-step confirm (org: team, budget, dated rate, alert rule, project-identity rule, deployment connector, intelligence provider, virtual-key revoke, announcement retract, dataset item; node: Remote "Revoke all", arena candidate discard, "Run retention now", the terminal's "Stop & close"). Source maps are built `hidden` and never shipped in the embedded bundles.
+- feat(ui): the custom time range is a picker, not typed datetime fields (node and org): one-click presets (Today, Yesterday, This week, Last week, This month, Last month), a Monday-first month calendar (start day, then end day; future days disabled) and hour / minute selects; the end defaults to Now. The org dashboard's rollups are trailing windows, so its picker chooses a start and runs to now.
+- feat(dashboards): charts bucket by the window - 5 min / hour / day / week in the viewer's time zone, zero-filled, with a per-chart Auto / 5 min / Hour / Day / Week control (only the buckets the window allows, at most 2,000 points; an over-cap request is a `400 granularity`, never a silently coarser chart; the choice travels in the URL as `gran=`). Auto picks 5 min up to 3 hours, hour up to 7 days, day up to 180 days, else week. Node: every time-series endpoint now honours the selected window (analysis trend, cache-savings trend, cost-by-hour, cost-by-day-of-week-hour and cache timeseries used to serve 30 days on 1h / 12h / custom), and the Analysis headline, movers, top sessions and routing suggestions and the Cache overview and events follow it too; the raw proxy-only hour query (which dropped transcript rows) is gone. Org: the window ladder gains 1h / 12h / custom (additive `hours` / `since` / `until` / `gran` / `tz` params; a days-only request keeps the daily response); sub-day spend is read from raw rows within the cap and Auto picks Day above 2 days; charts fed by daily pushed summaries offer Day / Week with a "daily data only" note. Cloud portal: day labels and a daily-data note. Review fold: the zone database is compiled in, so a Windows node buckets in the viewer's zone instead of silently in UTC (a fallback says "UTC buckets (zone unavailable)"); every series on a page agrees across DST changes; malformed timestamps no longer 500 on PostgreSQL; zero-filled org series show their empty state again; window-scoped analytics answers of a day or less are at most 30 s fresh. Plan `docs/plans/chart-time-granularity-plan-2026-09-29.md`.
+
+- perf(dashboard): node dashboard performance audit on a real 27 GB database, and fixes (`docs/audits/node-dashboard-performance-audit-2026-09-29.md`): a stale-while-revalidate response cache for 30 heavy GET endpoints (inside every guard, invalidated by dashboard writes); polls re-arm only after the previous one settles; the Sessions list polls every 30 s and pauses while the drawer is open; memoized table rows and charts, lazy tooltips, cached date formatters, finite illustration animations; the session Messages tab loads only the returned page; agent migration 147 adds covering indexes (sessions activity, excerpt lookup, latest limit snapshot, repeated-command discovery); the process-to-action correlator searches a sorted time window instead of every action. Measured on a copy of that database: drawer tabs 38-240 s -> 1.2-10 s to data-complete, Overview 157 s -> 54 s cold / 17 s warm, Analysis 111 s -> 33 s / 0.6 s, Discovery 60 s -> 12 s / 0.5 s, Cost 76 s -> 16 s / 6 s, Report 22 s -> 0.5 s; blocking time on drawer tabs 2-23 s -> 0.1-0.7 s; the correlator 6.2 s -> 71 ms on 20k x 15k. The org dashboard and the portal inherit the shared client fixes. On the live daemon (cold, first visits after a restart): Overview >240 s -> 93 s, Analysis 116 s -> 61 s, Discovery >240 s -> 27 s, Report 58 s -> 0.4 s, session Messages tab 207 s -> 5.4 s; idle main-thread use 5-35 % -> 1-2 % on every page.
+- perf(dashboard): the Sessions list uses its index again - the default sort repeated `started_at`, which kept SQLite off `idx_sessions_started` and scanned every session before the page limit (`/api/sessions` first call 4.2 s -> 0.14 s, byte-identical responses, plan pinned by a test); the Overview stale-reads tile asks `/api/discover?sections=stale` instead of computing the whole discovery report (5.7 s -> 0.23 s warm; it was the last panel on a cold Overview); chart first mounts take turns instead of mounting about ten charts in one task (Analysis blocking time roughly halved); bar charts with more than 400 bars (a 7-day hourly trend is about 1,200) draw without the entry animation.
+- perf: optimization review (`docs/audits/optimization-review-2026-09-27.md`): node Overview 40-47 s -> 11-21 s, Analysis 14-16 s -> 9-12 s, Cost 7-8 s -> 4.5-5.5 s, Sessions 8.5-9 s -> 6.8-7.4 s on a real 21.5 GB database copy (agent migration 138 covering index, a dashboard-only raw-row cache in the cost engine, serve-stale-then-refresh for `/api/status` and watcher health); org session drawer spend queries ~716 ms -> ~10 ms on a 900k-row PostgreSQL store (server 176 / pg 0042, indexes only); the org rollup cache shares concurrent cold loads and an invalidation beats an in-flight load.
+- perf(org): a daily deduplicated spend summary (`spend_daily`, server 184 / pg 0050) written at ingest by one writer from the same per-row projection and duplicate-count verdicts as the live spend query; every ingest path, re-send, moved row, tombstone, scrub, purge, eviction and prune refreshes the affected units in the same transaction. Overview, Projects, People, Teams, Tools, Models, Movers, reports and budget totals read it (a window is split into live head, summary middle and live tail; until the boot rebuild has stamped the summary every reader stays on the live tables). Measured on a 462k-token-row fixture: Overview 15.9 s -> 1.2 s (PostgreSQL), Projects 10.2 s -> 0.45 s, budget total 834 ms -> 60 ms. The session drawer, Live, workspaces and the People model ladder stay on the live tables.
+
+- feat(pricing): prices come from the Tokenomics database with their history: the public feed carries a per-row `history` of dated periods, the org importer keeps every period, and the cost engine prices each turn at the period in force at its timestamp (a period the source does not state is an honest miss, never a guess); the compiled seed snapshot is generated from the signed feed and the hand-maintained dated timelines are retired. New or corrected rows include claude-opus-5-5-fast (was billed at half its fast price), mimo-v2.6-flash / -pro, Moonshot's dotted kimi-k2.6 / k2.7-code ids, gemini-3.5-flash-lite (was billed as 3.5 Flash), gemini-3.1-flash-lite (was billed as 3.1 Pro) and the composer-2.5-fast cache read; Copilot CLI Auto sessions record the model Auto chose instead of `auto`.
+- fix(pricing): the model maker's price wins over a reseller's. The feed export ranked offerings without preferring the maker, so reseller cards (Venice, Azure AI Foundry, Novita, OpenModel.ai) won for 16 models on the public feed from 2026-09-16 (for example Claude Opus 4.5-4.8 at $6/$30 instead of $5/$25 per million, gpt-5.4 input at $5 instead of $2.50); feed version 5 pins each maker's page, and the export's maker preference plus a guard listing reseller-won ids whose maker publishes a card follow in the next Tokenomics publish (open-weight ids such as gpt-oss-120b stay reseller-priced on purpose). Costs already stored at the reseller rates are not changed automatically: use the new re-price (below). On an org server, feed-owned price rows now mirror the latest applied feed (a first poll that answers 304 still catches up), so a stale imported reseller row can no longer stay in force in the org's price book, the gateway rate card or the enrolled nodes' signed pricing documents.
+- feat(models): Claude Sonnet 5.5 (`claude-sonnet-5-5`): a 512-token minimum cacheable prompt in cache tracking and a 1M-token routing context window; the price ($2 in / $10 out / $0.20 cache read / $2.50 5m and $4 1h cache writes per million, no long-context tier) arrives through the pricing feed, not from a hand row in the binary.
+- feat(pricing): opt-in retroactive re-pricing of stored costs, node and org (closes `PRICE-REPRICE-1`). Capture still stamps the cost; a re-price is an explicit act at the price in force at each row's own timestamp, never today's. Node: `observer reprice` is a dry run unless `--apply` (`--revert <run>`, `--list`, `--since` / `--until` / `--model`, `--json`), plus a Settings -> Pricing card; it re-prices `api_turns` and `summary_calls` costs Observer computed itself, never a vendor- or tool-reported cost (`integration.TokenTier.ReportsCost`, 13 tools), never writes $0 for an unpriced row, keeps the captured figure and a per-run change log (agent migration 145), and re-priced rows reach the org through the re-send queue. Org: `/api/org/pricing/reprice*` (`write:pricing`, history `read:budgets`, audited before any row changes, fail-closed) and a panel on the Pricing page re-price org-held rows from the org's own dated price book (server 187 / pg 0053) and refresh the spend summary. Review fold: a single dated org row prices only from its date; reverts run newest first (an out-of-order revert is refused and names the later run) and one run holds the claim at a time on the node and the org; the CLI honours an org pricing pin like the dashboard. Nothing re-prices automatically after a new price version, and a re-price never re-runs budget alerts or rewrites gateway reservations. See `docs/pricing.md` "Re-pricing stored costs".
+- feat(org,pricing): context windows reach enrolled nodes (an unsigned sibling of the signed pricing policy, `context_windows`, covered by the ETag and outside the signed bytes so older verifiers still accept the document), so a node and its org show the same context-gauge ratio. A re-parse can now correct a token row's reliability: a Crush session that grows past one step corrects itself without `--crush-rescan`.
+
+- fix(org): one duplicate-count rule on every spend surface, node and org. The org drawer header, model split and cost series derive from the same `sessionmsg.Derive` pass as the node (it had counted every proxied OpenCode turn twice); duplicate verdicts are stored at ingest and applied by every org list, page and drawer (server 179 / pg 0045; org Overview 30 d on PostgreSQL 71.7 s -> 3.5 s), and on the node by the cost engine, Analysis, reports, budget, live, statusline, predictor, guard token and priced-spend checks, cloud evidence and the task and sub-agent drill-downs (stored node verdicts, agent migration 143; server 182 / pg 0048). OpenCode twins whose output was clamped to 0 because reasoning exceeded the completion now fold (a session had shown 49,554 tokens for ~24.8K on node and org). The org names its push boundary ("as of <last received>"); a `claude -p` session reads `sdk · cli` on the org instead of `other`. Remaining: legacy session-less proxy rows always count.
+- feat(org): rows a node changes after pushing them reach the org (agent migration 140, server 178 / pg 0044): triggers queue a changed row only when enrolled and a shipped column changed, every row carries a node revision, and the org applies a re-sent row only when its revision is newer (a moved turn is relocated, never doubled). Corrections a node makes by deleting rows (dedup sweeps, merges, identity changes) ship an identity-only tombstone (agent migration 141); ageing deletes (retention) never propagate. Migration 142 fixes the queue triggers, which failed a whole ingest batch on enrolled nodes when a row was already queued. `observer org resync` (dry run by default, `--confirm`, `--deletions` default on) heals divergence from before the upgrade and backfills session end times. A share-posture change between two sends no longer lands a second org row (server 180 / pg 0046), and `observer-org scrub-content` / the enterprise purge collapse such twins instead of failing on the primary key.
+- feat(sessions): sessions get an end time: `sessions.ended_at` was never written by any path (NULL for every session of every tool); a table-driven rule (a session end closes, a later prompt or session start reopens) now sets it inside ingest, so the dashboards stop showing finished sessions as "in progress". Historical sessions pick it up on their next lifecycle event or via `observer org resync`.
+- feat(scoring): the session quality score is computed: only the manual `observer score` CLI ever called the scorer, so almost no session was scored. A daemon auto-scorer (`[intelligence.scoring]`, default on, capped passes, a session counts as ended after 30 min idle) stores all four components (agent migration 137) and a Session quality card shows the breakdown and a stale-score note on the node session detail and the org drawer (server 177 / pg 0043; the org's newer-action count is derived like the node's). The scorer is about 80x faster on the largest session.
+- feat(org): context-window and rate-limit gauges on the org session drawer from one shared derivation (context used = newest non-zero cache read over the session's reported prompt budget or the model's context window; over-window and unknown stay unknown, never 100% or 0%). Rate-limit windows reach the org as a new metadata-only wire family `session_limit_snapshots` (5 h / 7 d utilization and resets; no headers or counters), gated by `[org_client.share].limit_gauge` or full-content sharing (server 183 / pg 0049); agent migration 146 starts an already-enrolled node's cursor at head so its older limit history is not shipped. The node session detail gains the same context gauge.
+- fix(codex,cowork): Codex (and Cowork) sessions no longer show a "Rate limit" row between every message. A rate-limit reading is recorded only when the limit really changes (status, plan, window, used percent by half a point or more, or a reset moved by more than 10 minutes), plus a 15-minute heartbeat that keeps the usage gauge fresh - on the author's own history that is about 9,100 readings instead of 53,500. In the session Messages tab, readings fold into the message they follow and a small badge (for example "7d 74%") marks only the turns where usage changed; node and org drawer derive this from the same shared code. Already-captured readings fold at display time; nothing is deleted.
+- feat(org): the Claude Code request class (`x-claude-code-request-class`: main, subagent, workflow, compaction, auxiliary; anything else stays empty, never guessed) is recorded per proxied turn (agent migration 144), ships to the org as a content-free enum (server 188 / pg 0054); both session-detail APIs return the per-class split and the org drawer shows it.
+- feat(org): `sessions.parent_thread_id` ships as metadata (server 162 / pg 0028) so the org drawer resolves a Cursor sub-agent session's tool account through its parent, as the node does; the per-session AI tool version reaches the org (server 161 / pg 0027).
+
+- feat(loc,projects): AI code vs comment lines on every lines-of-code surface, node and org, from one derivation (code = added + modified code lines, comments = added comment lines, a share only when either is non-zero): session card, Sessions list, the Cost lines-per-dollar tile (code lines only), Projects list, overview, commits, spend and prompts, `observer loc show`, `observer project`, and the org People, person / project LOC cards, "Code lines over time", developer footprint and session drawer (server 185 / pg 0051; an older agent's rows show no split rather than 0%). Honesty fixes: Projects "AI code lines", by-session and commit lines, the reached-line proxy and prompt edit counts no longer include docs and config files.
+- feat(projects): the session that owns each git commit, node and org. A table-driven rule: merge, unreachable, foreign-author (a teammate's commit you pulled) and no-AI-edit commits have no owner, never a guess; otherwise most AI code lines, then most files, then earliest prompt, then session id (comment lines do not count; sub-agent edits fold into the parent). Node: an Owner column on the Projects Commits tab, a Commits card on the session detail, `GET /api/session/{id}/commits`. Org: an additive commit-ownership wire family (no author identity, no paths; `commit_sha_hash` always, the raw SHA and subject only under full-content sharing; server 186 + 189 / pg 0052 + 0055), audited org session and project commit views, subject and raw SHA only with `read:content`. The local git author is stored as a hash only (agent migration 146). See `docs/projects-page.md` "Commit ownership" and ledger COMMIT-3.
+
+- fix(claude-code): tokens-per-second sanity: a response-side attachment introduced in Claude Code builds from 2026-09-26 sat in the timing start slot and collapsed generation spans (rates up to 127,667 tok/s). A table of response-side attachment types plus a strict-before rule fix the span (live 7-day max 229, no row at or above 500). Rows stored with the old rule are corrected when their transcript is re-parsed.
+- feat(proxy): the Claude Code prompt id (`x-claude-code-prompt-id`) is recorded per proxied turn (agent migration 139, node-local) and the next-message predictor groups by it; `observer claude` enables Claude Code's gateway hint headers only when routed to Observer's proxy and never over your own value. Codex: a Responses websocket upgrade is answered 426 so Codex falls back to captured HTTP; `/v1/realtime` routes to OpenAI instead of Anthropic; `observer doctor codex` gains `codex.proxy_route` and reports a managed `requirements.toml` provider. The org AI gateway forwards `anthropic-*` headers.
+- fix(cursor): an unfinished Cursor turn (quit mid-answer, or every retry failed) records evidence and a precise reason on the node page, the org drawer and `observer doctor cursor` (`cursor.usage`) instead of a number: no local artefact holds its billed usage. Auto-mode turns record the model Auto routed to per request; placeholder models (`default`, `auto`) never overwrite a concrete session model; hook input nets both cache buckets (cache writes were billed twice). cursor-agent 2026.09 also runs Claude Code's user hooks with Cursor payloads; the Claude Code receiver now ignores those (no duplicate prompt guard, no rows mis-tagged as claude-code).
+- fix(adapters): Hermes schema 30 auxiliary-call spend is captured on both the hook and database paths. Crush's token counters are the last step's context size, so only one-step sessions keep token counts; every other Crush session keeps a token row with its model and Crush's own cost at 0/0 tokens (reliability unknown), and `observer backfill --crush-rescan` corrects rows stored before. New tool-name mappings seen live or in vendor source (for example OpenCode `question` -> ask_user, Cline `list_code_definition_names`, Zed `grep` / `fetch` / `spawn_agent`, Kimi plan mode and task tools).
+- feat(mcp): MCP calls made through the node relay are tied to their session for every client, not only Claude Code: a third, unanchored correlation tier (always labelled `inferred`, read-side only, retroactive, ambiguity shown rather than guessed). Protocol traffic (`tools/list`, notifications) never claims a tool action and attaches at session level; the method reaches the org so the drawer shows the same fields as the node (server 181 / pg 0047).
+- feat(ide): `observer ide <id> [project-dir]` launches an IDE or desktop app through the same path as the dashboard's GUI launch and prints an honest per-agent routing outcome (vendor-hosted inference such as Cursor's own models, Antigravity, Kiro, Qoder, Devin / Windsurf or Grok Bot cannot be routed and is reported so). Live traffic proof is still owed for VS Code, JetBrains, OpenCode Desktop and Goose Desktop (steps in `docs/proxy-wrappers.md`).
+- feat(shell-wrap): command wrapping, default off: `observer shell-wrap status|preview|enable|disable` and a Settings -> Terminal "Command wrapping" card put PATH shims first so typing `claude` runs `observer claude` (per-tool opt-in; `all` means installed CLI tools only). One marked block in bash / zsh rc files, a fish conf.d drop-in or the PowerShell profile (never auto-created), an exact preview, byte-for-byte undo, recursion guards so no launcher resolves a shim. On `observer start` a shim whose observer binary was moved or deleted is re-pointed at the running binary (a still-runnable different binary is kept); the PowerShell profile resolves the real Documents folder. Ledger SHELLWRAP-1.
+- fix: small live-verification defects: the org session quality card's newer-action count is derived like the node's (it was always 0); the goose watcher no longer logs "caught up dropped writes" every 2 s for a database scanned by row watermark; `observer doctor <tool>` defers the whole-database quick_check (`--integrity` forces it); the Cursor "no finish hook" note no longer tells you to run `observer init` when the hooks are already registered.
+- chore(build): `web/dist` and `web2/dist` are no longer tracked (the three `go:embed` bundles stay committed, so `go install` and the Docker builds are unchanged), every dist tree is marked `-diff`, and source maps stay out of the embeds; a rebuild no longer produces a multi-megabyte diff that agents such as OpenCode copy into their session stores. Stored `raw_tool_output` is capped at 1 MiB at every writer.
+
+- fix(security): a review of what earlier reviews had not covered (`docs/audits/security-review-2026-09-27.md`; 3 High + 9 Medium found, all High and 7 Medium fixed with regression tests): the proxy refuses browser-shaped requests (a web page can no longer drive it cross-origin; CLI, SDK and editor clients are unaffected); the guard evaluates Monitor, PowerShell and Grep tool calls; a truncated PreToolUse payload asks instead of allowing in enforce mode; `key_pool` rotates only credentials in the pool; Gemini API keys are redacted; the org gRPC receiver authenticates before decoding; tree-sitter parsing runs under deadlines; a repository symlink into your home directory no longer leaks the target through `get_project_guidance`; node database files are restricted to 0600 when opened. The rest is ledgered as SR27-*.
+- feat(sandbox): sandboxed terminals are contained (SR27-SBX-1): each sandboxed launch gets its own network namespace with the tier from `[terminal.sandbox].egress` (`internet` default, `proxy_only`, `none`, or `host` which restores the old shared namespace). A host helper serves the observer proxy and an egress gateway over sockets bound into the sandbox, so launcher URLs are unchanged and the dashboard on `:8081` is unreachable from inside; the gateway refuses loopback, link-local (incl. 169.254.169.254), multicast, the host's own addresses and private ranges (RFC 1918, CGNAT, IPv6 ULA and site-local) unless listed in `[terminal.sandbox].egress_allow_cidrs`. Every tier runs in a private PID namespace; host sockets under `/run`, WSL interop and agent environment variables are masked; Observer's secrets and the attach socket are hidden; daemon config, guard policies, shims, each tool's hook and MCP config and the workspace `.git/config` and hooks are read-only (a missing protected path gets a read-only placeholder) unless `allow_tool_config_writes = true`. A host that cannot create a network namespace refuses the launch (`netns_denied`), never a silent fallback. Linux and WSL2 only, opt-in as before; residual risk in ledger SR27-SBX-2, see `docs/sandboxed-terminals.md`.
+- fix(harness-gateway): the codex adapter runs codex with its built-in tools disabled (exec, shell, view_image and apply_patch calls return unsupported, web search off, the default-off features explicitly disabled), an allow-listed environment and a per-session private home; `@openai/codex-sdk` and `@openai/codex` are pinned to exactly 0.147.0 (the disabled list is re-grounded on every bump), and turns are serialized per session with the codex home disposed only after a running turn ends (SR27-C2).
+- fix(dashboard): the node dashboard's Origin check compares scheme, TLS, host and port with the request's own Host (loopback aliases equal) instead of the host alone (DASH-ORIGIN-1).
+- ci: third-party GitHub Actions in secret-holding jobs are pinned to commit SHAs (tag kept as a comment; Dependabot keeps them current) (SR27-SC1).
+
+- Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1) — the dated
+  three-cloud price snapshot every `observer-org deploy plan` estimate in this release is
+  computed from (plan v2.1 6.9; `scripts/verify-price-snapshot.sh --line` prints this line and
+  `scripts/release.sh` requires it in a final tag's section).
+
+## [1.34.0-rc.8] — 2026-09-21
+
+Pre-release on the `edge` channel; rc.7 plus the two demo-estate fixes rc.7 could not carry, the
+2026-09-21 Windows-side handoff merged onto the rc.7 tree, and one adversarial review of that merge
+folded. Server migration 159 (`org_model_prices.peak_json`; run `observer-org migrate` before starting
+the new image) and agent migrations 125 + 126 (node-local, additive). Node binaries need updating too.
+
+- Org server: the fleet-findings sweeper is now carried onto the served server (D-DEMO-12) - the built-in
+  `no_contact` alert rule seeds and `authority_divergence` / `integrity_risk` / `no_contact` /
+  `governance_lapsed` findings open; a runtime test pins every background worker across the assembly copy.
+- Deploy bundle: `observer-env-sync.sh` re-asserts the D12 `secrets/config.toml` mountpoint placeholder in
+  place (D-DEMO-11) so `docker exec observer-org <cli>` keeps reading the real config.
+- Org server, pricing feed: the public signed pricing feed importer now defaults to ENABLED with mode
+  `auto` (operator decision 2026-09-20): a connected org pulls `https://superbased.app/api/pricing/v1/observer-pricing`
+  and auto-applies list-price versions as `source = imported` rows; opt out with `[pricing_feed] enabled = false`,
+  or keep pulls but park them for approval with `mode = "park"`. An air-gapped org (bundle_path set) egresses nothing.
+- Pricing, peak/off-peak (Phases 0-3): `org_model_prices.peak_json` backs `pricing.Row.Peak` (a peak RateSet
+  + UTC schedule); both signed rails carry it; the node cost engine prices a turn at the peak variant inside
+  the window; the org Pricing page shows a read-only vendor-line badge; the Tokenomics feed export carries
+  `peak_json`. Inert until an org authors (or the feed publishes) a peak variant. Both pricing rails now
+  verify over the raw received bytes and persist them, so a field a newer server adds degrades instead of
+  freezing the cache. DeepSeek flash-family off-peak base correction.
+- Guard: manage guard rules from the node dashboard (Settings, per project) through a daemon-local
+  trusted per-project policy layer under `~/.observer` (weaken/disable scoped to one project, never below
+  the org floor; R-160/R-161 integrity rules cannot be disabled or relaxed below the org); the global rule
+  picker can loosen built-ins; the org dashboard's guard form picks rules from a described dropdown; the
+  guard-rule vocabulary is one shared module for both dashboards. Hook-lane policy blocks are interleaved
+  into the session Messages tab at the exact message anchor.
+- Guard, merge-review fold: a signed org bundle carrying a top-level `disable` list is accepted with the key
+  ignored and noted (the forward-compatibility rc.7 introduced now covers decoded keys too - rejecting it
+  would have stranded every node on its stale bundle); the trusted per-project layer loads even when the
+  in-repo `project_policy` layer is disabled; `/api/session/<id>/guard` carries `overridable` / `org_locked`
+  like the global timeline.
+- Capture: user file/image attachments on a prompt are captured and shown in the Messages tab (agent 126);
+  the AI tool / CLI version is captured per session (agent 125) and shown on the session card; lines of
+  code by sub-agents fold under the parent session card; process-APM metrics correlate to the message /
+  turn that caused them across every adapter; clinecli pidbridge rail proven live.
+- Org client: benign policy-rail states (`channel_off`, `disabled`, `not_supported`, `no_budget`,
+  `no_pricing`) log at Debug instead of a WARN per rail per cycle.
+- Marketing site: `www` 301s to the apex host; `/listed-on` directory page with a quiet footer link;
+  tool counts say 40 supported tools and 27 CLI launchers; guide links from the home page and footer.
+- Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+## [1.34.0-rc.7] — 2026-09-21
+
+Pre-release on the `edge` channel; rc.6 plus the org guardrail control wave (plan of record
+`docs/plans/org-guardrail-control-wave-2026-09-21.md`, one adversarial review folded) and three
+adapter/posture fixes found on the demo estate. Server migrations 157 + 158 (run `observer-org migrate`
+before starting the new image). Node-side changes need the node binaries updated too:
+
+- Org policy: team-scoped guard bundles and node-governance targeting (`teams` resolved server-side from
+  the bearer, one composed bundle per developer, strictest-wins across teams, served version = bundle
+  sequence + roster epoch so joining or leaving a team converges); per-rule `overridable` on the org
+  bundle (the developer may consent on ask-capable channels or grant a scoped, reported approval;
+  otherwise the rule is hard and local approvals are inert on a managed node); publish-time warnings.
+- Node guard: human-first deny text naming the rule, what was blocked and the exact override step;
+  node dashboard "Organization guardrails" card; desktop toast on every enforced overridable deny;
+  proxy-lane approvals resolve the project root through the session.
+- Tamper detection: the stored enrolment grant is re-verified on every identity refresh; proxy-route
+  drift is inspected per registry route kind and an absent route is drift on a managed node when the
+  tool's config is present; nodes report effective pinned values; org-side fleet findings
+  (`authority_divergence`, `integrity_risk`, `no_contact`, `governance_lapsed`) with four new alert rule
+  kinds and a Control Center panel; `GET /api/org/fleet-findings`.
+- Posture: the teams -> enterprise flip widens authority and never drops it (D-DEMO-10; gateway-class
+  authorities are withheld from the fleet-wide replacement and those members are named).
+- Posture, second pass (pre-tag review): `POST /api/org/posture/reissue` signs a new fleet replacement
+  generation on an already-enterprise org (no activation needed) and `GET /api/org/posture` says when one
+  is due; withheld (service-account) members are excluded from the fleet document by construction, at
+  issue time and at enrolment-token redemption, so re-enrolling one with its own token now sticks; a member
+  enrolled later with a developer-class grant wider than the live generation is parked until the next
+  reissue lifts it, and a developer-class re-enrolment lifts a structural exclusion; activate
+  on an already-active org is a no-op; flip and reissue share one issue path. Node: the org guard layer
+  ignores bundle keys a newer server adds instead of running without the org layer (`observer guard
+  status` names them); nodes older than rc.7 still drop the org layer on such a bundle - update them first.
+- pi adapter: git identity (remote, branch, owner) resolved from the session cwd (D-DEMO-9).
+- Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+- Deploy bundle (Azure + AWS cloud-init `observer-env-sync.sh`, and the four Azure templates that embed it):
+  the D12 `secrets/config.toml` mountpoint placeholder is re-asserted IN PLACE on every timer run
+  instead of being re-`install`ed. Recreating its inode detached the running org container's bind mount
+  of `config.production.toml` for every later path lookup, so `docker exec observer-org <cli>` read an
+  EMPTY config from the next 6-hourly run on (the server itself never re-reads its file and was
+  unaffected; `docker compose run --rm --no-deps org <cli>` always worked). Found live on the demo
+  estate (D-DEMO-11); the harness now pins the inode across runs. NOT in the rc.7 tag - lands in the
+  next bundle export.
+- Org server: the Track C fleet-findings sweeper was assembled but never carried onto the served
+  server, so it never started - no built-in `no_contact` alert rule was seeded and no fleet finding was
+  ever opened (D-DEMO-12, found live on the demo org after the rc.7 roll). Carried, and a runtime test
+  now pins every background worker across the assembly copy. NOT in the rc.7 tag.
+
+## [1.34.0-rc.6] — 2026-09-21
+
+Pre-release on the `edge` channel; rc.5 plus two org-dashboard fixes found on the demo estate
+(the OIDC login gate and the SCIM-hidden team create form). Cut so the org-feature validation
+arc runs on a signed image carrying them:
+
+- Org dashboard: the Teams page no longer hides its team CREATE form on a SCIM
+  deployment (D-DEMO-7). It gated the form on `scim_configured`, which only
+  means `[scim].auth_token_path` is set - and the appliance bundle always
+  provisions a SCIM token secret, so on every bundle-deployed org the admin
+  could not create a team at all (and a team budget had nothing to attach to),
+  even with zero SCIM-provisioned rows. `GET /api/org/team-management` now also
+  carries `scim_active`, resolved from the data (a non-empty `external_id` on
+  any `org_teams` or `org_members` row), and the page always offers the form
+  and uses the two flags to choose a notice instead - the D-DEMO-6 "offered,
+  not hidden" rule. An individual SCIM-provisioned team is still read-only by
+  provenance, unchanged.
+- Org sign-in: a configured rail is offered before its first probe (D-DEMO-6).
+  The login page hid the link for any rail whose health was not exactly `ok`,
+  but an OIDC rail's discovery document is fetched lazily and following that
+  link was the only thing that fetched it - so on a fresh boot the first
+  sign-in could never be started. Health is now a tri-state that decides what
+  is said beside a rail, never whether it exists, and the server warms the
+  probe at boot.
+- Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+## [1.34.0-rc.5] — 2026-09-20
+
+Pre-release on the `edge` channel; rc.4 plus the demo-estate rebuild waves and two org-dashboard
+fixes found on the first fresh org that booted from rc.4. Cut so the demo estate can run a
+cosign-signed image carrying them (first boot pins the release workflow's signing identity):
+
+- Org dashboard: Settings no longer crashes on a fresh org (`GET /api/org/plane-b/mode` served
+  `"pending": null` for a fleet with no capability acks and the page read `.length` on it; the
+  activate endpoint's Node-Mode downgrade result seeded the same way), and the People
+  leaderboard's TOP TOOL / TOP MODEL are derived by count from every substrate (actions ->
+  sessions -> token rows for the tool; the deduped proxied-turn ∪ token-row union -> sessions for
+  the model) instead of the cost-ranked proxied-turns-joined-to-sessions query that left every
+  developer on a free-tier model, or without a joinable proxy session, at "-".
+- Azure appliance modules: `lb_nodes = 1` (single HAProxy, stated full-outage replace window,
+  DR-63) and `nats_placement = dedicated` (the nats-single broker on its own VM); the org POLICY
+  signing key is now minted beside the bearer key (`policy-signing-key`, both clouds), landed by
+  env-sync and rendered as `[policy]` in every production config - without it every managed
+  node's `GET /api/agent/budget` answered 409 and `observer <tool>` refused to launch;
+  `restore-drill.sh --pgbackrest-conf` for the separate-PostgreSQL topology; the app NSG
+  metrics rule admits the VNet; env-sync's PFX converter fails loudly and keeps SAS values out
+  of comment lines.
+- `budgetsigningcheck` warns on managed tokens / managed nodes without a policy key and
+  `new-enrolment-token --managed` warns at mint time; node posture (budget + pricing) is fetched
+  before every push and `observer org push-now` carries it.
+- Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+## [1.34.0-rc.4] — 2026-09-18
+
+Pre-release on the `edge` channel; rc.3 plus the enterprise-deployment Phase 1 and Phase 2
+work. Cut so that the Phase 2 attended acceptance has CI-built, cosign-signed images to boot
+from (first boot pins the release workflow's signing identity; the `observer-postgres` image
+had never been published):
+
+- `observer-org deploy plan` (Phase 1): the deployment catalog (axes, constraint table,
+  developer-count size map, eleven reference architectures), the bill of materials, the dated
+  three-cloud price snapshot with confidence letters and the 90-day stale gate (DR-17), the
+  alternatives block, honest ceilings (D2), and the rendered bundle (`config.production.toml`,
+  `.env`, compose override, `nats.conf`, RUNBOOK/ESTIMATE); `deploy export` ships the catalog.
+- Azure OpenTofu modules (Phase 2): six thin roots (`compact`/`appliance` x
+  `bootstrap`/`data`/`app`) over shared child modules under `deploy/modules/`, embedded and
+  exported as the bundle's `modules/` row; tfvars rendered from the answer set's sizing and the
+  catalog's provision SKU names; cloud-init + on-box units (Key Vault secrets flow, private
+  bundle container, pgBackRest timers, restore drill); the `observer-postgres` image
+  (postgres 16 + pgBackRest, DR-51) built, signed and pushed beside `observer-org` under the
+  same tag.
+- `[metrics]` listener + `/metrics` (DR-12) and `observer-org support-bundle` (DR-20);
+  `doctor` gains the object-store probe and the SAS-expiry warning.
+- The air-gap kit ships the Sigstore trusted root and `VERIFY.md` verifies with
+  `--trusted-root`; `release.sh` pre-flight asserts the chart and harness-gateway versions.
+- Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+## [1.34.0-rc.3] — 2026-09-18
+
+Pre-release on the `edge` channel; rc.2 plus three release-pipeline fixes found by running
+rc.2 (the second pre-release tag; every fix is pinned by an executed test):
+
+- cosign is installed by the pipeline's own retried, sha256-pinned script at all three signing
+  sites (`COSIGN_VERSION` / `COSIGN_SHA256`); on rc.2 one un-retried download inside the
+  installer action failed after the observer-org image had been pushed, leaving the tag
+  unsigned and the private release skipped.
+- The release-archive filename rule has one owner, `internal/update.ParseArtifactName`, used by
+  both the org server's `update import` and the pipeline's manifest producer; rc.1's fix had
+  patched the importer's copy while the pipeline ran its own, so rc.2's public release failed
+  with the same "no agent archives".
+- The private GitHub release is created and its assets attached with `gh release create` /
+  `gh release upload --clobber`, the mechanism the public release has always used; the
+  third-party release action aborted its parallel upload batch on both rc attempts.
+
+## [1.34.0-rc.2] — 2026-09-18
+
+Pre-release on the `edge` channel; rc.1 plus four release-pipeline fixes found by
+running rc.1 (the first pre-release tag the pipeline has ever cut):
+
+- The two image jobs no longer upload the buildx build record, whose artifact broke every
+  "download all artifacts" step (npm, PyPI, provenance) on rc.1.
+- Update-artifact names with a pre-release version (`observer-v1.34.0-rc.1-linux-x64.tar.gz`)
+  parse correctly, so the public release and the `edge` update manifest are produced for
+  pre-release tags.
+- The VS Code Marketplace publish is skipped on pre-release tags (the Marketplace rejects
+  pre-release semver); the VSIXes are still packaged.
+- The air-gap kit carries one compressed OCI layout per image (with its signature) instead of
+  every image twice; rc.1's 1.8 GB kit aborted the private release's asset upload.
+
+## [1.34.0-rc.1] — 2026-09-17
+
+Pre-release on the `edge` channel. Its purpose is the first real publish to the private
+enterprise container registry; nothing here changes a running node's behaviour beyond the
+retention horizons and the fix below.
+
+### Added
+
+- **Enterprise private distribution (Phase 0).** The `observer-org` image and, new, the
+  `harness-gateway` image are published to SuperBased's private registry with a per-customer
+  pull token instead of a public GHCR package; both are cosign keyless-signed by digest, and
+  a final release now FAILS when the registry credential is absent instead of silently
+  skipping the image. The public GitHub release no longer carries any `observer-org` asset
+  (archives, SBOM, pull recipe); they attach to the private release together with a signed
+  deployment bundle and an air-gap kit.
+- **`observer-org deploy export --to <dir>` / `deploy list`.** The org-server image carries
+  its own deployment bundle: the hardened compose template, the Helm chart, the developer-node
+  supervisor templates and the enterprise runbooks, stamped with the exact image tag and
+  registry, with `MANIFEST.json`, `SHA256SUMS` and a README holding the pull-and-verify recipe.
+- **`observer cloud job <cloud-job-id>`** reads a hosted job's state, terminal reason and
+  result summary.
+- **feat(retention): horizons for `compaction_events` and
+  `compression_events`, the two node-local event tables that had none.**
+  `[observer.retention].compaction_events_days` (default 30) and
+  `compression_events_days` (default 90) age out per-session compaction
+  snapshots and per-decision compression detail through the ordinary
+  retention pass - startup, the `interval_hours` tick and `observer prune` -
+  in bounded batches, with the counts printed in the `prune complete` line
+  and the retention log. On the node that prompted this the two tables held
+  1.4 GiB in 1,333 rows and 915 MB in 3.59M rows respectively. Both horizons
+  are ON by default, including for existing installs, so the first pass after
+  upgrading deletes accordingly; set either key to 0 to keep forever. One
+  behaviour change: post-compaction context injection reads a session's most
+  recent `compaction_events` row, so a session idle for longer than the
+  compaction horizon no longer receives it.
+
+### Fixed
+
+- **fix(store): the guard limit-window poll no longer full-scans
+  `limit_snapshots`.** `store.LatestLimitWindows` filters on the window
+  columns and orders by `observed_at`, but migration 049 shipped the table
+  with only a `(scope_hash, provider, observed_at)` index whose leading
+  column that query never constrains, so every poll scanned the whole table
+  and sorted it through a temp b-tree. At 178k rows that ran past the poll's
+  3 s deadline every time. Agent migration 123 adds a partial index on
+  `(observed_at DESC, id DESC)` covering exactly the windowed rows.
+
+- **fix(orgserver): ORGSEC-CSRF-2** - one cross-site seam for every cookie-authenticated
+  mutation (415 on a non-JSON body, 403 cross-site).
+- **fix(aigateway): GW-AUDIT-1 / GW-SETTLE-1** - the gateway audit row and the reservation
+  settle are one journaled write; a crash between them no longer strands a reservation.
+- **fix(orgserver): ORG-NATS-REATTACH-1** - a durable consumer whose identity drifted is
+  re-attached (bounded, with the drift cause surfaced) instead of backing off forever; a
+  vanished stream is handled the same way.
+- **fix(projectresolver):** the row-5 enterprise-owner fallback is a deferred suggestion,
+  never an automatic fold, and a suggestion that names a project the hash already belongs to
+  is suppressed.
+- **fix(cloudserver):** the worker role can complete the weekly project digest (migration
+  0040 grants); the portal CSP admits Paddle.js v2's own runtime footprint.
+- **ci:** the `-race` suite is sharded ten ways with per-process migrated SQLite templates.
+
+## [1.33.0] — 2026-09-15
+
+### Added
+
+- **feat(update): Enterprise Update Management - fleet self-update served by
+  your own org server.** A node never contacts GitHub, npm or a CDN for an
+  update; it fetches only from the org server it is enrolled with. That
+  server's mirror is filled by `observer-org update import` (air-gapped
+  sites) or `observer-org update sync` (connected ones), which is what makes
+  air-gap the default path rather than a special case. Three channels
+  (`stable` / `lts` / `edge`) are a property of the MANIFEST, never of the
+  binary, and the node side is `observer update status|check|apply|history`.
+  Operator reference: `docs/enterprise-updates.md`.
+- **feat(update): two-signature update manifests and a compiled-in vendor
+  key.** Every manifest carries the org's Ed25519 TOFU-pinned distribution
+  signature AND a per-artifact vendor signature over the archive bytes,
+  verified against a key compiled into the agent, so a compromised org server
+  alone cannot substitute a binary we did not build. An artifact with no
+  vendor signature is refused - fail closed. The release pipeline now signs
+  every artifact and publishes a signed release manifest plus an air-gap
+  bundle; cosign-bundle and minisign were deleted from the signature
+  vocabulary because neither ever had a verifier.
+- **feat(update): drain-gated apply with a fork-exec-and-watch handshake.**
+  Applying an update is never an execve replace. The old daemon drains
+  in-flight proxied requests (`503` plus `Retry-After` through the new
+  `internal/quiesce`, never a connection refusal), swaps the binary
+  atomically, spawns the new one as a child, and - if the child fails its
+  self-check, exits non-zero, or hangs - the still-alive parent kills it and
+  restores the previous binary, along with a pre-apply `VACUUM INTO` snapshot
+  when the target advanced the schema. Supervisor templates for systemd,
+  launchd and Windows ship under `deploy/supervisor/` for the residual window
+  after the old parent exits.
+- **feat(org,update): staged rollout rings, a fleet version board and a skew
+  gate.** Manifests roll out through a pure ring engine (`rolloutcore`,
+  extracted from the policy-rollout cohort code) keyed on each node's own
+  subject. `[server].min_agent_version` and `min_agent_version_action` (warn
+  by default, a typed `426 agent_too_old` when set to refuse) plus
+  `max_skew_minors` feed `GET /api/org/fleet/versions` with a version
+  histogram, a skew banner and a stranding-by-install-method panel. The new
+  `observer-org upgrade preflight` turns the server's own pre-upgrade
+  checklist (backup, migration dry run, disk headroom, skew report, config
+  validation) into one gate-able exit code, and the VS Code extension will
+  never launch its bundled binary over a strictly newer installed one.
+- **feat(org,pricing): enterprise per-model pricing.** `org_model_prices`
+  (server migration 132, effective-dated, USD only) becomes the ONE authored
+  price table, and the two places that already priced a turn become
+  projections of it: the AI gateway's rate card, projected through one seam
+  (the old rate-card PUT answers `409 moved_to_pricing`), and a signed
+  fleet-wide `GET /api/agent/pricing` rail that each node persists locally
+  (agent migration 106) and feeds into a single process-wide cost engine, so
+  captured turns are stamped at the org's negotiated rate. Reads need
+  `read:budgets`; writes use the new 18th RBAC key `write:pricing`. Since
+  migration 135 every rate column is nullable: NULL means not quoted and
+  falls through, a set 0 means the org negotiated that rate free. Operator
+  reference: `docs/pricing.md`.
+- **feat(org,assistant): an org admin assistant that can author the
+  organization's administration under approval.** A closed table of 57 tools
+  generates the tool specs, the labels, the system contract and the gate, and
+  three enforcement points make a proposal safe: the chatting member is
+  authorized before dispatch (a miss writes no proposal row at all), the
+  parked proposal is inert with a server-computed preview, and approval
+  re-checks the APPROVER against the same table, re-previews (a changed plan
+  goes stale, an uncomputable one invalid) and executes the resolved plan
+  under the approver. Bulk operations are ordinary table rows capped at 200
+  items, with invites itemized because mail cannot be un-sent. Ships with an
+  Approvals inbox, a sidebar badge, nine status pills and an opt-in
+  `[dashboard].approval_email` notification. Operator reference:
+  `docs/assistant.md`.
+- **feat(org,budgets): team and developer spend budgets with real
+  enforcement.** One authored `budgets` table (server migration 125) carries
+  `cap_tokens` beside `monthly_usd_cap`, an `enforcement` column
+  (report / soft / hard) and calendar periods with a timezone. Two real
+  chokepoints act on it: the existing alert evaluator, and the AI gateway's
+  reservation ledger, which now PROJECTS its cap from `budgets` instead of
+  being separately authored. A third, opt-in node-side chokepoint composes
+  the org's cap onto the node's existing guard engine through a signed
+  per-caller `GET /api/agent/budget` pull - lowering-only on an individual
+  node, org-authoritative on a managed node holding the `enforce.budget`
+  authority. Dashboard team CRUD makes a "team budget" addressable without an
+  IdP. An org that would rather not show dollars can render every figure on
+  the org dashboard as tokens, or as a percentage of the relevant cap,
+  through one formatter seam - never per-surface division - and token counts
+  now ride beside cost on every payload that carried cost alone. Operator
+  reference: `docs/budgets.md`.
+- **feat(org,budgets): an honest per-developer coverage column.** A budget
+  nothing can enforce must never render as "under budget". Nodes now
+  self-report an enum-only budget posture that ingest lands in
+  `org_node_budget_posture` (server migration 130) and the rollup turns into
+  table-driven coverage reasons on the Budgets page, so an unenforceable
+  scope or a developer who does not route through the gateway is visibly
+  uncovered rather than silently green. The gateway also buckets each cap's
+  window in the cap's own timezone (migration 131), retiring the
+  gateway-buckets-in-UTC warning.
+- **feat(org): three sign-in rails behind one seam - local, SAML and OIDC.**
+  The new OIDC rail does authorization-code plus PKCE with JWKS rotation and
+  presets for Entra, Okta, Google and a generic provider; SAML now boots
+  non-fatally against an unreachable IdP instead of aborting startup; and the
+  local email-and-password rail (argon2id) is unconditionally mounted as the
+  break-glass path when an IdP is down. Identity is configured from the
+  dashboard (Settings, Identity) and the setup wizard, seeded once from TOML
+  and dashboard-owned thereafter, with `observer-org auth show` /
+  `auth reset-bootstrap` as the CLI escape.
+- **feat(org): IdP group to role mapping, gated JIT provisioning and member
+  approval.** Group-to-role mapping is an admin-editable ordered rule set
+  applied at every sign-in, with a last-admin guard and an explicit
+  dashboard-versus-IdP precedence. More importantly, an unknown email on an
+  SSO rail no longer becomes an active member by default: it auto-activates
+  only via an email-domain allow-list (empty by default) or a matching group
+  rule, and otherwise lands `pending` awaiting an explicit approval. Sessions
+  are generation- and epoch-aware for every rail, so a single member or the
+  whole org can be signed out
+  (`POST /api/org/members/{id}/revoke-sessions` and
+  `POST /api/org/auth/revoke-all-sessions`); every sign-in, failure, lockout,
+  revocation and settings change is audited BEFORE the session issues; and
+  `admin:identity` is the 16th RBAC permission key, held only by the builtin
+  admin role.
+- **feat(org,loc): lines-of-code tracking.** Per-session and per-developer
+  AI-versus-human-versus-system CODE line counts, with comments, blanks and
+  whitespace split out, produced by a pure classifier over already-scrubbed
+  tool input (agent migration 103, node-local). Human capture is VS Code-only
+  in v1 and `human_capture="none"` means unmeasured, never zero - no surface
+  renders an AI share on it. `observer backfill --loc` re-counts history; the
+  org wire ships aggregate counts by default and gates only the per-language
+  mix behind the raw-content posture. Operator reference:
+  `docs/loc-tracking.md`.
+- **feat(org): Project Identity Resolver v2.** N differently-named local
+  folders across N developers now fold onto one project with zero developer
+  action: the node resolves a set of identity hashes at capture (agent
+  migration 102), they ride on the session wire (server migration 121), and a
+  pure table-driven rule engine (server migration 122) materializes projects
+  through a single writer at ingest. Ships with `observer-org resolve-projects`,
+  admin surfaces on Projects and Project Detail, and a Settings, Identity
+  panel for the rule table.
+- **feat(telemetrylog): a shared durable log in front of both org ingest
+  paths.** Node push and OTLP gateway requests each publish one record to a
+  durable log and are acked only after the log's PubAck - a log fault answers
+  `503` plus `Retry-After`, never a lying `200`. The log contract is pure
+  (`internal/telemetrylog`) with a NATS/JetStream adapter that can run
+  embedded in-process or against an external cluster, a `[log]` config block
+  with redaction, an `observer-org doctor` probe, and a conformance suite.
+  Three durable consumers drain it, and records that cannot be applied land
+  in a quarantine table with one writer and its own alerting.
+- **feat(orgserver): typed Parquet on object storage as the durable system of
+  record, with offline replay.** Accepted telemetry is written as typed
+  Parquet to local, S3-compatible or Azure Blob storage, which is also the
+  update mirror; legacy JSONL replay remains supported. Recovery inventories
+  and validates the whole archive first, then applies one generation's
+  sequence order in bounded pages, and transactional receipts (SQLite
+  migration 137 / PostgreSQL 0003) stop a stale occurrence committing its
+  derived rows twice. Object-store credentials resolve by identity (S3
+  default chain, Azure SAS) rather than long-lived keys. Alongside this,
+  `observer-org serve --role all|collector|worker|api|aigateway` (or
+  `[server].roles`) splits the server into independently scalable tiers
+  behind a load balancer, with advisory-lock singletons for the jobs that
+  must run once and `/healthz` reporting the roles and the log probe.
+- **feat(aigateway): AI Gateway v1.** An optional org-side gateway with
+  virtual keys, atomic budget reservation and settlement, streaming support
+  and metadata-only audit, plus Bedrock and Vertex providers, a standalone
+  gateway binary, a capacity envelope and a live disallow gate.
+- **feat(node): direct-vendor budget enforcement on managed nodes.** A
+  managed node whose developer talks straight to a vendor - no gateway, no
+  proxy - is now inside the budget too: the node watches its own captured
+  spend against the org's cap and, past the cap, stops the offending agent
+  processes and refuses new launches, with a policy-bound process cutoff and
+  a three-class accounting readiness model so an unpriced model is FLAGGED,
+  never silently denied.
+- **feat(cloud): Cloud Intelligence - a signed-in personal plane (BETA).**
+  An entirely opt-in, manual-first lane in which a developer can send one
+  session's evidence to a hosted service and get an AI-written summary back.
+  **Signed-in Free** allows up to 20 session enrichments per day and 100 per
+  month on GPT-5.6 Luna (xhigh reasoning). **Plus is beta and experimental**,
+  USD 15 per month with a 7-day trial: enrichments run on the substantially
+  stronger GPT-5.6 Sol (xhigh reasoning), capped at 120 per month (25 per
+  day), and add weekly project digests. Results now read as narrative
+  sections - what was done, plans implemented, issues found, failures, and
+  what to do next - and never expose internal evidence ids. The node half is
+  zero-egress by construction: the `observer cloud` CLI is the only outbound
+  trigger, preview bytes are the upload bytes, and nothing leaves a machine
+  that a consent screen did not already name. Operator reference:
+  `docs/cloud-intelligence.md`.
+- **feat(cloud): consent, results and background enrichment where developers
+  already look.** One plain consent card in Settings replaces the purpose
+  vocabulary (which moves to an Advanced fold), a "What we sent" ledger shows
+  every upload content-free, and session cards gained Enrich now, Sync now
+  and a preview-first flow. With the policy on, a daemon-side sweep enriches
+  finished sessions in the background on a 15-minute default. AI-written
+  session titles and descriptions surface on the Sessions list, the session
+  header and the VS Code tree, with inline editing and a user-over-AI
+  precedence.
+- **feat(orgserver): org-served Cloud Intelligence.** An enrolled node can get
+  the same AI session enrichment from its OWN org server instead of the
+  hosted personal plane, over a disjoint authority plane with its own org
+  settings, job and result tables, a signed result-pull rail, per-org
+  retention and an admission bound. Surfaces land on the node dashboard, the
+  org session drawer and a Settings card.
+- **feat(adapter): four new tool adapters.** `poolside` (Poolside's agentic
+  coding model, reached as a JetBrains ACP agent; event-sourced NDJSON
+  trajectories, per-call tokens), `zed` (Zed's own native agent; per-OS
+  `threads.db` whose rows are rewritten whole per turn as zstd-compressed
+  JSON), `kiro-crew` (AWS Kiro Crew, the multi-agent desktop app that drives
+  kiro-cli - it emits rows ONLY for a Crew chat with no kiro-cli twin, so
+  nothing is double-counted) and `grokbot` (the Grok Bot desktop app, whose
+  inference runs in a remote sandbox, so tokens, model, cost and cwd are
+  honestly absent rather than guessed). Freebuff also gained its desktop
+  store, and Qoder, Open Interpreter, Factory and OpenClaw gained additional
+  grounded surfaces. Supported-tool copy is reconciled to 40 across every
+  surface.
+- **feat(surfaceenrich): a hosted-surface enricher for JetBrains AI
+  Assistant.** An orchestration host that owns no conversation but points at
+  the agent session it drove now stamps that session's capture surface: a
+  daemon-lifetime loop maps JetBrains agent-session pointers onto the owning
+  adapter's session id, and the host record wins over the agent's own
+  self-report (an empty host never clears it). Agents that do not round-trip
+  by exact id stay honestly unmapped, and no JetBrains capture adapter was
+  added, because one would double-count every agent's conversation.
+- **feat(org): node session-detail trickles up to the org dashboard.** The
+  org session drawer now carries what the node has always shown, additively:
+  the capture surface, sub-agent token and cost attribution, real message
+  columns with per-message role, effort, tools and stop reason, per-model
+  cost buckets, a per-event cache timeline, the process tree with metrics,
+  a Tasks tab and per-message tool-account attribution - the last two behind
+  two new opt-in share tiers, with the rest as default metadata.
+- **feat(design-system): one shared design system for every application
+  surface.** `shared/` is now an npm-workspace package owning the tokens, the
+  Tailwind preset, the primitives and the charts that the node dashboard, the
+  org dashboard and the cloud portal all consume, ending web2's hand-copied
+  tokens and webcloud's look-alike tiles. Components promoted into it stay
+  pure, with a one-line re-export shim left at the old path so existing
+  importers are untouched.
+- **feat(config,dashboard): config management from the dashboard.** A
+  generated config schema (with a CI drift gate) backs
+  `GET /api/config/schema` and `PUT /api/config/keys`, a surgical file patcher
+  that preserves comments and formatting, credential redaction, and a
+  schema-driven Settings renderer that is honest about which keys need a
+  restart.
+- **feat(pricing): a signed public pricing feed.** List prices can now be
+  refreshed without a package release: a signed feed published from the
+  Tokenomics database and shaped like the node rate vocabulary, an
+  in-process poller that re-prices the live cost engine, explicit precedence
+  (enrolment first), an air-gap bundle, park and auto modes, and an org-side
+  importer with a dashboard panel.
+- **feat(ssh,terminal): SSH remote-profile terminals and an instance
+  switcher.** Dashboard terminals can open on another machine through an
+  allow-listed SSH profile (the request carries a profile NAME only),
+  `observer ssh` reaches CLI parity with a "Test connection" verb and an
+  opt-in reverse proxy forward, and the dashboard can switch to a remote
+  install's dashboard over a local port forward.
+- **feat(archive): corpus archival and reclaim.** An opt-in cold store
+  (`archive.db`, its own lineage and its own owner) moves aged corpus rows
+  out of the hot database copy-verify-delete, never delete-first, verifying
+  by reading back from the cold file; `observer archive status|rehydrate|reclaim`
+  drives it, and reclaim is operator-invoked only and never deletes. Disabled
+  by default, so an untouched install is byte-identical to before.
+- **feat(orgpush): a uniform envelope budget across all 41 wire families.**
+  Every family is now bounded end to end with a loud push breaker, closing
+  the class behind the 2026-08-26 host-crash amplifier, and cursor wires
+  leave explicit slack so a push cannot pause 693 bytes over the limit.
+- **feat(govern): enterprise share algebra and node governance.** A managed
+  node's reporting tiers are composed through one share algebra with grant
+  replacement and posture-conditional invariants, enterprise authority tokens
+  reach the node through the enrolment-delivered grant, and every authority
+  string on the dashboard says honestly what it does and does not allow.
+- **docs: a private-datacenter deployment playbook and a sizing
+  calculator.** `docs/private-datacenter-deployment.md` is the full operator
+  playbook for standing `observer-org` up inside a private or air-gapped data
+  center - hardware sizing, a non-cloud object store, HA PostgreSQL and NATS,
+  a Kubernetes path, the air-gapped update mirror and the private-DC pricing
+  feed - with a companion per-component sizing calculator rebuilt for the
+  PostgreSQL, Parquet and NATS architecture.
+
+### Changed
+
+- **feat(orgserver): SQLite is no longer the org server's runtime engine.**
+  The deployed org server runs its control plane and its Plane-B hot and
+  query data on PostgreSQL (`OBSERVER_CONTROL_STORE_DSN` /
+  `OBSERVER_DATA_STORE_DSN`; `--role all` may point both at one database),
+  with typed Parquet as the durable system of record and a NATS/JetStream
+  durable log. SQLite remains the org server's test engine and is completely
+  unchanged as the node's local store. Migration is documented in
+  `docs/stateless-collectors-postgres-migration-runbook.md`; note that the
+  reference deployment's NATS sidecar uses ephemeral storage at R=1 and so
+  does not by itself support an HA or container-group-loss claim.
+- **feat(org,pricing): the gateway rate card and the gateway budget cap are
+  projections, not authored objects.** `POST /api/org/ai-gateway/budgets` and
+  `PUT /api/org/ai-gateway/rate-card` are retired to `409`; caps come from
+  `budgets` and rates from `org_model_prices`. The projection is lossy by
+  design (the card carries 4 of 13 price fields), and the one shape that
+  cannot project is surfaced as `gateway_skipped` on the Pricing page rather
+  than being dropped silently.
+- **fix(orgserver): `scrub-content` now erases the durable system of
+  record too.** Targeted erasure previously scrubbed only the hot data store,
+  leaving the Parquet/object SoR readable and able to resurrect scrubbed
+  content on a rebuild; it now runs through the same governance and retention
+  seam with verify-read-back before tombstoning, fails loud, and refuses
+  legacy JSONL. Replay defaults to a dry run with a target assertion and a
+  sequence-gap policy.
+- **feat(orgserver): retention covers the raw-detail tiers and the gateway
+  lane.** The server-side retention allow-list was widened so the
+  content-bearing tables added by recent arcs age out with everything else,
+  and the ingest quarantine follows `data_retention_days` with requeued rows
+  pruned after 7 days.
+- **feat(web2): primary content shows directly.** The click-to-disclose
+  gates on the org dashboard are gone; audited message bodies reveal on click
+  instead of collapsing to a spacer row, and a content cell says honestly
+  whether it holds a preview, an audited chip, or nothing because the node
+  did not share it. The dashboard itself was reorganised into three areas
+  with Observe and Configure split, Trajectories became a master-detail
+  drill-down, every entity mention is a link through one shared primitive,
+  and the brand mark and favicons now match the node dashboard.
+- **fix(web,web2): em-dashes replaced with hyphens in user-facing
+  copy.** A sweep across the node dashboard, the org dashboard, the shared
+  components and the cloud portal, leaving code comments untouched.
+- **fix(handoff): Full+cache is disabled where the source cannot provide
+  it.** Thirty adapters have no full-body reader, so the Full+cache carry
+  mode was inherently identical to Full for them; the option is now disabled
+  with honest copy rather than offering a distinction that does not exist.
+- **perf(orgpush): the org push tick no longer recomputes every snapshot wire
+  on every tick** (steady-state CPU remediation, Track R2). Before this, all
+  ~23 snapshot/aggregate wire families — the teams-tier aggregates plus the
+  enterprise per-session and per-developer wires — re-ran their full 7-day
+  window or whole-table read on every push regardless of whether anything had
+  changed, which was the systemic cause behind the three query-shape findings
+  fixed in 1.32.0. Each family is now guarded by an O(1) change probe over its
+  own source tables (a single index-endpoint seek in most cases), so an idle
+  node's whole snapshot family costs a handful of seeks instead of a full
+  recompute. The cursor wires (sessions, actions, api_turns, token_usage,
+  guard_events, otel_content) are untouched and still ship every tick.
+  Fail-open by construction: a probe error, an unknown family, a failed push,
+  or a budget-truncated wire all recompute, and every family is force-refreshed
+  at least hourly so its server-side freshness never ages out of a dashboard
+  window. No wire shape, server behaviour, or migration changed.
+- **feat(config): new `[org_client] snapshot_interval_seconds`** bounds how
+  often the snapshot wire families recompute even when their source data DID
+  change, for nodes busy enough that the change probe never gets to skip.
+  Unset means 4× the effective `push_interval_seconds` (8 minutes at the
+  shipped defaults, and it tracks a retuned push interval rather than freezing
+  an absolute); a negative value restores the previous every-tick cadence. The
+  staleness it buys is explicit — see `docs/teams-operations.md`.
+
+### Fixed
+
+- **fix(budget): a fallback-priced model is no longer reported as an
+  unpriced one (BUDGET-COV-3).** Org budget coverage lumped "this model was
+  priced from the built-in table because the org has no negotiated rate for
+  it" together with "this model has no price anywhere", so an estate with a
+  perfectly enforceable budget read as partially blind. The two are now
+  distinct posture classes (server migration 152) with their own coverage
+  notes.
+- **fix(node): a transient capture state never stops a running process.**
+  The managed-node budget intervention treated a momentarily unresolvable
+  per-tool capture state as an enforcement signal and could kill a healthy
+  agent process. Transient states are now inert: only a settled, measured
+  crossing acts.
+- **fix(node): managed budget accounting uses the full pricing ladder.** A
+  prior correction narrowed managed accounting to exact and org-quoted
+  prices only, so every model without an org rate read "unpriced" and got
+  blocked at effectively zero spend. Accounting now walks the whole engine
+  ladder, and an unpriced model is FLAGGED, never denied; org spend is
+  additionally sourced by capability rather than by tool name.
+- **fix(org,budgets): the Budgets page sources spend by capability.** Spend
+  attributed on the Budgets page could disagree with the enforcing
+  chokepoint; both now read through the same capability-scoped source, and
+  coverage ignores the individual-tenancy predecessor of a node that has
+  since become managed.
+- **fix(org): one org distribution identity (SIGN-1).** Several signed rails
+  minted or pinned their own key material, so a node could hold more than
+  one trusted org identity. Every signed rail now uses the single
+  enrolment-delivered key, and pre-existing TOFU pins heal on a hash match
+  instead of failing the node.
+- **fix(org,budgets): budgets fail CLOSED on a managed node (BUDGET-FC-1).**
+  A managed node that could not resolve its cap previously behaved as if no
+  cap existed. It now fails closed, an explicitly-no-budget answer is signed
+  rather than inferred from silence, and per-window hardness is shared so the
+  node and the gateway cannot disagree about whether a window is hard.
+- **fix(org): team-management routes worked only on fresh installs
+  (TEAM-KEY-1).** `write:teams` was granted by the migration that created it,
+  so an already-bootstrapped admin never received it and every team route
+  answered `403`. Server migration 129 back-grants it, and a matching
+  control-store retrofit covers `admin:identity`.
+- **fix(harness-gateway): cancellation and timeouts are plumbed end to end.**
+  Closing the org bridge now cancels the in-flight provider inference and
+  disposes uncached failed sessions instead of leaking them, the provider
+  request is bounded independently and below the org deadline, the saved
+  provider timeout is forwarded rather than defaulted, and a silent exit or
+  an empty completion produces an actionable diagnostic.
+- **fix(orgserver): the org hot window evicts correctly.** A hot-window
+  eviction defect that could leave stale rows resident was fixed and shipped
+  with the v54 estate roll.
+- **fix(org,policy): a committed mutation whose audit row fails is not a
+  client error.** Under a split PostgreSQL control plane, policy-rollout and
+  policy-resource mutations wrote their audit row inside the control
+  transaction against a table that is not mirrored there, failing the whole
+  mutation. The audit now rides inside the transaction only when the pools
+  are the same, and a post-commit audit failure maps to a typed
+  `500 audit_failed_after_commit` that says the change took effect and must
+  not be retried.
+- **fix(orgclient): the push cursor advances by compare-and-swap.** A blind
+  save could rewind or skip the cursor under concurrency; the cycle now
+  advances it with a CAS, and the task, tool-account and cache-event wires
+  are mapped into the envelope with a reflective sentinel so a new wire
+  cannot be silently forgotten.
+- **fix(orgpush): zero-cost token rows are priced at push time.** Rows that
+  reached the org with no cost are now priced with the node's own cost
+  engine before shipping, and the org prices previously-unpriced model ids,
+  falls back honestly for an unknown session model, and shows an explicit
+  Unattributed spend bucket instead of quietly dropping it.
+- **fix(terminal): dashboard terminals link to their captured sessions.**
+  Late-starting sessions are now correlated (the first scan no longer gives
+  up before first activity), simultaneous terminals of the same tool no
+  longer share one candidate set, default-cwd launches auto-link, and the
+  behaviour extends across every adapter with a launcher rather than a
+  handful.
+- **fix(launcher,predict,hook): three node-daemon defects.** Hooks under
+  `observer claude` crashed on an inherited `OBSERVER_OOB_FD=3` that was
+  adopted without first checking it was still a pipe or socket (it is now
+  verified, and `OBSERVER_OOB_*` is scrubbed from tool-child environments);
+  predictor facts were coupled to pricing availability, so proxy-only
+  sessions got no cost band; and hook events collapsed several distinct
+  events into one row.
+- **fix(scripts): `restart-daemon.sh` refuses to run inside a
+  daemon-launched session.** Restarting the daemon kills that session
+  outright, because the daemon owns the pty, and it never resumes; the script
+  now refuses by default and tells you to restart from an outside shell.
+- **fix(scrub): Anthropic API keys with hyphens now redact.** The API-key
+  body regexes did not admit hyphens, so `sk-ant-api03` keys survived
+  scrubbing.
+- **fix(codeintel,watcher,orgserver): three smaller regressions.** Project
+  roots discovered under temporary directories were re-indexed on every
+  daemon start, burning minutes per boot; a legitimate large watermark
+  SQLite store was rejected by the oversize DoS gate; and `/ai-gateway`
+  crashed on an empty estate because its list endpoints returned `null`
+  rather than `[]`.
+- **fix(cloud): two hosted-lane defects.** The results-pull cursor is now
+  keyed by cloud host, so a node that had synced against staging no longer
+  replays staging's cursor against production and never pulls a production
+  result; and a zero-total trial-start transaction no longer flips a trialing
+  subscription to active (found against a live sandbox checkout, with the
+  Paddle goldens replaced by real sandbox deliveries).
+- **fix(org,pricing): a colliding price row answers `409`, and an undated
+  price takes effect when it is approved.** A duplicate model plus
+  effective-date pair produced a raw constraint `500`, and an undated row
+  approved from the assistant landed behind an earlier dated import instead
+  of superseding it.
+
+### Security
+
+- **Nine dated reviews since 1.32.0, all recorded in `docs/security.md`.**
+  Every arc in this release went through at least one fresh-context
+  adversarial pass before shipping: the Plane-B gateway and RBAC arc
+  (2026-08-30), Cloud Intelligence across seven separate rounds
+  (2026-09-02 through 2026-09-16), the sign-in arc and its hardening wave
+  (2026-09-07), lines-of-code tracking and the identity resolver
+  (2026-09-07), enterprise pricing and the admin assistant (2026-09-08), the
+  stateless-collectors architecture (2026-09-08 and a whole-arc review on
+  2026-09-10), and org budgets (2026-09-07). The ledger in `docs/security.md`
+  remains the canonical record.
+- **SOR-2: targeted erasure reached the durable store.** `observer-org
+  scrub-content` scrubbed only the hot data store, so a rebuild from the
+  Parquet system of record could resurrect scrubbed content. Closed - see
+  the Changed entry above.
+- **XFF-1: dashboard audit rows record the real transport peer.** Audit rows
+  recorded a forwarded address even when no trusted-proxy resolver was
+  injected; the transport peer is now recorded unless one explicitly is.
+- **Sign-in hardening.** `__Host-` cookie prefix behind a dual-read rename
+  transition (so no admin is force-logged-out across the upgrade), `Secure`
+  as an enforced policy with one explicit override, a double-submit CSRF
+  token on the one server-rendered form POST, logout as a CSRF-bearing POST,
+  MFA signal passthrough, IdP-initiated logout, an SSRF-hardened identity
+  probe, and a held identity that can no longer admit itself simply by
+  signing in again.
+- **Cloud Intelligence privacy invariants are pinned, not promised.** Zero
+  egress from the daemon (the CLI is the only outbound trigger, pinned by an
+  invariant test), preview bytes equal upload bytes, an authority gate that
+  refuses org-owned or unknown-authority evidence, credential absence checked
+  before any provider call, a content-free local ledger of everything sent,
+  and a per-table deletion matrix. The provider's data-retention posture is
+  now stated as an explicit, operator-attested disclosure rather than an
+  unqualified claim, and the marketing copy was flipped from absolute to
+  conditional truth with a CI gate holding it there.
+
+## [1.32.0] — 2026-08-26
+
+### Fixed
+
+- **fix(retention): the daemon no longer runs unbounded full-database
+  `VACUUM`s** — the retention size-cap's automatic, looping bare `VACUUM`
+  (which could write tens of GiB of SQLite temp files on large databases and
+  fill the host disk) is removed from every automatic path. Size-cap
+  reclamation is now a single bounded pass (aged-actions shed + WAL
+  checkpoint + incremental vacuum where enabled); full compaction is
+  operator-triggered via `observer prune --vacuum`, which now also requires
+  the daemon to be down and ~2× free disk headroom.
+- **fix(db): connection-scoped pragmas apply to every pooled connection** —
+  `synchronous`, `temp_store`, and a new `hard_heap_limit` memory backstop
+  moved into the SQLite DSN (previously they were applied post-open to one
+  arbitrary pooled connection, letting other connections spill temp files to
+  disk with default settings). The pool is now bounded
+  (`SetMaxOpenConns`/`SetConnMaxIdleTime`), and a regression test pins the
+  pragma set on N concurrent connections. Applied to the node DB, the org
+  server DB, and the edge WAL store.
+- **fix(db): startup integrity check is size-gated** — `PRAGMA quick_check`
+  (which reads every page and could run for over an hour on multi-GiB
+  databases) is skipped above a configurable size threshold
+  (`integrity_check_max_gb`, default 8) with a 10-minute deadline;
+  `observer doctor db` remains the explicit, authoritative integrity path.
+- **fix(observer): cross-process maintenance lease** — retention,
+  maintenance, and codeintel-on-start acquire a flock-based lease so
+  concurrent observer processes cannot duplicate expensive maintenance work;
+  codeintel index-on-start gained an aggregate deadline.
+- **perf(store): org-push snapshot queries no longer sort or scan far more
+  than they ship** — three per-tick reads fixed, each verified with
+  `EXPLAIN QUERY PLAN` and selection-equivalence tests: session network
+  events (per-session cap pushed into SQL via `ROW_NUMBER()` so the body
+  join fires only on surviving rows, migration 089), session process rows
+  (same cap pushdown, plus the per-run event count now seeks a new
+  `process_run_id` index instead of aggregating the whole `process_events`
+  table per tick, migration 090), and the codeintel dev + teams-tier
+  aggregates (Cartesian-product joins rewritten to pre-aggregate per
+  file). On the profiled node these were ~55% of steady-state daemon CPU.
+- **fix(arena): Windows build** — unix-only process-group syscalls in
+  `internal/arena` are build-tagged, restoring `GOOS=windows` builds (and
+  the win32 npm/VSIX artifacts).
+
+### Added
+
+- **feat(observer): env-gated pprof endpoint** — `OBSERVER_PPROF_ADDR`
+  (loopback-only, default off, fail-soft) serves `net/http/pprof` for the
+  daemon's lifetime, so steady-state CPU consumers can be named empirically.
+- **feat(observer): temp-file watchdog + startup guidance** — a background
+  check WARNs when deleted-but-open SQLite temp files exceed a threshold
+  (the failure mode that silently consumed ~80 GiB inside WSL), a
+  stale-binary check WARNs when the running executable no longer matches
+  the on-disk build, and daemon startup states that full integrity checks
+  and compaction are operator-triggered.
+
+### Docs
+
+- Root-cause audit + remediation plan for the disk/compute exhaustion
+  incident, and a steady-state CPU audit (pprof-named findings, a full
+  background-loop cadence inventory, and prevention guidance) with its
+  remediation plan — see `docs/audits/` and `docs/plans/`
+  (`*2026-08-26*`).
+
+## [1.31.0] — 2026-08-17
+
+### Added
+
+- **feat(adapter): JetBrains Junie adapter** — event-sourced `events.jsonl`
+  capture for JetBrains' Junie coding agent, bringing the supported-tool
+  count to 33.
+- **feat(judge): opt-in Baseten judge provider** — a Qwen 2.5 3B Instruct
+  judge behind a budget on/off switch, for admission and eval scoring.
+- **docs: adapter count reconciled to 33** — READMEs, package manifests, and
+  in-product copy aligned to the 33 tools folded from the integration
+  registry.
+
+- **feat(plane-a): P1-4 remote-config and cert rotation v1** — server migration
+  040 `org_fleet_remote_config` / `org_fleet_cert_events`; GET/PUT
+  `/api/org/fleet/collectors/{id}/config`; POST
+  `/api/org/fleet/collectors/{id}/certs/rotate` (placeholder not_before/
+  not_after); fleet board gains `remote_config_present` / `last_cert_event`.
+
+- **refactor(plane-a): telemetry bundle helper for deployment paths** —
+  `telemetry.AssembleBundle` is the single seam for capabilities/Doctor/
+  connector Test connection; handlers no longer construct CH/Parquet/SQLite
+  adapters inline. Full Control Store rewrite (Postgres dialect across
+  orgserver handlers) remains residual (tracker P1-7).
+
+- **feat(plane-a): P1-1 FTS filter on ClickHouse query store** — additive
+  `model.QueryRequest.TextQuery`; ClickHouse `fts_text` column (DedupKey+
+  ServiceName) + `positionCaseInsensitive` filter. Trajectory
+  (`obs_traces`) explorer remains without FTS — TelemetryQueryStore only.
+
+- **feat(plane-a): P1-9 Doctor + demo IaC emit** — `POST /api/org/deployment/doctor`
+  returns `{ok, probes, ingest_ok, query_matched, detail}` (hot/ingest/query/
+  durable Probe + synthetic `doctor-<uuid>` batch when hot configured);
+  `GET /api/org/deployment/iac` emits static Terraform/Bicep demo templates
+  (CH URL / Blob / ACI open-webui vars, no secrets); `/deployment` Doctor +
+  IaC card.
+
+- **feat(plane-a): P1-7 ClickHouse HTTP adapter + JSONL durable SoR** —
+  `clickhouse.Store` (EnsureSchema / IngestBatch / Query / Probe via HTTP
+  JSONEachRow; `OBSERVER_CLICKHOUSE_URL` or `CLICKHOUSE_URL`); `parquet.Store`
+  filesystem JSONL under `OBSERVER_PARQUET_ROOT` (engine `parquet_object`,
+  interim until Arrow); stubs when unset; `assembleTelemetryBundle` prefers
+  env stores; `POST /api/org/deployment/doctor` synthetic ingest+query.
+
+- **feat(plane-a): P1-4 fleet inventory + health board v1** — org-scoped
+  collector board (`fleetinventory`) with healthy/stale/never_seen;
+  `GET /api/org/fleet/collectors`; hosted on `/deployment`. Residual:
+  remote config / cert rotation.
+
+- **feat(plane-a): P1-2 entity correlation graph v1** — server migration
+  039 `org_entities`/`org_entity_edges`; Upsert/List/Link/Neighbors; admin
+  APIs + `/deployment` entity card. Provenance taxonomy unchanged.
+
+- **feat(plane-a): P1-9 Phase 2 — connector catalog + capability probes** —
+  server migration 038 `org_deployment_connectors`; catalog CRUD + Test
+  connection via P1-7 capability Probe; `/deployment` shows resolved
+  capabilities + connectors.
+
+- **feat(plane-a): P0-10 Phase B — targeting, simulate, rollout UX** —
+  workspace/environment/service selectors on policy-resource publish
+  (signing-bound); agent GET query attrs; `POST …/simulate` fleet
+  preview; `/policy` rollout panel wired to P1-3 APIs.
+
+- **feat(plane-a): P1-7 Phase A — engine ratification + capability seams** —
+  designate ClickHouse T1 / Postgres control / SQLite starter / Parquet SoR
+  (harness = validation). Pure `telemetry/model` + five capability contracts +
+  topology resolver; SQLite adapter; ClickHouse/Parquet NotConfigured stubs;
+  `GET /api/org/deployment/capabilities`. Plan:
+  `docs/plans/plane-a-storage-ha-plan.md`.
+
+- **feat(plane-a): P1-9 Deployment Control Center Phase 1** — server
+  migration 037 `org_deployment_wizard`; `GET/PUT` topology APIs; web2
+  `/deployment` wizard (SQLite / ClickHouse-recommended / existing /
+  custom). Connectors, Doctor, IaC residual (P1-7 blocked). Plan:
+  `docs/plans/plane-a-deployment-control-center-plan.md`.
+
+- **feat(plane-a): P0-10 Organization Control Center Phase A** — admin
+  HTTP list/show/lint for `admission.input` + `egress.routing_guardrail`;
+  web2 `/policy` gains family tabs (Guard TOML + Plane-A JSON
+  lint→publish) with links to `/fleet-state`. Targeting/simulate/rollout
+  UX residual. Plan: `docs/plans/plane-a-p0-10-org-control-center-v1-plan.md`.
+
+- **feat(plane-a): P1-3 policy rollout + exceptions v1 (API+CLI)** —
+  server migration 036 (`org_policy_rollouts` / `org_policy_exceptions`);
+  canary delivery via `policyrollout.ResolveDelivered` on
+  `GET /api/agent/policy/{family}` (named + hash% cohort; waivers force
+  baseline); admin stage/approve/promote/halt/rollback + exception
+  routes; auto-halt from `policy_state` cohort rates; rollback republishes
+  baseline as MAX+1; CLI `observer-org policy-rollout`. UI deferred to
+  P0-10. Plan: `docs/plans/plane-a-p1-3-policy-rollout-exceptions-plan.md`.
+
+- **feat(plane-a): P1-1 trajectory explorer v1 (pagination + filters)** —
+  `GET /api/org/obs/trajectories` gains Sessions-style `limit`/`offset`/
+  `total` plus status/source/session_id/model/provider filters over the
+  pushed `obs_traces` substrate. Web2 `/trajectories` gains a filter row
+  + pager. FTS / saved views / live-tail / gateway browse / million-trace
+  remain deferred (P1-7). Plan:
+  `docs/plans/plane-a-p1-1-searchable-trajectory-explorer-plan.md`.
+
+- **feat(plane-a): P1-10 production self-obs retrofit (Phases A–D)** —
+  opt-in `[selfobs]` (default OFF) builds a credentialed OTLP emit sink
+  in `buildProxy` (Shutdown on cleanup). Routing Decide emits sampled
+  DecisionRuns (`routing_sample_n`, default 32). Admission Admit, online
+  eval (`OnlineSampler.OnScored`) + CLI `obsEvalRun`, and `observer
+  advise` emit under `system_agent`. Conformance registry Wired:true for
+  routing/advisor/admission/eval (insight-agent remains P2-7). Plan:
+  `docs/plans/plane-a-p1-10-production-retrofit-plan.md`.
+
+- **feat(plane-a): P0-5 unified policy resource v1** — org distribution for
+  `admission.input` + `egress.routing_guardrail` (agent mig 081 / server mig
+  035). Signed fetch + CAS-fenced accept, enrolment-generation fence,
+  LKG-before-listener (incl. standalone `observer proxy start`), steady-state
+  poller, layered Org ownership on the shared AdmissionService, and P0-6
+  reporter widening (`accepted_inert` / `delivered_unaccepted`). Pure
+  compilers live in `internal/policyfam/{admission,egress}`; wire in
+  `internal/orgclient` + `cmd/observer/policyresource_wire.go` +
+  `internal/orgserver/policyresource`. Codex BLOCK B1–B11 + SHOULD-FIX
+  SF1–SF8 folded (304 revalidate, LKG pin-required, cache-tree clear on
+  identity change, Cleared outcome slots, accepted_inert↔observe,
+  publish BEGIN IMMEDIATE + in-txn audit, 4KiB description cap).
+
+- **feat(dashboard): New Terminal dialog gains a model picker.** Per-tool,
+  capability-gated: a grounded `Model ModelSpec` row on the adapter's
+  `internal/integration` capability declares HOW a tool takes a model
+  (top-level flag, subcommand-scoped flag, or env var) so no consumer
+  branches on tool name. The picker is seeded from the tool's own local
+  session history (180-day window, recency-ordered) plus the row's
+  grounded known models; an invalid or unsupported value is silently
+  dropped so the tool's own default applies. goose is delivered via
+  `GOOSE_MODEL` (env-only, no flag exists); kiro-cli's `--model` lives
+  under its `chat` subcommand. openclaw and droid get no picker at all —
+  neither has a grounded seed-time model mechanism (droid's `--model`
+  exists only on its headless `droid exec`, not the interactive launch).
+
+- **feat(terminal): New Terminal launches can run inside a bubblewrap
+  filesystem sandbox (Linux + WSL2, opt-in, default off).** New
+  `internal/sandbox` (bwrap argv composition + a readiness probe) and
+  `internal/workspace` (three host-side workspace sources) packages,
+  both pure per CLAUDE.md #1 — no SQL/HTTP/os-exec, the actual `bwrap`
+  and `git` exec calls live in the one seam,
+  `cmd/observer/terminal_sandbox.go`. The private root is bwrap-only in
+  v1 (no Docker backend); it shares the host's network namespace, so
+  **this does not block or monitor egress** — a sandboxed agent can
+  still reach the network exactly like an unsandboxed one, same
+  provider creds and all. `~/.observer` is bound read-write inside the
+  sandbox on purpose, so the proxy route, hooks, and token capture are
+  unaffected. Workspaces come from one of three host-side git
+  operations before the sandbox starts — `live` (bind the real project
+  dir), `clone-local` (`git clone --no-hardlinks`, so the clone can
+  never hardlink objects back into the real repo), or `clone-remote`
+  (host-side `git clone <url>` using your ambient auth, gated by
+  `allow_remote_clone`, off by default) — plus a fourth, `worktree`,
+  that ships **off by default** because it needs the main repo's `.git`
+  bound read-write and a known pre-existing worktree-attribution bug
+  (`findGitRoot`) has to be fixed first. Only `claude-code` has a
+  grounded per-tool `SandboxSpec` (its real state directories) in v1;
+  every other adapter is honestly reported as not sandbox-launchable
+  rather than guessed at. A sandboxed launch request that can't
+  actually be satisfied (disabled, backend missing/too old, userns
+  denied, tool unmapped, workspace prep failed) **fails the launch
+  outright** — there is no silent unsandboxed fallback. New
+  `observer workspaces ls|rm <id>` CLI to inspect/clean up the managed
+  workspace tree (no automatic retention sweep yet in v1). See
+  `docs/sandboxed-terminals.md`.
+
+### Fixed
+
+- **fix(watcher): New Terminal install→launch capture for Muse/Prime (and peers).**
+  The watcher used to freeze its fsnotify root set at daemon start via
+  one-shot `Detected()`, and entered permanent idle mode when no session
+  directories existed yet. Installing Muse/Prime (or any transcript-only
+  adapter) from the New Terminal dialog and launching immediately left
+  that session invisible until a daemon restart. `Watcher.RefreshRoots`
+  now hot-adds newly-existing roots into the live watch set and Scans;
+  the dashboard kicks it (with a short retry schedule) after guided
+  install and after a successful launch; the poller's full-scan pass
+  also re-applies roots so CLI installs recover without a dashboard
+  kick. Empty `enabled_adapters = []` still detects nothing.
+
+- **fix(launchers): every `observer <tool>` launcher now faithfully
+  passes arbitrary flags through to the wrapped CLI.** `observer
+  claude --model sonnet` previously died on a silently-swallowed
+  unknown-flag rejection (exit 1, no output); passthrough only worked
+  when a positional preceded the flag or after `--`. All 24 launcher
+  verbs now parse their own wrapper-reserved flags manually
+  (`DisableFlagParsing` + a shared parser) and forward every other
+  token verbatim, in order. Wrapper-owned flags (`--resume`,
+  `--continue-from`/`--carry` and the handoff family,
+  `--attach`/`--no-attach`/`--no-proxy`, `--verify`, `--config`,
+  `--proxy`, `--<tool>-path`, codex's process-control flags,
+  copilot-cli's `--model`) keep their existing meaning and are never
+  forwarded; malformed wrapper-flag usage now errors loudly instead
+  of silently. Positional-first and `--` invocations behave
+  byte-identically to before. Known trade-off: shell completion no
+  longer suggests wrapper flag names on these subcommands (a cobra
+  `DisableFlagParsing` limitation).
+
+## [1.30.0] — 2026-08-08
+
+### Fixed
+
+- **fix(cursor): Cursor-on-Windows capture restored end to end.** The
+  hook bridge had been dead since 2026-07-05 behind stale tee-shim
+  entries; auto-register now self-heals that file shape (loud WARN +
+  remediation on failure, `last_result`/`last_error` persisted to
+  `hook_checksums.json`), the watcher resolves project roots from
+  `.workspace-trusted` with stat-gated candidate expansion, and hook
+  payloads carrying the IDE's `Uri.fsPath` spelling (`/c:/…`) now
+  land on the same canonical `/mnt/c/…` root as the watcher's rows —
+  one project identity instead of up to six spellings of one
+  directory.
+- **fix(pathnorm): the `/c:/` URI-fsPath drive spelling folds into the
+  Windows-drive layer.** Anchored lexical detection (never
+  `filepath.IsAbs`, which is host-dependent); non-drive lookalikes
+  (`/cache/…`, `/cc:/…`, bare `/c:`) are pinned untouched. Hook ==
+  watcher convergence is enforced by test.
+
+### Changed
+
+- **Tool count synced to 31 everywhere, from one generated manifest.**
+  `tools/toolcountgen` derives the editorial adapter count from the
+  integration registry (fold rules explicit and tested); the website
+  hero badge, docs, READMEs, npm and VS Code Marketplace descriptions,
+  and the extension walkthrough all read 31 now, and the accuracy
+  checker fails on bare "N tools"/"N integrations" drift, on
+  registry↔prose disagreement, and on the distribution surfaces that
+  previously sat outside its scan root.
+- **Version-scoped the stale "Cursor 3.4+ stopped writing transcripts"
+  claims.** True on 3.4.20–3.9.16 where it was measured; on 3.14.27
+  the transcript walker is live again and currently the sole
+  Windows-IDE capture path.
+
+## [1.29.0] — 2026-08-07
+
+### Added
+
+- **feat(adapter): Meta Muse Code CLI — the 30th adapter.** Event-sourced
+  `session.jsonl` parsing (envelope → payload_type → event.kind) with
+  microsecond `recorded_at` timestamps. `model_completed.usage` needs
+  DUAL netting — input including `cache_read`, output including
+  reasoning — the OpenAI-Responses convention rather than Anthropic's;
+  a subagent run under `subagent/<child-uuid>/` rolls up into its
+  parent session. `auth.json`, `trust.json`, and `tui-history.jsonl`
+  are never read.
+- **feat(adapter): Prime Agent — the 31st adapter.** Prime Intellect's
+  Prime Agent CLI is a hard fork of pi-mono with its own parser, not a
+  retag of the existing `pi` adapter. Flat JSONL sessions under
+  `~/.prime/agent/sessions/<uuid>.jsonl` form a tree via `parentId`
+  (8-hex ids); the envelope timestamp is ISO-8601 while the inner
+  message timestamp is Unix milliseconds. Usage input arrives already
+  NET (`totalTokens == input+output+cacheRead+cacheWrite` exactly) —
+  the opposite of most adapters' gross-then-netted convention, so this
+  one is a genuine exception, not a bug. `ipython` is the sole
+  built-in tool: reads, edits, and shell commands all run through one
+  persistent Python kernel. A child agent run's usage folds into the
+  parent's token row via the same source-event id (ON CONFLICT
+  MAX-upgrade, never double-counted). `auth.json`,
+  `daemon-workers/*.json`, and the pickled `kernel-state.dill` sidecar
+  are never read.
+- **feat(cli): `observer muse` and `observer prime-agent` — launcher
+  verbs 22 → 24.** Muse launches non-proxied for now; an open
+  `--base-url` question blocks proxy routing until it's answered.
+  Prime Agent launches proxied, through its own
+  `~/.prime/agent/models.json` provider entry. Both ship with the same
+  grammar/resume-row/provider-merge conformance tests every other
+  launcher verb carries.
+- **feat(dashboard): plain-shell "New terminal" launch, opt-in.** The
+  New Terminal dialog can now spawn a bare shell — the child's own
+  `$SHELL`, or `/bin/bash`/`/bin/sh` as a fallback — instead of only a
+  known AI-tool launcher. Off by default and deliberately independent
+  of the existing fresh-agent toggle: `[terminal.launch].allow_shell`
+  is its own opt-in, because a plain shell can run any command, a
+  strictly larger authority grant than a capability-registry-bounded
+  AI-tool launch. The dialog only offers the option when the daemon
+  reports it enabled, rather than showing it and failing at launch
+  time.
+- **feat(dashboard,obs): Policies module — admission and egress policy
+  authoring on the node dashboard.** What used to be config-file-only
+  setup is now a guided editor at `/policies`: six tabs (Overview,
+  Templates, Guardrails, Routing, Test, Activity) covering an
+  11-entry template catalog across five groups (Scope, Safety, Cost,
+  Data locality, Bundles) for one-click guardrail criteria and egress
+  rules, plus live validate-and-apply and an activity feed. The UI
+  states its own honesty limit rather than hiding it: the dashboard
+  and the proxy each hold a SEPARATE `AdmissionService` instance, so
+  "Apply live" only takes effect on the dashboard's own SDK front door
+  immediately — egress edits and proxy-side enforcement need Save plus
+  a daemon restart. Paired with a new `examples/copilot-harness` demo
+  walking the whole Plane-A governance loop (admit → proxy → optional
+  OTLP trace) end to end.
+- **feat(store,dashboard,cli): overall session rating (1–10).** A
+  fourth session-classification primitive alongside tags, favorite,
+  and note (migration 080): one reviewer score per session, landing
+  as a column on the existing `session_annotations` row rather than a
+  new table. 0 is the "unrated" zero value everywhere, and an
+  annotation row is garbage-collected once favorite, note, and rating
+  are all back to their zero states — "no row" and "reviewed and
+  found unremarkable" stay indistinguishable, as intended. Node-local
+  like the rest of session classification: no wire surface, no
+  org-push column.
+- **feat(cost,dashboard): dated pricing — recorded → dated → undated.**
+  A new per-model rate timeline lets a price change take effect
+  without silently repricing history: usage before a cut keeps the
+  old rate, usage after keeps the new one. First landed against a
+  real change — the OpenAI GPT-5.6 Terra/Luna price cut effective
+  2026-07-30 — then rolled out across the dashboard surfaces that had
+  been pricing every row at today's flat rate regardless of when it
+  ran: report, budget, statusline, live, and experiments, plus two
+  more found beyond the originally named list. Each now prefers a
+  turn's own recorded `cost_usd` first, falls back to the rate that
+  was actually in force on that turn's own timestamp, and only falls
+  back further to the current flat rate when neither exists.
+- **feat(website): `/pricing`.** The site had no pricing link anywhere,
+  and a missing price label reads as a hidden price rather than a free
+  product. The page states what is true: the node **and** the
+  self-hosted org server are both Apache-2.0 with no licence gate, so
+  Teams can be self-hosted free today; commercial support and a managed
+  option are in design and do not exist yet. No figures, because none
+  are shipped. Pricing takes the Arcade slot in the primary nav; Arcade
+  stays reachable from both footers.
+- **feat(website): homepage rebuilt around the install command.** Four
+  competing hero subheadlines collapse to one, and
+  `npx @superbased/observer` becomes the primary copyable call to action
+  — the site's own analytics already counted installing as the
+  conversion while the gold button pointed at the docs. "No account · No
+  signup · No telemetry" is promoted out of fine print. A new
+  measurement-honesty section surfaces the public retraction, which had
+  no link from any marketing page, alongside two entry points to the
+  eight comparison pages, previously unreachable from the marketing
+  site.
+- **feat(website): FAQPage schema on the comparison pages.** The docs
+  renderer was already generic; emission was gated behind an allow-list
+  containing only the track section. Auditing Compare and flipping one
+  map entry adds 31 questions across 9 pages, taking site coverage from
+  30 pages / 151 questions to 39 / 182, with honesty parity holding by
+  construction.
+- **feat(website): RFC 9116 `security.txt`.** The disclosure route
+  existed only as prose; researchers and enterprise scanners look for
+  `/.well-known/security.txt` first, and its absence reads as no
+  process.
+- **test(website): licensing and release-date tripwires** in the
+  accuracy gate (9 → 11 check groups). The licensing check binds to
+  structural column identity — locate the header column named
+  SuperBased, inspect only its cells — rather than proximity to the
+  word, because comparison prose routinely names SuperBased and a
+  competitor in one sentence.
+
+### Fixed
+
+- **fix(integration,adapters): adapter-count surfaces move together,
+  30 → 31.** Landing Prime Agent meant every pinned adapter-count
+  surface had to move in the same pass — `observer adapters`, doc
+  counts, and the generated website pages that state "N coding tools"
+  — six drift gates re-verified in sync so the number can't drift out
+  from under the roster the way a stale "26 coding tools" once did
+  (see v1.28.0's tool-count drift fix).
+- **fix(vscode): `observer.daemon.mode` now defaults to `auto`.** It
+  shipped as `detect`, which never spawns the daemon, so a fresh install
+  showed an empty sidebar and a warning status bar until the user found
+  and changed a setting the README itself called "recommended for most
+  users" — the documentation and the default disagreed, and the default
+  won. `auto` attaches to a daemon you already started and only spawns
+  when none is running, and only ever stops a daemon it spawned itself.
+- **fix(website): three shipped claims that contradicted the site's own
+  honesty standard.** Literal `[REDACTED]` placeholders in the live
+  `/enterprise` SSO and enrolment copy; SuperBased's own Apache-2.0
+  licence described as "Source-available" across nine comparison pages,
+  next to competitors correctly labelled MIT; and npm/PyPI **downloads**
+  presented as "total installs" beside a 35-star repo.
+- **fix(website): the nav "Install free" button was unreadable.** It
+  rendered `--ink-dim` cream on gold at 1.52:1, in both rest and hover,
+  on every home-layout page: the CTA sits inside `.nav__links`, so that
+  rule's higher specificity beat `.nav__cta` and the intended dark text
+  never applied. Now 9.14:1.
+- **fix(website): WCAG AA contrast across both themes.** Eight measured
+  failures, worst 2.70:1, corrected by lightness and alpha only so hue
+  and brand identity are unchanged; verified live at 77 elements per
+  theme with zero failures.
+- **fix(website): meta descriptions across 61 docs pages.** All were
+  past the point where search results truncate, and 16 generated ones
+  carried a literal ellipsis mid-sentence. Composition is now
+  budget-aware, spending what is left after the per-tool lead on the
+  longest call-to-action rung that fits, so the marketing tail degrades
+  and the differentiating fact survives. Median length 209 → 154, zero
+  ellipses, all unique.
+- **fix(website): exactly one `<h1>` per docs page.** 62 of 95 emitted
+  two — one from the front-matter title, one from the markdown body.
+  Fixed in the renderer rather than the sources, because the changelog
+  page is itself generated and would have been overwritten.
+- **fix(website): sitemap freshness.** `lastmod` was a hardcoded
+  constant reused for every URL and never updated, leaving `/docs` a
+  month stale; it now derives per file from git history. `changefreq`
+  was "weekly" on 94 of 104 URLs, contradicting its own stale
+  timestamps.
+- **fix(website): missing `<main>` landmark and focus ring** on the
+  home-layout pages, which had neither while every support page had
+  both.
+
+## [1.28.0] — 2026-08-01
+
+### Added
+
+- **feat(cli): `observer statusline` — one-line, fail-open, wordmarked
+  cost status.** Prints a single line — the `▞ superbased` wordmark plus
+  (when available) the current session's cost, today's total observed
+  spend, and the active model name — for Claude Code's `statusLine`
+  contract or any host tool that execs a command and reads stdout.
+  Input precedence is piped stdin JSON, then `--session-cost`/`--model`/
+  `--cwd` flags, then `OBSERVER_STATUSLINE_SESSION_COST`/
+  `OBSERVER_STATUSLINE_MODEL` env vars, then nothing — segments are
+  omitted, never rendered as a fabricated `$0.00`. The "today" segment
+  comes from a new, lean `GET /api/statusline` daemon endpoint over a
+  bounded, loopback-only HTTP call (`--timeout`, default `80ms`); when
+  no daemon is running, or it doesn't answer in time, that segment (and
+  only that segment) is silently omitted and the command still exits 0.
+  `--no-daemon` skips the daemon attempt entirely; `--explain` reports
+  which data path was used to stderr; `--json` emits a machine-readable
+  line. All dollar figures are
+  estimated list-price totals, not invoiced amounts, stated once at
+  `--help` and at registration time, never per-render. Registration is
+  opt-in via `observer init --statusline` (writes Claude Code
+  `settings.json`'s top-level `"statusLine"` key) — never implied by
+  `--all`, never auto-registered by `observer start`; `--uninstall`
+  removes the key entirely. A Claude Code install detected only on the
+  Windows side of a cross-OS WSL setup gets an honest WARN, not a
+  cross-OS bridge. The VS Code status bar's live-state text also picks
+  up the same `▞ superbased` wordmark prefix
+  (`observer.statusBar.wordmark`, default `true`, to turn it off). The
+  daemon side adds migration 074 (`idx_token_usage_timestamp`) so the
+  endpoint's "today" aggregate is an index scan, not a table scan. See
+  [`docs/observer-statusline.md`](docs/observer-statusline.md).
+- **feat(cli): `observer usage` — zero-install one-shot cost report (the
+  `npx @superbased/observer` activation path).** Scans every detected AI
+  coding tool's own local session files into a throwaway temp database,
+  prints one tool × model cost table, and deletes the database again.
+  Zero configuration, zero network calls: pricing is embedded in the
+  binary and the default path never reads `~/.observer/config.toml` or
+  any `OBSERVER_*` environment variable, never writes any AI tool's
+  config, and never binds a port. Flags: `--since` (default `30d`,
+  accepts `7d|30d|90d|all|RFC3339`), `--days`, `--group-by`
+  (`tool-model|tool|model|day`), `--tool`, `--budget` (default `30s`,
+  `0` = unlimited, prints an honest `partial:` footer on expiry),
+  `--json`, `--keep-db`, `--config` (opt back into a real config and its
+  pricing overrides), `--no-progress`. Bare `observer` now runs this same
+  report on a machine with no local SuperBased state at all (no
+  `~/.observer/observer.db`, no `config.toml`, no daemon listening) — a
+  state branch, never an invocation-channel branch — and prints the
+  usual welcome screen otherwise; `OBSERVER_ONESHOT=off` always forces
+  the welcome screen. New pure package `internal/oneshot`. See
+  [`docs/one-shot-usage-report.md`](docs/one-shot-usage-report.md).
+- **docs: repo-landing hygiene fixes.** README gets a "Try it in one
+  command" block (the `npx`/`observer usage` activation path, immediately
+  above Install) and a plain, no-count "⭐ Star this repo" badge + CTA
+  line near the top. `scripts/release.sh`'s public-mirror re-staging now
+  also carves out `docs/deployment-models.md`, `docs/remote-access.md`,
+  `docs/session-handoff.md`, `docs/cache-tracking.md`, and the
+  `docs/guard-{rules,policy-authoring,compliance}.md` trio, fixing four
+  confirmed-live 404s on the public repo's README links (all three
+  re-staging sites — the force-add list, the `.gitignore` negation
+  block, and the `docs_leaks` sanity-check regex — kept in sync). Both
+  README hero infographics regenerated from new **versioned HTML
+  sources** (`docs/assets/infographics/gen/` + `render.mjs` — the old
+  images were one-offs with no source in the repo): current single-word
+  lockup, correct counts (29 adapters / 25 MCP tools), and the
+  proxy-accuracy / cache-attribution / routing differentiators now in
+  the pixels. The stale `13-trajectories.png` screenshot recaptured from
+  the web2 admin dashboard's Trajectory Explorer (the node dashboard no
+  longer hosts that page).
+- **feat(mcp): droid + Command Code MCP registration.** `observer init`
+  can now register the SuperBased MCP server into Factory Droid and
+  Command Code — one locate row + Installed probe + registry `MCPTarget`
+  each, following the grounded droid pattern. Registry rows only; no
+  new switches (integration-registry discipline).
+- **feat(store,dashboard,web,cli): session tags/favorites/notes.** New
+  migration 075 backs a `sessiontags` store seam behind Execute-class
+  routes (mutations gated the same way as every other write path), plus
+  an `observer tag`/`observer tags` CLI with exact-first-then-index-range
+  prefix resolution. The dashboard gains `TagPill`/`TagEditor`,
+  star-favorite toggles, a note field, server-side tag+favorite filters,
+  and a tags rollup panel; the rollup query is chunked past SQLite's
+  32766 bind-variable ceiling (`cost.SessionRowsByID`, capped at 900
+  session IDs per scope — the pre-fix symptom was cost columns silently
+  zeroing out, not an error). Remote devices are honestly read-only for
+  tag mutation: the only `Execute`-class mint is terminal-scoped and
+  loopback, so a phone or tablet viewing the dashboard sees the
+  classification controls disabled with a stated reason rather than a
+  control that quietly fails. Mutations are validate-before-write atomic
+  and single-flight; a conflicting note edit surfaces a hint instead of
+  silently overwriting. Privacy pins cover the new columns end to end
+  (a canary tag proven never pushed under `admin_managed`). See
+  [`docs/dashboard-walkthrough.md`](docs/dashboard-walkthrough.md)
+  ("Classifying sessions: tags, favorites, notes").
+- **feat(announce,web,orgserver,orgclient,web2): dashboard
+  announcements, three rails.** New pure package `internal/announce`
+  backs **R1**, a `GET /api/announcements` embedded rail with a
+  dismissible `AnnouncementBanner` (ack tracked in `sb_announce_ack`,
+  never re-shown once dismissed). **R2** is a click-only npm-metadata
+  piggyback — the `superbased.announcement` field an operator authors
+  into `npm/observer/package.json` at publish time and the dashboard
+  reads passively; an always-on background poll was considered and
+  rejected for the zero-network posture `observer privacy` states, and
+  the choice is written down on the measurement-honesty page. **R3** is
+  a signed org-distribution rail on the routing-policy pattern: agent
+  migration 076 (a node-side cache) + server migration 022, a
+  `[dashboard].org_announcements` gate (partial-merge default tested),
+  and a web2 composer as the first UI consumer of the sign-and-distribute
+  mechanism. See Fixed below for the security round that hardened R3
+  before it shipped, and
+  [`docs/teams-operations.md`](docs/teams-operations.md) §7 for the
+  publish/retract/trust-model/opt-out operator reference.
+- **feat(tooltax,web): canonical cross-adapter tool taxonomy.** New pure
+  package `internal/tooltax` (WP-T1) is a 1,074-row table across all 30
+  tool identities, with `MCPIdentity` as the one owner of MCP-tool
+  naming — a corpus-measured slash-form convention was dropped on
+  zero corpus evidence rather than guessed at, closing a taint
+  false-positive class; `models.IsMCPToolName` now delegates to it, and
+  the routing package's independent zero-imports pin correctly refuses
+  the same delegation, with equivalence proven from the tooltax side
+  instead. WP-T2 generates a TypeScript mirror (`actiontax.gen.json` →
+  `actions.ts` as a reader) so the dashboard's category/colour data
+  can't drift from the Go table, aligns the MCP-parser divergence to Go,
+  and adds a `taxonomy-build-drift` CI job. A codex gate round then
+  closed the real hole the first pass left open: the Go-side test suite
+  stayed green while a hand-written TS reader could still silently
+  diverge, so the fix is a REAL-TS parity gate that esbuild-compiles the
+  actual `actions.ts` against 28 Go-oracle vectors, a generated literal
+  category union that makes a missing `CATEGORY_COLOR` a compile error
+  instead of a silent runtime fallback, and `C:/`-drive plus
+  POSIX-colon path guards.
+- **feat(mcp,cli,docs): published stable MCP local contract.**
+  [`docs/mcp-contract.md`](docs/mcp-contract.md) documents the full
+  25-tool tier table (18 stable, 4 conditional, 3 experimental) and
+  `observer contract --json` emits it as machine-readable data, backed
+  by conformance tests that pin it against the real server; the README
+  gains an Integrations section pointing at it. A codex round then made
+  the published invariants actually true: a `days`-parameter clamp
+  closes a gap between the documented and enforced range, every one of
+  the 25 tools' required parameters and all 18 stable tools' result keys
+  are wire-checked, and the markdown drift-gate test now parses BOTH the
+  doc and the generated mirror instead of one — the prior version could
+  pass while blind to a real divergence between them.
+- **feat(plugins): adapter distribution as installable plugins, Phase 1
+  in-repo — not yet published.** `plugins/plugingen` satisfies the
+  one-owner registration rule by execution rather than duplication: it
+  runs the real `observer init` registrars (`mcp.Registrar`,
+  `hook.Registry`) against a sandbox `$HOME` and transposes their exact
+  output into `plugins/claude-code/` (a marketplace root plus a plugin
+  directory — `plugin.json`, `.mcp.json`, `hooks.json` with all 22
+  events) and `plugins/cursor/deeplink.txt` (a static, exact-config
+  base64 deeplink, with its inherent one-click-install caveat stated
+  rather than hidden). A byte-for-byte `verify-plugins-build` plus a
+  `plugins-build-drift` CI job keep the generated trees honest, and
+  `sync-npm-version.sh` now stamps both plugin manifests with the full
+  semver (an opaque version pin, not MV3's numeric-core trap). Nothing
+  is published: the `superbasedapp/observer-plugins` repo, the Claude
+  Code marketplace listing, and the Cursor deeplink distribution all
+  stay operator-gated pending a decision on a known caveat — installing
+  the plugin alongside `observer init --claude-code` double-registers
+  hooks, so both would fire on every event until that's deduped.
+- **feat(orgserver,orgclient,web2): Teams member-invite loop,
+  default-off.** `[server].member_invites` (default `false`) lets an
+  active admin mint a capped, audited, time-boxed invite link — server
+  migration 023 backs the monthly cap and the `invite_minted` audit
+  trail — with a web2 invite composer page and a node-dashboard nudge on
+  the `Execute`-class surface. Conversion is reconstructed by joining
+  `minted_by` against `used_at`; nothing new goes on the agent wire. See
+  Fixed below for the security round that closed eight findings (seven
+  fixed, one documented) before this shipped.
+- **feat(plugins): one-command install for 20 AI coding tools, published
+  as the public `superbasedapp/plugins` repo.** Each supported tool can
+  now wire SuperBased up through its own native plugin or extension
+  mechanism instead of a hand-edited config file. The repo is *assembled*
+  from this one, never hand-maintained: `scripts/assemble-plugins-repo.sh`
+  runs the REAL `observer init` registrars (`mcp.Registrar` +
+  `hook.Registry`) against a sandbox `HOME` and transposes their exact
+  output, so a plugin manifest can never drift from what `init` actually
+  writes. Coverage grew across three waves to a **52-file** assembled
+  tree: six native manifests (kimi-code, qoder, devin, droid, openclaw,
+  antigravity — validated with each vendor's own validator where one
+  exists), six generated config listings (crush, kiro-cli, copilot-cli,
+  kilo-code, roo-code, open-interpreter), a Gemini CLI extension, a Goose
+  listing, a Codex plugin + marketplace, and a Copilot
+  `vscode:mcp/install` deep link. `@superbased/opencode-plugin` is
+  published to npm. Cowork's `.mcpb` bundle is built but deliberately
+  **not** claimed as supported until a live install verifies it.
+- **feat(tooltax): a canonical tool-name taxonomy shared by every
+  adapter.** A single 1,074-row table (30 tools) is now the one owner of
+  what each tool call *is* — its canonical name, category, and surface —
+  replacing per-adapter string matching. Adapters read `tooltax.For`;
+  migration 077 backfills historical rows whose `action_type` was
+  `unknown`; the dashboard gains a `/api/tools/breakdown` endpoint with
+  real category and surface dimensions; and `observer adapters` gains a
+  `VOCAB` column reporting, per adapter, whether its vocabulary is
+  grounded or honestly unknown.
+- **feat(db): test runs can no longer touch your real database.** `db.Open`
+  now refuses any path inside the operator's actual `~/.observer` when
+  running under `go test`, returning `ErrRealDBInTest` before `sql.Open`.
+  This closes a real incident in which a working-tree test resolved
+  `config.Default()`'s live path and ran a migration against the 16 GB
+  production store. The gate resolves symlinks across the full path and
+  checks hard links via `os.SameFile`, guards both migration entry points
+  (including `internal/orgserver/db`), and fails loudly rather than
+  skipping when the home directory can't be resolved.
+
+- **feat(orgserver,web2): GitHub Copilot seat subscriptions are finally
+  priced.** The seats API returns COUNTS ONLY, so `/api/org/telemetry`
+  reported "50 seats" and the metered overage while the subscription
+  those seats cost — normally the larger of Copilot's two cost feeds —
+  appeared nowhere. `[copilot_analytics].per_seat_price_usd` existed and
+  defaulted to $19, but **nothing read it**: an admin could set it and
+  change nothing. `SeatStats` now carries `per_seat_price_usd` and
+  `monthly_usd` (`total × price`), threaded from config through the
+  dashboard options, and the org dashboard renders a "Seat subscription"
+  tile plus a summary stat. Both are omitted entirely when the price is
+  unconfigured — absent means "price not supplied", never "seats are
+  free". **The unit trap is preserved at every level:** `monthly_usd` is
+  a point-in-time monthly fee and is never summed into `cost_usd`
+  (additive per-day metered spend) — asserted in Go, on the wire, and in
+  every UI aggregate. A non-finite or negative price is now refused at
+  config validation: TOML accepts the literals `nan` and `inf` without
+  error, and `inf` would otherwise reach `encoding/json`, which refuses
+  it *after* the 200 status is already sent.
+
+- **feat(cockpit): burn rate on the session cost strip.** A running
+  total never answers "should I stop this?" — a rate does. The terminal
+  cockpit's cost strip gains $/h plus a +1h projection. The rate is
+  measured over the turns the cockpit already polls so it reflects
+  current spend rather than being diluted by earlier idle time; the
+  oldest fetched turn is the window boundary, so it sets the denominator
+  but is excluded from the numerator. Falls back to the session average
+  over the same elapsed the header shows, and returns nothing — never a
+  confident $0.00/h — when neither basis exists.
+
+### Fixed
+
+- **fix(codex): patch rows no longer land with an empty input.** Modern
+  Codex invokes `apply_patch` from inside an `exec` custom_tool_call and
+  the executor stamps `patch_apply_end` with its own `exec-<uuid>` id,
+  while the response_item carries `call_<hash>`. Different namespaces, so
+  the join could never match on current builds and every patch row took
+  the standalone path with no `raw_tool_input`. Measured over a
+  393-rollout corpus: 2,059 exec-uuid vs 416 call_hash. There is no join
+  to repair, so the standalone path now reconstructs the input from the
+  producer's own `changes` object, with the rendering owned in one place
+  so a live-captured row and a `backfill --codex-tool-input` recovery are
+  byte-identical. On one live update-heavy session this took empty inputs
+  from 95 to 0.
+
+  Authored-byte accounting was deliberately left alone after measurement
+  proved the obvious "fix" wrong: an `update` change carries only
+  `unified_diff` and scores zero here, which *looks* like a bug, but every
+  patch also emits an invocation row that already counts the same bytes
+  from its own patch text (107 invocation rows / 142,823 B alongside 95
+  executor rows). Counting the diff as well double-counts every update.
+  The reasoning is now written into the code so the zero is not "fixed"
+  again.
+
+- **fix(dashboard): Compression tiles show an em dash, not a confident
+  zero.** `deriveTotals()` returned an all-zero object whenever the
+  timeseries query had no data, so five tiles rendered "$0.00 saved
+  across 0 compression events" from the moment the page mounted — and
+  because the loading flag also clears on error, a failed query settled
+  that zero in as a confident, wrong answer. The no-data branch now
+  yields undefined, which the existing null-safe formatters render as an
+  em dash: loading keeps the pulse, an error settles to a static dash.
+
+- **test(terminal): one flaked assertion can no longer kill an entire
+  package.** A cache-cleared `-race` sweep reported `FAIL cmd/observer
+  2400s` — the full 40-minute timeout. The cause was not slowness:
+  `TestTerminalPidSeederEndToEnd` failed an assertion and then deadlocked
+  in cleanup, because the PTY stub's `Kill`/`Close` were no-ops that never
+  unblocked the parked reader, so `Manager.Shutdown`'s unbounded
+  `wg.Wait()` never returned. Being a serial test, it left ~340 parallel
+  tests in the same package waiting and never run — the package reported
+  FAIL having executed almost none of itself. The prior "green" sweep
+  could not have caught this: `cmd/observer` was one of the 193/195
+  cached packages. With the stub honouring `Close`, the same failure now
+  takes 6.9s instead of 40 minutes.
+
+- **fix(dashboard): cache-savings counterfactual no longer zeroed for
+  proxy-recorded turns.** Rows with a recorded cache read > 0
+  contributed $0 to the "saved by caching" counterfactual, understating
+  cache savings roughly 3× on real corpora. Found by the Show HN corpus
+  mining pass; the memo's savings claims are gated on this fix.
+- **fix(store): outcome-update seam hardened.** Cross-tick
+  `tool_results` outcome flips now persist action outcomes through ONE
+  store-owned seam instead of per-adapter writes, closed across two
+  adversarial review rounds (evidence-gated 1→0 self-heal included).
+- **fix(hook,init): settings.json writer classes hardened (9 call
+  sites).** Two pre-existing defect classes shared by the hooks/cursor/
+  statusline registrars: the `any`-decode re-indent path could mangle
+  big integers (float64), reformat numbers, HTML-escape strings, panic
+  on JSON null, and silently collapse duplicate keys — now re-indents
+  RAW bytes; and the read-modify-write used a fixed temp name with no
+  lock — now unique temps + a cross-process advisory lock +
+  re-read-after-lock. Plus: loose ownership matching tightened, symlink
+  clobbering refused, a 5 MiB size cap, PID-reuse liveness via
+  `/proc` cmdline, and oversize-stdin handling on the statusline path.
+- **fix(hook): registrar write-path hardening, second pass.** The
+  deferred WP9 ledger: `hook_checksums.json` writes now take the
+  cross-process advisory lock and rename a unique temp file (was an
+  unlocked plain write); the codex `hooks.json`/`config.toml` writers
+  drop their fixed `.tmp` names for unique-temp atomic writes under
+  per-path locks with re-read-after-lock; and the unregister path
+  refuses to delete a symlinked config file instead of silently
+  unlinking the link while the target keeps stale hooks. Each pinned
+  by a concurrent-writer or symlink regression test.
+- **fix(adapter): foreign-mount SQLite mirror staging unified under
+  `internal/adapter/mirrorbase`.** Seven adapters staged cross-mount DB
+  mirrors into persistent `~/.cache` during parsing through copied
+  helper code; the new single-owner seam scopes them, and
+  `observer usage` redirects mirrors into its throwaway scratch
+  directory (live-verified: a one-shot run adds zero cache entries).
+- **fix(integration): npm Binary-row honesty.** Dropped impossible
+  `.exe` spellings from 10 npm-distributed CLI tools' Windows binary
+  rows — npm shims install `.cmd`/`.ps1` wrappers, never raw `.exe`.
+- **feat(web): share surfaces + camera-ready wordmark + once-only star
+  prompt.** CommunityCard can share a real personal stat the user opts
+  into ("$X tracked across N tools this month — superbased.app"), with
+  the exact text previewed before sharing and a static-link fallback
+  (never "$0.00 tracked"). MilestonesCard brag moments gain share/copy
+  actions. The four hero stat surfaces (Cost, Suggestions, Milestones,
+  Report) carry a muted in-frame `▞ superbased` wordmark so a native
+  screenshot travels with attribution — no export pipeline. A
+  lazygit-pattern once-only GitHub star prompt appears after a week of
+  real usage (never in demo mode, never twice). A new open-ended
+  Feedback issue form joins the GitHub templates.
+- **feat(cli): `observer privacy` — verifiable zero-network posture.**
+  Prints an honest, config-derived egress report: every listening
+  socket (loopback-only except the opt-in tailnet remote-access
+  listener) and every outbound path the binary can take, each with its
+  gate and this config's actual on/off state; `--json` for scripting.
+  Paired with two changes that make the claim exact: the dashboard's
+  npm-registry update check is now **user-initiated only** (a "Check
+  for updates" card in Settings → Health; no fetch on tab load, no
+  background timer), and a new website page,
+  `/docs/reference/measurement-honesty`, states the
+  compression-savings retraction plainly and documents the provable
+  accuracy claims that replace it.
+- **feat(website): three new competitor comparison pages** (CodeBurn,
+  Claude Code Usage Monitor, TokenTracker), authored from a dated
+  2026-07-30 re-verification of every competitor claim, with steelman
+  sections and the competitors' newest features stated fairly. New
+  `make track-build` / `verify-track-build` + a CI drift gate; fixed a
+  track-gen idempotency bug (marker blocks re-appended at EOF instead
+  of spliced in place, which could permanently redden a byte-for-byte
+  drift gate).
+- **fix(website): tool-count drift sweep.** Live compare pages said "26
+  coding tools" against 29 shipped adapters; the four compare pages are
+  corrected and `track-gen` now derives counts from `len(roster)` so the
+  class can't recur (new accuracy-check Check B2 guards it).
+- **fix(orgserver,orgclient,store): org-announcements rail hardened
+  before release (adversarial review, six findings, all fixed).** The
+  rail was built by cloning the routing-policy distribution rail, and
+  cloning a mechanism cloned its weaknesses into a context that couldn't
+  tolerate them. Three HIGHs, all fixable because the rail was still
+  unreleased: the signature covered the body only — no version, no rail
+  identity — so a captured signed document replayed at a bumped version
+  froze a node's cache via its own monotonic short-circuit, an old
+  retraction replayed cleared every banner, and because the org server
+  has one shared signing identity, a genuinely-signed routing-policy
+  document verified as a valid announcement. Fixed with
+  `orgcontract.AnnouncementSigningMessage` (a domain tag, the version,
+  and the body, hashed together) — the routing rail keeps its released
+  wire shape as-is, and the residual is now tracked as ledger row
+  **ROUTING-SIG-1** (`docs/security.md`) instead of silently inherited.
+  Announcement TOFU also consulted only its own rail's pin, so a node
+  enrolled for months would accept any key on its first announcement
+  fetch — closed in `internal/orgclient/orgpin.go`, one org identity now
+  enforced across both rails. And unenrolment left a departed org's
+  cached banner (and its pinned key) live, risking poisoning
+  re-enrolment into a different org — `store.DeleteEnrolment` now clears
+  both distribution caches. Three smaller fixes: the per-cycle poll is
+  now stated in `observer privacy` instead of left implicit; both
+  endpoints' 1 MiB caps applied to the read only and ignored trailing
+  bytes, now `orgcontract.DecodeCapped`; and `"[]"`/`"null"` were a third
+  and fourth silent spelling of a retraction, now one representation.
+  Every fix carries a regression test proven to fail pre-fix by inline
+  mutation against a document the org genuinely signed.
+- **fix(orgserver): member-invite loop hardened before release
+  (adversarial review, eight findings, seven fixed, one documented).**
+  Two HIGHs: the monthly mint cap was read-then-insert across two
+  connections with tens of milliseconds of argon2id hashing between
+  them, so concurrent mints could all read the same pre-mint count and
+  all land past the cap — now one `BEGIN IMMEDIATE` transaction,
+  mutation-proved by an 8-goroutine hammer test; and a SCIM-deactivated
+  admin with a still-live SAML cookie kept minting uncapped because the
+  admin branch returned before any liveness check — fixed both at the
+  invite gate and, more broadly, at `adminCheckerFor` (`AND active = 1`),
+  restoring deactivation as an authority revocation across every
+  `RequireAdminSAML` route. Three MEDs: `ttl_days` was unbounded (a
+  273-year token was mintable) and is now clamped 1–90 with explicit-zero
+  rejected rather than treated as "omitted"; the invite-lookup
+  404-vs-201 response was a membership oracle, now rate-limited to 20
+  failed lookups/hour per inviter (server migration 024, storing only
+  the inviter id and timestamp — never the probed address); and the
+  enrol link is now copy-only text rather than a clickable URL (the SPA
+  has no `/enrol/:token` route, so navigability bought nothing and only
+  cost exposure to link-unfurlers and mail scanners). One MED + one LOW:
+  inviter attribution now survives SCIM deletion via a `minted_by`
+  fallback, and the invite audit's `source_ip` no longer trusts
+  `X-Forwarded-For` (new ledger row **XFF-1** for two pre-existing,
+  deliberately-deferred XFF-trusting audit sites elsewhere in the org
+  server). One LOW documented rather than fixed: target-deletion CASCADE
+  frees a cap slot early, recorded in `docs/teams-operations.md` §8.2 as
+  needing member-lifecycle authority that already outranks the cap.
+- **fix(adapters): model reasoning no longer files itself as a completed
+  task.** Fifteen adapters minted a separate action row — typed
+  `task_complete` — every time the model produced a reasoning block,
+  inventing 15,734 phantom "task completions" in a live corpus for work
+  the model never did. Reasoning is not an action; it is something the
+  model did on the way to one. Every adapter now carries it as
+  `preceding_reasoning` on the *successor* event and mints no row at all.
+  Threading is consumed-once, last-wins, discarded at a turn boundary,
+  and never crosses a session id. Opaque or encrypted reasoning
+  placeholders are never threaded anywhere. Affected: crush, hermes,
+  cline-cli, antigravity, cursor, opencode, kilo-code-cli, codex,
+  open-interpreter, openclaw, cline, cowork, pi, copilot, copilot-cli,
+  gemini.
+- **fix(dashboard): `/api/status` no longer saturates the daemon.**
+  `diag.Snapshot` costs several seconds of `COUNT(*)`s on a large
+  database, and two always-mounted chrome components polled it every 5
+  seconds — so a scan was permanently in flight and starved every other
+  query (measured first-load latencies reached 36 s). The snapshot is now
+  computed behind a 15-second TTL + singleflight cache. Crucially the
+  scan runs **detached** from the caller's request context: the previous
+  fix was incomplete because the client aborts its prior fetch each tick,
+  cancelling whichever poller held the gate and serialising the scans
+  anyway. Degraded snapshots now carry a `QueryErrors` count and are
+  returned but never cached.
+- **fix(cursor): the reasoning stash is now safe across hook processes.**
+  Cursor is a hook adapter — one process per event — so its pending
+  reasoning needs an on-disk carrier. The first implementation raced:
+  under contention, 190 of 200 iterations double-threaded a thought and 8
+  of 200 reads saw a truncated file. It is now an atomic rename-claim
+  protocol — writes land at a unique temporary name and rename over the
+  target, and consumers claim by renaming the target to a nonce first, so
+  exactly one participant can win a name. Proven under `-race` with
+  multiple concurrent participants.
+- **fix(gemini): a failed call no longer records itself as a success.** A
+  legacy-shaped failed call persisted `success=1` forever. The verdict is
+  now taken from the response body — but only for *meaningful* errors
+  (non-blank strings, non-empty objects or arrays). `{"error": false}`,
+  `0`, `[]`, `{}`, and bare booleans or numbers never invent a failure.
+- **fix(plugins): two wrong-plugin-resolution hazards caught before
+  publication.** Both were reproduced live, not theorised. Factory's
+  `droid` resolved `./superbased` at the repo root to the *Claude Code*
+  plugin directory — hooks and all — so the plugin was relocated to
+  `factory/superbased`. `qodercli plugins marketplace add` likewise
+  installed the Claude plugin via its binary's literal search order;
+  closed with a root `.qoder-plugin/marketplace.json` whose schema was
+  extracted from the shipped binary, then verified end to end.
+
+### Changed
+
+- **Migration 079 deletes ~15,050 content-free reasoning rows on first
+  run, and your action counts will drop.** This is the historical half of
+  the reasoning fix above: the `(reasoning)` and `(encrypted reasoning, N
+  bytes)` placeholder rows written by the retired emit sites, plus their
+  FTS search excerpts, are removed, and 7 stale cursor rows are rewritten.
+  Those rows have no content, never had content, and were never threaded
+  anywhere — deleting them removes rows, not information. **Aggregate
+  action counts on the dashboard will fall accordingly; this is the
+  intended correction, not data loss.** Everything content-bearing is
+  kept, including the 329 codex reasoning rows carrying real summary text
+  and all 15 gemini reasoning rows (deleting those was measured to be
+  lossy). An id high-water marker is recorded in `schema_meta` before the
+  deletes so the result can be re-verified afterwards. Schema golden
+  moves 78 → 79.
+- `scripts/sync-npm-version.sh` now stamps **11** plugin-side manifests
+  in addition to the npm and VS Code packages, with a set-equality test
+  in both directions so a new manifest cannot be silently missed.
 
 ## [1.27.0] — 2026-07-29
 
@@ -1601,7 +4520,9 @@ All notable changes to SuperBased Observer are documented here.
   (idempotent; overrides `enabled_adapters` for the run). A future adapter's
   Backfill row appears automatically.
 - **Pricing: GPT-5.6 and Grok 4.5 model launches.** Added `gpt-5.6-sol`
-  ($5/$30), `gpt-5.6-terra` ($2.50/$15), `gpt-5.6-luna` ($1/$6), and a
+  ($4/$20 since 2026-08-21; it launched at $5/$30), `gpt-5.6-terra` ($2.50 in / $15 out at launch), `gpt-5.6-luna`
+  ($1 in / $6 out at launch; OpenAI cut Terra and Luna prices on 2026-07-30 —
+  the current table reflects the cut), and a
   `gpt-5.6` family row. GPT-5.6 introduces the **first non-Anthropic explicit
   cache-write tier** (writes at 1.25× uncached input, reads keep the 90%
   discount); the write rate is wired into the cost table but INERT until a live

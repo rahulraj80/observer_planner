@@ -140,6 +140,11 @@ var gitHooksPatterns = []pathPattern{
 // permission grant; flagging it would be constant noise and denying
 // it would break the host tool (revisit with the G6 conformance
 // matrix).
+// The `~/.observer/**` glob already covers the dashboard-authored
+// trusted per-project layer dir (~/.observer/guard-project-policies/),
+// so an agent write there is denied with no new matcher — that coverage
+// is what lets the trusted layer safely carry weaken/disable semantics
+// (guard-rule-management-ui plan §3.4).
 var observerConfigPatterns = []pathPattern{
 	{"~/.observer/**", "observer configuration"},
 	{"?:/users/*/.observer/**", "observer configuration"},
@@ -213,9 +218,27 @@ func boundaryRules() []Rule {
 		},
 		{
 			ID: "R-152", Category: CategoryBoundary, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: inlineDeletePathMatch(sensitivePathPatterns),
+			Observe: DecisionFlag, Enforce: DecisionDeny,
+			Doc:    "interpreter one-liner or inline script deleting a sensitive credential/profile location",
+			Advice: "Credential stores are off-limits to agents; have the operator make this change.",
+		},
+		{
+			ID: "R-152", Category: CategoryBoundary, Severity: SeverityCritical,
 			AppliesTo: shell, MatchCmd: shPathMatch(sensitivePathPatterns, false),
 			Observe: DecisionFlag, Enforce: DecisionAsk,
 			Doc:    "shell command reading a sensitive credential/profile location",
+			Advice: "If a credential is genuinely needed, ask the operator to provide it explicitly.",
+		},
+		{
+			// T-317: the path lives inside interpreter program text
+			// (python -c, node -e, a heredoc, a .NET file call), not in
+			// the unit's positionals. Same classifier, same decisions
+			// as the shell read row above.
+			ID: "R-152", Category: CategoryBoundary, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: matchInlineScriptSensitive,
+			Observe: DecisionFlag, Enforce: DecisionAsk,
+			Doc:    "interpreter one-liner or inline script naming a sensitive credential/profile location",
 			Advice: "If a credential is genuinely needed, ask the operator to provide it explicitly.",
 		},
 		{
@@ -234,6 +257,17 @@ func boundaryRules() []Rule {
 			Advice: "Use a placeholder (.env.example) or have the operator supply the value.",
 		},
 		{
+			// T-317: `python3 -c "open('fake.pem').read()"` and its
+			// node/ruby/perl/php/deno/bun/osascript/PowerShell
+			// siblings. Same secret-basename classifier as the rows
+			// above.
+			ID: "R-153", Category: CategoryBoundary, Severity: SeverityHigh,
+			AppliesTo: shell, MatchCmd: matchInlineScriptSecret,
+			Observe: DecisionFlag, Enforce: DecisionAsk,
+			Doc:    "interpreter one-liner or inline script naming a secret-bearing file (.env / key material / credentials)",
+			Advice: "Use a placeholder (.env.example) or have the operator supply the value.",
+		},
+		{
 			ID: "R-154", Category: CategoryBoundary, Severity: SeverityCritical,
 			AppliesTo: faCfg, Match: faPathMatch(shellProfilePatterns, true),
 			Observe: DecisionFlag, Enforce: DecisionDeny,
@@ -248,6 +282,13 @@ func boundaryRules() []Rule {
 			Advice: "Profile changes outlive the session; have the operator apply them.",
 		},
 		{
+			ID: "R-154", Category: CategoryBoundary, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: inlineDeletePathMatch(shellProfilePatterns),
+			Observe: DecisionFlag, Enforce: DecisionDeny,
+			Doc:    "interpreter one-liner or inline script deleting a shell rc/profile file",
+			Advice: "Profile changes outlive the session; have the operator apply them.",
+		},
+		{
 			ID: "R-155", Category: CategoryBoundary, Severity: SeverityCritical,
 			AppliesTo: faCfg, Match: faPathMatch(persistencePathPatterns, true),
 			Observe: DecisionFlag, Enforce: DecisionDeny,
@@ -259,6 +300,13 @@ func boundaryRules() []Rule {
 			AppliesTo: shell, MatchCmd: shPathMatch(persistencePathPatterns, true),
 			Observe: DecisionFlag, Enforce: DecisionDeny,
 			Doc:    "shell command writing to an autostart/persistence location",
+			Advice: "Persistent scheduling needs the operator; agents must not install autostart entries.",
+		},
+		{
+			ID: "R-155", Category: CategoryBoundary, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: inlineDeletePathMatch(persistencePathPatterns),
+			Observe: DecisionFlag, Enforce: DecisionDeny,
+			Doc:    "interpreter one-liner or inline script deleting an autostart/persistence location",
 			Advice: "Persistent scheduling needs the operator; agents must not install autostart entries.",
 		},
 		{
@@ -284,6 +332,13 @@ func boundaryRules() []Rule {
 			Advice: "Git hooks execute on the next git operation; review the hook body before allowing.",
 		},
 		{
+			ID: "R-156", Category: CategoryBoundary, Severity: SeverityHigh,
+			AppliesTo: shell, MatchCmd: inlineDeletePathMatch(gitHooksPatterns),
+			Observe: DecisionFlag, Enforce: DecisionAsk,
+			Doc:    "interpreter one-liner or inline script deleting a .git/hooks entry",
+			Advice: "Git hooks execute on the next git operation; review the hook body before allowing.",
+		},
+		{
 			ID: "R-157", Category: CategoryBoundary, Severity: SeverityHigh,
 			AppliesTo: shell, MatchCmd: matchUnanalyzedWrapper,
 			Observe: DecisionFlag, Enforce: DecisionDeny,
@@ -305,18 +360,25 @@ func boundaryRules() []Rule {
 			Advice: "Guard and hook configuration is operator-owned (F4); ask the operator to change it.",
 		},
 		{
+			ID: "R-160", Category: CategoryBoundary, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: inlineDeletePathMatch(observerConfigPatterns),
+			Observe: DecisionFlag, Enforce: DecisionDeny,
+			Doc:    "interpreter one-liner or inline script deleting observer/guard/hook configuration",
+			Advice: "Guard and hook configuration is operator-owned (F4); ask the operator to change it.",
+		},
+		{
 			ID: "R-161", Category: CategoryBoundary, Severity: SeverityHigh,
 			AppliesTo: faCfg, Match: matchProjectPolicyWriteFA,
 			Observe: DecisionFlag, Enforce: DecisionFlag,
 			Doc:    "agent modifying the project guard policy file",
-			Advice: "Project policy edits are recorded; §4.6 layering prevents loosening regardless.",
+			Advice: "Project policy edits are recorded; this in-repo file is escalate-only (§4.6 drops any loosening it attempts). Dashboard-managed project relaxations live in the R-160-protected daemon-local trusted layer, which the agent cannot write.",
 		},
 		{
 			ID: "R-161", Category: CategoryBoundary, Severity: SeverityHigh,
 			AppliesTo: shell, MatchCmd: matchProjectPolicyWriteShell,
 			Observe: DecisionFlag, Enforce: DecisionFlag,
 			Doc:    "shell command modifying the project guard policy file",
-			Advice: "Project policy edits are recorded; §4.6 layering prevents loosening regardless.",
+			Advice: "Project policy edits are recorded; this in-repo file is escalate-only (§4.6 drops any loosening it attempts). Dashboard-managed project relaxations live in the R-160-protected daemon-local trusted layer, which the agent cannot write.",
 		},
 	}
 }
@@ -375,22 +437,68 @@ func faPathMatch(pats []pathPattern, wantWrite bool) MatchFn {
 }
 
 // shPathMatch builds a command-unit matcher over a pattern table:
-// every path-candidate token resolves and matches against the table,
-// then classifies as write or read access within the unit.
+// every path-candidate token resolves (from every directory the unit can
+// run in, unitPathCandidates) and matches against the table, then
+// classifies as write or read access within the unit.
 func shPathMatch(pats []pathPattern, wantWrite bool) MatchCmdFn {
 	return func(ctx *MatchContext, cmd *Command) (bool, string) {
-		for _, t := range unitPathTokens(cmd) {
-			rp := resolveOrLiteral(ctx, t)
-			desc, ok := pathPatternMatch(rp, ctx.Cfg.Home, pats)
-			if !ok {
+		tokens := sensitivePathTokens(cmd)
+		if len(tokens) == 0 {
+			return false, ""
+		}
+		anchors := unitAnchors(ctx, cmd)
+		for _, t := range tokens {
+			if classifyWrite(cmd, t.text) != wantWrite {
 				continue
 			}
-			if classifyWrite(cmd, t) == wantWrite {
-				return true, desc + " (" + t + ")"
+			for _, c := range unitPathCandidates(ctx, anchors, t.text) {
+				if skipBareCandidate(t, c, wantWrite) {
+					continue
+				}
+				if desc, ok := pathPatternMatch(c.path, ctx.Cfg.Home, pats); ok {
+					return true, movedReason(desc+" ("+t.text+")", c.moved)
+				}
 			}
 		}
 		return false, ""
 	}
+}
+
+// pathToken is one operand a sensitive-path row judges.
+type pathToken struct {
+	text string
+	// bare: a positional that does not look like a path (`config`,
+	// `.bashrc`, `pre-commit`). Resolved from the event's own directory a
+	// bare word is not a READ candidate (looksPathish: FP soup, `grep
+	// config`), so for a read it is judged only from a directory an earlier
+	// step of the line moved to or through a link it created (T-387): `cd ~
+	// && cat .aws/config`. A bare word the unit WRITES (classifyWrite: a
+	// writeBases operand, a copy/move destination, `sed -i`, a delete) is a
+	// file name by construction, so it is also judged from the event's own
+	// directory (T-526): `tee .bashrc` typed in home, `cp x evil.desktop`
+	// typed in ~/.config/autostart.
+	bare bool
+}
+
+// skipBareCandidate reports whether a sensitive-path row skips one resolved
+// candidate of a token: only a bare token, read from the event's own
+// directory (not moved), is skipped (pathToken.bare).
+func skipBareCandidate(t pathToken, c anchoredPath, write bool) bool {
+	return t.bare && !c.moved && !write
+}
+
+// sensitivePathTokens returns a unit's positionals (bare ones marked) and
+// its redirect targets, which are always path candidates.
+func sensitivePathTokens(cmd *Command) []pathToken {
+	pos := cmd.Positionals()
+	out := make([]pathToken, 0, len(pos)+len(cmd.RedirectTargets))
+	for _, p := range pos {
+		out = append(out, pathToken{text: p, bare: !looksPathish(p)})
+	}
+	for _, r := range cmd.RedirectTargets {
+		out = append(out, pathToken{text: r})
+	}
+	return out
 }
 
 // writeBases are command bases whose pathish operands are written
@@ -400,8 +508,8 @@ var writeBases = map[string]bool{
 	"set-content": true, "add-content": true, "out-file": true, "new-item": true,
 }
 
-// destBases are copy/move-style commands whose LAST pathish operand
-// is the written destination.
+// destBases are copy/move-style commands whose LAST operand is the
+// written destination.
 var destBases = map[string]bool{
 	"cp": true, "mv": true, "rsync": true, "scp": true,
 	"copy-item": true, "move-item": true,
@@ -410,8 +518,12 @@ var destBases = map[string]bool{
 // classifyWrite classifies one path token's access direction within a
 // unit (documented approximation, pinned by tests): redirect targets
 // are writes; writeBases write all operands; copy/move write their
-// last operand; sed -i writes in place; delete commands write
-// (destroy) their targets; everything else reads.
+// last positional operand, path-like or bare (T-526: `cp /tmp/x.desktop
+// evil.desktop` after a `cd` writes evil.desktop; reading only path-like
+// operands took the source for the destination); sed -i writes in place;
+// delete commands write (destroy) their targets; everything else reads.
+// A `cp -t DIR` target-directory form is not modelled (its last operand
+// is a source).
 func classifyWrite(cmd *Command, tok string) bool {
 	for _, r := range cmd.RedirectTargets {
 		if r == tok {
@@ -428,8 +540,8 @@ func classifyWrite(cmd *Command, tok string) bool {
 		return true
 	}
 	if destBases[cmd.Base] {
-		pathish := unitPathTokens(cmd)
-		return len(pathish) >= 2 && pathish[len(pathish)-1] == tok
+		pos := cmd.Positionals()
+		return len(pos) >= 2 && pos[len(pos)-1] == tok
 	}
 	return false
 }
@@ -530,13 +642,25 @@ func matchSecretFileReadFA(ctx *MatchContext) (bool, string) {
 // real and a placeholder file), unlike the file-access row where it
 // is a rule-level safe pattern.
 func matchSecretFileReadShell(ctx *MatchContext, cmd *Command) (bool, string) {
-	for _, t := range append(cmd.Positionals(), cmd.RedirectTargets...) {
-		name := baseName(resolveOrLiteral(ctx, t))
-		if !secretBasename(name) || exampleBasename(name) {
+	pos := cmd.Positionals()
+	tokens := make([]string, 0, len(pos)+len(cmd.RedirectTargets))
+	tokens = append(tokens, pos...)
+	tokens = append(tokens, cmd.RedirectTargets...)
+	if len(tokens) == 0 {
+		return false, ""
+	}
+	anchors := unitAnchors(ctx, cmd)
+	for _, t := range tokens {
+		if classifyWrite(cmd, t) {
 			continue
 		}
-		if !classifyWrite(cmd, t) {
-			return true, "secret file " + t
+		// A link created earlier in the line can give the token another
+		// basename (`ln -s /srv/app/.env cfg && cat cfg`).
+		for _, c := range unitPathCandidates(ctx, anchors, t) {
+			name := baseName(c.path)
+			if secretBasename(name) && !exampleBasename(name) {
+				return true, movedReason("secret file "+t, c.moved)
+			}
 		}
 	}
 	return false, ""
@@ -1310,10 +1434,22 @@ func matchProjectPolicyWriteFA(ctx *MatchContext) (bool, string) {
 
 // matchProjectPolicyWriteShell implements the R-161 shell row.
 func matchProjectPolicyWriteShell(ctx *MatchContext, cmd *Command) (bool, string) {
-	for _, t := range unitPathTokens(cmd) {
-		rp := resolveOrLiteral(ctx, t)
-		if projectPolicyPath(rp, ctx.Cfg.Home) && classifyWrite(cmd, t) {
-			return true, "project guard policy " + t
+	tokens := sensitivePathTokens(cmd)
+	if len(tokens) == 0 {
+		return false, ""
+	}
+	anchors := unitAnchors(ctx, cmd)
+	for _, t := range tokens {
+		if !classifyWrite(cmd, t.text) {
+			continue
+		}
+		for _, c := range unitPathCandidates(ctx, anchors, t.text) {
+			if skipBareCandidate(t, c, true) {
+				continue
+			}
+			if projectPolicyPath(c.path, ctx.Cfg.Home) {
+				return true, movedReason("project guard policy "+t.text, c.moved)
+			}
 		}
 	}
 	return false, ""

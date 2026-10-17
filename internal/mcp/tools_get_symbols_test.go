@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package mcp
 
 import (
@@ -12,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
@@ -22,10 +26,8 @@ import (
 // NATIVE codeintel index seeded inline with V7-15 ranking cases.
 // project_root is a temp dir; the codeintel_files rows are keyed off
 // the abs path inside that root so file-resolution works end-to-end.
-// (Phase 4: the fixture seeds the native store directly via the same
-// store seam the indexer uses — replacing the old hand-built codegraph
-// graph.db. The synthetic node/edge DSL is unchanged so every existing
-// assertion still holds.)
+// The fixture seeds the native store directly via the same store seam
+// the indexer uses.
 type getSymbolsFixture struct {
 	s       *Server
 	root    string
@@ -58,8 +60,7 @@ type edgeSeed struct {
 }
 
 // seedCodeIntel persists the synthetic symbolSeed/edgeSeed graph into
-// the NATIVE codeintel store, replacing the old hand-built codegraph
-// graph.db. Each seed file's nodes become codeintel_nodes; each CALLS
+// the NATIVE codeintel store. Each seed file's nodes become codeintel_nodes; each CALLS
 // edge becomes a call site enclosed by its source symbol whose callee
 // name is the edge target's name, then the project-level name-matched
 // resolver fills in the edge's dst — reproducing the caller/callee
@@ -162,7 +163,7 @@ func newGetSymbolsFixture(t *testing.T, seeds []symbolSeed, edges []edgeSeed, op
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -229,15 +230,6 @@ func editorTSXContent() string {
 		}
 	}
 	return sb.String()
-}
-
-func defaultGetSymbolsOpts() GetSymbolsOptions {
-	return GetSymbolsOptions{
-		AllowExtensions: []string{"tsx", "ts", "js", "go"},
-		MaxResponseKB:   100,
-		MaxCallers:      20,
-		MaxCallees:      20,
-	}
 }
 
 func TestGetSymbols_SingleNamedMatch(t *testing.T) {
@@ -547,7 +539,7 @@ func TestGetSymbols_IndexUnavailable(t *testing.T) {
 	// directly with codeintel.Unavailable().
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{
@@ -604,7 +596,7 @@ func TestGetSymbols_IndexUnavailable(t *testing.T) {
 func TestGetSymbols_RegexFallback_Unavailable(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{
@@ -666,7 +658,7 @@ export class Editor {}
 func TestGetSymbols_RegexFallback_UnsupportedLanguage(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{
@@ -947,7 +939,7 @@ func TestGetSymbols_TooManyRequests(t *testing.T) {
 
 func TestGetSymbols_NotRegisteredWhenDisabled(t *testing.T) {
 	tmp := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	s, _ := New(Options{
 		DB: database, ServerName: "test", ServerVersion: "0",
@@ -963,7 +955,7 @@ func TestGetSymbols_NotRegisteredWhenDisabled(t *testing.T) {
 
 func TestGetSymbols_RegisteredWhenEnabledEvenWithoutIndex(t *testing.T) {
 	tmp := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	s, _ := New(Options{
 		DB: database, ServerName: "test", ServerVersion: "0",

@@ -164,13 +164,15 @@ func TestBuildEvent_BeforeSubmitPrompt(t *testing.T) {
 	}
 }
 
-// TestBuildEvent_AfterAgentThought pins the v1.6.18 capture of
-// finalized assistant thinking blocks. The event delivers the full
-// thinking text + duration_ms once per thought (not per-token-delta
-// per the v1.4.45 docstring's now-obsolete claim — verified against
-// captured live payloads). The emitted row mirrors the
-// cursor.assistant_text shape used by BuildTranscriptToolEvents so a
-// hook-sourced session looks identical to a transcript-walked one.
+// TestBuildEvent_AfterAgentThought pins the B3-converged behaviour of
+// the v1.6.18 finalized-thinking capture. UPDATED 2026-07-31: the event
+// used to mint a `cursor.thinking` task_complete row carrying the
+// thought in its own Target/PrecedingReasoning/ToolOutput. It now mints
+// NO row at all — the scrubbed 200-char preview is stashed and threaded
+// onto the next recordable event of the conversation instead (see
+// pending.go). The old assertions on the minted row are replaced by
+// assertions on the absence of the row plus the arrival of the text on
+// the successor; the preview cap is unchanged.
 func TestBuildEvent_AfterAgentThought(t *testing.T) {
 	body := []byte(`{
 		"hook_event_name": "afterAgentThought",
@@ -182,26 +184,107 @@ func TestBuildEvent_AfterAgentThought(t *testing.T) {
 		"duration_ms": 9468
 	}`)
 	ev, ok, err := BuildEvent(EventAfterAgentThought, body, nil)
+	if err != nil {
+		t.Fatalf("BuildEvent: %v", err)
+	}
+	if ok {
+		t.Fatalf("afterAgentThought must mint NO row; got %+v", ev)
+	}
+
+	// The thought reaches the timeline on the NEXT recordable event.
+	next := []byte(`{
+		"hook_event_name": "beforeShellExecution",
+		"conversation_id": "32c83fe8-3763-4f29-b127-a0968203db01",
+		"generation_id": "5ac8a876-8e4e-428d-8189-21d5a3ee129c",
+		"workspace_roots": ["/c:/programsx/marmutmain"],
+		"command": "go test ./..."
+	}`)
+	shell, ok, err := BuildEvent(EventBeforeShellCommand, next, nil)
 	if err != nil || !ok {
-		t.Fatalf("BuildEvent: %v ok=%v", err, ok)
+		t.Fatalf("BuildEvent(shell): %v ok=%v", err, ok)
 	}
-	if ev.ActionType != models.ActionTaskComplete {
-		t.Errorf("action: %s want task_complete", ev.ActionType)
+	if !strings.Contains(shell.PrecedingReasoning, "wants to know my specific model name") {
+		t.Errorf("successor preceding reasoning = %q, want the stashed thought", shell.PrecedingReasoning)
 	}
-	if ev.RawToolName != "cursor.thinking" {
-		t.Errorf("raw tool name: %s", ev.RawToolName)
+}
+
+// TestAfterAgentThought_ConsumedOnceAndDiscardedOnUserTurn pins the
+// three semantics the stash carries (pending.go): consumed-once (the
+// second successor gets nothing), last-wins (a second thought before
+// any successor replaces the first), and turn-boundary discard (a new
+// user prompt drops an unclaimed thought).
+func TestAfterAgentThought_ConsumedOnceAndDiscardedOnUserTurn(t *testing.T) {
+	thought := func(conv, gen, text string) {
+		t.Helper()
+		body := []byte(`{"hook_event_name":"afterAgentThought","conversation_id":"` + conv +
+			`","generation_id":"` + gen + `","workspace_roots":["/repo"],"text":"` + text + `"}`)
+		if _, ok, err := BuildEvent(EventAfterAgentThought, body, nil); err != nil || ok {
+			t.Fatalf("thought: err=%v ok=%v (want no row)", err, ok)
+		}
 	}
-	if ev.DurationMs != 9468 {
-		t.Errorf("duration_ms: %d want 9468", ev.DurationMs)
+	shell := func(conv, gen, cmd string) models.ToolEvent {
+		t.Helper()
+		body := []byte(`{"hook_event_name":"beforeShellExecution","conversation_id":"` + conv +
+			`","generation_id":"` + gen + `","workspace_roots":["/repo"],"command":"` + cmd + `"}`)
+		ev, ok, err := BuildEvent(EventBeforeShellCommand, body, nil)
+		if err != nil || !ok {
+			t.Fatalf("shell: err=%v ok=%v", err, ok)
+		}
+		return ev
 	}
-	if !strings.Contains(ev.PrecedingReasoning, "wants to know my specific model name") {
-		t.Errorf("preceding reasoning: %q", ev.PrecedingReasoning)
+
+	// last-wins: two thoughts, no successor between them.
+	thought("conv-a", "g1", "first thought")
+	thought("conv-a", "g1", "second thought")
+	first := shell("conv-a", "g1", "ls")
+	if first.PrecedingReasoning != "second thought" {
+		t.Errorf("last-wins: preceding reasoning = %q, want %q", first.PrecedingReasoning, "second thought")
 	}
-	if !strings.Contains(ev.ToolOutput, "wants to know my specific model name") {
-		t.Errorf("tool output: %q", ev.ToolOutput)
+	// consumed-once: the next successor of the same conversation gets none.
+	second := shell("conv-a", "g2", "pwd")
+	if second.PrecedingReasoning != "" {
+		t.Errorf("consumed-once: second successor carried %q", second.PrecedingReasoning)
 	}
-	if ev.SessionID != "32c83fe8-3763-4f29-b127-a0968203db01" {
-		t.Errorf("session id: %s", ev.SessionID)
+
+	// turn boundary: a user prompt discards an unclaimed thought.
+	thought("conv-b", "g1", "stale thought")
+	promptBody := []byte(`{"hook_event_name":"beforeSubmitPrompt","conversation_id":"conv-b",` +
+		`"generation_id":"g1","workspace_roots":["/repo"],"prompt":"do the thing"}`)
+	if _, ok, err := BuildEvent(EventBeforeSubmitPrompt, promptBody, nil); err != nil || !ok {
+		t.Fatalf("prompt: err=%v ok=%v", err, ok)
+	}
+	after := shell("conv-b", "g2", "ls")
+	if after.PrecedingReasoning != "" {
+		t.Errorf("user-turn discard: successor carried %q", after.PrecedingReasoning)
+	}
+}
+
+// TestAfterAgentThought_LifecycleEventsDoNotConsume pins the consumer
+// TABLE: a lifecycle marker firing between the thought and the model's
+// real next act must neither claim the reasoning nor destroy it.
+func TestAfterAgentThought_LifecycleEventsDoNotConsume(t *testing.T) {
+	body := []byte(`{"hook_event_name":"afterAgentThought","conversation_id":"conv-c",` +
+		`"generation_id":"g1","workspace_roots":["/repo"],"text":"planning the edit"}`)
+	if _, ok, _ := BuildEvent(EventAfterAgentThought, body, nil); ok {
+		t.Fatal("thought minted a row")
+	}
+	compact := []byte(`{"hook_event_name":"preCompact","conversation_id":"conv-c",` +
+		`"generation_id":"g1","workspace_roots":["/repo"],"trigger":"auto"}`)
+	ev, ok, err := BuildEvent(EventPreCompact, compact, nil)
+	if err != nil || !ok {
+		t.Fatalf("preCompact: err=%v ok=%v", err, ok)
+	}
+	if ev.PrecedingReasoning != "" {
+		t.Errorf("preCompact consumed the thought: %q", ev.PrecedingReasoning)
+	}
+	edit := []byte(`{"hook_event_name":"afterFileEdit","conversation_id":"conv-c",` +
+		`"generation_id":"g2","workspace_roots":["/repo"],"file_path":"/repo/main.go"}`)
+	got, ok, err := BuildEvent(EventAfterFileEdit, edit, nil)
+	if err != nil || !ok {
+		t.Fatalf("afterFileEdit: err=%v ok=%v", err, ok)
+	}
+	if got.PrecedingReasoning != "planning the edit" {
+		t.Errorf("real successor preceding reasoning = %q", got.PrecedingReasoning)
 	}
 }
 
@@ -239,7 +322,7 @@ func TestBuildEvent_AfterAgentResponse(t *testing.T) {
 		"generation_id": "4d5d4102-34a7-48fd-aeb8-eee33729bf98",
 		"workspace_roots": ["/c:/programsx/marmutmain"],
 		"model": "default",
-		"text": "Auto is the agent/router identity in Cursor — how this chat is presented to you — not the foundation model.",
+		"text": "Auto is the agent/router identity in Cursor - how this chat is presented to you - not the foundation model.",
 		"input_tokens": 21268,
 		"output_tokens": 593,
 		"cache_read_tokens": 20992,
@@ -344,6 +427,69 @@ func TestBuildStopTokenEvent_WindowsCLIWorkspaceRoot(t *testing.T) {
 	// Net non-cached: 14243 - 6747 = 7496.
 	if ev.InputTokens != 7496 || ev.CacheReadTokens != 6747 {
 		t.Errorf("usage: in=%d cr=%d, want 7496/6747 (net of cached)", ev.InputTokens, ev.CacheReadTokens)
+	}
+}
+
+// TestNormalizeWorkspaceRoot_CanonicalizesWindowsShapes pins the
+// post-F4 project-identity contract on the HOOK path. Cursor emits a
+// Windows workspace root in three spellings depending on surface and
+// era — the CLI's raw `C:\...`, the IDE's `Uri.fsPath` `/c:/...`, and
+// (on a WSL-side install) an already-native POSIX path. F4 made the
+// WATCHER path (scan.go resolveProjectRoot) emit canonical
+// `/mnt/c/...`; if the hook path leaves `/c:/...` alone, one
+// directory becomes two project rows. All Windows spellings must
+// converge here.
+func TestNormalizeWorkspaceRoot_CanonicalizesWindowsShapes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/mnt/<drive> canonicalization is a WSL-daemon-observing-a-Windows-mount behavior")
+	}
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"cursor-agent CLI backslash", `C:\programsx\marmutmain`, "/mnt/c/programsx/marmutmain"},
+		{"IDE Uri.fsPath lowercase drive", "/c:/programsx/marmutmain", "/mnt/c/programsx/marmutmain"},
+		{"IDE Uri.fsPath uppercase drive", "/C:/programsx/marmutmain", "/mnt/c/programsx/marmutmain"},
+		{"already canonical", "/mnt/c/programsx/marmutmain", "/mnt/c/programsx/marmutmain"},
+		{"file URI", "file:///c:/programsx/marmutmain", "/mnt/c/programsx/marmutmain"},
+		// Native WSL-side cursor-agent: untouched.
+		{"native linux root", "/home/marmutapp/superbased-observer", "/home/marmutapp/superbased-observer"},
+		// A Linux directory that merely starts like a drive letter
+		// must never be rewritten.
+		{"linux /cache root", "/cache/projects/foo", "/cache/projects/foo"},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeWorkspaceRoot(c.in); got != c.want {
+				t.Errorf("normalizeWorkspaceRoot(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeWorkspaceRoot_HookMatchesWatcher is the cross-path
+// convergence assertion stated end-to-end: the hook path's root for a
+// Windows workspace must equal the watcher path's root for the same
+// workspace. Before the pathnorm `/c:` strip, the left side was
+// `/c:/programsx/model_pricing` and the right side (post-F4)
+// `/mnt/c/programsx/model_pricing` — the live split reported in
+// docs/audits/cursor-windows-capture-diagnosis-2026-08-07.md §2.5.
+func TestNormalizeWorkspaceRoot_HookMatchesWatcher(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/mnt/<drive> canonicalization is a WSL-daemon-observing-a-Windows-mount behavior")
+	}
+	const workspace = `C:\programsx\model_pricing`
+	hookRoot := normalizeWorkspaceRoot("/c:/programsx/model_pricing")
+	// The watcher path resolves through the same translate seam once
+	// .workspace-trusted supplies the authoritative Windows path.
+	watcherRoot := projectRootResolver{}.doTranslate(workspace)
+	if hookRoot != watcherRoot {
+		t.Fatalf("hook root %q != watcher root %q - project identity is split", hookRoot, watcherRoot)
+	}
+	if hookRoot != "/mnt/c/programsx/model_pricing" {
+		t.Errorf("converged root = %q, want /mnt/c/programsx/model_pricing", hookRoot)
 	}
 }
 
@@ -933,7 +1079,7 @@ func TestBuildEvent_PostToolUseAndAfterEventsNoRow(t *testing.T) {
 				t.Fatalf("BuildEvent: %v", err)
 			}
 			if ok {
-				t.Errorf("expected (zero, false) for %s — paired-after enrichment is deferred", evt)
+				t.Errorf("expected (zero, false) for %s - paired-after enrichment is deferred", evt)
 			}
 		})
 	}
@@ -1266,5 +1412,82 @@ func TestBuildAfterOutcome_DerivedSuccess(t *testing.T) {
 				t.Errorf("Success=%v want %v", out.Success, c.want)
 			}
 		})
+	}
+}
+
+// TestPostToolUseDurationUnitByVersion pins S10-CURSOR review (Codex
+// pass 2) finding 4: current builds send postToolUse `duration` in
+// MILLISECONDS (grounded 3.17.21-3.21.13); only the version-less 3.4.x
+// shape keeps the seconds reading.
+func TestPostToolUseDurationUnitByVersion(t *testing.T) {
+	cases := []struct {
+		version string
+		d       float64
+		want    int64
+	}{
+		{"3.20.21", 1401.838, 1401},
+		{"3.17.21", 120086.182, 120086},
+		{"3.21.13", 0.859, 0},
+		{"4.0.1", 250, 250},
+		{"3.16.9", 6.332, 6332},
+		{"", 6.332, 6332},
+		{"garbage", 6.332, 6332},
+	}
+	for _, tc := range cases {
+		if got := postToolUseDurationMs(tc.d, tc.version); got != tc.want {
+			t.Errorf("postToolUseDurationMs(%v, %q) = %d, want %d", tc.d, tc.version, got, tc.want)
+		}
+	}
+}
+
+// TestBuildAfterOutcome_ReadPairsWithBeforeReadFile pins Codex pass-2
+// finding 5: the Read tool's postToolUse carries its path only in
+// tool_input.file_path, and must hash to the SAME id as the
+// beforeReadFile row (whose top-level file_path it matches verbatim).
+func TestBuildAfterOutcome_ReadPairsWithBeforeReadFile(t *testing.T) {
+	before := []byte(`{"hook_event_name":"beforeReadFile","conversation_id":"c1","generation_id":"g1",
+		"file_path":"/repo/internal/store/x_test.go","content":"package store","workspace_roots":["/repo"]}`)
+	ev, ok, err := BuildEvent(EventBeforeReadFile, before, nil)
+	if err != nil || !ok {
+		t.Fatalf("BuildEvent: ok=%v err=%v", ok, err)
+	}
+	post := []byte(`{"hook_event_name":"postToolUse","conversation_id":"c1","generation_id":"g1",
+		"tool_name":"Read","tool_input":{"file_path":"/repo/internal/store/x_test.go"},
+		"tool_output":"ok","duration":12.5,"cursor_version":"3.20.21","tool_use_id":"call-1"}`)
+	out, ok, err := BuildAfterOutcome(EventPostToolUse, post)
+	if err != nil || !ok {
+		t.Fatalf("BuildAfterOutcome: ok=%v err=%v", ok, err)
+	}
+	if out.SourceEventID != ev.SourceEventID {
+		t.Fatalf("outcome id %q != before-row id %q", out.SourceEventID, ev.SourceEventID)
+	}
+	if out.DurationMs != 12 {
+		t.Fatalf("duration_ms = %d, want 12 (ms on 3.20.21)", out.DurationMs)
+	}
+}
+
+// TestBuildEventUnmappedEventIsScrubbedAndCapped pins Codex pass-2
+// finding 7: an event with no mapping keeps its payload only through
+// the scrubber and the content cap, never verbatim.
+func TestBuildEventUnmappedEventIsScrubbedAndCapped(t *testing.T) {
+	secret := "sk-ant-api03-" + strings.Repeat("A", 90)
+	big := strings.Repeat("x", 3*1024*1024)
+	body := []byte(`{"hook_event_name":"someFutureEvent","conversation_id":"c1","generation_id":"g1",
+		"workspace_roots":["/repo"],"note":"key ` + secret + `","blob":"` + big + `"}`)
+	small := []byte(`{"hook_event_name":"someFutureEvent","conversation_id":"c1","generation_id":"g1",
+		"workspace_roots":["/repo"],"note":"key ` + secret + `"}`)
+	sev, ok, err := BuildEvent("someFutureEvent", small, scrub.New())
+	if err != nil || !ok {
+		t.Fatalf("BuildEvent: ok=%v err=%v", ok, err)
+	}
+	if strings.Contains(sev.RawToolInput, secret) || !strings.Contains(sev.RawToolInput, "conversation_id") {
+		t.Fatalf("unmapped event not scrubbed field-wise: %q", sev.RawToolInput)
+	}
+	ev, ok, err := BuildEvent("someFutureEvent", body, scrub.New())
+	if err != nil || !ok {
+		t.Fatalf("BuildEvent: ok=%v err=%v", ok, err)
+	}
+	if len(ev.RawToolInput) >= len(body) || len(ev.RawToolInput) > 1024*1024 {
+		t.Fatalf("unmapped event payload not capped: %d bytes", len(ev.RawToolInput))
 	}
 }

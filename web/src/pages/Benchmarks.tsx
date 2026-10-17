@@ -1,9 +1,40 @@
-import { type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { HeroStat, PageHeader, Pill } from "@/components/primitives";
-import { PercentIcon } from "@/components/icons";
+import type { ColumnDef } from "@tanstack/react-table";
+import {
+  Button,
+  ChartShell,
+  ConfirmButton,
+  EmptyState,
+  ErrorState,
+  HeroStat,
+  InlineLoading,
+  ModelId,
+  PageHeader,
+  Pill,
+  Stagger,
+  Table,
+  Textarea,
+  Tooltip,
+} from "@/components/primitives";
+import { DataTable } from "@/components/DataTable";
 import { useApi } from "@/lib/useApi";
-import { fmtDuration, fmtInt, fmtUSD } from "@/lib/format";
+import { useFilters } from "@/lib/filters";
+import { fetchJSON, localConfirmHeaders } from "@/lib/api";
+import { JobResult, useCommandJob } from "@/components/CommandJobButton";
+import type { BackfillRunResponse } from "@/lib/types";
+import { costLabel, dollarsShown, fmtDateOnly, fmtDateTime, fmtDuration, fmtInt, fmtUSD, withoutDollars } from "@/lib/format";
+
+// Benchmark cost figures (spend, cost per success, mean $, Δ $/success, the
+// per-attempt cost dots) are list-price dollars with no token form: in the
+// org's token-usage view (format.ts cost affordances) they drop, and the
+// success / CI / verdict columns stay.
+const DOLLAR_COLUMN_IDS = new Set(["spend", "cost_per_success", "mean_cost", "delta_cost"]);
+const isDollarColumn = (c: { id?: string }) => DOLLAR_COLUMN_IDS.has(c.id ?? "");
+import type { VocabTable } from "@shared/lib/vocabEntry";
+import { VocabPill } from "@shared/lib/vocabPill";
+import { navIcon } from "@/lib/nav";
+import { MetricIcon } from "@/components/MetricIcon";
 
 // Benchmarks page (docs/plans/benchmarks-harness-plan-2026-07-11.md §4.1):
 // the read-only surface over the CLI-driven harness×model rig. Run list →
@@ -98,36 +129,25 @@ type RunDetail = {
   tasks: TaskRow[] | null;
 };
 
-const VERDICT_VARIANT: Record<string, "success" | "warn" | "danger" | "neutral"> = {
-  candidate_cheaper_noninferior: "success",
-  candidate_worse: "danger",
-  no_detected_difference: "neutral",
-  inconclusive: "warn",
-  insufficient_distinct_tasks: "warn",
-};
-const VERDICT_LABEL: Record<string, string> = {
-  candidate_cheaper_noninferior: "cheaper · non-inferior",
-  candidate_worse: "worse",
-  no_detected_difference: "no detected difference",
-  inconclusive: "inconclusive",
-  insufficient_distinct_tasks: "too few distinct tasks",
+// VERDICT - the ONE presentation row per candidate-vs-baseline verdict
+// (tone + label); glyph from VOCAB_ICONS.benchmarkVerdict.
+const VERDICT: VocabTable = {
+  candidate_cheaper_noninferior: { tone: "success", label: "cheaper · non-inferior" },
+  candidate_worse: { tone: "danger", label: "worse" },
+  no_detected_difference: { tone: "neutral", label: "no detected difference" },
+  inconclusive: { tone: "warn" },
+  insufficient_distinct_tasks: { tone: "warn", label: "too few distinct tasks" },
 };
 
-function statusVariant(s: string): "success" | "info" | "warn" | "danger" | "neutral" {
-  switch (s) {
-    case "completed":
-      return "success";
-    case "running":
-      return "info";
-    case "budget_stop":
-      return "warn";
-    case "aborted":
-    case "error":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
+// RUN_STATUS - a benchmark run's status; running is in flight (spins).
+// Glyph from VOCAB_ICONS.benchmarkRun.
+const RUN_STATUS: VocabTable = {
+  completed: { tone: "success" },
+  running: { tone: "info", spin: true },
+  budget_stop: { tone: "warn" },
+  aborted: { tone: "danger" },
+  error: { tone: "danger" },
+};
 
 export function BenchmarksPage() {
   const [params, setParams] = useSearchParams();
@@ -144,112 +164,310 @@ export function BenchmarksPage() {
     );
   };
   return (
-    <div className="space-y-4 p-5">
+    <div className="space-y-6 p-4 sm:p-6">
       <PageHeader
+        icon={navIcon("benchmarks")}
         title="Benchmarks"
-        sub="Harness × model comparisons grounded in billed-token truth — success ± Wilson CI, expected cost per successful completion, and non-inferiority verdicts over a pinned task corpus. Runs are launched from the CLI (observer benchmark run); this page reads the results."
+        sub={`Harness × model comparisons grounded in billed-token truth - success ± Wilson CI, ${costLabel("expected cost per successful completion, ", "")}and non-inferiority verdicts over a pinned task corpus. Start a run below (it runs observer benchmark run for you); this page reads the results.`}
       />
       {run ? <RunDetailView runID={run} onBack={() => setRun("")} /> : <RunListView onOpen={setRun} />}
     </div>
   );
 }
 
+// RUN_COLUMNS: the run list. The server returns newest first; that order
+// holds until a header is clicked.
+const RUN_COLUMNS: ColumnDef<RunSummary, unknown>[] = [
+  {
+    id: "spec",
+    header: "Spec",
+    accessorFn: (r) => r.spec_name,
+    cell: ({ row }) => (
+      <>
+        <span className="font-semibold text-fg-1">{row.original.spec_name}</span>
+        <code className="ml-1.5 rounded-1 bg-bg-3 px-1 font-mono text-micro text-fg-3">
+          {row.original.run_id}
+        </code>
+      </>
+    ),
+  },
+  {
+    id: "status",
+    header: "Status",
+    accessorFn: (r) => r.status,
+    cell: ({ row }) => <VocabPill vocab="benchmarkRun" table={RUN_STATUS} value={row.original.status} />,
+  },
+  {
+    id: "matrix",
+    header: "Matrix",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap tabular-nums text-fg-2">
+        {row.original.configs}×{row.original.tasks}
+        <span className="text-fg-3"> ·{row.original.repeats}rep</span>
+      </span>
+    ),
+  },
+  {
+    id: "cells",
+    header: "Cells",
+    accessorFn: (r) => r.completed_cells,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap tabular-nums text-fg-2">
+        {row.original.completed_cells}/{row.original.planned_cells}
+      </span>
+    ),
+  },
+  {
+    id: "spend",
+    header: "Spend",
+    accessorFn: (r) => r.spend_usd,
+    meta: { align: "right" },
+    cell: ({ row }) => <span className="text-fg-2">{fmtUSD(row.original.spend_usd)}</span>,
+  },
+  {
+    id: "started",
+    header: "Started",
+    accessorFn: (r) => r.started_at,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap text-fg-3">{fmtDateTime(row.original.started_at)}</span>
+    ),
+  },
+  {
+    id: "harnesses",
+    header: "Harnesses",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-[11px] text-fg-3">{row.original.harnesses.join(", ")}</span>
+    ),
+  },
+];
+
+// configColumnsFor builds the per-config report columns; the baseline id
+// is the one piece of run state a cell needs (the "baseline" pill).
+function configColumnsFor(baseline: string): ColumnDef<ConfigReport, unknown>[] {
+  return [
+    {
+      id: "config",
+      header: "Config",
+      accessorFn: (c) => c.config_id,
+      cell: ({ row }) => (
+        <span className="font-mono text-[11px] text-fg-1">
+          {row.original.config_id}
+          {row.original.config_id === baseline && (
+            <>
+              {" "}
+              <Pill variant="info">baseline</Pill>
+            </>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: "model",
+      header: "Model",
+      accessorFn: (c) => c.model,
+      cell: ({ row }) => (
+        <span className="text-[11px]">
+          <ModelId model={row.original.model} className="min-w-0" />
+        </span>
+      ),
+    },
+    {
+      id: "success",
+      header: "Success (95% CI)",
+      // No attempts is unknown, not 0% - it sorts last either way.
+      accessorFn: (c) => (c.n_executed === 0 ? undefined : c.success_rate),
+      sortUndefined: "last",
+      cell: ({ row }) => {
+        const c = row.original;
+        const wide = c.success_ci.hi - c.success_ci.lo > 0.5;
+        return c.n_executed === 0 ? (
+          <span className="text-fg-3">no attempts</span>
+        ) : (
+          <span className="whitespace-nowrap tabular-nums text-fg-1">
+            {(c.success_rate * 100).toFixed(0)}%{" "}
+            <span className={wide ? "text-warn" : "text-fg-3"}>
+              [{(c.success_ci.lo * 100).toFixed(0)}-{(c.success_ci.hi * 100).toFixed(0)}]
+            </span>
+          </span>
+        );
+      },
+    },
+    {
+      id: "n",
+      header: "N pl/ex/sc/pass",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap tabular-nums text-fg-2">
+          {row.original.n_planned}/{row.original.n_executed}/{row.original.n_scored}/{row.original.n_passed}
+        </span>
+      ),
+    },
+    {
+      id: "cost_per_success",
+      header: "Cost / success",
+      accessorFn: (c) => c.cost_per_success_usd ?? undefined,
+      sortUndefined: "last",
+      meta: { align: "right" },
+      cell: ({ row }) =>
+        row.original.cost_per_success_usd == null ? (
+          <Tooltip content="No successful attempts - cost per success is undefined (censored)">
+            <span tabIndex={0} className="cursor-help text-fg-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring">
+              n/a
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="text-fg-2">{fmtUSD(row.original.cost_per_success_usd)}</span>
+        ),
+    },
+    {
+      id: "mean_cost",
+      header: "Mean $",
+      accessorFn: (c) => c.mean_cost_per_attempt_usd,
+      meta: { align: "right" },
+      cell: ({ row }) => <span className="text-fg-2">{fmtUSD(row.original.mean_cost_per_attempt_usd)}</span>,
+    },
+    {
+      id: "cache",
+      header: "Cache %",
+      accessorFn: (c) => c.cache_read_pct,
+      meta: { align: "right" },
+      cell: ({ row }) => <span className="text-fg-2">{row.original.cache_read_pct.toFixed(0)}%</span>,
+    },
+    {
+      id: "wall",
+      header: "Mean wall",
+      accessorFn: (c) => (c.mean_wall_ms > 0 ? c.mean_wall_ms : undefined),
+      sortUndefined: "last",
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap tabular-nums text-fg-2">
+          {row.original.mean_wall_ms > 0 ? fmtDuration(row.original.mean_wall_ms) : "-"}
+        </span>
+      ),
+    },
+  ];
+}
+
+const COMPARISON_COLUMNS: ColumnDef<Comparison, unknown>[] = [
+  {
+    id: "candidate",
+    header: "Candidate",
+    accessorFn: (c) => c.candidate,
+    cell: ({ row }) => <span className="font-mono text-[11px] text-fg-1">{row.original.candidate}</span>,
+  },
+  {
+    id: "verdict",
+    header: "Verdict",
+    accessorFn: (c) => c.verdict,
+    cell: ({ row }) => <VocabPill vocab="benchmarkVerdict" table={VERDICT} value={row.original.verdict} />,
+  },
+  {
+    id: "diff",
+    header: "Δ success (95% CI)",
+    accessorFn: (c) => c.success_diff_ci.point,
+    cell: ({ row }) => {
+      const ci = row.original.success_diff_ci;
+      return (
+        <span className="whitespace-nowrap tabular-nums text-fg-2">
+          {signed(ci.point * 100)}pp [{signed(ci.lo * 100)}, {signed(ci.hi * 100)}]
+        </span>
+      );
+    },
+  },
+  {
+    id: "paired",
+    header: "Paired Δ",
+    accessorFn: (c) => c.paired_delta.point,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap tabular-nums text-fg-2">
+        {signed(row.original.paired_delta.point * 100)}pp
+        <span className="text-fg-3"> ({row.original.paired_tasks} tasks)</span>
+      </span>
+    ),
+  },
+  {
+    id: "cheaper",
+    header: "Cheaper",
+    accessorFn: (c) => (c.cheaper ? 1 : 0),
+    cell: ({ row }) => <span className="text-fg-2">{row.original.cheaper ? "yes" : "no"}</span>,
+  },
+  {
+    id: "delta_cost",
+    header: "Δ $/success",
+    accessorFn: (c) => c.cost_per_success_delta_usd,
+    meta: { align: "right" },
+    cell: ({ row }) => <span className="text-fg-2">{signed(row.original.cost_per_success_delta_usd, true)}</span>,
+  },
+];
+
 function RunListView({ onOpen }: { onOpen: (id: string) => void }) {
-  const runs = useApi<RunsResponse>("/api/benchmarks", { limit: 100 }, []);
+  // The global Model filter keeps the runs whose config matrix ran it.
+  const { model } = useFilters();
+  const modelArg = model !== "all" ? model : undefined;
+  const runs = useApi<RunsResponse>("/api/benchmarks", { limit: 100, model: modelArg }, [modelArg]);
   const rows = runs.data?.runs ?? [];
   const latest = rows[0];
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <Stagger className={dollarsShown() ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" : "grid grid-cols-1 gap-3 sm:grid-cols-2"}>
         <HeroStat
           label="Benchmark runs"
-          icon={<PercentIcon />}
+          icon={<MetricIcon metric="benchmarkRuns" />}
           loading={runs.loading}
-          value={runs.data ? fmtInt(runs.data.total) : "—"}
-          sub="node-local, CLI-driven — never leaves this machine"
+          value={runs.data ? fmtInt(runs.data.total) : "-"}
+          sub="node-local - never leaves this machine"
         />
         <HeroStat
           label="Latest run"
+          icon={<MetricIcon metric="latestRun" />}
           loading={runs.loading}
-          value={latest ? latest.spec_name : "—"}
-          sub={latest ? `${latest.completed_cells}/${latest.planned_cells} cells · ${new Date(latest.started_at).toLocaleDateString()}` : "no runs yet"}
+          stale={runs.isStale}
+          value={latest ? latest.spec_name : "-"}
+          sub={latest ? `${latest.completed_cells}/${latest.planned_cells} cells · ${fmtDateOnly(latest.started_at)}` : "no runs yet"}
         />
-        <HeroStat
-          label="Latest spend"
-          loading={runs.loading}
-          value={latest ? fmtUSD(latest.spend_usd) : "—"}
-          sub="estimated list price, not invoiced"
-        />
-      </div>
-
-      <Section title="Runs">
-        {runs.loading ? (
-          <Loading />
-        ) : rows.length === 0 ? (
-          <div className="py-10 text-center text-[12px] leading-relaxed text-fg-3">
-            <p className="text-[13px] font-semibold text-fg-2">No benchmark runs yet</p>
-            <p className="mt-1">
-              Run a spec to populate this page:{" "}
-              <code className="rounded-1 bg-bg-2 px-1 font-mono">observer benchmark run &lt;spec.toml&gt;</code>
-            </p>
-            <p className="mt-1 text-fg-3">
-              Dry-run by default; add <code className="rounded-1 bg-bg-2 px-1 font-mono">--confirm-spend</code> to
-              drive the harnesses. Report from the CLI with{" "}
-              <code className="rounded-1 bg-bg-2 px-1 font-mono">observer benchmark report &lt;run-id&gt;</code>.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                  <th className="py-1.5 pr-3 font-semibold">Spec</th>
-                  <th className="py-1.5 pr-3 font-semibold">Status</th>
-                  <th className="py-1.5 pr-3 font-semibold">Matrix</th>
-                  <th className="py-1.5 pr-3 font-semibold">Cells</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Spend</th>
-                  <th className="py-1.5 pr-3 font-semibold">Started</th>
-                  <th className="py-1.5 font-semibold">Harnesses</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr
-                    key={r.run_id}
-                    onClick={() => onOpen(r.run_id)}
-                    className="cursor-pointer border-b border-line-1/60 transition-colors hover:bg-bg-2/60"
-                  >
-                    <td className="py-1.5 pr-3">
-                      <span className="font-semibold text-fg-1">{r.spec_name}</span>
-                      <code className="ml-1.5 rounded-1 bg-bg-2 px-1 font-mono text-[10px] text-fg-3">
-                        {r.run_id}
-                      </code>
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <Pill variant={statusVariant(r.status)}>{r.status}</Pill>
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-fg-2">
-                      {r.configs}×{r.tasks}
-                      <span className="text-fg-3"> ·{r.repeats}rep</span>
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-fg-2">
-                      {r.completed_cells}/{r.planned_cells}
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
-                      {fmtUSD(r.spend_usd)}
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 pr-3 text-fg-3">
-                      {new Date(r.started_at).toLocaleString()}
-                    </td>
-                    <td className="py-1.5 font-mono text-[11px] text-fg-3">{r.harnesses.join(", ")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {dollarsShown() && (
+          <HeroStat
+            label="Latest spend"
+            icon={<MetricIcon metric="spend" />}
+            loading={runs.loading}
+            stale={runs.isStale}
+            value={latest ? fmtUSD(latest.spend_usd) : "-"}
+            sub="estimated list price, not invoiced"
+          />
         )}
-      </Section>
+      </Stagger>
+
+      <RunBenchmarkPanel onFinished={runs.reload} />
+
+      <ChartShell title="Runs">
+        {runs.loading ? (
+          <InlineLoading block />
+        ) : runs.error && !runs.data ? (
+          <ErrorState className="py-6" title="Couldn't load benchmark runs" error={runs.error} onRetry={runs.reload} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            variant="inline"
+            illustration="setup"
+            title="No benchmark runs yet"
+            body="Paste a spec in Run a benchmark above, review the dry-run estimate, then start the run."
+          >
+            <p className="text-[12px] leading-relaxed text-fg-3">
+              A finished run appears here; click it for the full report (the same numbers{" "}
+              <code className="rounded-1 bg-bg-3 px-1 font-mono">observer benchmark report</code> prints).
+            </p>
+          </EmptyState>
+        ) : (
+          <DataTable<RunSummary>
+            data={rows}
+            columns={withoutDollars(RUN_COLUMNS, isDollarColumn)}
+            rowKey={(r) => r.run_id}
+            onRowClick={(r) => onOpen(r.run_id)}
+            minWidth={720}
+          />
+        )}
+      </ChartShell>
     </>
   );
 }
@@ -260,6 +478,10 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
   const configs = d?.configs ?? [];
   const comparisons = d?.comparisons ?? [];
   const tasks = d?.tasks ?? [];
+  const configColumns = useMemo(
+    () => withoutDollars(configColumnsFor(d?.baseline_config ?? ""), isDollarColumn),
+    [d?.baseline_config],
+  );
 
   return (
     <>
@@ -280,161 +502,77 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
           Export JSON
         </a>
         <code className="rounded-1 bg-bg-2 px-1 font-mono text-[11px] text-fg-3">{runID}</code>
+        <DeleteRunButton runID={runID} onDeleted={onBack} />
       </div>
 
       {detail.loading && !d ? (
-        <Loading />
+        <InlineLoading block />
       ) : detail.error ? (
-        <Section title="Run detail">
-          <p className="py-6 text-center text-[12px] text-danger">
-            Could not load this run — it may have been deleted (
-            <code className="font-mono">observer benchmark delete</code>). {detail.error.message}
-          </p>
-        </Section>
+        <ChartShell title="Run detail">
+          <ErrorState
+            className="py-6"
+            title="Could not load this run. It may have been deleted."
+            error={detail.error}
+            onRetry={detail.reload}
+          />
+        </ChartShell>
       ) : d ? (
         <>
-          <Section
+          <ChartShell
             title={
               <span className="inline-flex flex-wrap items-center gap-2">
                 {d.spec_name}
-                <Pill variant={statusVariant(d.status)}>{d.status}</Pill>
+                <VocabPill vocab="benchmarkRun" table={RUN_STATUS} value={d.status} />
               </span>
             }
             sub={
               <>
                 Baseline <code className="font-mono text-fg-1">{d.baseline_config}</code> · non-inferiority margin{" "}
                 {d.noninferiority_margin > 0 ? `${(d.noninferiority_margin * 100).toFixed(0)}pp` : "none declared"} ·
-                sample floor {d.min_sample} · {d.completed_cells}/{d.planned_cells} cells · total spend{" "}
-                <span className="font-semibold text-fg-1">{fmtUSD(d.total_spend_usd)}</span>{" "}
-                <span className="text-fg-3">({d.price_disclaimer})</span>
+                sample floor {d.min_sample} · {d.completed_cells}/{d.planned_cells} cells
+                {dollarsShown() && (
+                  <>
+                    {" "}· total spend{" "}
+                    <span className="font-semibold text-fg-1">{fmtUSD(d.total_spend_usd)}</span>{" "}
+                    <span className="text-fg-3">({d.price_disclaimer})</span>
+                  </>
+                )}
               </>
             }
           >
             {configs.length === 0 ? (
-              <p className="py-4 text-center text-[12px] text-fg-3">No config rows — the run produced no attempts.</p>
+              <p className="py-4 text-center text-[12px] text-fg-3">No config rows - the run produced no attempts.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[12px]">
-                  <thead>
-                    <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                      <th className="py-1.5 pr-3 font-semibold">Config</th>
-                      <th className="py-1.5 pr-3 font-semibold">Model</th>
-                      <th className="py-1.5 pr-3 font-semibold">Success (95% CI)</th>
-                      <th className="py-1.5 pr-3 font-semibold">N pl/ex/sc/pass</th>
-                      <th className="py-1.5 pr-3 text-right font-semibold">Cost / success</th>
-                      <th className="py-1.5 pr-3 text-right font-semibold">Mean $</th>
-                      <th className="py-1.5 pr-3 text-right font-semibold">Cache %</th>
-                      <th className="py-1.5 font-semibold">Mean wall</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {configs.map((c) => {
-                      const wide = c.success_ci.hi - c.success_ci.lo > 0.5;
-                      return (
-                        <tr key={c.config_id} className="border-b border-line-1/60 align-top">
-                          <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">
-                            {c.config_id}
-                            {c.config_id === d.baseline_config && (
-                              <>
-                                {" "}
-                                <Pill variant="info">baseline</Pill>
-                              </>
-                            )}
-                          </td>
-                          <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-2">{c.model}</td>
-                          <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums">
-                            {c.n_executed === 0 ? (
-                              <span className="text-fg-3">no attempts</span>
-                            ) : (
-                              <span className="text-fg-1">
-                                {(c.success_rate * 100).toFixed(0)}%{" "}
-                                <span className={wide ? "text-warn" : "text-fg-3"}>
-                                  [{(c.success_ci.lo * 100).toFixed(0)}–{(c.success_ci.hi * 100).toFixed(0)}]
-                                </span>
-                              </span>
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-fg-2">
-                            {c.n_planned}/{c.n_executed}/{c.n_scored}/{c.n_passed}
-                          </td>
-                          <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
-                            {c.cost_per_success_usd == null ? (
-                              <span className="text-fg-3" title="No successful attempts — cost per success is undefined (censored)">
-                                n/a
-                              </span>
-                            ) : (
-                              fmtUSD(c.cost_per_success_usd)
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
-                            {fmtUSD(c.mean_cost_per_attempt_usd)}
-                          </td>
-                          <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">
-                            {c.cache_read_pct.toFixed(0)}%
-                          </td>
-                          <td className="whitespace-nowrap py-1.5 tabular-nums text-fg-2">
-                            {c.mean_wall_ms > 0 ? fmtDuration(c.mean_wall_ms) : "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable<ConfigReport>
+                data={configs}
+                columns={configColumns}
+                rowKey={(c) => c.config_id}
+                rowClassName={() => "align-top"}
+                minWidth={820}
+              />
             )}
             <p className="mt-2 text-[11px] leading-snug text-fg-3">
               Success uses a Wilson score interval (correct at small repeats); a wide CI (highlighted) means the N is
-              too small to rank. Cost is skewed — see the raw per-attempt dots below.
+              too small to rank.{dollarsShown() && " Cost is skewed - see the raw per-attempt dots below."}
             </p>
-          </Section>
+          </ChartShell>
 
           {comparisons.length > 0 && (
-            <Section
+            <ChartShell
               title="Comparisons vs baseline"
-              sub="Non-inferiority verdicts against the pre-registered margin — never a bare 'parity'. The verdict uses the unpaired independent-proportions (Newcombe) Δ-success CI below; the Paired Δ column is a separate task-blocked diagnostic and does not drive the verdict."
+              sub="Non-inferiority verdicts against the pre-registered margin - never a bare 'parity'. The verdict uses the unpaired independent-proportions (Newcombe) Δ-success CI below; the Paired Δ column is a separate task-blocked diagnostic and does not drive the verdict."
             >
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[12px]">
-                  <thead>
-                    <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                      <th className="py-1.5 pr-3 font-semibold">Candidate</th>
-                      <th className="py-1.5 pr-3 font-semibold">Verdict</th>
-                      <th className="py-1.5 pr-3 font-semibold">Δ success (95% CI)</th>
-                      <th className="py-1.5 pr-3 font-semibold">Paired Δ</th>
-                      <th className="py-1.5 pr-3 font-semibold">Cheaper</th>
-                      <th className="py-1.5 text-right font-semibold">Δ $/success</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {comparisons.map((cmp) => (
-                      <tr key={cmp.candidate} className="border-b border-line-1/60">
-                        <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">{cmp.candidate}</td>
-                        <td className="py-1.5 pr-3">
-                          <Pill variant={VERDICT_VARIANT[cmp.verdict] ?? "neutral"}>
-                            {VERDICT_LABEL[cmp.verdict] ?? cmp.verdict}
-                          </Pill>
-                        </td>
-                        <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-fg-2">
-                          {signed(cmp.success_diff_ci.point * 100)}pp [{signed(cmp.success_diff_ci.lo * 100)},{" "}
-                          {signed(cmp.success_diff_ci.hi * 100)}]
-                        </td>
-                        <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-fg-2">
-                          {signed(cmp.paired_delta.point * 100)}pp
-                          <span className="text-fg-3"> ({cmp.paired_tasks} tasks)</span>
-                        </td>
-                        <td className="py-1.5 pr-3 text-fg-2">{cmp.cheaper ? "yes" : "no"}</td>
-                        <td className="whitespace-nowrap py-1.5 text-right tabular-nums text-fg-2">
-                          {signed(cmp.cost_per_success_delta_usd, true)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Section>
+              <DataTable<Comparison>
+                data={comparisons}
+                columns={withoutDollars(COMPARISON_COLUMNS, isDollarColumn)}
+                rowKey={(cmp) => cmp.candidate}
+                minWidth={640}
+              />
+            </ChartShell>
           )}
 
-          <Section title="Cost per attempt (raw)" sub="Every attempt's snapshot billed cost — dots, never hidden.">
+          {dollarsShown() && (
+          <ChartShell title="Cost per attempt (raw)" sub="Every attempt's snapshot billed cost - dots, never hidden.">
             <div className="space-y-2.5">
               {configs.map((c) => (
                 <div key={c.config_id} className="flex flex-wrap items-center gap-2">
@@ -445,55 +583,54 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
                 </div>
               ))}
             </div>
-          </Section>
+          </ChartShell>
+          )}
 
           {tasks.length > 0 && (
-            <Section title="Per-task results" sub="Pass count / attempts per task × config — the block structure behind the paired analysis.">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[12px]">
-                  <thead>
-                    <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                      <th className="py-1.5 pr-3 font-semibold">Task</th>
-                      {configs.map((c) => (
-                        <th key={c.config_id} className="py-1.5 pr-3 text-right font-mono text-[10px] font-semibold">
-                          {c.config_id}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tasks.map((t) => (
-                      <tr key={t.task_id} className="border-b border-line-1/60">
-                        <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">{t.task_id}</td>
-                        {configs.map((c) => {
-                          const cell = t.cells[c.config_id];
-                          if (!cell || cell.attempts === 0) {
-                            return (
-                              <td key={c.config_id} className="py-1.5 pr-3 text-right text-fg-3">
-                                —
-                              </td>
-                            );
-                          }
-                          const pass = cell.passed === cell.attempts;
-                          return (
-                            <td
-                              key={c.config_id}
-                              className={`py-1.5 pr-3 text-right tabular-nums ${pass ? "text-success" : cell.passed === 0 ? "text-danger" : "text-fg-2"}`}
-                            >
-                              {cell.passed}/{cell.attempts}
-                            </td>
-                          );
-                        })}
-                      </tr>
+            <ChartShell title="Per-task results" sub="Pass count / attempts per task × config - the block structure behind the paired analysis.">
+              <Table
+                minWidth={Math.max(320, 160 + configs.length * 96)}
+                head={
+                  <tr>
+                    <th className="py-1.5 pr-3 font-medium">Task</th>
+                    {configs.map((c) => (
+                      <th key={c.config_id} className="py-1.5 pr-3 text-right font-mono font-medium">
+                        {c.config_id}
+                      </th>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </Section>
+                  </tr>
+                }
+              >
+                {tasks.map((t) => (
+                  <tr key={t.task_id} className="border-b border-line-1/60 last:border-0">
+                    <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">{t.task_id}</td>
+                    {configs.map((c) => {
+                      const cell = t.cells[c.config_id];
+                      if (!cell || cell.attempts === 0) {
+                        return (
+                          <td key={c.config_id} className="py-1.5 pr-3 text-right text-fg-3">
+                            -
+                          </td>
+                        );
+                      }
+                      const pass = cell.passed === cell.attempts;
+                      return (
+                        <td
+                          key={c.config_id}
+                          className={`py-1.5 pr-3 text-right tabular-nums ${pass ? "text-success" : cell.passed === 0 ? "text-danger" : "text-fg-2"}`}
+                        >
+                          {cell.passed}/{cell.attempts}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </Table>
+            </ChartShell>
           )}
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <Section title="Status census" sub="Every terminal attempt status — nothing dropped from the denominator.">
+            <ChartShell title="Status census" sub="Every terminal attempt status - nothing dropped from the denominator.">
               {Object.keys(d.status_census ?? {}).length === 0 ? (
                 <p className="py-2 text-[12px] text-fg-3">No attempts recorded.</p>
               ) : (
@@ -508,11 +645,11 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
                     ))}
                 </div>
               )}
-            </Section>
+            </ChartShell>
 
-            <Section title="Warnings" sub="Honesty guards from the analysis pass.">
+            <ChartShell title="Warnings" sub="Honesty guards from the analysis pass.">
               {(d.warnings ?? []).length === 0 ? (
-                <p className="py-2 text-[12px] text-fg-3">None — no sample-floor, wide-CI, or flaky-setup flags.</p>
+                <p className="py-2 text-[12px] text-fg-3">None - no sample-floor, wide-CI, or flaky-setup flags.</p>
               ) : (
                 <ul className="space-y-1.5">
                   {(d.warnings ?? []).map((wmsg, i) => (
@@ -523,7 +660,7 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
                   ))}
                 </ul>
               )}
-            </Section>
+            </ChartShell>
           </div>
         </>
       ) : null}
@@ -550,7 +687,7 @@ function CostDots({ samples }: { samples: number[] }) {
           <span
             key={i}
             title={fmtUSD(v)}
-            className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-accent/40 bg-accent/60"
+            className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-pill border border-accent/40 bg-accent/60"
             style={{ left: `${pct}%` }}
           />
         );
@@ -568,32 +705,153 @@ function signed(n: number, usd = false): string {
   return usd ? `${s}${fmtUSD(n)}` : `${s}${n.toFixed(1)}`;
 }
 
-// Section mirrors the Routing/Security page card shape.
-function Section({
-  title,
-  sub,
-  right,
-  children,
-}: {
-  title: ReactNode;
-  sub?: ReactNode;
-  right?: ReactNode;
-  children: ReactNode;
-}) {
+
+type BenchmarkRunStart = BackfillRunResponse & { spec_name: string; spec_digest: string };
+
+// postBenchmarkRun starts `observer benchmark run` through the dashboard
+// (POST /api/benchmarks/run). The server parses the spec with the CLI's own
+// parser first, so a malformed spec comes back as a 400 with the reason.
+async function postBenchmarkRun(
+  spec: string,
+  confirmSpend: boolean,
+  dryRunJobID: string,
+  allowUnpriced = false,
+): Promise<BenchmarkRunStart> {
+  const res = await fetch("/api/benchmarks/run", {
+    method: "POST",
+    headers: await localConfirmHeaders(),
+    body: JSON.stringify({
+      spec,
+      confirm_spend: confirmSpend,
+      dry_run_job_id: dryRunJobID,
+      allow_unpriced: allowUnpriced,
+    }),
+  });
+  const out = (await res.json().catch(() => null)) as (BenchmarkRunStart & { error?: string }) | null;
+  if (!res.ok || !out) throw new Error(out?.error || `HTTP ${res.status}`);
+  return out;
+}
+
+// RunBenchmarkPanel: `observer benchmark run` from the dashboard (backlog
+// item 6, sweep row 10). Paste a spec, run the dry run (it launches nothing
+// and stores nothing; it prints the plan and the cost estimate), then start
+// the real run, which spends API budget within the spec's [budget] caps. The
+// spend button only arms after a finished dry run of exactly the text in the
+// box, and the server checks the same thing.
+function RunBenchmarkPanel({ onFinished }: { onFinished: () => void }) {
+  const [spec, setSpec] = useState("");
+  const [dry, setDry] = useState<{ jobID: string; text: string } | null>(null);
+  const [allowUnpriced, setAllowUnpriced] = useState(false);
+  const dryJob = useCommandJob({
+    mode: "benchmark-dry-run",
+    start: async () => {
+      const text = spec;
+      const out = await postBenchmarkRun(text, false, "");
+      setDry({ jobID: out.job_id, text });
+      return out;
+    },
+  });
+  const spendJob = useCommandJob({
+    mode: "benchmark-run",
+    start: () => postBenchmarkRun(spec, true, dry?.jobID ?? "", allowUnpriced),
+    onDone: () => onFinished(),
+  });
+  const dryDone = dryJob.job?.status === "done" && dry !== null && dry.text === spec && spec.trim() !== "";
   return (
-    <section className="rounded-3 border border-line-1 bg-bg-1 p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold text-fg-0">{title}</h2>
-          {sub && <p className="mt-0.5 max-w-3xl text-[11.5px] leading-snug text-fg-3">{sub}</p>}
-        </div>
-        {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
+    <ChartShell
+      title="Run a benchmark"
+      sub="Paste a benchmark spec (TOML, the same file observer benchmark run takes). The dry run shows the plan and the cost estimate and spends nothing."
+    >
+      <Textarea
+        mono
+        rows={8}
+        value={spec}
+        onChange={(e) => setSpec(e.target.value)}
+        placeholder={'name = "my-corpus"\nrepeats = 3\n[budget]\n  max_total_usd = 5.0\n...'}
+        aria-label="Benchmark spec (TOML)"
+        className="w-full"
+      />
+      <div className="mt-2 flex flex-wrap items-start gap-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void dryJob.run()}
+          disabled={spec.trim() === "" || dryJob.busy || dryJob.running || spendJob.running}
+        >
+          {dryJob.running ? "Estimating…" : "Dry run (estimate)"}
+        </Button>
+        <ConfirmButton
+          variant="primary"
+          armedVariant="danger"
+          size="sm"
+          onConfirm={() => void spendJob.run()}
+          disabled={!dryDone || spendJob.busy || spendJob.running}
+          title={dryDone ? undefined : "Run a dry run of this exact spec first"}
+          confirmLabel="Spend and run?"
+          armedNote={
+            allowUnpriced
+              ? "Drives the harnesses for real and spends API budget, capped by the spec's [budget] limits. Models with no price history are allowed, so the estimate cannot bound their cost."
+              : "Drives the harnesses for real and spends API budget, capped by the spec's [budget] limits."
+          }
+        >
+          {spendJob.running ? "Running…" : "Run and spend"}
+        </ConfirmButton>
+        <label className="flex items-center gap-2 self-center text-[11.5px] text-fg-2">
+          <input
+            type="checkbox"
+            checked={allowUnpriced}
+            onChange={(e) => setAllowUnpriced(e.target.checked)}
+            disabled={spendJob.running}
+          />
+          Allow models with no price history (the run is still capped by [budget])
+        </label>
       </div>
-      {children}
-    </section>
+      <p className="mt-2 text-[11px] leading-snug text-fg-3">
+        Codex runs record into this node and appear in the list below. A claude-code spend run uses a throwaway
+        isolated benchmark daemon and copies its results into this node when it finishes, so it appears below too. The
+        output below is the CLI's own: its --confirm-spend is the Run and spend button and its --allow-unpriced is the
+        checkbox.
+      </p>
+      <JobResult job={dryJob.job} err={dryJob.err} doneText="Dry run finished. Review the estimate before you spend." lines={14} />
+      <JobResult job={spendJob.job} err={spendJob.err} doneText="Run finished. It is in the list below." lines={14} />
+    </ChartShell>
   );
 }
 
-function Loading() {
-  return <div className="py-8 text-center text-[12px] text-fg-3">Loading…</div>;
+// DeleteRunButton: `observer benchmark delete <run-id>` (the same store
+// delete). Two-step: the first click arms it.
+function DeleteRunButton({ runID, onDeleted }: { runID: string; onDeleted: () => void }) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function del() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fetchJSON("/api/benchmarks/delete", undefined, {
+        method: "POST",
+        headers: await localConfirmHeaders(),
+        body: JSON.stringify({ run_id: runID }),
+      });
+      onDeleted();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <ConfirmButton
+        size="sm"
+        variant="ghost"
+        onConfirm={() => void del()}
+        disabled={busy}
+        confirmLabel="Delete this run?"
+        armedNote="Removes the run, its attempts and scores. This cannot be undone."
+      >
+        Delete run
+      </ConfirmButton>
+      {err && <span className="text-[11px] text-danger">{err}</span>}
+    </span>
+  );
 }

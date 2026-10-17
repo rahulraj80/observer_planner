@@ -147,17 +147,79 @@ type tokenParts struct {
 // against live turns 2026-07-09: 17883+81==17964 with cached 0;
 // 18049+41==18090 with cached 17920 ⊂ input). TokenEvent.InputTokens
 // must be NET, so cached is subtracted here and carried in CacheRead.
+//
+// Output and reasoning must be DISJOINT (the cost engine bills reasoning
+// at the output rate ON TOP of output, internal/intelligence/cost
+// TokenBundle.Reasoning). Whether qwen's output_token_count already
+// contains thoughts_token_count depends on the content generator behind
+// the turn, not on the tool: the OpenAI-compatible generator copies
+// completion_tokens (which INCLUDES reasoning_tokens) into
+// output_token_count and reasoning_tokens into thoughts_token_count, while
+// the Gemini generator reports candidates (EXCLUDING thoughts) beside
+// thoughts. reasoningInOutput resolves it per record (T-542; live
+// qwen-code 0.21.0 capture testdata/otlp/qwen-code: 1234 + 56 == 1290
+// total with 16 thoughts inside the 56).
 func tokenBundle(ev *rawUIEvent) tokenParts {
 	net := ev.InputTokenCount - ev.CachedTokenCount
 	if net < 0 {
 		net = 0
 	}
+	output := ev.OutputTokenCount
+	if ev.ThoughtsTokens > 0 && reasoningInOutput(ev) {
+		output -= ev.ThoughtsTokens
+		if output < 0 {
+			output = 0
+		}
+	}
 	return tokenParts{
 		inputNet:  net,
-		output:    ev.OutputTokenCount,
+		output:    output,
 		cacheRead: ev.CachedTokenCount,
 		reasoning: ev.ThoughtsTokens,
 	}
+}
+
+// reasoningRule is one row of the ordered reasoning-convention table.
+type reasoningRule struct {
+	// when reports whether the row decides this record.
+	when func(ev *rawUIEvent) bool
+	// included is the decision: output_token_count already contains the
+	// thoughts.
+	included bool
+}
+
+// openAIShapedAuth are the qwen auth types whose content generator
+// reports usage in the OpenAI shape (completion_tokens includes
+// reasoning_tokens). Used only when the record carries no usable total.
+var openAIShapedAuth = map[string]bool{"openai": true, "qwen-oauth": true}
+
+// reasoningRules is walked top-down; the first row whose condition holds
+// decides. The record's own arithmetic wins over its auth type: a total
+// equal to input + output + thoughts proves the buckets disjoint (Gemini
+// usageMetadata), a total equal to input + output proves the thoughts sit
+// inside the output (OpenAI usage). Without a total the auth type decides,
+// and an unknown generator keeps the disjoint reading (the pre-T-542
+// behaviour).
+var reasoningRules = []reasoningRule{
+	{when: func(ev *rawUIEvent) bool {
+		return ev.TotalTokenCount > 0 && ev.TotalTokenCount == ev.InputTokenCount+ev.OutputTokenCount+ev.ThoughtsTokens
+	}, included: false},
+	{when: func(ev *rawUIEvent) bool {
+		return ev.TotalTokenCount > 0 && ev.TotalTokenCount == ev.InputTokenCount+ev.OutputTokenCount
+	}, included: true},
+	{when: func(ev *rawUIEvent) bool { return openAIShapedAuth[ev.AuthType] }, included: true},
+	{when: func(*rawUIEvent) bool { return true }, included: false},
+}
+
+// reasoningInOutput reports whether the record's output_token_count
+// already contains its thoughts_token_count.
+func reasoningInOutput(ev *rawUIEvent) bool {
+	for _, r := range reasoningRules {
+		if r.when(ev) {
+			return r.included
+		}
+	}
+	return false
 }
 
 // mapToolName collapses qwen's tool vocabulary onto the normalized
@@ -194,6 +256,14 @@ func mapToolName(name string) string {
 		return models.ActionTodoUpdate
 	case "savememory", "memorize":
 		return models.ActionMCPCall // closest existing semantic; no dedicated type
+	case "advisor":
+		// ToolNames.ADVISOR = 'advisor' (QwenLM/qwen-code
+		// packages/core/src/tools/tool-names.ts; tools/advisor.ts,
+		// Kind.Think): a one-shot, TOOL-LESS consultation of a separately
+		// configured Advisor model whose free-text advice returns to the
+		// executor. Not a sub-agent spawn (no tools, no autonomous run) —
+		// a host-harness builtin, so harness_call.
+		return models.ActionHarnessCall
 	default:
 		if strings.HasPrefix(key, "mcp") || strings.Contains(name, "__") {
 			return models.ActionMCPCall

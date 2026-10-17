@@ -24,6 +24,8 @@ func TestToolForLaunchSubcommand(t *testing.T) {
 		{"kilo", "kilo-code-cli", true},
 		{"qwen", "qwen-code", true},
 		{"kiro", "kiro-cli", true},
+		{"pool", "poolside", true}, // verb is the vendor binary, not the key
+		{"junie", "junie", true},
 		{"nonexistent-verb", "", false},
 		{"", "", false},
 	}

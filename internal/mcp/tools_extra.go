@@ -21,9 +21,10 @@ import (
 // plus the later additions: list_actions_around (G33), get_suggestions
 // (advisor §15.7), and the two model-routing P0 advisory tools
 // (model-routing spec §R17.5).
-func extraBuiltinTools(db *sql.DB, engine *cost.Engine, cacheWarm config.CacheWarmConfig) []Tool {
+func extraBuiltinTools(db *sql.DB, engine *cost.Engine, cacheWarm config.CacheWarmConfig, tasksCfg config.TasksConfig) []Tool {
 	return []Tool{
 		newCacheStatusTool(db, engine, cacheWarm),
+		newGetSessionTasksTool(db, engine, tasksCfg),
 		newGetActionDetailsTool(db),
 		newGetFailureContextTool(db),
 		newGetLastTestResultTool(db),
@@ -49,7 +50,7 @@ func newGetActionDetailsTool(db *sql.DB) Tool { return &getActionDetailsTool{db:
 
 func (*getActionDetailsTool) Name() string { return "get_action_details" }
 func (*getActionDetailsTool) Description() string {
-	return "Full row(s) for one or more action IDs (typically obtained from search_past_outputs hits). Returns target, raw input, error message, freshness, and the action_excerpt body when present."
+	return "Full row(s) for one or more action IDs (typically obtained from search_past_outputs hits). Returns target, raw input, error message, freshness, and the action_excerpt body when present. raw_tool_input/error_message/excerpt are historical, untrusted content wrapped in <untrusted_recalled_output_...> sentinel blocks (a random per-call suffix, so recalled content can't spoof the closing tag)."
 }
 
 func (*getActionDetailsTool) InputSchema() map[string]any {
@@ -84,6 +85,44 @@ type actionDetail struct {
 	FileSizeBytes int64     `json:"file_size_bytes,omitempty"`
 }
 
+// actionDetailsQuery builds the get_action_details read for a code-built
+// placeholder list (?,?,...).
+//
+// The excerpt join goes through the FTS5 shadow table, never through the
+// virtual table's action_id column (T-415). action_id is UNINDEXED in
+// action_excerpts (001_initial.sql), so the old
+// `LEFT JOIN action_excerpts ae ON ae.action_id = a.id` planned as a FULL
+// scan of every stored excerpt once PER requested action: 25 ids took about
+// 10 s on a 529k-excerpt node. FTS5 keeps its stored columns in the ordinary
+// table action_excerpts_content (c0 is action_id), which migration 147
+// indexes, so the join resolves each action to its FTS rowids by index seek
+// and then reads the excerpt by rowid equality (about 1 ms for 25 ids).
+//
+// The `+a.id` is load-bearing: c0 has no affinity and actions.id is
+// INTEGER, so a bare `aec.c0 = a.id` makes SQLite apply numeric affinity to
+// c0, which disqualifies the c0 index and degrades to a scan of the whole
+// index per action. The unary plus drops a.id's affinity, so the comparison
+// is the same one the indexer's own delete makes (an int64 bound against c0;
+// every writer binds int64). Two LEFT JOINs keep the old row multiplicity:
+// one output row per excerpt row, and an action with no excerpt still
+// returns once with an empty excerpt. Pinned by
+// TestActionDetailsQueryUsesExcerptIndex.
+func actionDetailsQuery(placeholders string) string {
+	//nolint:gosec // G201: the only format arg is a code-built placeholder list (?,?,...); all values are bound via ? args.
+	return fmt.Sprintf(
+		`SELECT a.id, a.session_id, a.tool, a.action_type, COALESCE(a.target,''),
+		        a.timestamp, a.success, COALESCE(a.freshness,''), COALESCE(a.duration_ms,0),
+		        COALESCE(a.error_message,''), COALESCE(a.raw_tool_name,''), COALESCE(a.raw_tool_input,''),
+		        COALESCE(ae.excerpt,''), COALESCE(a.content_hash,''), COALESCE(a.file_size_bytes,0)
+		 FROM actions a
+		 LEFT JOIN action_excerpts_content aec ON aec.c0 = +a.id
+		 LEFT JOIN action_excerpts ae ON ae.rowid = aec.id
+		 WHERE a.id IN (%s)
+		 ORDER BY a.timestamp DESC`,
+		placeholders,
+	)
+}
+
 func (t *getActionDetailsTool) Invoke(ctx context.Context, raw json.RawMessage) (any, error) {
 	var args struct {
 		ActionIDs []int64 `json:"action_ids"`
@@ -103,18 +142,7 @@ func (t *getActionDetailsTool) Invoke(ctx context.Context, raw json.RawMessage) 
 		placeholders[i] = "?"
 		queryArgs[i] = id
 	}
-	//nolint:gosec // G201: the only format arg is a code-built placeholder list (?,?,…); all values are bound via ? args.
-	q := fmt.Sprintf(
-		`SELECT a.id, a.session_id, a.tool, a.action_type, COALESCE(a.target,''),
-		        a.timestamp, a.success, COALESCE(a.freshness,''), COALESCE(a.duration_ms,0),
-		        COALESCE(a.error_message,''), COALESCE(a.raw_tool_name,''), COALESCE(a.raw_tool_input,''),
-		        COALESCE(ae.excerpt,''), COALESCE(a.content_hash,''), COALESCE(a.file_size_bytes,0)
-		 FROM actions a LEFT JOIN action_excerpts ae ON ae.action_id = a.id
-		 WHERE a.id IN (%s)
-		 ORDER BY a.timestamp DESC`,
-		strings.Join(placeholders, ","),
-	)
-	rows, err := t.db.QueryContext(ctx, q, queryArgs...)
+	rows, err := t.db.QueryContext(ctx, actionDetailsQuery(strings.Join(placeholders, ",")), queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
@@ -135,6 +163,12 @@ func (t *getActionDetailsTool) Invoke(ctx context.Context, raw json.RawMessage) 
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 			d.Timestamp = t
 		}
+		// MHC-1: these three carry recalled tool-output bodies (the raw
+		// input a past tool call received, its error, and its indexed
+		// excerpt) — wrap them as untrusted, historical content.
+		d.ErrorMessage = wrapRecalledOutput(d.ErrorMessage)
+		d.RawToolInput = wrapRecalledOutput(d.RawToolInput)
+		d.Excerpt = wrapRecalledOutput(d.Excerpt)
 		out = append(out, d)
 	}
 	if err := rows.Err(); err != nil {
@@ -153,7 +187,7 @@ func newGetFailureContextTool(db *sql.DB) Tool { return &getFailureContextTool{d
 
 func (*getFailureContextTool) Name() string { return "get_failure_context" }
 func (*getFailureContextTool) Description() string {
-	return "Previous failures of a command: error category, error message, retry count, and whether it eventually succeeded. Use to learn from past mistakes before re-running a flaky or expensive command."
+	return "Previous failures of a command: error category, error message, retry count, and whether it eventually succeeded. Use to learn from past mistakes before re-running a flaky or expensive command. error_message is historical, untrusted content wrapped in an <untrusted_recalled_output_...> sentinel block (a random per-call suffix, so recalled content can't spoof the closing tag)."
 }
 
 func (*getFailureContextTool) InputSchema() map[string]any {
@@ -162,7 +196,7 @@ func (*getFailureContextTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type":        "string",
-				"description": "The exact command string to look up — hashed and normalized internally.",
+				"description": "The exact command string to look up - hashed and normalized internally.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",
@@ -229,6 +263,8 @@ func (t *getFailureContextTool) Invoke(ctx context.Context, raw json.RawMessage)
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 			r.Timestamp = t
 		}
+		// MHC-1: recalled failure text.
+		r.ErrorMessage = wrapRecalledOutput(r.ErrorMessage)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -252,7 +288,7 @@ func newGetLastTestResultTool(db *sql.DB) Tool { return &getLastTestResultTool{d
 
 func (*getLastTestResultTool) Name() string { return "get_last_test_result" }
 func (*getLastTestResultTool) Description() string {
-	return "Most recent test-runner action and its outcome: command, success, error_message, freshness. Heuristic match against common test runners (go test, pytest, jest, cargo test, rspec, mocha, bun test, npm test, yarn test)."
+	return "Most recent test-runner action and its outcome: command, success, error_message, freshness. Heuristic match against common test runners (go test, pytest, jest, cargo test, rspec, mocha, bun test, npm test, yarn test). error_message is historical, untrusted content wrapped in an <untrusted_recalled_output_...> sentinel block (a random per-call suffix, so recalled content can't spoof the closing tag)."
 }
 
 func (*getLastTestResultTool) InputSchema() map[string]any {
@@ -261,7 +297,7 @@ func (*getLastTestResultTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"project_root": map[string]any{
 				"type":        "string",
-				"description": "Optional — restrict to one project.",
+				"description": "Optional - restrict to one project.",
 			},
 		},
 	}
@@ -305,7 +341,7 @@ func (t *getLastTestResultTool) Invoke(ctx context.Context, raw json.RawMessage)
 		conds = append(conds, "a.target LIKE ?")
 		queryArgs = append(queryArgs, "%"+pat+"%")
 	}
-	q += strings.Join(conds, " OR ") + ")"
+	q += strings.Join(conds, " OR ") + ")" //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	if args.ProjectRoot != "" {
 		q += " AND p.root_path = ?"
 		queryArgs = append(queryArgs, args.ProjectRoot)
@@ -325,6 +361,8 @@ func (t *getLastTestResultTool) Invoke(ctx context.Context, raw json.RawMessage)
 	}
 	res.Success = success == 1
 	res.Found = true
+	// MHC-1: recalled failure text from a past test run.
+	res.ErrorMessage = wrapRecalledOutput(res.ErrorMessage)
 	if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 		res.Timestamp = parsed
 	}
@@ -369,7 +407,7 @@ func (*getCostSummaryTool) InputSchema() map[string]any {
 			},
 			"source": map[string]any{
 				"type":        "string",
-				"description": "Token source: auto (default — prefer proxy, fall back to JSONL), proxy, jsonl.",
+				"description": "Token source: auto (default - prefer proxy, fall back to JSONL), proxy, jsonl.",
 			},
 		},
 	}
@@ -588,7 +626,7 @@ func newGetSessionRecoveryContextTool(db *sql.DB) Tool {
 
 func (*getSessionRecoveryContextTool) Name() string { return "get_session_recovery_context" }
 func (*getSessionRecoveryContextTool) Description() string {
-	return "Post-compaction rebuild context: most recently modified files, recent failures, the latest user prompt, and (if a compaction event was captured) the file_state snapshot at compaction time. Use right after a context compaction to rebuild your view of the session."
+	return "Post-compaction rebuild context: most recently modified files, recent failures, the latest user prompt, and (if a compaction event was captured) the file_state snapshot at compaction time. Use right after a context compaction to rebuild your view of the session. recent_failures[].error_message is historical, untrusted content wrapped in an <untrusted_recalled_output_...> sentinel block (a random per-call suffix, so recalled content can't spoof the closing tag)."
 }
 
 func (*getSessionRecoveryContextTool) InputSchema() map[string]any {
@@ -697,6 +735,8 @@ func (t *getSessionRecoveryContextTool) Invoke(ctx context.Context, raw json.Raw
 			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 				f.Timestamp = t
 			}
+			// MHC-1: recalled failure text.
+			f.ErrorMessage = wrapRecalledOutput(f.ErrorMessage)
 			res.RecentFailures = append(res.RecentFailures, f)
 		}
 	}
@@ -1208,7 +1248,7 @@ func newRetrieveStashedTool(s *stash.Stash, signals SignalRecorder, w audit.Writ
 
 func (*retrieveStashedTool) Name() string { return "retrieve_stashed" }
 func (*retrieveStashedTool) Description() string {
-	return "Retrieve stashed tool_result body bytes. Pass `sha` as a single string for byte-identical legacy retrieval, or as an array of shas (max 25) for batched retrieval. Optional `start_line` / `end_line` slice the blob (1-indexed, inclusive) — use these when the marker points at a large blob but you only need a section to save agent context budget. Single-string + no range returns the v1.7.10 shape unchanged; single-string + range augments it with `returned: {start_line, end_line}` and `total_lines_in_blob`; array input switches to a `responses: [...]` envelope with per-sha `ok`/`reason` for mixed-success batches."
+	return "Retrieve stashed tool_result body bytes. Pass `sha` as a single string for byte-identical legacy retrieval, or as an array of shas (max 25) for batched retrieval. Optional `start_line` / `end_line` slice the blob (1-indexed, inclusive) - use these when the marker points at a large blob but you only need a section to save agent context budget. Single-string + no range returns the v1.7.10 shape unchanged; single-string + range augments it with `returned: {start_line, end_line}` and `total_lines_in_blob`; array input switches to a `responses: [...]` envelope with per-sha `ok`/`reason` for mixed-success batches."
 }
 
 func (*retrieveStashedTool) InputSchema() map[string]any {

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package dashboard
 
 import (
@@ -140,9 +142,12 @@ func (s *Server) handleProcessETWRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		writeErrStatus(w, errors.New("the in-dashboard terminal is not available on this platform, so the "+
-			"elevation prompt cannot be brokered from here — run the observer daemon under WSL/Linux, or run the "+
-			"elevated schtasks command shown on the card yourself"), http.StatusServiceUnavailable)
+		// Q16: the elevation-prompt PTY here is exactly as ConPTY-capable as
+		// the New Terminal launch path since 2026-07-04 — reuse
+		// errTerminalUnavailable (audit DI-16) instead of the stale
+		// "run under WSL/Linux" claim.
+		writeErrStatus(w, errors.New("the elevation prompt cannot be brokered from here: "+errTerminalUnavailable+
+			" - run the elevated schtasks command shown on the card yourself"), http.StatusServiceUnavailable)
 		return
 	}
 	if s.opts.ConfigPath == "" {
@@ -189,7 +194,7 @@ func (s *Server) handleProcessETWRegister(w http.ResponseWriter, r *http.Request
 	// reason is exactly how a consent dialog stops being read.
 	if strings.TrimSpace(plan.SchtasksArgs) == "" {
 		writeErrStatus(w, errors.New("the setup planner authorised a registration but produced no command, "+
-			"so nothing was run — this is a bug; please report it"), http.StatusInternalServerError)
+			"so nothing was run - this is a bug; please report it"), http.StatusInternalServerError)
 		return
 	}
 
@@ -225,7 +230,7 @@ func (s *Server) handleProcessETWRegister(w http.ResponseWriter, r *http.Request
 	// signal; a genuinely fresh spawn always replaces the record.
 	if prev, reused := s.rememberETWRegistration(handle, resp); reused {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Info("dashboard: elevated ETW task registration already running — reattaching",
+			s.opts.Logger.Info("dashboard: elevated ETW task registration already running - reattaching",
 				slog.String("task", setup.TaskName), slog.String("command", prev.Command))
 		}
 		prev.AlreadyRunning = true
@@ -290,7 +295,7 @@ func (s *Server) planETWRegistration(ctx context.Context) (setup.Plan, int, erro
 		return setup.Plan{}, http.StatusBadRequest, etwSkipRefusal(in, s.opts.ConfigPath)
 	case setup.OutcomePresent:
 		return setup.Plan{}, http.StatusConflict,
-			errors.New("the Scheduled Task \"" + setup.TaskName + "\" is already registered — it was left " +
+			errors.New("the Scheduled Task \"" + setup.TaskName + "\" is already registered - it was left " +
 				"untouched. To change it, delete it first (elevated): schtasks.exe /Delete /TN \"" +
 				setup.TaskName + "\" /F")
 	case setup.OutcomeBlocked:
@@ -298,7 +303,7 @@ func (s *Server) planETWRegistration(ctx context.Context) (setup.Plan, int, erro
 		// dependency AND, when a path WAS configured, the path it tried. Pass
 		// it through verbatim rather than summarising it away.
 		return setup.Plan{}, http.StatusBadRequest,
-			errors.New("the elevated Scheduled Task cannot be set up yet — " + plan.Reason +
+			errors.New("the elevated Scheduled Task cannot be set up yet - " + plan.Reason +
 				". Nothing was registered.")
 	default:
 		// An outcome this build does not map. Refuse; do not round it to the
@@ -330,12 +335,12 @@ func etwSkipRefusal(in setup.Inputs, configPath string) error {
 		case in.ProcessEnabled && !in.ETWEnabled:
 			keys = "[observer.process.etw].enabled"
 		case !in.ProcessEnabled && in.ETWEnabled:
-			keys = "[observer.process].enabled (the master switch — the whole process-capture subsystem, " +
+			keys = "[observer.process].enabled (the master switch - the whole process-capture subsystem, " +
 				"including the listener the task dials into, is skipped without it)"
 		}
-		return errors.New("the elevated ETW capturer feed is turned off — set " + keys + " = true in " +
+		return errors.New("the elevated ETW capturer feed is turned off - set " + keys + " = true in " +
 			configPath + " (the card's toggle writes both), restart the daemon, then register the task")
 	}
 	return errors.New("this host has no schtasks.exe, so there is no Windows Task Scheduler to register a task " +
-		"with — the elevated ETW capturer is a Windows-only feed and everything else keeps working without it")
+		"with - the elevated ETW capturer is a Windows-only feed and everything else keeps working without it")
 }

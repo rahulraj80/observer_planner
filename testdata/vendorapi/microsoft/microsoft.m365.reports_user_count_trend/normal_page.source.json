@@ -1,0 +1,48 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "value": "Inferred",
+    "value[]": "Inferred",
+    "value[].adoptionByDate": "Inferred",
+    "value[].adoptionByDate[]": "Inferred",
+    "value[].adoptionByDate[].anyAppActiveUsers": "Inferred",
+    "value[].adoptionByDate[].anyAppEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].copilotChatActiveUsers": "Inferred",
+    "value[].adoptionByDate[].copilotChatEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].excelActiveUsers": "Inferred",
+    "value[].adoptionByDate[].excelEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].loopActiveUsers": "Inferred",
+    "value[].adoptionByDate[].loopEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].microsoftTeamsActiveUsers": "Inferred",
+    "value[].adoptionByDate[].microsoftTeamsEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].oneNoteActiveUsers": "Inferred",
+    "value[].adoptionByDate[].oneNoteEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].outlookActiveUsers": "Inferred",
+    "value[].adoptionByDate[].outlookEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].powerPointActiveUsers": "Inferred",
+    "value[].adoptionByDate[].powerPointEnabledUsers": "Inferred",
+    "value[].adoptionByDate[].reportDate": "Inferred",
+    "value[].adoptionByDate[].wordActiveUsers": "Inferred",
+    "value[].adoptionByDate[].wordEnabledUsers": "Inferred",
+    "value[].reportPeriod": "Inferred",
+    "value[].reportRefreshDate": "Inferred"
+  },
+  "fixture_sha256": "566e1f96b812dae00dd92f45d0ca706164bfab367c17d55e2c6e33b10f99a47e",
+  "http": {
+    "method": "GET",
+    "path": "/v1.0/copilot/reports/getMicrosoft365CopilotUserCountTrend(period='D7')",
+    "query": {
+      "$format": "application/json"
+    },
+    "status": 200
+  },
+  "notes": "The documented JSON example (beta pivot) verbatim. That v1.0 answers this JSON shape under $format=application/json is Inferred.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "MicrosoftDocs/m365copilot-docs main, copilotReportRoot: getMicrosoft365CopilotUserCountTrend (ms.date 07/15/2026), fetched 2026-10-08",
+  "source_kind": "api_reference_example",
+  "source_sha256": "cf4b6041b61e1643dd8964d0833c3837526d093bc69449002650b3281465c406",
+  "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/m365copilot-docs/main/docs/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusercounttrend.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "microsoft.m365.reports_user_count_trend"
+}

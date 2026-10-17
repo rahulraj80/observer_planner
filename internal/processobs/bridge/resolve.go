@@ -54,7 +54,7 @@ func ResolveWindowsObserver(explicit string) (string, bool) {
 		if i >= 2 && !strings.HasPrefix(c, "/mnt/") {
 			continue
 		}
-		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() { //nolint:gosec // G703: candidate paths come from the operator's config and fixed /mnt locations, stat only
 			return c, true
 		}
 	}

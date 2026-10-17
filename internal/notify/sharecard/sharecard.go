@@ -60,7 +60,7 @@ func (d Data) periodPhrase() string {
 // deterministic and safe to paste into GitHub, Slack, or a social post.
 func (d Data) Markdown() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## My AI agent spend — %s\n\n", d.PeriodLabel)
+	fmt.Fprintf(&b, "## My AI agent spend - %s\n\n", d.PeriodLabel)
 	if d.TurnCount > 0 {
 		fmt.Fprintf(&b, "**%s** observed %s across %s turns.\n",
 			money(d.TotalUSD), d.periodPhrase(), integer(int64(d.TurnCount)))
@@ -71,7 +71,7 @@ func (d Data) Markdown() string {
 	if len(d.TopModels) > 0 {
 		b.WriteString("\n**Top models**\n")
 		for _, m := range d.TopModels {
-			fmt.Fprintf(&b, "- %s — %s\n", labelOrNone(m.Label), money(m.CostUSD))
+			fmt.Fprintf(&b, "- %s - %s\n", labelOrNone(m.Label), money(m.CostUSD))
 		}
 	}
 
@@ -87,7 +87,7 @@ func (d Data) Markdown() string {
 		fmt.Fprintf(&b, "\n**Tool mix:** %s\n", strings.Join(names, ", "))
 	}
 
-	b.WriteString("\n_Tracked locally by SuperBased Observer — superbased.app_\n")
+	b.WriteString("\n_Tracked locally by SuperBased Observer - superbased.app_\n")
 	return b.String()
 }
 
@@ -258,6 +258,7 @@ func money(v float64) string {
 		whole++
 		cents = 0
 	}
+	// no-bare-usd:allow (the spend card; report share refuses it under the token display)
 	s := "$" + group(whole) + fmt.Sprintf(".%02d", cents)
 	if neg {
 		return "-" + s

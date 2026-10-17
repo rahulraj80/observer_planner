@@ -1,12 +1,25 @@
+import { ArchiveRestore, RefreshCw, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { ChartShell, Pill, StatCard } from "@/components/primitives";
+import {
+  Button,
+  Card,
+  ChartShell,
+  CopyOnClick,
+  StatCard,
+  Table,
+  Stagger,
+} from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
 import { TitleWithHelp } from "@/components/HelpInd";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
 import { fmtInt } from "@/lib/format";
 import type { BackfillJob, BackfillRunResponse } from "@/lib/types";
+import { MetricIcon } from "@/components/MetricIcon";
+import { JOB_STATUS } from "@shared/lib/sessionVocab";
+import { VocabPill } from "@shared/lib/vocabPill";
+import { ReclaimLeftoversCard, type ReclaimLeftover } from "./ReclaimLeftoversCard";
 
 // StorageSection — Settings → Storage (usability arc P6.8): per-table
 // size breakdown, vacuum, one-click backup, restore instructions.
@@ -28,6 +41,8 @@ type StorageResponse = {
   };
   backup_dir?: string;
   backups?: { name: string; bytes: number; modified: string }[];
+  /** Originals `observer archive reclaim` kept aside (T-493); absent on an older daemon. */
+  reclaim_leftovers?: ReclaimLeftover[];
 };
 
 function fmtBytes(n: number): string {
@@ -42,61 +57,63 @@ function fmtBytes(n: number): string {
   return `${v.toFixed(1)} ${units[i]}`;
 }
 
-export function StorageSection() {
+// `icon` is the section glyph from the Settings SECTIONS table.
+export function StorageSection({ icon }: { icon?: LucideIcon }) {
   const storage = useApi<StorageResponse>("/api/storage");
   const rep = storage.data?.report;
+  const restoreCommand = `cp ${storage.data?.backup_dir ?? "<backup dir>"}/<file> ${storage.data?.db_path ?? "<db path>"}`;
 
   return (
     <div className="space-y-4">
       <ChartShell
         title={<TitleWithHelp text="Storage" helpId="glossary.settings_storage" />}
-        sub="Where the database's bytes live — per table, indexes and search shadow tables folded into their owners"
+        icon={icon}
+        sub="Where the database's bytes live - per table, indexes and search shadow tables folded into their owners"
         right={
-          <button
-            type="button"
-            onClick={() => storage.reload()}
-            className="rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-[11px] text-fg-2 hover:bg-bg-3"
-          >
+          <Button variant="secondary" size="sm" iconLeft={RefreshCw} onClick={() => storage.reload()}>
             refresh
-          </button>
+          </Button>
         }
       >
         <ChartState
           loading={storage.loading && !storage.data}
           error={storage.error}
+          denied={storage.denied}
+          deniedPermission={storage.deniedPermission}
           empty={!rep}
           emptyHint="No report."
           height={200}
         >
           {rep && (
             <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <StatCard label="Database size" value={fmtBytes(rep.total_bytes)} sub={storage.data?.db_path ?? ""} />
+              <Stagger className="grid grid-cols-3 gap-3">
+                <StatCard label="Database size" icon={<MetricIcon metric="databaseSize" />} value={fmtBytes(rep.total_bytes)} sub={storage.data?.db_path ?? ""} />
                 <StatCard
                   label="Reclaimable by vacuum"
+                  icon={<MetricIcon metric="reclaimable" />}
                   value={fmtBytes(rep.reclaimable_bytes)}
-                  sub={`${fmtInt(rep.freelist_pages)} free pages — live-page fragmentation can add more`}
+                  sub={`${fmtInt(rep.freelist_pages)} free pages - live-page fragmentation can add more`}
                 />
-                <StatCard label="Tables" value={fmtInt(rep.tables.length)} sub="indexes + FTS internals folded in" />
-              </div>
-              <table className="w-full text-[11.5px]">
-                <thead>
-                  <tr className="border-b border-line-2 text-left text-[10.5px] uppercase tracking-wide text-fg-4">
+                <StatCard label="Tables" icon={<MetricIcon metric="tables" />} value={fmtInt(rep.tables.length)} sub="indexes + FTS internals folded in" />
+              </Stagger>
+              <Table
+                minWidth={420}
+                head={
+                  <tr className="border-b border-line-2 text-left">
                     <th className="py-1 pr-2 font-medium">Table</th>
                     <th className="py-1 pr-2 text-right font-medium">Size</th>
                     <th className="py-1 text-right font-medium">Rows</th>
                   </tr>
-                </thead>
-                <tbody>
-                  {rep.tables.map((t) => (
-                    <tr key={t.name} className="border-b border-line-1 last:border-0">
-                      <td className="py-1 pr-2 font-mono text-fg-2">{t.name}</td>
-                      <td className="py-1 pr-2 text-right text-fg-2">{fmtBytes(t.bytes)}</td>
-                      <td className="py-1 text-right text-fg-3">{t.rows >= 0 ? fmtInt(t.rows) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                }
+              >
+                {rep.tables.map((t) => (
+                  <tr key={t.name} className="border-b border-line-1 last:border-0">
+                    <td className="py-1 pr-2 font-mono text-fg-2">{t.name}</td>
+                    <td className="py-1 pr-2 text-right text-fg-2">{fmtBytes(t.bytes)}</td>
+                    <td className="py-1 text-right text-fg-3">{t.rows >= 0 ? fmtInt(t.rows) : "-"}</td>
+                  </tr>
+                ))}
+              </Table>
             </div>
           )}
         </ChartState>
@@ -104,7 +121,7 @@ export function StorageSection() {
 
       <MaintenanceCard
         title="Back up the database"
-        description="Writes a consistent snapshot next to the live DB (VACUUM INTO — online-safe; capture keeps running). Months of history are worth a copy before upgrades or machine moves."
+        description="Writes a consistent snapshot next to the live DB (VACUUM INTO - online-safe; capture keeps running). Months of history are worth a copy before upgrades or machine moves."
         buttonLabel="Back up now"
         runningLabel="Backing up…"
         path="/api/storage/backup"
@@ -113,40 +130,54 @@ export function StorageSection() {
 
       <MaintenanceCard
         title="Vacuum"
-        description="Rebuilds the database file to return free pages to the OS. Needs the write lock and temporarily doubles disk usage — pick a quiet moment; if the daemon is busy writing, the job reports the conflict honestly."
+        description="Rebuilds the database file to return free pages to the OS. Needs the write lock and temporarily doubles disk usage - pick a quiet moment; if the daemon is busy writing, the job reports the conflict honestly."
         buttonLabel="Vacuum now"
         runningLabel="Vacuuming…"
         path="/api/storage/vacuum"
         onDone={() => storage.reload()}
       />
 
-      <ChartShell title="Backups & restore" sub={storage.data?.backup_dir ?? ""}>
+      <ReclaimLeftoversCard
+        leftovers={storage.data?.reclaim_leftovers ?? []}
+        fmtBytes={fmtBytes}
+        onDone={() => storage.reload()}
+      />
+
+      <ChartShell title="Backups & restore" icon={ArchiveRestore} sub={storage.data?.backup_dir ?? ""}>
         <div className="space-y-3 text-[11.5px]">
           {(storage.data?.backups?.length ?? 0) > 0 ? (
-            <table className="w-full">
-              <tbody>
-                {storage.data?.backups?.map((b) => (
-                  <tr key={b.name} className="border-b border-line-1 last:border-0">
-                    <td className="py-1 pr-2 font-mono text-fg-2">{b.name}</td>
-                    <td className="py-1 pr-2 text-right text-fg-3">{fmtBytes(b.bytes)}</td>
-                    <td className="py-1 text-right text-fg-4">{b.modified}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Table>
+              {storage.data?.backups?.map((b) => (
+                <tr key={b.name} className="border-b border-line-1 last:border-0">
+                  <td className="py-1 pr-2 font-mono text-fg-2">{b.name}</td>
+                  <td className="py-1 pr-2 text-right text-fg-3">{fmtBytes(b.bytes)}</td>
+                  <td className="py-1 text-right text-fg-4">{b.modified}</td>
+                </tr>
+              ))}
+            </Table>
           ) : (
             <p className="m-0 text-fg-4">No backups yet.</p>
           )}
-          <div>
-            <div className="mb-1 text-[10.5px] uppercase tracking-wide text-fg-4">To restore</div>
-            <pre className="m-0 whitespace-pre-wrap rounded-2 border border-line-1 bg-bg-1 px-3 py-2 font-mono text-[11px] text-fg-3">
-              {`1. stop the daemon (ctrl-c the observer start process, or kill its PID)
-2. replace the live DB with the snapshot:
-     cp ${storage.data?.backup_dir ?? "<backup dir>"}/<file> ${storage.data?.db_path ?? "<db path>"}
-   and delete the -wal / -shm files next to it if present
-3. start the daemon again: observer start`}
-            </pre>
-          </div>
+          <Card title="To restore" bodyClassName="text-fg-3">
+            <ol className="list-decimal space-y-2 pl-4">
+              <li>stop the daemon (ctrl-c the observer start process, or kill its PID)</li>
+              <li>
+                replace the live DB with the snapshot, and delete the -wal /
+                -shm files next to it if present:
+                <div className="mt-1">
+                  <CopyOnClick value={restoreCommand}>
+                    <code className="block rounded-2 border border-line-1 bg-bg-3 px-2 py-1 font-mono text-[11px] text-fg-2">
+                      {restoreCommand}
+                    </code>
+                  </CopyOnClick>
+                </div>
+              </li>
+              <li>
+                start the daemon again:{" "}
+                <code className="font-mono text-fg-2">observer start</code>
+              </li>
+            </ol>
+          </Card>
         </div>
       </ChartShell>
     </div>
@@ -204,23 +235,25 @@ function MaintenanceCard({
 
   const outputTail = job?.output ? job.output.split("\n").slice(-10).join("\n").trim() : "";
   return (
-    <div className="rounded-3 border border-line-2 bg-bg-2 p-4 text-[11.5px]">
+    <Card className="text-[11.5px]">
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[12px] font-semibold text-fg-1">
             {title}
-            {job?.status === "running" && <Pill variant="warn">running</Pill>}
+            {/* The ONE JOB_STATUS row: running spins its LoaderCircle. */}
+            {job?.status === "running" && <VocabPill vocab="jobStatus" table={JOB_STATUS} value="running" />}
           </div>
           <p className="m-0 mt-0.5 text-fg-3">{description}</p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="primary"
           onClick={run}
           disabled={busy || job?.status === "running"}
-          className="shrink-0 rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          loading={busy}
+          className="shrink-0"
         >
           {job?.status === "running" ? runningLabel : buttonLabel}
-        </button>
+        </Button>
       </div>
       {err && <p className="m-0 mt-2 text-danger">{err}</p>}
       {job && job.status !== "running" && (
@@ -229,10 +262,18 @@ function MaintenanceCard({
         </p>
       )}
       {outputTail && (
-        <pre className="m-0 mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-2 border border-line-1 bg-bg-1 px-3 py-2 font-mono text-[11px] text-fg-3">
-          {outputTail}
-        </pre>
+        <div className="mt-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-[0.06em] text-fg-4">Output</span>
+            <CopyOnClick value={outputTail} className="text-[10px] text-fg-3">
+              copy
+            </CopyOnClick>
+          </div>
+          <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap rounded-2 border border-line-1 bg-bg-3 px-3 py-2 font-mono text-[11px] text-fg-3">
+            {outputTail}
+          </pre>
+        </div>
       )}
-    </div>
+    </Card>
   );
 }

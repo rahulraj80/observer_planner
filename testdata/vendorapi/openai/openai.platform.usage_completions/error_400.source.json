@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "Inferred",
+    "error.message": "Inferred",
+    "error.param": "VerifiedOfficial",
+    "error.type": "Inferred"
+  },
+  "fixture_sha256": "b582f6801fe4bef92866b2ecc8adf523fc767f218046e487acd32a2d63f3bdfa",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/usage/completions",
+    "query": {
+      "bucket_width": "1d",
+      "limit": "180"
+    },
+    "status": 400
+  },
+  "notes": "Envelope from the official openai-openapi ErrorResponse schema (error.code, message, param, type required); the code, type and message values are synthesized. Daily buckets accept limit at most 31 (EA-F7); the exact message text is unknown.",
+  "scenario": "error_400",
+  "sdk_or_spec_version_or_commit": "openai-openapi master (ErrorResponse schema), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.usage_completions"
+}

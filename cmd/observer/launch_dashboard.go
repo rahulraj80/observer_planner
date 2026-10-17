@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -7,26 +9,23 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"runtime"
-	"sync"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
+	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
-	"github.com/marmutapp/superbased-observer/internal/remoteauth"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/termlease"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/termsession"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
-	"github.com/marmutapp/superbased-observer/internal/toolresolve"
-	"github.com/marmutapp/superbased-observer/internal/toolresolve/host"
 )
 
 // launch_dashboard.go wires the dashboard's embedded web-terminal launch
-// seam (dashboard.LaunchManager) to the terminal application service
+// seam (dashapi.LaunchManager) to the terminal application service
 // (internal/termsvc) over internal/termsession. termsvc owns the run identity,
 // the fresh-launch authorization, and the correlation model; termsession owns
 // only the PTY/viewer lifecycle. The dashboard never imports either — this
@@ -35,7 +34,7 @@ import (
 // (the same pattern as handoffRunner behind BuildHandoff).
 
 // launchManagerAdapter bridges the terminal service + PTY manager to
-// dashboard.LaunchManager.
+// dashapi.LaunchManager.
 type launchManagerAdapter struct {
 	svc *termsvc.Service
 	mgr *termsession.Manager
@@ -47,18 +46,45 @@ type launchManagerAdapter struct {
 	// AFTER the lease install and must return true for the lease to survive —
 	// false means the standing secret was revoked/rotated while the (argon2)
 	// verify was in flight, so the just-installed lease is torn down.
-	remoteAuthz func(dashboard.RemoteWriterRequest) (termlease.WriterGrant, func() dashboard.ControlDenialReason, error)
+	remoteAuthz func(dashapi.RemoteWriterRequest) (termlease.WriterGrant, func() dashapi.ControlDenialReason, error)
 	// attachAudit records the metadata-only terminal_attach spawn-audit row (F4,
 	// session-attach design §3.5) for attach-socket launches. Nil when no DB is
 	// wired (auditing disabled). Built in buildTerminalStack over the SAME
 	// SpawnAuditKind vocabulary the dashboard resume handler uses.
 	attachAudit func(runID, tool, handle string)
+	// instances owns the instance switcher's SSH local port forwards
+	// (docs/ssh-terminals.md "Instance switcher"). Nil when the terminal stack
+	// was not built — the dashboard's optional-seam assertion still succeeds,
+	// and every verb then degrades honestly through the nil-safe Manager
+	// methods rather than panicking.
+	instances sshInstances
+	// remoteIDs remembers what each live forward's REMOTE daemon says about
+	// its own build and hostname (T-425, instance_identity.go). Zero value
+	// ready.
+	remoteIDs remoteIdentityCache
+	// guard is the process-wide egress-policy Guard (P7 gateway-arc item 3:
+	// the sandbox_enforce lane). Nil when guarding is disabled/no DB — every
+	// consumer must nil-check via guard.Mode(), which itself has no
+	// nil-receiver guard.
+	guard *guard.Guard
+	// sandboxProber backs the same B9 probe the dashboard's own
+	// /api/terminal/sandbox endpoint uses, reused here so CreateFresh's
+	// auto-upgrade decision and the dashboard's own availability display never
+	// disagree. Nil when [terminal.sandbox] is disabled.
+	sandboxProber dashapi.SandboxProber
+	// nf is the node.features policy handle (P7 gateway-arc item 4's
+	// org_disallow honor path). Nil-safe: a nil nf allows every tool.
+	nf *nodeFeaturesHandle
+	// toolGate reads whether a hook_block tool's tool-gate hook is
+	// registered and current on this node (toolgate_node.go). Nil reads as
+	// not current, so a hook_block tool is sandboxed like any other.
+	toolGate func(tool string) nodeToolGateState
 }
 
 // newSpawnAuditSink builds the metadata-only spawn-audit closure (F4,
 // session-attach design §3.5) that persists one remote_audit row per terminal
 // spawn through the ONE store seam (store.InsertRemoteAudit). kind is a
-// dashboard.SpawnAuditKind value resolved once at wiring; an empty kind or a nil
+// dashapi.SpawnAuditKind value resolved once at wiring; an empty kind or a nil
 // DB yields a nil sink (auditing disabled). Metadata ONLY — the run identity,
 // the tool label, and the opaque handle (correlation, like the lease-audit
 // Route) — NEVER argv, env, or terminal content. Best-effort + bounded; a failed
@@ -108,6 +134,19 @@ func terminalLaunchPolicy(tc config.TerminalConfig) termsvc.Policy {
 		AllowFresh:          tc.Enabled && tc.Launch.AllowFreshAgent,
 		AllowedTools:        tc.Launch.AllowedTools,
 		AllowedProjectRoots: tc.Launch.AllowedProjectRoots,
+		AllowShell:          tc.Enabled && tc.Launch.AllowShell,
+		// SSH remote-system shells. Like AllowShell this requires BOTH the
+		// terminal-wide surface and its OWN opt-in — an SSH shell runs
+		// arbitrary commands on ANOTHER machine, so [terminal.launch].
+		// allow_shell (a LOCAL shell) deliberately does not imply it.
+		//
+		// The profile list is threaded in whole: it IS the authorization model
+		// (a name the operator never wrote can never become a connection), so
+		// the daemon holds exactly the list config declared, converted once at
+		// this boundary into the pure sshprofile type.
+		AllowSSH:    tc.Enabled && tc.SSH.Enabled,
+		SSHProfiles: config.SSHProfiles(tc.SSH),
+		SSHOptions:  config.SSHOptions(tc.SSH),
 	}
 }
 
@@ -126,9 +165,17 @@ func (a *launchManagerAdapter) SetTerminalLimits(maxConcurrent int, idleTimeout 
 	a.mgr.SetLimits(maxConcurrent, idleTimeout)
 }
 
-// --- dashboard.LaunchManager implementation ---
+// TerminalPolicyLive satisfies the dashboard's OPTIONAL terminalPolicyLive
+// seam: true when the terminal service reads the launch policy through the
+// live config holder (terminal_config_live.go), so a [terminal.launch] save
+// binds on the next launch and the dashboard must not say "restart". Nil-safe.
+func (a *launchManagerAdapter) TerminalPolicyLive() bool {
+	return a != nil && a.svc.PolicyLive()
+}
 
-func (a *launchManagerAdapter) Create(spec dashboard.LaunchSpec) (string, error) {
+// --- dashapi.LaunchManager implementation ---
+
+func (a *launchManagerAdapter) Create(spec dashapi.LaunchSpec) (string, error) {
 	res, err := a.svc.LaunchHandoff(context.Background(), termsvc.HandoffRequest{
 		Tool:        spec.Subcommand, // the launcher verb doubles as the tool label here
 		Subcommand:  spec.Subcommand,
@@ -144,18 +191,202 @@ func (a *launchManagerAdapter) Create(spec dashboard.LaunchSpec) (string, error)
 	return res.Handle, nil
 }
 
-func (a *launchManagerAdapter) CreateFresh(spec dashboard.FreshLaunchSpec) (string, error) {
+func (a *launchManagerAdapter) CreateFresh(spec dashapi.FreshLaunchSpec) (string, error) {
+	// P7 gateway-arc item 4: org_disallow honor path. Checked before termsvc's
+	// own AllowedTools/AllowedProjectRoots authorization, so a tool the org
+	// policy disallows never reaches the launcher at all. a.nf is nil-safe —
+	// no org policy (or no tools stanza) allows every tool.
+	// Request-grants G8: a verified org tool access grant lets a launch of a
+	// disallowed tool through; the refusal names the request path. This
+	// gate only PEEKS (review M3-10): the inner `observer <tool>` launcher
+	// the PTY runs counts the use, once, when it starts the tool, so a
+	// launch refused below (sandbox, allowed tools) spends nothing.
+	if allowed, _, _ := a.nf.ToolLaunchAllowed(spec.Tool); !allowed {
+		return "", fmt.Errorf("%w: your organization disallows %s; request access from the Requests page",
+			dashapi.ErrLaunchToolNotAllowed, spec.Tool)
+	}
+	// P7 gateway-arc item 3: sandbox-enforce lane. When the process-wide
+	// guard is in enforce mode and this tool's enforcement channel ON THIS
+	// NODE (integration.Capability.NodeEnforcement: a hook_block tool counts
+	// as hook_block only while its tool-gate hook is registered and current
+	// here, toolgate_node.go; sandbox availability on THIS platform comes
+	// from the same prober the dashboard's own /api/terminal/sandbox endpoint
+	// consults) is sandbox_enforce, auto-upgrade an unsandboxed request
+	// rather than letting a tool with no working gate launch unguarded.
+	// Never downgrades an already-sandboxed request; never forces a sandbox
+	// that isn't actually available (the channel degrades to
+	// recorded_acceptance there, so the request proceeds unsandboxed honestly
+	// rather than failing closed on a platform that can't sandbox at all).
+	//
+	// D-178 / D-221 (operator ruling 2026-10-04): what a missing sandbox
+	// degrades to is the ORGANIZATION's choice, read from the signed org
+	// guard bundle through Guard.OrgFallbacks (the defaults on an individual
+	// node). recorded_acceptance (the default) keeps the honest unsandboxed
+	// launch above; org_disallow refuses a proxied tool's launch with a
+	// reason instead. Both decisions are one per-node call (D-262): a
+	// hook_block tool whose gate is not current here reaches the org's
+	// fallback like a tool with no hook.
+	//
+	// T-497 (D-333): the decision ("enforcing" is Guard.GateEnforcement
+	// .Tool, review M2-13) and its wording live in ONE owner,
+	// sandboxLaunchDecision (launch_sandbox_gate.go). `observer <tool>`
+	// launches from any terminal reach the same owner through the shared
+	// admission chokepoint, so the two paths cannot drift.
+	probe := func() bool {
+		return a.sandboxProber != nil && a.sandboxProber.ProbeSandbox(context.Background()).Available
+	}
+	switch sandboxLaunchDecision(a.guard, spec.Tool, spec.Sandbox, probe, a.toolGate) {
+	case sandboxLaunchUpgrade:
+		spec.Sandbox = true
+	case sandboxLaunchRefuse:
+		return "", dashboardSandboxRefusal(spec.Tool)
+	}
 	res, err := a.svc.LaunchFresh(context.Background(), termsvc.FreshRequest{
 		Tool:        spec.Tool,
 		Subcommand:  spec.Subcommand,
 		ProjectRoot: crossmount.TranslateForeignPath(spec.ProjectRoot),
 		Rows:        spec.Rows,
 		Cols:        spec.Cols,
+		Shell:       spec.Shell,
+		Model:       spec.Model,
+		// B9: the sandbox request (already fail-closed-validated by
+		// handleTerminalLaunch against the probe before this spec was built).
+		// LaunchFresh re-checks the seam is present (nil Sandboxer →
+		// ErrSandboxUnavailable) and runs Prepare before minting the run.
+		Sandbox:         spec.Sandbox,
+		WorkspaceSource: spec.WorkspaceSource,
+		WorkspaceRemote: spec.WorkspaceRemote,
+		WorkspaceBranch: spec.WorkspaceBranch,
 	})
 	if err != nil {
 		return "", mapFreshErr(err)
 	}
 	return res.Handle, nil
+}
+
+// CreateSSH spawns an OUTBOUND SSH remote-system shell through the terminal
+// application service (docs/plans/ssh-remote-profiles-plan-2026-08-27.md).
+//
+// Note what is NOT here: no crossmount.TranslateForeignPath, no project root,
+// no subcommand, no model. The spec carries a profile NAME and the PTY
+// geometry; the service resolves every connection parameter from the operator's
+// own config. Errors map through mapSSHErr onto the dashboard sentinels.
+func (a *launchManagerAdapter) CreateSSH(spec dashapi.SSHLaunchSpec) (string, error) {
+	res, err := a.svc.LaunchSSH(context.Background(), termsvc.SSHRequest{
+		Profile: spec.Profile,
+		Rows:    spec.Rows,
+		Cols:    spec.Cols,
+	})
+	if err != nil {
+		return "", mapSSHErr(err)
+	}
+	return res.Handle, nil
+}
+
+// SSHProfiles projects the service's configured profiles onto the dashboard's
+// picker rows. It is a pure projection of config — never a mutation — and it
+// deliberately narrows what crosses the seam: the full key PATH stays behind,
+// and only its BASENAME (KeyHint) is exposed, so the dashboard never discloses
+// the operator's filesystem layout.
+func (a *launchManagerAdapter) SSHProfiles() (bool, []dashapi.SSHProfileInfo) {
+	enabled, profiles := a.svc.SSHProfileList()
+	if len(profiles) == 0 {
+		return enabled, nil
+	}
+	out := make([]dashapi.SSHProfileInfo, 0, len(profiles))
+	for _, p := range profiles {
+		out = append(out, dashapi.SSHProfileInfo{
+			Name:    p.Name,
+			Label:   p.Display(),
+			Target:  p.Target(),
+			Jump:    p.Jump,
+			HasKey:  p.KeyPath != "",
+			KeyHint: p.KeyHint(),
+		})
+	}
+	return enabled, out
+}
+
+// --- dashboard instanceManager implementation (instance switcher) ---
+//
+// The three methods below satisfy the dashboard's OPTIONAL instanceManager
+// seam. They are pure projections of the sshforward.Manager: this adapter adds
+// no policy of its own, because every authorization decision (feature enabled,
+// profile known, profile still valid, host key trusted) already lives in the
+// one owner. A nil manager is honest rather than fatal — Enabled/List are
+// nil-safe, and the verbs return ErrDisabled.
+
+// Instances lists the operator's configured remote Observer installs plus each
+// one's live forward state. Like SSHProfiles this narrows what crosses the
+// seam: the key PATH stays behind and only its basename travels.
+func (a *launchManagerAdapter) Instances() (bool, []dashapi.InstanceInfo) {
+	if a == nil || a.instances == nil {
+		return false, nil
+	}
+	rows := a.instances.List()
+	if len(rows) == 0 {
+		return a.instances.Enabled(), nil
+	}
+	out := make([]dashapi.InstanceInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, a.remoteIDs.annotate(r))
+	}
+	return a.instances.Enabled(), out
+}
+
+// ConnectInstance opens (or re-uses) the local port forward for a profile.
+func (a *launchManagerAdapter) ConnectInstance(name string) (dashapi.InstanceInfo, error) {
+	if a == nil || a.instances == nil {
+		return dashapi.InstanceInfo{}, dashapi.ErrInstancesDisabled
+	}
+	inst, err := a.instances.Connect(name)
+	if err != nil {
+		return dashapi.InstanceInfo{}, err
+	}
+	return a.remoteIDs.annotate(inst), nil
+}
+
+// DisconnectInstance closes the forward and returns the resulting row. The
+// post-disconnect snapshot is read back rather than synthesized so the UI is
+// updated from the manager's own state, not from this adapter's assumption
+// about it.
+func (a *launchManagerAdapter) DisconnectInstance(name string) (dashapi.InstanceInfo, error) {
+	if a == nil || a.instances == nil {
+		return dashapi.InstanceInfo{}, dashapi.ErrInstancesDisabled
+	}
+	if err := a.instances.Disconnect(name); err != nil {
+		return dashapi.InstanceInfo{}, err
+	}
+	inst, ok := a.instances.Get(name)
+	if !ok {
+		return dashapi.InstanceInfo{}, dashapi.ErrInstanceUnknown
+	}
+	return inst, nil
+}
+
+// TestInstance runs the bounded, non-interactive connectivity probe
+// (sshforward.Manager.Test) for a profile and projects the result onto the
+// dashboard wire shape. Like Connect/Disconnect it re-validates the profile
+// first (inside Manager.Test), so a request can never probe a machine the
+// operator did not write down; unlike them it opens no forward and leaves no
+// live state, so it needs no post-call snapshot read-back.
+func (a *launchManagerAdapter) TestInstance(name string) (dashapi.InstanceTestResult, error) {
+	if a == nil || a.instances == nil {
+		return dashapi.InstanceTestResult{}, dashapi.ErrInstancesDisabled
+	}
+	return a.instances.Test(name)
+}
+
+// TestSSHProfileDraft satisfies the dashboard's OPTIONAL sshProfileTester
+// seam (T-488): the profile editor's test-connect for a profile the operator
+// has not saved yet. It converts the draft at the ONE config boundary
+// (config.SSHProfile) and runs sshforward's read-only probe, which validates
+// it exactly like config load does and never opens a forward.
+func (a *launchManagerAdapter) TestSSHProfileDraft(p config.SSHProfileConfig) (dashapi.InstanceTestResult, error) {
+	if a == nil || a.instances == nil {
+		return dashapi.InstanceTestResult{}, dashapi.ErrInstancesDisabled
+	}
+	return a.instances.TestProfile(p)
 }
 
 // CreateResume spawns a NATIVE resume of a closed session (session-attach
@@ -165,7 +396,7 @@ func (a *launchManagerAdapter) CreateFresh(spec dashboard.FreshLaunchSpec) (stri
 // returns the opaque handle AND the durable run id; errors map onto the
 // dashboard sentinels through mapFreshErr (fresh-disabled / tool-not-allowed /
 // project-root-denied + the termsession spawn errors).
-func (a *launchManagerAdapter) CreateResume(spec dashboard.ResumeLaunchSpec) (string, string, error) {
+func (a *launchManagerAdapter) CreateResume(spec dashapi.ResumeLaunchSpec) (string, string, error) {
 	res, err := a.svc.LaunchResume(context.Background(), termsvc.ResumeRequest{
 		Tool:            spec.Tool,
 		Subcommand:      spec.Subcommand,
@@ -189,12 +420,16 @@ func (a *launchManagerAdapter) CreateResume(spec dashboard.ResumeLaunchSpec) (st
 // marker via setupChildEnv, so this non-termsvc path still satisfies the "every
 // daemon child carries the marker" invariant (finding: marker completeness). The
 // session is SpecSetup → local-writer-only.
-func (a *launchManagerAdapter) CreateSetup(spec dashboard.SetupSpec) (string, error) {
+//
+// Dir is setupChildDir() for EVERY setup command, never the daemon's inherited
+// cwd: see setupWorkDir for why.
+func (a *launchManagerAdapter) CreateSetup(spec dashapi.SetupSpec) (string, error) {
 	handle, err := a.mgr.Create(termsession.Spec{
 		Kind:       termsession.SpecSetup,
 		SetupArgv:  spec.Argv,
 		SetupLabel: spec.Label, // keys the setup single-flight (one PTY per kind)
-		Env:        setupChildEnv(),
+		Env:        setupChildEnvFor(setupProgram(spec.Argv)),
+		Dir:        setupChildDir(),
 		Rows:       spec.Rows,
 		Cols:       spec.Cols,
 	})
@@ -204,18 +439,65 @@ func (a *launchManagerAdapter) CreateSetup(spec dashboard.SetupSpec) (string, er
 	return handle, nil
 }
 
-func (a *launchManagerAdapter) Subscribe(handle string) (dashboard.LaunchSubscription, error) {
+// setupChildDir is the working directory a setup PTY (guided install and
+// uninstall, the Tailscale operator grant, the ETW register) starts in: the
+// operator's home, else the OS temp dir, else "" (inherit, the old behaviour).
+func setupChildDir() string {
+	home, _ := os.UserHomeDir()
+	return setupWorkDir(home, os.TempDir(), func(p string) bool {
+		fi, err := os.Stat(p)
+		return err == nil && fi.IsDir()
+	})
+}
+
+// setupWorkDir picks the first candidate that is an absolute, existing
+// directory. It is pure (the directory test is injected) so the ladder is
+// table-tested.
+//
+// Why a setup PTY must not inherit the daemon's cwd: a daemon started by a
+// service manager, a login script or `nohup` from a system directory runs with
+// cwd "/" (demo node 1, 2026-10-02: /proc/<daemon>/cwd -> /), which an ordinary
+// user cannot write. Vendor installers routinely download into the CURRENT
+// directory before extracting - goose's download_cli.sh does
+// `curl -sLf "$URL" --output "$FILE"` - so from "/" curl fails with exit 23
+// (write error), `-s` hides the reason, and the script reports a misleading
+// "Failed to download from fallback url ..." although the asset exists and is
+// reachable. A user typing the same command into a fresh terminal is in their
+// home directory; the guided install now is too.
+func setupWorkDir(home, tmp string, isDir func(string) bool) string {
+	for _, cand := range []string{home, tmp} {
+		cand = strings.TrimSpace(cand)
+		if cand != "" && filepath.IsAbs(cand) && isDir != nil && isDir(cand) {
+			return cand
+		}
+	}
+	return ""
+}
+
+// setupProgram returns the PROGRAM a setup argv runs (its head), or "" for an
+// empty argv. It is what setupChildEnvFor prepends the directory of, so a
+// guided install whose argv[0] dashboardInstallPlanFor already resolved to an
+// absolute path (DI-04a) also gets that directory on the setup PTY's own PATH
+// — which is how an npm shim in a login-only prefix finds its node (DI-04b).
+func setupProgram(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	return argv[0]
+}
+
+func (a *launchManagerAdapter) Subscribe(handle string) (dashapi.LaunchSubscription, error) {
 	sub, err := a.mgr.Subscribe(handle)
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil // *termsession.Subscription satisfies dashboard.LaunchSubscription
+	return sub, nil // *termsession.Subscription satisfies dashapi.LaunchSubscription
 }
 
 // SubscribeRemote is the remote-principal viewer path: it refuses a SpecSetup
 // (privileged, local-only) session at the manager seam so a paired remote device
 // can never READ a setup PTY's output (a typed sudo password / login URL).
-func (a *launchManagerAdapter) SubscribeRemote(handle string) (dashboard.LaunchSubscription, error) {
+func (a *launchManagerAdapter) SubscribeRemote(handle string) (dashapi.LaunchSubscription, error) {
 	sub, err := a.mgr.SubscribeRemote(handle)
 	if err != nil {
 		return nil, err
@@ -245,18 +527,18 @@ func (a *launchManagerAdapter) IsRemoteSensitiveSession(handle string) bool {
 	return ok && termrun.IsRemoteSensitiveKind(kind)
 }
 
-func (a *launchManagerAdapter) Unsubscribe(sub dashboard.LaunchSubscription) {
+func (a *launchManagerAdapter) Unsubscribe(sub dashapi.LaunchSubscription) {
 	if ts, ok := sub.(*termsession.Subscription); ok {
 		a.mgr.Unsubscribe(ts)
 	}
 }
 
-func (a *launchManagerAdapter) AcquireWriterLocal(handle string) (dashboard.LaunchWriter, error) {
+func (a *launchManagerAdapter) AcquireWriterLocal(handle string) (dashapi.LaunchWriter, error) {
 	l, err := a.mgr.AcquireWriterLocal(handle)
 	if err != nil {
 		return nil, err
 	}
-	return l, nil // *termsession.WriterLease satisfies dashboard.LaunchWriter
+	return l, nil // *termsession.WriterLease satisfies dashapi.LaunchWriter
 }
 
 // termsvcLaunchPolicy resolves the termlease.LaunchPolicy leg of the §4.δ
@@ -285,20 +567,20 @@ func (p termsvcLaunchPolicy) Allowed(handle string) bool {
 // allowTerminal reads the live remote.allow_terminal gate; RemoteExposed comes
 // from the request's boundary-resolved provenance flag — NEVER a client body
 // field. Until this is called, AcquireWriterRemote stays fail-closed.
-func (a *launchManagerAdapter) wireRemoteExecute(authz dashboard.TerminalControlAuthorizer, allowTerminal func() bool) {
+func (a *launchManagerAdapter) wireRemoteExecute(authz dashapi.TerminalControlAuthorizer, allowTerminal func() bool) {
 	policy := termsvcLaunchPolicy{svc: a.svc}
-	a.remoteAuthz = func(req dashboard.RemoteWriterRequest) (termlease.WriterGrant, func() dashboard.ControlDenialReason, error) {
+	a.remoteAuthz = func(req dashapi.RemoteWriterRequest) (termlease.WriterGrant, func() dashapi.ControlDenialReason, error) {
 		// A standing terminal-control secret (opt-in §B) rides the SAME
 		// acquire-writer cap field, distinguished by its collision-free prefix.
 		// Route it to the AuthorizeStanding leg — the IDENTICAL §4.δ conjunction
 		// with a reusable-standing-secret verify replacing the single-use
 		// capability consume. This is a boundary branch on CREDENTIAL SHAPE, not
 		// a second websocket path (CLAUDE.md #3).
-		if remoteauth.IsStandingSecret(credOf(req)) {
-			standing, ok := authz.(dashboard.StandingTerminalVerifier)
+		if isStandingCredential(credOf(req)) {
+			standing, ok := authz.(dashapi.StandingTerminalVerifier)
 			if !ok {
-				return termlease.WriterGrant{}, nil, dashboard.NewControlDeniedError(
-					dashboard.ControlDenialUnavailable, false, dashboard.ErrLaunchExecuteUnavailable,
+				return termlease.WriterGrant{}, nil, dashapi.NewControlDeniedError(
+					dashapi.ControlDenialUnavailable, false, dashapi.ErrLaunchExecuteUnavailable,
 				)
 			}
 			// TOCTOU close (finding 1): capture the standing generation BEFORE
@@ -326,7 +608,7 @@ func (a *launchManagerAdapter) wireRemoteExecute(authz dashboard.TerminalControl
 			// gate time could leave a surviving writer past the disable). Any of
 			// the three moving means the acquire raced an admin transition and
 			// the just-installed lease must not survive.
-			recheck := func() dashboard.ControlDenialReason {
+			recheck := func() dashapi.ControlDenialReason {
 				if standing.StandingTerminalGeneration() != gen {
 					// AuthTransient, not Auth (2026-07-25): the secret VERIFIED
 					// successfully microseconds ago — what moved is the server's
@@ -336,13 +618,13 @@ func (a *launchManagerAdapter) wireRemoteExecute(authz dashboard.TerminalControl
 					// credential made it delete a secret that may well still be
 					// valid; if it is genuinely dead the very next attempt is
 					// judged and returns a real Auth denial.
-					return dashboard.ControlDenialAuthTransient
+					return dashapi.ControlDenialAuthTransient
 				}
 				if authz.Validate(req.DeviceSessionID) != nil {
-					return dashboard.ControlDenialSessionInvalid
+					return dashapi.ControlDenialSessionInvalid
 				}
 				if !allowTerminal() {
-					return dashboard.ControlDenialTerminalDisabled
+					return dashapi.ControlDenialTerminalDisabled
 				}
 				return ""
 			}
@@ -366,12 +648,12 @@ func (a *launchManagerAdapter) wireRemoteExecute(authz dashboard.TerminalControl
 			RemoteExposed:   req.RemoteExposed, // boundary-resolved provenance
 			AllowTerminal:   allowTerminal(),   // LIVE allow_terminal (finding 3 residual)
 		}, authz, policy, authz)
-		recheck := func() dashboard.ControlDenialReason {
+		recheck := func() dashapi.ControlDenialReason {
 			if authz.Validate(req.DeviceSessionID) != nil {
-				return dashboard.ControlDenialSessionInvalid
+				return dashapi.ControlDenialSessionInvalid
 			}
 			if !allowTerminal() {
-				return dashboard.ControlDenialTerminalDisabled
+				return dashapi.ControlDenialTerminalDisabled
 			}
 			return ""
 		}
@@ -384,25 +666,72 @@ func (a *launchManagerAdapter) wireRemoteExecute(authz dashboard.TerminalControl
 // no-op — leaving AcquireWriterRemote fail-closed (ErrLaunchExecuteUnavailable) —
 // when either is absent. Both `observer dashboard` and `observer start` call it
 // with the identical assembly, so the two commands share one authorization path.
+// browsableRoot is the ONE owner of "which directory does the Files/Git surface
+// serve for this run" — consulted by BOTH the panel's token→root seam
+// (projectRootResolver) and the Snapshot flag that enables its buttons
+// (LaunchInfo.HasProjectRoot), so the button and the endpoint can never
+// disagree.
+//
+// Two answers, in order:
+//
+//   - svc.ProjectRoot — the AUTHORIZED root, present only when the launch
+//     requested a root the operator allow-listed under
+//     [terminal.launch].allowed_project_roots. Reported Authorized=true.
+//   - svc.SpawnDir — the FACTUAL directory the run's child executes in (the
+//     daemon's own cwd for a default-cwd launch). Reported Authorized=false.
+//
+// Serving the second is the 2026-08-28 operator ruling, deliberately overruling
+// the previous conservative gating that left Files/Git disabled for every
+// default-cwd launch. The allow-list governs which roots a dashboard client may
+// REQUEST at launch time; it was never a statement about which directory an
+// already-running, owner-local terminal may browse. What widens is WHICH root is
+// browsable, not who may browse: the panel handlers keep every per-request
+// containment guard (fsview traversal/symlink re-verification, gitview argv
+// hardening) and the remote [remote].allow_terminal_view gate unchanged.
+//
+// SSH runs are the one exclusion, and on shape rather than tool name: a
+// termrun.KindSSH child's shell lives on ANOTHER machine, so its local spawn dir
+// (the daemon's cwd, where the ssh client happens to run) is not the terminal's
+// working directory at all. Browsing it would be a false claim, so the zero
+// TerminalRoot is returned and the buttons stay honestly disabled.
+//
+// The zero value means "nothing browsable" and never carries a path.
+func browsableRoot(svc *termsvc.Service, handle string) dashapi.TerminalRoot {
+	if svc == nil {
+		return dashapi.TerminalRoot{}
+	}
+	if root, ok := svc.ProjectRoot(handle); ok && root != "" {
+		return dashapi.TerminalRoot{Path: root, Authorized: true}
+	}
+	if kind, _, ok := svc.KindForHandle(handle); ok && kind == termrun.KindSSH {
+		return dashapi.TerminalRoot{}
+	}
+	spawnDir, ok := svc.SpawnDir(handle)
+	if !ok || spawnDir == "" {
+		return dashapi.TerminalRoot{}
+	}
+	return dashapi.TerminalRoot{Path: spawnDir}
+}
+
 // projectRootResolver adapts the launch manager's termsvc.Service into the
-// dashboard's token→project-root seam (Arc A project panel). It reports
-// known=false for an unknown OR exited token (RunIDForHandle tracks LIVE runs
-// only — an exited handle lingers in byMeta for classification but is not
-// browsable) and (root="", known=true) for a live run launched with the default
-// cwd. Returns nil when the manager isn't the concrete adapter (or has no
-// service), which leaves the panel endpoints disabled (404).
-func projectRootResolver(launchMgr dashboard.LaunchManager) func(string) (string, bool) {
+// dashboard's token→root seam (Arc A project panel). It reports known=false for
+// an unknown OR exited token (RunIDForHandle tracks LIVE runs only — an exited
+// handle lingers in byMeta for classification but is not browsable) and
+// (Path="", known=true) for a live run with no local directory to browse.
+// The directory decision itself belongs to browsableRoot. Returns nil when the
+// manager isn't the concrete adapter (or has no service), which leaves the panel
+// endpoints disabled (404).
+func projectRootResolver(launchMgr dashapi.LaunchManager) func(string) (dashapi.TerminalRoot, bool) {
 	a, ok := launchMgr.(*launchManagerAdapter)
 	if !ok || a == nil || a.svc == nil {
 		return nil
 	}
 	svc := a.svc
-	return func(token string) (string, bool) {
+	return func(token string) (dashapi.TerminalRoot, bool) {
 		if _, live := svc.RunIDForHandle(token); !live {
-			return "", false
+			return dashapi.TerminalRoot{}, false
 		}
-		root, _ := svc.ProjectRoot(token)
-		return root, true
+		return browsableRoot(svc, token), true
 	}
 }
 
@@ -415,13 +744,13 @@ func projectRootResolver(launchMgr dashboard.LaunchManager) func(string) (string
 // uncorrelated run returns known=true with an empty SessionID and 0 Confidence.
 // Returns nil when the manager isn't the concrete adapter (or has no service),
 // which leaves the cockpit endpoint disabled (404).
-func sessionResolver(launchMgr dashboard.LaunchManager) func(string) (dashboard.TerminalSessionLink, bool) {
+func sessionResolver(launchMgr dashapi.LaunchManager) func(string) (dashapi.TerminalSessionLink, bool) {
 	a, ok := launchMgr.(*launchManagerAdapter)
 	if !ok || a == nil || a.svc == nil {
 		return nil
 	}
 	svc := a.svc
-	return func(token string) (dashboard.TerminalSessionLink, bool) {
+	return func(token string) (dashapi.TerminalSessionLink, bool) {
 		// Single-lock resolve (F4): liveness + run identity + correlation are
 		// read atomically, so a run ending mid-resolve can't yield known=true
 		// with a deleted correlation. A miss on the session link inside is an
@@ -429,9 +758,9 @@ func sessionResolver(launchMgr dashboard.LaunchManager) func(string) (dashboard.
 		// zero Confidence (correlation is scored + async).
 		runID, kind, tool, sessionID, confidence, live := svc.ResolveHandleLink(token)
 		if !live {
-			return dashboard.TerminalSessionLink{}, false
+			return dashapi.TerminalSessionLink{}, false
 		}
-		return dashboard.TerminalSessionLink{
+		return dashapi.TerminalSessionLink{
 			RunID:      runID,
 			Kind:       string(kind),
 			Tool:       tool,
@@ -441,12 +770,12 @@ func sessionResolver(launchMgr dashboard.LaunchManager) func(string) (dashboard.
 	}
 }
 
-func wireRemoteExecuteTier(cfg config.Config, launchMgr dashboard.LaunchManager, remoteCtrl dashboard.RemoteController) {
+func wireRemoteExecuteTier(cfg config.Config, launchMgr dashapi.LaunchManager, remoteCtrl dashapi.RemoteController) {
 	a, ok := launchMgr.(*launchManagerAdapter)
 	if !ok || a == nil {
 		return
 	}
-	authz, ok := remoteCtrl.(dashboard.TerminalControlAuthorizer)
+	authz, ok := remoteCtrl.(dashapi.TerminalControlAuthorizer)
 	if !ok {
 		return
 	}
@@ -473,9 +802,9 @@ func wireRemoteExecuteTier(cfg config.Config, launchMgr dashboard.LaunchManager,
 // store + session validator + launch policy + live allow_terminal), mints the
 // unforgeable WriterGrant, and acquires the remote writer lease. Until the
 // remote-execute tier is wired (a nil authorizer), it fails closed.
-func (a *launchManagerAdapter) AcquireWriterRemote(req dashboard.RemoteWriterRequest) (dashboard.LaunchWriter, error) {
+func (a *launchManagerAdapter) AcquireWriterRemote(req dashapi.RemoteWriterRequest) (dashapi.LaunchWriter, error) {
 	if a.remoteAuthz == nil {
-		return nil, dashboard.NewControlDeniedError(dashboard.ControlDenialUnavailable, false, dashboard.ErrLaunchExecuteUnavailable)
+		return nil, dashapi.NewControlDeniedError(dashapi.ControlDenialUnavailable, false, dashapi.ErrLaunchExecuteUnavailable)
 	}
 	grant, recheck, err := a.remoteAuthz(req)
 	if err != nil {
@@ -495,47 +824,47 @@ func (a *launchManagerAdapter) AcquireWriterRemote(req dashboard.RemoteWriterReq
 	if recheck != nil {
 		if reason := recheck(); reason != "" {
 			l.Release()
-			return nil, dashboard.NewControlDeniedError(reason, !grant.Standing(), nil)
+			return nil, dashapi.NewControlDeniedError(reason, !grant.Standing(), nil)
 		}
 	}
 	return l, nil
 }
 
 func mapRemoteAcquireDenial(err error, capabilityConsumed bool) error {
-	var typed *dashboard.ControlDeniedError
+	var typed *dashapi.ControlDeniedError
 	if errors.As(err, &typed) {
 		return err
 	}
-	reason := dashboard.ControlDenialUnavailable
+	reason := dashapi.ControlDenialUnavailable
 	switch {
 	case errors.Is(err, termlease.ErrCapabilityRejected):
-		reason = dashboard.ControlDenialAuth
+		reason = dashapi.ControlDenialAuth
 	case errors.Is(err, termlease.ErrStandingRevoked):
 		// The standing secret has been revoked and not re-provisioned: nothing
 		// exists at rest for the device's saved secret to match, now or ever
 		// (a re-mint issues a different one). PERMANENT — the device should
 		// clear it, exactly as for a judged rejection.
-		reason = dashboard.ControlDenialAuthRevoked
+		reason = dashapi.ControlDenialAuthRevoked
 	case errors.Is(err, termlease.ErrStandingUnavailable):
 		// The standing leg refused without judging the secret AND the refusal
 		// may lift on its own (standing access momentarily switched off with
 		// the secret still at rest, or rate-limited) — deny, but never blame
 		// the credential.
-		reason = dashboard.ControlDenialAuthTransient
+		reason = dashapi.ControlDenialAuthTransient
 	case errors.Is(err, termlease.ErrTerminalDisabled):
-		reason = dashboard.ControlDenialTerminalDisabled
+		reason = dashapi.ControlDenialTerminalDisabled
 	case errors.Is(err, termlease.ErrNoDeviceSession):
-		reason = dashboard.ControlDenialSessionInvalid
+		reason = dashapi.ControlDenialSessionInvalid
 	case errors.Is(err, termlease.ErrPolicyDenied), errors.Is(err, termlease.ErrNotRemoteExposed), errors.Is(err, termlease.ErrMissingField), errors.Is(err, termsession.ErrNoGrant), errors.Is(err, termsession.ErrSetupSessionLocalOnly):
-		reason = dashboard.ControlDenialPolicyDenied
+		reason = dashapi.ControlDenialPolicyDenied
 	case errors.Is(err, termsession.ErrHeldLocally):
-		reason = dashboard.ControlDenialHeldLocally
+		reason = dashapi.ControlDenialHeldLocally
 	case errors.Is(err, termsession.ErrWriterHeld):
-		reason = dashboard.ControlDenialHeldByRemote
+		reason = dashapi.ControlDenialHeldByRemote
 	case errors.Is(err, termsession.ErrNotFound):
-		reason = dashboard.ControlDenialNotFound
+		reason = dashapi.ControlDenialNotFound
 	}
-	return dashboard.NewControlDeniedError(reason, capabilityConsumed, err)
+	return dashapi.NewControlDeniedError(reason, capabilityConsumed, err)
 }
 
 func (a *launchManagerAdapter) Close(handle string) { a.mgr.Close(handle) }
@@ -565,7 +894,7 @@ func (a *launchManagerAdapter) SessionForRun(runID string) (string, bool) {
 	return a.svc.SessionForRun(runID)
 }
 
-func (a *launchManagerAdapter) Snapshot() []dashboard.LaunchInfo {
+func (a *launchManagerAdapter) Snapshot() []dashapi.LaunchInfo {
 	live := a.mgr.Snapshot()
 	// GC retained run classification (termsvc.byMeta) for handles the Manager no
 	// longer tracks (reaped past ExitLinger). This is the Snapshot-enrichment
@@ -578,9 +907,9 @@ func (a *launchManagerAdapter) Snapshot() []dashboard.LaunchInfo {
 		liveHandles[s.ID] = struct{}{}
 	}
 	a.svc.PruneEndedHandles(liveHandles)
-	out := make([]dashboard.LaunchInfo, 0, len(live))
+	out := make([]dashapi.LaunchInfo, 0, len(live))
 	for _, s := range live {
-		info := dashboard.LaunchInfo{
+		info := dashapi.LaunchInfo{
 			ID:           s.ID,
 			Subcommand:   s.Subcommand,
 			SessionID:    s.SessionID,
@@ -600,9 +929,16 @@ func (a *launchManagerAdapter) Snapshot() []dashboard.LaunchInfo {
 		// HasProjectRoot drives the dashboard's Files/Git panel button enablement
 		// straight from the snapshot — the raw path is NOT carried on the wire
 		// (LaunchInfo flows to remote viewers); only the gated panel endpoint
-		// serves it.
-		if _, ok := a.svc.ProjectRoot(s.ID); ok {
+		// serves it. It reads the SAME browsableRoot decision the panel endpoint
+		// resolves, so a default-cwd launch enables the buttons on its own working
+		// directory (operator ruling 2026-08-28) and an SSH run leaves them off.
+		if browsableRoot(a.svc, s.ID).Path != "" {
 			info.HasProjectRoot = true
+		}
+		// B9 (plan §6): the "sandboxed" pill on the Terminals list/header,
+		// read from the run's in-memory sandboxed flag (no DB column — G19).
+		if sb, ok := a.svc.Sandboxed(s.ID); ok {
+			info.Sandboxed = sb
 		}
 		if runID, ok := a.svc.RunIDForHandle(s.ID); ok {
 			info.RunID = runID
@@ -711,173 +1047,11 @@ func newLeaseAuditSink(database *sql.DB) func(termsession.LeaseEvent) {
 	}
 }
 
-// dashResolveEnvTTL bounds how long the dashboard reuses a captured
-// toolresolve.Env before rebuilding it. A short window (not a forever-memoized
-// value) is what keeps the "a fresh install becomes visible in a daemon-side
-// preflight without a restart" story honest (F7): host.NewEnv does a crossmount
-// home walk + a bounded (≤1.5s) login-shell PATH capture, so per-call rebuilds
-// would be wasteful, but a process-lifetime memo would pin the PATH snapshot
-// taken at first launch forever.
-var dashResolveEnvTTL = 30 * time.Second
-
-var (
-	dashResolveEnvMu   sync.Mutex
-	dashResolveEnvVal  toolresolve.Env
-	dashResolveEnvAt   time.Time
-	dashResolveEnvHave bool
-	// dashResolveEnvNow + dashResolveEnvBuild are package-private seams a test
-	// substitutes to drive TTL expiry deterministically (restore in a defer);
-	// production keeps the real clock and the real host env capture.
-	dashResolveEnvNow   = time.Now
-	dashResolveEnvBuild = func() toolresolve.Env { return host.NewEnv(host.Options{}) }
-)
-
-// dashResolveEnv returns the toolresolve.Env driving the dashboard's tool-
-// resolution seams (tool-binary-resolution arc §5), rebuilding it via
-// host.NewEnv when the cached value is older than dashResolveEnvTTL so a
-// daemon-side preflight reflects a freshly installed binary without a restart
-// (F7). Concurrency-safe; the rebuild happens under the lock so a burst of
-// preflights past the TTL rebuilds exactly once.
-func dashResolveEnv() toolresolve.Env {
-	dashResolveEnvMu.Lock()
-	defer dashResolveEnvMu.Unlock()
-	now := dashResolveEnvNow()
-	if !dashResolveEnvHave || now.Sub(dashResolveEnvAt) >= dashResolveEnvTTL {
-		dashResolveEnvVal = dashResolveEnvBuild()
-		dashResolveEnvAt = now
-		dashResolveEnvHave = true
-	}
-	return dashResolveEnvVal
-}
-
-// installOSForGOOS maps the daemon GOOS to an integration.InstallHint.OS token
-// ("linux" | "darwin" | "windows"), the same convention toolresolve uses to
-// filter hints. It is the ONE place the cmd-side install seam picks the OS a
-// grounded hint must match.
-func installOSForGOOS(goos string) string {
-	switch goos {
-	case "windows":
-		return "windows"
-	case "darwin":
-		return "darwin"
-	default:
-		return "linux"
-	}
-}
-
-// toolPreflightSeam builds the dashboard.Options.ToolPreflight closure: it
-// resolves a launchable tool NAME to a dashboard.ToolPreflight verdict via the
-// SAME ladder the actual launcher (cmd/observer/launch.go resolveToolBin)
-// honors, so a preflight never diverges from the launch it predicts (F1). It
-// reports ok=false for an unknown tool, a non-launchable tool, or one with no
-// grounded Binary spec (the honest floor the endpoint turns into a 400).
-//
-// Ladder, mirroring resolveToolBin (the --<tool>-path FLAG has no dashboard
-// equivalent, so only the config override is mirrored):
-//
-//  1. [launch.tools.<tool>].path config override — what the launcher checks
-//     BEFORE the resolution ladder. Present + stats as a file ⇒ verdict "ok"
-//     with Bin=that path and a note that it is configured; present + missing
-//     (or a dir) ⇒ verdict "not_found" with a note NAMING the stale config key
-//     (never a silent fall-through to the ladder — the launch would fail AT the
-//     override, so preflighting past it would lie). A config that fails to load
-//     falls open to the ladder (a broken config never blocks a preflight).
-//  2. the pure internal/toolresolve ladder over the registry Binary row.
-//
-// InstallCommand is the first daemon-GOOS-matching grounded hint's Display
-// (toolresolve already filters Installs to the daemon OS); CanInstall is true
-// only when such a hint exists AND the live allow_install kill-switch is on. The
-// argv NEVER crosses this seam — it is the install endpoint's own registry-
-// constant lookup.
-func toolPreflightSeam(configPath string, allowInstall func() bool) func(string) (dashboard.ToolPreflight, bool) {
-	return func(tool string) (dashboard.ToolPreflight, bool) {
-		ic, ok := integration.For(tool)
-		if !ok || !ic.Handoff.Launchable() || ic.Binary == nil {
-			return dashboard.ToolPreflight{}, false
-		}
-		// Step 1: config override parity with resolveToolBin. Fail open on a
-		// config load error so a broken config never blocks the ladder.
-		if cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath}); err == nil {
-			if tc, ok := cfg.Launch.Tools[tool]; ok && tc.Path != "" {
-				key := fmt.Sprintf("[launch.tools.%s].path", tool)
-				if fi, statErr := os.Stat(tc.Path); statErr != nil || fi.IsDir() {
-					return dashboard.ToolPreflight{
-						Tool:    tool,
-						Verdict: string(toolresolve.VerdictNotFound),
-						Notes: []string{fmt.Sprintf(
-							"%s = %q is set but no binary is there — fix the path or remove the entry",
-							key, tc.Path,
-						)},
-					}, true
-				}
-				return dashboard.ToolPreflight{
-					Tool:    tool,
-					Verdict: string(toolresolve.VerdictOK),
-					Bin:     tc.Path,
-					Notes:   []string{fmt.Sprintf("configured via %s", key)},
-				}, true
-			}
-		}
-		// Step 2: registry-driven resolution ladder over the Binary row.
-		r := toolresolve.Resolve(*ic.Binary, dashResolveEnv())
-		pf := dashboard.ToolPreflight{
-			Tool:    tool,
-			Verdict: string(r.Verdict),
-			Bin:     r.Bin,
-			Notes:   r.Notes,
-		}
-		if len(r.Installs) > 0 {
-			pf.InstallCommand = r.Installs[0].Display
-			pf.CanInstall = allowInstall != nil && allowInstall()
-		}
-		return pf, true
-	}
-}
-
-// toolInstallHintSeam builds the dashboard.Options.ToolInstallHint closure: it
-// returns the SERVER-SIDE install argv + display for a tool NAME, sourced ONLY
-// from the compile-time registry (tool-binary-resolution arc §Security — the
-// request contributes only the map key, so the argv-injection surface is zero).
-// It returns the first grounded hint whose OS is empty (any) or matches the
-// daemon GOOS; a tool with no grounded hint yields ok=false (the endpoint's
-// 400).
-func toolInstallHintSeam() func(string) ([]string, string, bool) {
-	return func(tool string) ([]string, string, bool) {
-		ic, ok := integration.For(tool)
-		if !ok || ic.Binary == nil {
-			return nil, "", false
-		}
-		want := installOSForGOOS(runtime.GOOS)
-		for _, h := range ic.Binary.Installs {
-			if h.OS == "" || h.OS == want {
-				return h.Argv, h.Display, true
-			}
-		}
-		return nil, "", false
-	}
-}
-
-// allowToolInstallSeam builds the dashboard.Options.AllowToolInstall closure: a
-// LIVE read of [terminal.launch].allow_install (default true) so a config edit
-// flips the guided-install kill-switch with no daemon restart. A config-load
-// error fails SAFE (returns false → the endpoint 403s), matching the honest
-// "disabled" posture the dashboard prefers over spawning an install on a
-// half-broken config.
-func allowToolInstallSeam(configPath string) func() bool {
-	return func() bool {
-		cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
-		if err != nil {
-			return false
-		}
-		return cfg.Terminal.Launch.AllowInstall
-	}
-}
-
 // credOf returns the credential the remote writer-acquire request carries in
 // its capability field — a single-use capability token OR (opt-in §B) a
 // standing terminal-control secret. The acquire boundary branches on the
 // credential SHAPE (remoteauth.IsStandingSecret), so both ride one field.
-func credOf(req dashboard.RemoteWriterRequest) string { return req.CapabilityToken }
+func credOf(req dashapi.RemoteWriterRequest) string { return req.CapabilityToken }
 
 // setCred puts the credential onto a termlease authorize request's capability
 // field (the standing-secret path; AuthorizeStanding reads it as the secret).
@@ -888,11 +1062,11 @@ func setCred(r *termlease.AuthorizeRequest, cred string) { r.CapabilityToken = c
 func mapLaunchErr(err error) error {
 	switch {
 	case errors.Is(err, termsession.ErrTooManySessions):
-		return dashboard.ErrLaunchTooMany
+		return dashapi.ErrLaunchTooMany
 	case errors.Is(err, termsession.ErrPlatformUnsupported):
-		return dashboard.ErrLaunchUnsupported
+		return dashapi.ErrLaunchUnsupported
 	case errors.Is(err, termsession.ErrSetupInFlight):
-		return dashboard.ErrLaunchSetupInFlight
+		return dashapi.ErrLaunchSetupInFlight
 	default:
 		return err
 	}
@@ -900,14 +1074,32 @@ func mapLaunchErr(err error) error {
 
 // mapFreshErr translates the termsvc fresh-launch authorization sentinels (and
 // the underlying termsession spawn errors) onto the dashboard's.
+// mapSSHErr maps the termsvc SSH sentinels onto the dashboard's, falling
+// through to the shared spawn-error mapping (too-many-sessions, unsupported
+// platform) for everything else.
+func mapSSHErr(err error) error {
+	switch {
+	case errors.Is(err, termsvc.ErrSSHLaunchDisabled):
+		return dashapi.ErrLaunchSSHDisabled
+	case errors.Is(err, termsvc.ErrSSHProfileUnknown):
+		return dashapi.ErrLaunchSSHProfileUnknown
+	case errors.Is(err, termsvc.ErrSSHProfileInvalid):
+		return dashapi.ErrLaunchSSHProfileInvalid
+	default:
+		return mapLaunchErr(err)
+	}
+}
+
 func mapFreshErr(err error) error {
 	switch {
 	case errors.Is(err, termsvc.ErrFreshLaunchDisabled):
-		return dashboard.ErrLaunchFreshDisabled
+		return dashapi.ErrLaunchFreshDisabled
 	case errors.Is(err, termsvc.ErrToolNotAllowed):
-		return dashboard.ErrLaunchToolNotAllowed
+		return dashapi.ErrLaunchToolNotAllowed
+	case errors.Is(err, termsvc.ErrShellLaunchDisabled):
+		return dashapi.ErrLaunchShellDisabled
 	case errors.Is(err, termsvc.ErrProjectRootDenied):
-		return dashboard.ErrLaunchProjectRootDenied
+		return dashapi.ErrLaunchProjectRootDenied
 	default:
 		return mapLaunchErr(err)
 	}

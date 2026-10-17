@@ -19,9 +19,37 @@ func destructiveRules() []Rule {
 			ID: "R-101", Category: CategoryDestructive, Severity: SeverityCritical,
 			AppliesTo: shell, MatchCmd: matchDeleteCatastrophic,
 			Observe: DecisionFlag, Enforce: DecisionDeny,
-			SafePat: []SafeFn{safeUnitPathsAllowlisted},
+			SafePat: []SafeFn{safeDeleteAllowlisted},
 			Doc:     "recursive delete targeting a filesystem root, the home directory, a root-depth wildcard, or a path outside the project",
 			Advice:  "Delete inside the project root or a temp directory, or ask the operator to allow R-101 for this target.",
+		},
+		{
+			// T-317 follow-up: the same classification for a recursive
+			// delete CALL inside interpreter program text
+			// (`shutil.rmtree('/')`, `fs.rmSync(p, {recursive: true})`,
+			// `[IO.Directory]::Delete(p, $true)`); see inlinedelete.go.
+			// allow_paths is applied inside the matcher, to the
+			// outside-the-project arm only, as the shell row's safe
+			// pattern does.
+			ID: "R-101", Category: CategoryDestructive, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: matchInlineDeleteCatastrophic,
+			Observe: DecisionFlag, Enforce: DecisionDeny,
+			Doc:    "interpreter one-liner or inline script recursively deleting a filesystem root, the home directory, a root-depth wildcard, or a path outside the project",
+			Advice: "Delete inside the project root or a temp directory, or ask the operator to allow R-101 for this target.",
+		},
+		{
+			// T-525, operator ruling D-338: the ASK row of R-101. A
+			// recursive delete whose target is the bare pipeline variable
+			// (`$_`, `$PSItem`) of the PowerShell script block it sits in
+			// (`Get-ChildItem build | % { Remove-Item $_ -Recurse -Force }`)
+			// deletes whatever the pipeline hands the block, which the
+			// guard cannot see; the same bare variable outside a block
+			// stays the DENY row's unexpanded-variable arm (psblock.go).
+			ID: "R-101", Category: CategoryDestructive, Severity: SeverityCritical,
+			AppliesTo: shell, MatchCmd: matchDeletePipelineItem,
+			Observe: DecisionFlag, Enforce: DecisionAsk,
+			Doc:    "recursive delete of the pipeline item ($_) inside a PowerShell script block, whose target the guard cannot check",
+			Advice: "Confirm what the pipeline feeds the block, or delete explicit paths inside the project.",
 		},
 		{
 			ID: "R-102", Category: CategoryDestructive, Severity: SeverityHigh,
@@ -30,6 +58,19 @@ func destructiveRules() []Rule {
 			SafePat: []SafeFn{safeUnitPathsAllowlisted},
 			Doc:     "recursive delete inside the project targeting the VCS directory or the project root itself",
 			Advice:  "Target a specific subdirectory; .git removal destroys history irrecoverably.",
+		},
+		{
+			// Pass-2 M2-01 calibration (orchestrator decision 2026-10-05):
+			// the "might be catastrophic, cannot tell" tier of a recursive
+			// delete. A row of R-102 (the ask tier, which no starter org
+			// bundle raises to deny) rather than of R-101, so an org
+			// override of R-101 to deny does not turn every unresolved
+			// `cd $X && rm -rf build` back into a hard block.
+			ID: "R-102", Category: CategoryDestructive, Severity: SeverityHigh,
+			AppliesTo: shell, MatchCmd: matchDeleteUnresolved,
+			Observe: DecisionFlag, Enforce: DecisionAsk,
+			Doc:    "recursive delete after a directory change in the same command that the guard cannot resolve, or that is outside the project only if an earlier directory change fails",
+			Advice: "Use an explicit path, or chain directory changes with && so a failed cd stops the line; confirm if the target is intended.",
 		},
 		{
 			ID: "R-103", Category: CategoryDestructive, Severity: SeverityHigh,
@@ -170,7 +211,11 @@ func matchAllowPaths(ctx *MatchContext, p string) bool {
 // safeUnitPathsAllowlisted exempts a unit whose path candidates ALL
 // resolve under [guard.boundary].allow_paths (e.g. `rm -rf
 // /tmp/build`). A unit with no path candidates is NOT safe — safety
-// must be demonstrated, not absent.
+// must be demonstrated, not absent. Each candidate must be allowlisted
+// from EVERY directory the unit can run in (cwdtrack.go), and a unit that
+// can run in an unknown directory, or after an unmodelled evaluation, is
+// never safe: `cd /home/u/proj && rm -rf .git` with the event's cwd under
+// /tmp must not be judged as /tmp/.../.git.
 func safeUnitPathsAllowlisted(ctx *MatchContext, cmd *Command) bool {
 	if cmd == nil {
 		return false
@@ -179,9 +224,21 @@ func safeUnitPathsAllowlisted(ctx *MatchContext, cmd *Command) bool {
 	if len(cand) == 0 {
 		return false
 	}
-	for _, t := range cand {
-		if !matchAllowPaths(ctx, resolveOrLiteral(ctx, t)) {
+	for _, a := range unitAnchors(ctx, cmd) {
+		if a.unknown || a.opaque {
 			return false
+		}
+		for _, t := range cand {
+			p := resolveAt(ctx, t, a)
+			if sub, unknown, through := throughSameCmdLinks(p, a.links); through {
+				if unknown {
+					return false
+				}
+				p = sub
+			}
+			if !matchAllowPaths(ctx, p) {
+				return false
+			}
 		}
 	}
 	return true
@@ -230,48 +287,362 @@ func deleteShape(cmd *Command) (recursive, ok bool) {
 
 // matchDeleteCatastrophic implements R-101: recursive delete whose
 // target is a filesystem root, the home directory, a root-depth
-// wildcard, or resolves outside the project root.
+// wildcard, or resolves outside the project root. Each operand is
+// judged from every directory the unit can run in (cwdtrack.go, pass-2
+// review M2-01). When that is more than the event's own directory the
+// rule's safe pattern stands aside and allow_paths clears the
+// outside-the-project arms here, per anchor, as the inline-delete row
+// always has.
 func matchDeleteCatastrophic(ctx *MatchContext, cmd *Command) (bool, string) {
+	return matchShellDeleteTier(ctx, cmd, tierDeny)
+}
+
+// matchDeleteUnresolved is R-102's second row (pass-2 M2-01 calibration,
+// orchestrator decision 2026-10-05): a recursive delete the guard cannot
+// show is catastrophic, because an earlier step of the same line moved to
+// a directory it cannot resolve (a variable, a substitution, an inherited
+// previous directory, `popd` past this line's stack, an eval, a state
+// overflow), or because only the failure branch of a `;`-chained `cd` /
+// `pushd` puts the target outside the project. Those ASK; a target that
+// resolves to a root, the home directory or a root-depth wildcard in ANY
+// reachable state stays R-101's DENY (the engine keeps the strictest
+// verdict). It covers the shell delete operands and the inline-script
+// delete calls alike.
+func matchDeleteUnresolved(ctx *MatchContext, cmd *Command) (bool, string) {
+	if hit, why := matchShellDeleteTier(ctx, cmd, tierAsk); hit {
+		return true, why
+	}
+	return matchInlineDeleteTier(ctx, cmd, tierAsk)
+}
+
+// matchDeletePipelineItem is R-101's ASK row (T-525, D-338): a recursive
+// delete whose target is the bare pipeline variable of the script block
+// the unit sits in.
+func matchDeletePipelineItem(ctx *MatchContext, cmd *Command) (bool, string) {
+	return matchShellDeleteTier(ctx, cmd, tierItem)
+}
+
+// matchShellDeleteTier reports the first shell delete operand whose
+// classification from some anchor is exactly tier.
+func matchShellDeleteTier(ctx *MatchContext, cmd *Command, tier deleteTier) (bool, string) {
 	recursive, ok := deleteShape(cmd)
 	if !ok || !recursive {
 		return false, ""
 	}
-	for _, t := range cmd.Positionals() {
-		if hit, why := dangerousDeleteTarget(ctx, t); hit {
-			return true, why
+	anchors := unitAnchors(ctx, cmd)
+	allow := !plainOnly(anchors)
+	for _, op := range cmd.positionalOperands() {
+		for _, a := range anchors {
+			if t, why := dangerousDeleteTarget(ctx, op, cmd.Dialect, a, allow); t == tier {
+				return true, anchorReason(a, why)
+			}
 		}
 	}
 	return false, ""
 }
 
-// dangerousDeleteTarget classifies one delete target. Resolution is
-// lexical (pure package): home references expand, relatives anchor on
-// Cwd/ProjectRoot, and an unresolvable relative is judged by its
-// literal form only.
-func dangerousDeleteTarget(ctx *MatchContext, t string) (bool, string) {
-	raw := strings.TrimSpace(t)
-	if raw == "" || strings.HasPrefix(raw, "-") {
-		return false, ""
+// anchorReason tells the operator that a hit was judged from a directory
+// an earlier step of the command moved to, not the event's own one.
+func anchorReason(a deleteAnchor, why string) string {
+	if a.plain || len(a.links) > 0 || a.unknown || a.opaque || strings.Contains(why, "this command") ||
+		strings.Contains(why, "confirm before") {
+		return why
+	}
+	return why + " (from the directory an earlier step of this command changed to)"
+}
+
+// deleteTier is how one delete target classifies from one anchor.
+type deleteTier uint8
+
+// deleteTier values.
+const (
+	tierNone deleteTier = iota
+	// tierDeny: R-101. The target IS a root, the home directory, a
+	// root-depth wildcard, or resolves outside the project, in a state the
+	// guard resolved.
+	tierDeny
+	// tierAsk: R-102's unresolved-directory row. The guard cannot tell
+	// whether the delete is catastrophic.
+	tierAsk
+	// tierItem: R-101's ASK row. The target is the bare pipeline variable
+	// of the script block the unit sits in (T-525, D-338).
+	tierItem
+)
+
+// confirmTail ends every tierAsk reason.
+const confirmTail = "; confirm before a recursive delete"
+
+// dangerousDeleteTarget classifies one delete target from one anchor.
+// Resolution is lexical (pure package): home references expand,
+// relatives anchor on the anchor's directory (the event's Cwd/ProjectRoot
+// for the plain anchor), and an unresolvable relative is judged by its
+// literal form only. allow lets [guard.boundary].allow_paths clear the
+// outside-the-project arms (never the catastrophic ones).
+//
+// Order matters: a catastrophic path is DENY even on a failure branch or
+// after an evaluated step; only what the guard cannot resolve is ASK.
+func dangerousDeleteTarget(ctx *MatchContext, op operand, d Dialect, a deleteAnchor, allow bool) (deleteTier, string) {
+	raw := op.text
+	if strings.TrimSpace(raw) == "" || strings.HasPrefix(raw, "-") {
+		return tierNone, ""
+	}
+	if op.item {
+		return tierItem, "target " + raw + " is the pipeline item of the script block, which the guard cannot check" + confirmTail
+	}
+	if a.unknown && relativeDeleteTarget(ctx, op, d) {
+		return tierAsk, "target " + raw + " is relative to " + quoteStep(a.unknownVia, "a directory change") +
+			", which could not be resolved" + confirmTail
 	}
 	ev := ctx.Event
+	rp, cand := deleteTargetPathsAt(ctx, raw, a)
+	if why := catastrophicDeleteTarget(ctx, op, d, cand, a); why != "" {
+		return tierDeny, why
+	}
+	if t, why := sameCmdLinkHazard(ctx, op, d, a, cand, allow); t != tierNone {
+		return t, why
+	}
+	if a.opaque {
+		return tierAsk, "target " + raw + " follows " + quoteStep(a.opaqueVia, "a step") +
+			", which the guard cannot follow" + confirmTail
+	}
+	if allow && matchAllowPaths(ctx, rp) {
+		return tierNone, ""
+	}
+	outside := ""
+	if ev.ProjectRoot != "" && rp != "" && comparableFlavors(rp, ev.ProjectRoot) && !isUnder(rp, ev.ProjectRoot) {
+		outside = "target " + raw + " resolves outside the project root"
+	} else if real := resolveLinks(ctx, rp); real != "" && ev.ProjectRoot != "" && comparableFlavors(real, ev.ProjectRoot) {
+		rootReal := resolveLinks(ctx, normPath(ev.ProjectRoot))
+		if rootReal == "" {
+			rootReal = ev.ProjectRoot
+		}
+		if !isUnder(real, rootReal) && !isUnder(real, ev.ProjectRoot) {
+			outside = "target " + raw + " resolves outside the project root through a symlink"
+		}
+	}
+	if outside == "" {
+		return tierNone, ""
+	}
+	if a.failPath && !a.plain {
+		return tierAsk, outside + " only if " + quoteStep(a.failVia, "an earlier directory change") +
+			" fails and the line carries on" + confirmTail
+	}
+	return tierDeny, outside
+}
+
+// quoteStep renders the step that left a directory unresolved, or the
+// fallback when none was recorded. A step already rendered with its own
+// quoting and note (cwdtrack.go) is used as is.
+func quoteStep(step, fallback string) string {
+	switch {
+	case strings.TrimSpace(step) == "":
+		return fallback
+	case strings.HasPrefix(step, "`"):
+		return step
+	}
+	return "`" + excerpt(step) + "`"
+}
+
+// resolveLinks applies the injected symlink resolver to a normalized path:
+// "" when there is no resolver, no path, or the resolution changes
+// nothing.
+func resolveLinks(ctx *MatchContext, p string) string {
+	if ctx.Cfg.ResolveLinks == nil || p == "" || !isAbsPath(p) {
+		return ""
+	}
+	real := ctx.Cfg.ResolveLinks(p)
+	if real == "" {
+		return ""
+	}
+	real = normPath(real)
+	if pathsEqual(real, p) {
+		return ""
+	}
+	return real
+}
+
+// deleteTargetPathsAt resolves one delete target from an anchor: rp is
+// the anchored resolution ("" when a relative cannot be anchored) and
+// cand is rp, or the home-expanded literal when rp is empty. For the
+// plain anchor (cwd = Event.Cwd, else Event.ProjectRoot) this is the
+// same resolution the rules always used.
+func deleteTargetPathsAt(ctx *MatchContext, raw string, a deleteAnchor) (rp, cand string) {
 	home := ctx.Cfg.Home
-	rp := resolvePath(raw, home, ev.Cwd, ev.ProjectRoot)
-	cand := rp
+	rp = resolvePath(raw, home, a.cwd, "")
+	cand = rp
 	if cand == "" {
 		cand = normPath(expandHome(raw, home))
 	}
-	switch {
-	case isFilesystemRoot(cand):
-		return true, "target " + raw + " is a filesystem root"
-	case cand == "~" || (home != "" && pathsEqual(cand, home)):
-		return true, "target " + raw + " is the home directory"
-	case isRootDepthGlob(cand, home):
-		return true, "target " + raw + " is a root-depth wildcard"
-	case ev.ProjectRoot != "" && rp != "" && comparableFlavors(rp, ev.ProjectRoot) && !isUnder(rp, ev.ProjectRoot):
-		return true, "target " + raw + " resolves outside the project root"
-	default:
-		return false, ""
+	return rp, cand
+}
+
+// relativeDeleteTarget reports whether op names a path relative to the
+// working directory, as written or with its unexpanded variables empty.
+func relativeDeleteTarget(ctx *MatchContext, op operand, d Dialect) bool {
+	rel := func(s string) bool {
+		p := expandHome(s, ctx.Cfg.Home)
+		return strings.TrimSpace(p) != "" && !isAbsPath(p) && !strings.HasPrefix(p, "~")
 	}
+	if rel(op.text) {
+		return true
+	}
+	spans := shellExpansions(op.text, op.lit, d)
+	return len(spans) > 0 && rel(withoutSpans(op.text, spans))
+}
+
+// sameCmdLinkHazard is the same-command link arm (pass-2 review M2-01):
+// a target that goes through a link created earlier in the same line is
+// judged at the link's target, which Config.ResolveLinks cannot see
+// because the link does not exist yet. A catastrophic or outside-project
+// link target is DENY; a link whose target could not be resolved is ASK.
+func sameCmdLinkHazard(ctx *MatchContext, op operand, d Dialect, a deleteAnchor, cand string, allow bool) (deleteTier, string) {
+	raw := op.text
+	if len(a.links) == 0 {
+		return tierNone, ""
+	}
+	type probe struct{ path, via string }
+	probes := []probe{{cand, ""}}
+	if spans := shellExpansions(raw, op.lit, d); len(spans) > 0 {
+		if empty := withoutSpans(raw, spans); strings.TrimSpace(empty) != "" {
+			_, ec := deleteTargetPathsAt(ctx, empty, a)
+			probes = append(probes, probe{ec, " (with its unexpanded variable empty)"})
+		}
+	}
+	home := ctx.Cfg.Home
+	homeReal := resolveLinks(ctx, normPath(home))
+	root := ctx.Event.ProjectRoot
+	var unresolved string
+	for _, pr := range probes {
+		sub, unknown, through := throughSameCmdLinks(pr.path, a.links)
+		if !through {
+			continue
+		}
+		via := pr.via + " through a link created earlier in this command"
+		if unknown {
+			if unresolved == "" {
+				unresolved = "target " + raw + " goes through " + quoteStep(unknownLinkVia(pr.path, a.links), "a link created earlier in this command") +
+					", whose target could not be resolved" + confirmTail
+			}
+			continue
+		}
+		if why := catastrophicPath(raw, sub, via, home, homeReal); why != "" {
+			return tierDeny, why
+		}
+		if real := resolveLinks(ctx, sub); real != "" {
+			if why := catastrophicPath(raw, real, via, home, homeReal); why != "" {
+				return tierDeny, why
+			}
+		}
+		if root != "" && comparableFlavors(sub, root) && !isUnder(sub, root) && !(allow && matchAllowPaths(ctx, sub)) {
+			return tierDeny, "target " + raw + " resolves outside the project root" + via
+		}
+	}
+	if unresolved != "" {
+		return tierAsk, unresolved
+	}
+	return tierNone, ""
+}
+
+// catastrophicDeleteTarget returns R-101's reason when cand is a
+// filesystem root, the home directory or a root-depth wildcard, and ""
+// otherwise. These arms hold wherever the path sits: no allow_paths
+// entry can make deleting the home directory safe.
+//
+// Two arms close bypasses the literal check could not see (Sol A2-04, as
+// narrowed): a target carrying an unexpanded shell expansion is judged as
+// if every expansion were EMPTY, the value an unset or mistyped variable
+// gives, and is catastrophic when that lands on a root, the home directory
+// or a root-depth wildcard (a bare `$VAR`, `$VAR/`, `$VAR/*`, `$VAR/.`,
+// `$VAR/..`, `/$VAR`, `$HOME/$X`); `$VAR/<named subpath>` goes through the
+// normal rules. And a target whose existing prefix is a symlink is also
+// judged by where it resolves (Config.ResolveLinks), against the home
+// directory as written and as resolved.
+func catastrophicDeleteTarget(ctx *MatchContext, op operand, d Dialect, cand string, a deleteAnchor) string {
+	raw := op.text
+	home := ctx.Cfg.Home
+	if spans := shellExpansions(raw, op.lit, d); len(spans) > 0 {
+		empty := withoutSpans(raw, spans)
+		if strings.TrimSpace(empty) == "" {
+			return "target " + raw + " is only an unexpanded shell variable, so its real target cannot be checked"
+		}
+		_, ec := deleteTargetPathsAt(ctx, empty, a)
+		if why := catastrophicPath(raw, ec, " (with its unexpanded variable empty)", home); why != "" {
+			return why
+		}
+	}
+	if why := catastrophicPath(raw, cand, "", home); why != "" {
+		return why
+	}
+	if real := resolveLinks(ctx, cand); real != "" {
+		homeReal := resolveLinks(ctx, normPath(home))
+		return catastrophicPath(raw, real, " through a symlink", home, homeReal)
+	}
+	return ""
+}
+
+// catastrophicPath is the literal R-101 classification of one normalized
+// path against the home spellings in homes ("" entries ignored); via is
+// appended to the reason ("" for the literal path).
+func catastrophicPath(raw, p, via string, homes ...string) string {
+	switch {
+	case isFilesystemRoot(p):
+		return "target " + raw + via + " is a filesystem root"
+	case p == "~" || matchesHome(p, homes):
+		return "target " + raw + via + " is the home directory"
+	case isRootDepthGlob(p, "") || rootDepthUnderHome(p, homes):
+		return "target " + raw + via + " is a root-depth wildcard"
+	default:
+		return ""
+	}
+}
+
+func matchesHome(p string, homes []string) bool {
+	for _, h := range homes {
+		if h != "" && pathsEqual(p, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func rootDepthUnderHome(p string, homes []string) bool {
+	for _, h := range homes {
+		if h != "" && isRootDepthGlob(p, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// safeDeleteAllowlisted is R-101's safe pattern. The allow_paths
+// exemption clears only the outside-the-project arm: a unit that
+// targets a filesystem root, the home directory or a root-depth
+// wildcard is never safe, even when that path sits under an allowlisted
+// location. A home directory under /tmp (CI runners, sandboxes,
+// throwaway test homes) otherwise matched the default "/tmp/**" entry
+// and turned `rm -rf ~` into an exempt temp-dir delete.
+//
+// A unit that can run anywhere but the event's own directory (an earlier
+// `cd`, a same-command link, a chdir wrapper) is never exempt here: the
+// matcher then judges every anchor and applies allow_paths per anchor.
+func safeDeleteAllowlisted(ctx *MatchContext, cmd *Command) bool {
+	if cmd == nil {
+		return false
+	}
+	anchors := unitAnchors(ctx, cmd)
+	if !plainOnly(anchors) {
+		return false
+	}
+	for _, op := range cmd.positionalOperands() {
+		raw := op.text
+		if strings.TrimSpace(raw) == "" || strings.HasPrefix(raw, "-") {
+			continue
+		}
+		if _, cand := deleteTargetPathsAt(ctx, raw, anchors[0]); catastrophicDeleteTarget(ctx, op, cmd.Dialect, cand, anchors[0]) != "" {
+			return false
+		}
+	}
+	return safeUnitPathsAllowlisted(ctx, cmd)
 }
 
 // matchDeleteVCS implements R-102: recursive delete inside the
@@ -288,16 +659,25 @@ func matchDeleteVCS(ctx *MatchContext, cmd *Command) (bool, string) {
 	if pr == "" {
 		return false, ""
 	}
+	anchors := unitAnchors(ctx, cmd)
 	for _, t := range cmd.Positionals() {
-		rp := resolveOrLiteral(ctx, t)
-		if rp == "" || !isUnder(rp, pr) {
-			continue
-		}
-		if hasComponent(rp, ".git") {
-			return true, "target " + t + " includes the .git directory"
-		}
-		if pathsEqual(rp, pr) {
-			return true, "target " + t + " is the project root itself"
+		for _, a := range anchors {
+			if a.unknown || a.opaque {
+				continue // R-101 owns a delete it cannot place
+			}
+			rp := resolveAt(ctx, t, a)
+			if sub, unknown, through := throughSameCmdLinks(rp, a.links); through && !unknown {
+				rp = sub
+			}
+			if rp == "" || !isUnder(rp, pr) {
+				continue
+			}
+			if hasComponent(rp, ".git") {
+				return true, "target " + t + " includes the .git directory"
+			}
+			if pathsEqual(rp, pr) {
+				return true, "target " + t + " is the project root itself"
+			}
 		}
 	}
 	return false, ""
@@ -630,13 +1010,19 @@ func matchBulkPermChange(ctx *MatchContext, cmd *Command) (bool, string) {
 		if len(pos) < 2 {
 			return false, ""
 		}
+		anchors := unitAnchors(ctx, cmd)
 		for _, t := range pos[1:] { // pos[0] is the owner spec
-			rp := resolveOrLiteral(ctx, t)
-			if rp == "" || ctx.Event.ProjectRoot == "" {
-				continue
-			}
-			if comparableFlavors(rp, ctx.Event.ProjectRoot) && !isUnder(rp, ctx.Event.ProjectRoot) {
-				return true, "chown -R outside project: " + t
+			for _, a := range anchors {
+				if a.unknown || a.opaque {
+					continue
+				}
+				rp := resolveAt(ctx, t, a)
+				if rp == "" || ctx.Event.ProjectRoot == "" {
+					continue
+				}
+				if comparableFlavors(rp, ctx.Event.ProjectRoot) && !isUnder(rp, ctx.Event.ProjectRoot) {
+					return true, "chown -R outside project: " + t
+				}
 			}
 		}
 	}

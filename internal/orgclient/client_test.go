@@ -9,17 +9,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -29,8 +32,11 @@ import (
 
 // memBearerStore is an in-memory BearerStore for tests.
 type memBearerStore struct {
-	bearer string
-	key    ed25519.PrivateKey
+	bearer  string
+	key     ed25519.PrivateKey
+	vkey    string
+	vkeyGen uint64
+	vkeySet bool
 }
 
 func (m *memBearerStore) SaveBearer(b string) error { m.bearer = b; return nil }
@@ -47,15 +53,41 @@ func (m *memBearerStore) LoadAgentKey() (ed25519.PrivateKey, error) {
 	}
 	return m.key, nil
 }
-func (m *memBearerStore) Clear() error    { m.bearer = ""; m.key = nil; return nil }
+
+func (m *memBearerStore) SaveVirtualKey(key string, generation uint64) error {
+	m.vkey, m.vkeyGen, m.vkeySet = key, generation, true
+	return nil
+}
+
+func (m *memBearerStore) LoadVirtualKey() (string, uint64, error) {
+	if !m.vkeySet {
+		return "", 0, ErrNoSecret
+	}
+	return m.vkey, m.vkeyGen, nil
+}
+
+func (m *memBearerStore) Clear() error {
+	m.bearer, m.key, m.vkey, m.vkeyGen, m.vkeySet = "", nil, "", 0, false
+	return nil
+}
 func (m *memBearerStore) Backend() string { return "mem" }
 
 // --- helpers ----------------------------------------------------------------
 
+// newAgentStore opens a fresh agent store for a test. It uses
+// [dbtemplate.Open] rather than [db.Open] directly: this package's suite
+// creates one fresh SQLite database per test (sometimes several), and
+// re-running the full agent migration chain (125 migrations as of writing)
+// on every one of them was the single largest contributor to the package's
+// wall-clock time under `go test -race` — a from-scratch db.Open costs well
+// over a second, dominating tests whose own logic runs in milliseconds.
+// dbtemplate seeds each fresh path from a process-wide pre-migrated image
+// (built once, byte-copied per test) and is behaviour-identical to db.Open
+// for every other purpose (same schema, same options, same cleanup).
 func newAgentStore(t *testing.T) *store.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "agent.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -117,7 +149,7 @@ func TestEnroll_Success(t *testing.T) {
 
 	bs := &memBearerStore{}
 	c := newTestClient(t, s, bs)
-	enr, err := c.Enroll(context.Background(), srv.URL, "tok_id.secret")
+	enr, _, err := c.Enroll(context.Background(), srv.URL, "tok_id.secret")
 	if err != nil {
 		t.Fatalf("Enroll: %v", err)
 	}
@@ -166,7 +198,7 @@ func TestEnroll_AuthFailure(t *testing.T) {
 
 	bs := &memBearerStore{}
 	c := newTestClient(t, s, bs)
-	_, err := c.Enroll(context.Background(), srv.URL, "bad")
+	_, _, err := c.Enroll(context.Background(), srv.URL, "bad")
 	if !errors.Is(err, ErrAuthFailed) {
 		t.Fatalf("Enroll error = %v, want ErrAuthFailed", err)
 	}
@@ -176,6 +208,79 @@ func TestEnroll_AuthFailure(t *testing.T) {
 	}
 	if enr, _ := s.LoadEnrolment(context.Background()); enr != nil {
 		t.Errorf("enrolment row written despite failed enrol")
+	}
+}
+
+// TestEnroll_MemberNotActiveVsGenuinelyInvalid pins the discriminator: a 403
+// carrying {"error":"member_not_active",...} must surface as
+// ErrMemberNotActive with guidance to retry the SAME command (never "ask your
+// admin for a new one"), while a plain 401/403 with no such body — or a
+// different error code — keeps the existing ErrAuthFailed "invalid or
+// expired" text.
+func TestEnroll_MemberNotActiveVsGenuinelyInvalid(t *testing.T) {
+	tests := []struct {
+		name           string
+		status         int
+		body           map[string]string
+		wantErrIs      error
+		wantContains   []string
+		wantNotContain []string
+	}{
+		{
+			name:   "pending member 403",
+			status: http.StatusForbidden,
+			body: map[string]string{
+				"error":   "member_not_active",
+				"message": "your organization account is not active yet: redeem your dashboard sign-in invite and set a password first, then run this command again — your enrolment token is still valid",
+			},
+			wantErrIs: ErrMemberNotActive,
+			wantContains: []string{
+				"redeem your dashboard sign-in invite",
+				"run the same command again after you have signed in",
+			},
+			wantNotContain: []string{"ask your admin for a new one"},
+		},
+		{
+			name:         "genuinely invalid or expired token",
+			status:       http.StatusUnauthorized,
+			body:         map[string]string{"error": "unauthorized"},
+			wantErrIs:    ErrAuthFailed,
+			wantContains: []string{"invalid or expired enrolment token", "ask your admin for a new one"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAgentStore(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeTestJSON(w, tc.status, tc.body)
+			}))
+			defer srv.Close()
+
+			bs := &memBearerStore{}
+			c := newTestClient(t, s, bs)
+			_, _, err := c.Enroll(context.Background(), srv.URL, "tok_id.secret")
+			if !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("Enroll error = %v, want errors.Is(_, %v)", err, tc.wantErrIs)
+			}
+			for _, want := range tc.wantContains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+			for _, notWant := range tc.wantNotContain {
+				if strings.Contains(err.Error(), notWant) {
+					t.Errorf("error %q unexpectedly contains %q", err.Error(), notWant)
+				}
+			}
+			// Never persisted: a not-yet-active member must not leave the
+			// node half-enrolled, same as a genuinely invalid token.
+			if bs.bearer != "" || bs.key != nil {
+				t.Errorf("secrets stored despite a failed enrol")
+			}
+			if enr, _ := s.LoadEnrolment(context.Background()); enr != nil {
+				t.Errorf("enrolment row written despite a failed enrol")
+			}
+		})
 	}
 }
 
@@ -512,14 +617,19 @@ func TestStatusAndUnenroll(t *testing.T) {
 // --- runLoop timing (synctest) ----------------------------------------------
 
 // The loop waits one interval before the first cycle, backs off exponentially
-// (jittered) on retryable errors, resets the backoff after a success, and
-// stops cleanly (returns nil) on an auth failure.
-func TestRunLoop_BackoffResetAndAuthStop(t *testing.T) {
+// (jittered) on retryable errors, resets the backoff after a success, and —
+// crucially — RETRIES an auth failure on a separate track (initialBackoff-then-
+// climb) rather than stopping, so a re-enrol recovers without a restart.
+func TestRunLoop_BackoffResetAndAuthRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := New(config.OrgClientConfig{}, nil, &memBearerStore{}, "v", http.DefaultClient, quietLogger())
 		const interval = 900 * time.Second
 
-		script := []error{errors.New("boom"), errors.New("boom"), nil, ErrAuthFailed}
+		ctx, cancel := context.WithCancel(context.Background())
+		// boom, boom (backoff climbs) → nil (reset) → three ErrAuthFailed (auth
+		// track: retry at 250ms then 500ms, proving it does NOT stop); cancel
+		// after the last scripted step ends the loop.
+		script := []error{errors.New("boom"), errors.New("boom"), nil, ErrAuthFailed, ErrAuthFailed, ErrAuthFailed}
 		var gaps []time.Duration
 		last := time.Now()
 		i := 0
@@ -529,27 +639,33 @@ func TestRunLoop_BackoffResetAndAuthStop(t *testing.T) {
 			last = now
 			err := script[i]
 			i++
+			if i == len(script) {
+				cancel()
+			}
 			return err
 		}
 
-		if err := c.runLoop(context.Background(), interval, action); err != nil {
-			t.Fatalf("runLoop returned %v, want nil (auth stop)", err)
+		if err := c.runLoop(ctx, interval, action); !errors.Is(err, context.Canceled) {
+			t.Fatalf("runLoop returned %v, want context.Canceled (auth is retryable, not terminal)", err)
 		}
-		if len(gaps) != 4 {
-			t.Fatalf("ran %d cycles, want 4", len(gaps))
+		if len(gaps) != 6 {
+			t.Fatalf("ran %d cycles, want 6 (auth failures retried, not stopped)", len(gaps))
 		}
 		// First cycle: exactly one interval.
 		if gaps[0] != interval {
 			t.Errorf("gap[0] = %v, want %v", gaps[0], interval)
 		}
-		// After boom #1: ~250ms ±25%.
+		// After boom #1/#2: 250ms then doubled to 500ms.
 		assertWithin(t, "gap[1]", gaps[1], 250*time.Millisecond)
-		// After boom #2: backoff doubled to ~500ms ±25%.
 		assertWithin(t, "gap[2]", gaps[2], 500*time.Millisecond)
 		// After the success: backoff reset → back to the full interval.
 		if gaps[3] != interval {
 			t.Errorf("gap[3] = %v, want %v (backoff reset after success)", gaps[3], interval)
 		}
+		// After ErrAuthFailed #1/#2: the auth track retries at 250ms then 500ms
+		// — proof the loop keeps going instead of terminating.
+		assertWithin(t, "gap[4]", gaps[4], 250*time.Millisecond)
+		assertWithin(t, "gap[5]", gaps[5], 500*time.Millisecond)
 	})
 }
 
@@ -560,7 +676,8 @@ func TestRunLoop_IdleKeepsIntervalCadence(t *testing.T) {
 		c := New(config.OrgClientConfig{}, nil, &memBearerStore{}, "v", http.DefaultClient, quietLogger())
 		const interval = 900 * time.Second
 
-		script := []error{errIdle, errIdle, ErrAuthFailed}
+		ctx, cancel := context.WithCancel(context.Background())
+		script := []error{errIdle, errIdle}
 		var gaps []time.Duration
 		last := time.Now()
 		i := 0
@@ -570,13 +687,52 @@ func TestRunLoop_IdleKeepsIntervalCadence(t *testing.T) {
 			last = now
 			err := script[i]
 			i++
+			if i == len(script) {
+				cancel()
+			}
 			return err
 		}
-		_ = c.runLoop(context.Background(), interval, action)
-		for j, g := range gaps[:2] {
+		_ = c.runLoop(ctx, interval, action)
+		for j, g := range gaps {
 			if g != interval {
 				t.Errorf("idle gap[%d] = %v, want %v", j, g, interval)
 			}
+		}
+	})
+}
+
+func TestValidatePushBodySize(t *testing.T) {
+	if err := validatePushBodySize([]byte("1234"), 4); err != nil {
+		t.Fatalf("exact-limit body rejected: %v", err)
+	}
+	if err := validatePushBodySize([]byte("12345"), 4); !errors.Is(err, ErrBatchTooLarge) {
+		t.Fatalf("oversized body = %v, want ErrBatchTooLarge", err)
+	}
+}
+
+func TestRunLoop_OversizedBatchUsesCircuitBreakerCadence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := New(config.OrgClientConfig{}, nil, &memBearerStore{}, "v", http.DefaultClient, quietLogger())
+		ctx, cancel := context.WithCancel(context.Background())
+		var gaps []time.Duration
+		last := time.Now()
+		calls := 0
+		action := func(context.Context) error {
+			now := time.Now()
+			gaps = append(gaps, now.Sub(last))
+			last = now
+			calls++
+			if calls == 2 {
+				cancel()
+			}
+			return ErrBatchTooLarge
+		}
+		_ = c.runLoop(ctx, time.Minute, action)
+		if len(gaps) != 2 {
+			t.Fatalf("ran %d cycles, want 2", len(gaps))
+		}
+		if gaps[0] != time.Minute || gaps[1] != oversizedBatchBackoff {
+			t.Fatalf("gaps = %v, want [%v %v]", gaps, time.Minute, oversizedBatchBackoff)
 		}
 	})
 }
@@ -642,4 +798,75 @@ var testPubKeys = map[string]ed25519.PublicKey{}
 func bindPub(srv *httptest.Server, pub ed25519.PublicKey) { testPubKeys[srv.URL] = pub }
 func pubFromCtx(r *http.Request) ed25519.PublicKey {
 	return testPubKeys["http://"+r.Host]
+}
+
+// TestNoteOversizedBatch_PersistsPauseForOtherProcesses pins the H2 breaker
+// surface: opening the oversized-batch circuit must leave a DURABLE record, not
+// just a log line. The dashboard and `observer org push-status` run in different
+// processes from the daemon that parks the loop, so an in-memory flag would
+// leave "no telemetry is shipping for the next hour" completely invisible.
+func TestNoteOversizedBatch_PersistsPauseForOtherProcesses(t *testing.T) {
+	s := newAgentStore(t)
+	c := newTestClient(t, s, &memBearerStore{})
+	ctx := context.Background()
+
+	before := time.Now().UTC()
+	c.noteOversizedBatch(ctx, fmt.Errorf("orgclient.PushOnce: %w: serialized_bytes=250000000 limit_bytes=1048576", ErrBatchTooLarge))
+
+	paused, err := s.LoadPushBreaker(ctx)
+	if err != nil {
+		t.Fatalf("LoadPushBreaker: %v", err)
+	}
+	if paused == nil {
+		t.Fatal("the oversized-batch pause was not persisted — a parked push loop would be invisible")
+	}
+	if !strings.Contains(paused.Reason, "limit_bytes=1048576") {
+		t.Errorf("Reason = %q, want the serialized-vs-limit diagnostic operators act on", paused.Reason)
+	}
+	if got := paused.Until.Sub(before); got < oversizedBatchBackoff-time.Minute || got > oversizedBatchBackoff+time.Minute {
+		t.Errorf("pause window = %v, want ~%v (the circuit-breaker cadence)", got, oversizedBatchBackoff)
+	}
+
+	// A successful cycle closes the circuit — the same call PushLoop makes.
+	if err := s.ClearPushBreaker(ctx); err != nil {
+		t.Fatalf("ClearPushBreaker: %v", err)
+	}
+	if paused, err = s.LoadPushBreaker(ctx); err != nil || paused != nil {
+		t.Fatalf("circuit still open after a success: %+v, %v", paused, err)
+	}
+}
+
+// TestStatusReportsOpenPushBreaker pins that the persisted pause reaches the
+// EnrolmentState the dashboard + CLI read, not only the store.
+func TestStatusReportsOpenPushBreaker(t *testing.T) {
+	s := newAgentStore(t)
+	bs := &memBearerStore{}
+	c := newTestClient(t, s, bs)
+	ctx := context.Background()
+
+	// Status short-circuits on a non-enrolled node, so enrol first.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, orgcontract.EnrollResponse{
+			Bearer: "bearer-xyz", BearerExpiresAt: "2026-08-23T00:00:00Z",
+			OrgID: "org-1", OrgName: "Acme", UserID: "scim-42", UserEmail: "dev@acme.example",
+		})
+	}))
+	defer srv.Close()
+	if _, _, err := c.Enroll(ctx, srv.URL, "tok_id.secret"); err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	if err := s.OpenPushBreaker(ctx, time.Now().UTC().Add(oversizedBatchBackoff), "serialized_bytes=9 limit_bytes=1"); err != nil {
+		t.Fatalf("OpenPushBreaker: %v", err)
+	}
+
+	st, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.PushPaused == nil {
+		t.Fatal("EnrolmentState.PushPaused is nil while the circuit is open — the dashboard would show a healthy push loop")
+	}
+	if !strings.Contains(st.PushPaused.Reason, "limit_bytes=1") {
+		t.Errorf("PushPaused.Reason = %q", st.PushPaused.Reason)
+	}
 }

@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "spendingLimits": "VerifiedOfficial",
+    "spendingLimits.effectiveHardSl": "VerifiedOfficial",
+    "spendingLimits.effectiveHardSl.val": "VerifiedOfficial",
+    "spendingLimits.effectiveSl": "VerifiedOfficial",
+    "spendingLimits.effectiveSl.val": "VerifiedOfficial",
+    "spendingLimits.hardSlAuto": "VerifiedOfficial",
+    "spendingLimits.hardSlAuto.val": "VerifiedOfficial",
+    "spendingLimits.softSl": "VerifiedOfficial",
+    "spendingLimits.softSl.val": "VerifiedOfficial"
+  },
+  "fixture_sha256": "be4e6d48b7e0b16994dddcb7053b2d216e1ebaadcb02f336fd271c31ff7e8076",
+  "http": {
+    "method": "GET",
+    "path": "/v1/billing/teams/{team_id}/postpaid/spending-limits",
+    "status": 200
+  },
+  "notes": "The documented GET .../postpaid/spending-limits response example, verbatim (values are USD cents; the optional hardSlOverride is absent in the example).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "xAI Management API reference (audit.md, billing.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "6d2e052e36c76f9f770b5116e243365d95205b83e864d851dcfc9eab2aea7956",
+  "source_url": "https://docs.x.ai/developers/rest-api-reference/management/billing.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "xai.mgmt.spending_limits"
+}

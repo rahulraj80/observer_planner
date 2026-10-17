@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/git"
@@ -26,30 +27,90 @@ const historyFileName = ".aider.chat.history.md"
 // project-local adapters (e.g. crush) sharing the same repos.
 type Adapter struct {
 	scrubber *scrub.Scrubber
-	roots    []string
+	// roots is set only when the caller injected roots (NewWithOptions);
+	// it is then used verbatim and never re-discovered.
+	roots []string
+	// disc, when non-nil, supplies the discovered roots (New, or
+	// NewWithOptions without roots). Shared process-wide.
+	disc *discovery
 }
 
-// cachedDiscoveredRoots memoizes the discovery walk for the process
-// lifetime: defaults.Adapters() is constructed many times per process
-// (watcher build, dashboard health predicate, tests) and the walk must
-// not be re-paid on each construction. Tests exercise discoverRoots()
-// directly and are unaffected.
-var (
-	discoverOnce    sync.Once
-	discoveredRoots []string
-)
+// rediscoverInterval is how old the discovered root set may get before the
+// next WatchPaths call starts a background re-walk (T-706). The watcher's
+// root re-detector calls WatchPaths every 30 s and hot-adds any new root,
+// so a repo whose FIRST aider session starts after the daemon is up is
+// watched within about this interval plus one detector tick.
+const rediscoverInterval = 2 * time.Minute
 
-func cachedDiscoveredRoots() []string {
-	discoverOnce.Do(func() { discoveredRoots = discoverRoots() })
-	return discoveredRoots
+// discovery memoizes the bounded discovery walk and refreshes it in the
+// background. defaults.Adapters() is constructed many times per process
+// (watcher build, dashboard health predicate, tests), so the walk must not
+// be paid per construction, and WatchPaths sits on the watcher's poll path,
+// so a stale set must never make a caller wait for a walk: the first call
+// walks synchronously (the startup behaviour this package always had), and
+// every later stale call returns the current set at once and starts at most
+// one background re-walk.
+type discovery struct {
+	walk     func() []string
+	now      func() time.Time
+	spawn    func(func())
+	interval time.Duration
+
+	mu      sync.Mutex
+	roots   []string
+	at      time.Time
+	done    bool
+	running bool
+}
+
+// current returns the discovered roots, walking synchronously on first use
+// and refreshing in the background once the set is older than interval.
+func (d *discovery) current() []string {
+	d.mu.Lock()
+	if !d.done {
+		d.roots = d.walk()
+		d.at = d.now()
+		d.done = true
+		out := d.roots
+		d.mu.Unlock()
+		return out
+	}
+	out := d.roots
+	if !d.running && d.now().Sub(d.at) >= d.interval {
+		d.running = true
+		d.spawn(d.refresh)
+	}
+	d.mu.Unlock()
+	return out
+}
+
+// refresh re-walks and swaps the root set in. The walk runs without the
+// lock so concurrent WatchPaths calls keep returning the previous set.
+func (d *discovery) refresh() {
+	roots := d.walk()
+	d.mu.Lock()
+	d.roots = roots
+	d.at = d.now()
+	d.running = false
+	d.mu.Unlock()
+}
+
+// sharedDiscovery is the process-wide discovery every default-rooted
+// adapter reads. Tests exercise discoverRoots() and their own discovery
+// values directly.
+var sharedDiscovery = &discovery{
+	walk:     discoverRoots,
+	now:      time.Now,
+	spawn:    func(f func()) { go f() },
+	interval: rediscoverInterval,
 }
 
 // New returns an adapter whose watch roots are discovered from the
 // filesystem (bounded walk of the NATIVE home for .aider.chat.history.md
-// files, plus any AIDER_CHAT_HISTORY_FILE override). Discovery runs once
-// per process; the result is cached.
+// files, plus any AIDER_CHAT_HISTORY_FILE override). The first discovery is
+// shared process-wide and refreshed in the background (see discovery).
 func New() *Adapter {
-	return &Adapter{scrubber: scrub.New(), roots: cachedDiscoveredRoots()}
+	return &Adapter{scrubber: scrub.New(), disc: sharedDiscovery}
 }
 
 // NewWithOptions customizes the scrubber and/or watch roots. A nil
@@ -63,7 +124,7 @@ func NewWithOptions(s *scrub.Scrubber, roots []string) *Adapter {
 		s = scrub.New()
 	}
 	if len(roots) == 0 {
-		roots = cachedDiscoveredRoots()
+		return &Adapter{scrubber: s, disc: sharedDiscovery}
 	}
 	return &Adapter{scrubber: s, roots: roots}
 }
@@ -71,16 +132,21 @@ func NewWithOptions(s *scrub.Scrubber, roots []string) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolAider }
 
-// WatchPaths implements adapter.Adapter. The roots are a snapshot taken at
-// first construction: the .aider.chat.history.md FILE paths discovered in
-// the native home (plus AIDER_CHAT_HISTORY_FILE when set). A repo that
-// gains its FIRST aider session AFTER the daemon started is not watched
-// until the next daemon restart or an `observer scan`/`observer backfill`
-// run — Aider exposes no central directory or index the watcher could
-// cover, and this package does not reach into the watcher to re-derive
-// roots dynamically. See docs/aider-adapter.md for the recommended
-// shared-seam fix.
-func (a *Adapter) WatchPaths() []string { return a.roots }
+// WatchPaths implements adapter.Adapter. With discovered roots this is the
+// .aider.chat.history.md FILE paths found in the native home (plus
+// AIDER_CHAT_HISTORY_FILE when set), refreshed in the background every
+// rediscoverInterval (T-706: before this, the set was a once-per-process
+// snapshot, so a repo whose FIRST aider session started after the daemon
+// was never watched until a restart or `observer scan`; on demo node 1
+// every transcript of the operator's dashboard aider runs was in that
+// state). The watcher's 30 s root re-detector picks up a new transcript
+// from here, hot-adds it and walks it.
+func (a *Adapter) WatchPaths() []string {
+	if a.disc != nil {
+		return a.disc.current()
+	}
+	return a.roots
+}
 
 // IsSessionFile implements adapter.Adapter. Matches a file named exactly
 // .aider.chat.history.md under (or equal to) one of the watch roots, or a
@@ -89,14 +155,15 @@ func (a *Adapter) WatchPaths() []string { return a.roots }
 // sibling .aider.input.history and the .aider.tags.cache.v4/ repo-map
 // cache are deliberately NOT matched.
 func (a *Adapter) IsSessionFile(path string) bool {
-	if !adapter.UnderAnyWatchRoot(path, a.roots) {
+	roots := a.WatchPaths()
+	if !adapter.UnderAnyWatchRoot(path, roots) {
 		return false
 	}
 	if strings.EqualFold(filepath.Base(path), historyFileName) {
 		return true
 	}
 	clean := filepath.Clean(path)
-	for _, r := range a.roots {
+	for _, r := range roots {
 		if strings.EqualFold(clean, filepath.Clean(r)) {
 			return true
 		}
@@ -114,8 +181,11 @@ func (a *Adapter) IsSessionFile(path string) bool {
 // (sessionKey, sequence)-derived SourceEventID, so a full re-parse is
 // idempotent at the store's (source_file, source_event_id) dedup key.
 func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset int64) (adapter.ParseResult, error) {
-	info, err := os.Stat(path)
-	if err != nil {
+	// Lstat, not Stat: a transcript path that is a symlink (or any
+	// non-regular file) is never read, whichever discovery path named it
+	// (SEC-SWEEP, ledger AIDER-SYMLINK-1).
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
 		return adapter.ParseResult{NewOffset: fromOffset}, nil
 	}
 	size := info.Size()
@@ -129,14 +199,17 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		return adapter.ParseResult{NewOffset: fromOffset}, nil
 	}
 
-	projectRoot := a.resolveProjectRoot(path)
-	tools, tokens := a.parseTranscript(ctx, data, path, projectRoot)
+	projectRoot, gitRemote, projectIdentity := a.resolveProjectRoot(path)
+	p := a.parseTranscriptState(ctx, data, path, projectRoot, gitRemote)
 
-	return adapter.ParseResult{
-		ToolEvents:  tools,
-		TokenEvents: tokens,
-		NewOffset:   int64(len(data)),
-	}, nil
+	res := adapter.ParseResult{
+		ToolEvents:          p.tools,
+		TokenEvents:         p.tokens,
+		SessionToolVersions: p.versions,
+		NewOffset:           int64(len(data)),
+	}
+	adapter.ApplyProjectIdentity(&res, projectIdentity)
+	return res, nil
 }
 
 // resolveProjectRoot turns the transcript path into a stable project root.
@@ -144,21 +217,24 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 // own directory. Foreign-mount (Windows) paths are translated to their
 // /mnt/c equivalent and stat-gated before git.Resolve, so a Windows-side
 // repo doesn't misfile under the observer's own repo.
-func (a *Adapter) resolveProjectRoot(path string) string {
+// Returns (root, gitRemote); gitRemote is "" when the directory isn't
+// inside a git repo.
+func (a *Adapter) resolveProjectRoot(path string) (root, gitRemote string, id git.Identity) {
 	dir := filepath.Dir(path)
 	if dir == "" || dir == "." || dir == string(filepath.Separator) {
-		return "[aider]"
+		return "[aider]", "", git.Identity{}
 	}
 	if translated := crossmount.TranslateForeignPath(dir); translated != dir {
 		if _, err := os.Stat(translated); err == nil {
 			dir = translated
 		}
 	}
-	info, err := git.Resolve(dir)
+	identity, err := git.ResolveIdentity(dir, git.IdentityOptions{})
 	if err != nil {
-		return dir
+		return dir, "", git.Identity{}
 	}
-	return info.Root
+	// identity.Remote is already NormalizeRemote'd by ResolveIdentity.
+	return identity.Root, identity.Remote, identity
 }
 
 // scrub applies the plaintext scrubber, tolerating a nil scrubber.

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -28,7 +31,7 @@ func seedRoutingSimCorpus(t *testing.T) string {
 	}
 
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

@@ -265,7 +265,7 @@ func Compile(t Target, effective []policy.RuleInfo) Compiled {
 		case !present[row.RuleID]:
 			res.Skipped = "rule disabled in effective policy"
 		case enforce[row.RuleID] < policy.DecisionAsk:
-			res.Skipped = "effective enforce decision is " + enforce[row.RuleID].String() + " — no native expression"
+			res.Skipped = "effective enforce decision is " + enforce[row.RuleID].String() + " - no native expression"
 		default:
 			for _, e := range row.Entries {
 				if e.Action == ActionDeny && enforce[row.RuleID] < policy.DecisionDeny {

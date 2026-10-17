@@ -1,61 +1,34 @@
 package policy
 
 import (
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestPackageImports_Bounded enforces the module-boundary discipline
-// (CLAUDE.md "Module Boundaries & Anti-Spaghetti Discipline" + guard
-// spec §17.1, the cachetrack precedent). internal/policy is PURE:
-// non-test source files must not import I/O infrastructure
-// (database/sql, net/http, os, os/exec, fsnotify), any other observer
-// subsystem (the package imports ZERO observer packages — the
-// strongest form of the invariant), or path/filepath (whose semantics
-// depend on the daemon's runtime GOOS; this package's path handling
-// is deliberately OS-agnostic so the same Event yields the same
-// Verdict on every daemon OS).
-//
-// Tests may import broader stdlib infra (go/parser, os, etc.) without
-// violating the boundary; only non-test files are scanned.
+// TestPackageImports_Bounded pins internal/policy PURE (CLAUDE.md Module
+// Boundaries, guard spec section 17.1): no I/O, ZERO observer packages, and
+// no path/filepath, so the same Event yields the same Verdict on every OS.
 func TestPackageImports_Bounded(t *testing.T) {
 	t.Parallel()
-
-	forbiddenExact := []string{
-		"os",
-		"os/exec",
-		"io",
-		"io/ioutil",
-		"path/filepath",
-		"net/http",
-		"database/sql",
-		"github.com/fsnotify/fsnotify",
-	}
-	const forbiddenPrefix = "github.com/marmutapp/superbased-observer/"
-
-	fset := token.NewFileSet()
-	for _, path := range nonTestSourceFiles(t) {
-		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, imp := range file.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			if strings.HasPrefix(p, forbiddenPrefix) {
-				t.Errorf("%s: forbidden observer import %q (policy imports ZERO observer packages, §17.1)", filepath.Base(path), p)
-			}
-			for _, bad := range forbiddenExact {
-				if p == bad {
-					t.Errorf("%s: forbidden import %q (module boundary §17.1)", filepath.Base(path), p)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{
+			"os",
+			"os/exec",
+			"io",
+			"io/ioutil",
+			"path/filepath",
+			"net/http",
+			"database/sql",
+			"github.com/fsnotify/fsnotify",
+		},
+		ForbiddenPrefixes: []string{"github.com/marmutapp/superbased-observer/"},
+		Reason:            "module boundary section 17.1",
+	})
 }
 
 // TestNoToolIdentityBranching enforces guard spec §17.3: no logic in

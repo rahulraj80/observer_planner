@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -9,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
@@ -53,7 +57,7 @@ func runProcessObserver(ctx context.Context, configPath string) error {
 
 	backend, transportUnavailable, berr := selectProcessBackend(cfg.Observer.Process, filepath.Dir(cfg.Observer.DBPath), logger, netAccounting)
 	if berr != nil {
-		logger.Warn("process observability: no backend — capture disabled (daemon continues)",
+		logger.Warn("process observability: no backend - capture disabled (daemon continues)",
 			"backend", cfg.Observer.Process.Backend, "reason", berr.Error())
 		return nil
 	}
@@ -193,19 +197,32 @@ func runProcessObserver(ctx context.Context, configPath string) error {
 	go func() {
 		t := time.NewTicker(correlateInterval)
 		defer t.Stop()
+		actionCursors := make(map[string]actionSweepCursor)
+		crossSweeper := store.NewCrossOSSweeper()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				swept, attributed, cerr := sweepCrossOSCorrelation(ctx, st, 60, logger)
+				swept, attributed, cerr := sweepCrossOSCorrelationWith(ctx, st, crossSweeper, 60, logger)
 				if cerr != nil {
-					logger.Debug("process observability: correlation sweep — active-session query failed", "err", cerr)
-					continue
-				}
-				if swept > 0 {
+					logger.Debug("process observability: correlation sweep - active-session query failed", "err", cerr)
+				} else if swept > 0 {
 					logger.Debug("process observability: background correlation sweep",
 						"sessions", swept, "newly_attributed", attributed)
+				}
+				consumeLaunchSeeds(ctx, st, bridge, logger)
+				// Runs AFTER the cross-OS sweep in the same tick, so a process
+				// row that just gained a session_id above can be turn-linked
+				// to its run_command action in this same pass. Already inside
+				// the capture-enabled+backend-selected guard above, so a
+				// disabled install never sweeps.
+				linkedSessions, linked, lerr := sweepActionCorrelation(ctx, st, 60, logger, actionCursors)
+				if lerr != nil {
+					logger.Debug("process observability: action-correlation sweep - active-session query failed", "err", lerr)
+				} else if linked > 0 {
+					logger.Debug("process observability: background action-correlation sweep",
+						"sessions", linkedSessions, "newly_linked", linked)
 				}
 			}
 		}
@@ -230,7 +247,7 @@ func runProcessObserver(ctx context.Context, configPath string) error {
 		// or a fatal runtime error — degraded, never propagated. The DB-derived
 		// gauges + `observer doctor` still report persisted state.
 		h := obs.Health().Snapshot()
-		logger.Warn("process observability: backend stopped — capture degraded (daemon continues)",
+		logger.Warn("process observability: backend stopped - capture degraded (daemon continues)",
 			"backend", h.BackendName, "err", rerr)
 	}
 	return nil
@@ -254,6 +271,34 @@ func processHealthRecord(h processobs.HealthSnapshot) diag.ProcessHealth {
 		LastError:               h.LastError,
 		NetworkAccountingMode:   h.NetworkAccountingMode,
 		NetworkAccountingReason: h.NetworkAccountingReason,
+		Unattributed:            h.Unattributed,
+		SinkRetained:            h.SinkRetained,
+		SinkFlushMaxMs:          h.SinkFlushMaxMs,
+		QueueDepthMax:           h.QueueDepthMax,
+		HandoffDepthMax:         h.HandoffDepthMax,
+		FlushBacklogHits:        h.FlushBacklogHits,
+	}
+	// The capture-YIELD half. It used to be omitted entirely, which left every
+	// out-of-process surface unable to tell "nothing spawned" from "every batch
+	// was discarded on a locked database" — the state the 2026-08-26 capture
+	// anomaly sat in undiagnosed (task 9d). The DropReason keys are flattened
+	// to plain strings here, at the same boundary that flattens the transport
+	// half, so diag keeps a wire shape instead of a leaked processobs type.
+	if len(h.Dropped) > 0 {
+		r.Dropped = make(map[string]int64, len(h.Dropped))
+		for reason, n := range h.Dropped {
+			r.Dropped[string(reason)] = n
+		}
+	}
+	if len(h.AttributedByTool) > 0 {
+		r.AttributedByTool = make(map[string]int64, len(h.AttributedByTool))
+		for tool, n := range h.AttributedByTool {
+			r.AttributedByTool[tool] = n
+			// Attributed is DERIVED here rather than carried as its own
+			// counter: one owner for the total means the breakdown and the
+			// headline can never disagree (CLAUDE.md rule 4).
+			r.Attributed += n
+		}
 	}
 	switch h.TransportState {
 	case processobs.TransportStateConfigured:
@@ -324,7 +369,7 @@ func publishProcessHealth(ctx context.Context, dbPath string, snapshot func() pr
 			p, err := diag.WriteProcessHealth(dir, processHealthRecord(snapshot()))
 			if err != nil {
 				if !warned && logger != nil {
-					logger.Warn("process observability: could not publish runtime health — `observer doctor` and /metrics will report that no daemon is reporting",
+					logger.Warn("process observability: could not publish runtime health - `observer doctor` and /metrics will report that no daemon is reporting",
 						"dir", dir, "err", err)
 					warned = true
 				}
@@ -493,7 +538,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 			// and invisible.
 			if pc.Backend == "etw" {
 				return base, `[observer.process.etw].enabled is false, so no accept listener was started ` +
-					`(backend = "etw" alone does not start one — set [observer.process.etw].enabled = true)`
+					`(backend = "etw" alone does not start one - set [observer.process.etw].enabled = true)`
 			}
 			return base, ""
 		}
@@ -506,7 +551,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 		}
 		ln, lerr := newProcessBridgeListener(pc, observerDir, logger, lnStatus)
 		if lerr != nil {
-			logger.Warn("process observability: ETW accept listener unavailable — continuing without the elevated cross-OS feed",
+			logger.Warn("process observability: ETW accept listener unavailable - continuing without the elevated cross-OS feed",
 				"addr", pc.ETW.ListenAddr, "err", lerr)
 			lnStatus.Set(processobs.NetworkAccountingUnavailable,
 				"the cross-OS process capturer listener could not start: "+lerr.Error())
@@ -516,7 +561,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 			// operator-visible trace of the failure.
 			return base, lerr.Error()
 		}
-		logger.Info("process observability: ETW accept listener ready — waiting for an elevated capturer to connect",
+		logger.Info("process observability: ETW accept listener ready - waiting for an elevated capturer to connect",
 			"addr", ln.Addr())
 		return processobs.NewComposite([]processobs.Backend{base, ln}, onChildErr), ""
 	}
@@ -530,7 +575,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 	// backend (Linux /proc or, on a Windows host, the ToolHelp snapshot).
 	autoBackend := func() processobs.Backend {
 		if linuxebpf.Available(logger) {
-			logger.Info("process observability: auto selected linux_ebpf — real-time capture + poll metric sampler")
+			logger.Info("process observability: auto selected linux_ebpf - real-time capture + poll metric sampler")
 			return newEBPFComposite()
 		}
 		if bridge.AvailableInWSL(pc.WindowsBinaryPath) {
@@ -564,7 +609,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 		// BPF-capable kernel, which the unprivileged daemon usually lacks — so
 		// probe and FAIL OPEN to the poll path rather than disabling capture.
 		if !linuxebpf.Available(logger) {
-			logger.Info("process observability: linux_ebpf unavailable (needs CAP_BPF+CAP_PERFMON and a BPF-capable kernel) — falling back to poll capture")
+			logger.Info("process observability: linux_ebpf unavailable (needs CAP_BPF+CAP_PERFMON and a BPF-capable kernel) - falling back to poll capture")
 			if bridge.AvailableInWSL(pc.WindowsBinaryPath) {
 				b, reason := withETW(newComposite())
 				return b, reason, nil
@@ -572,7 +617,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 			b, reason := withETW(poll.New(pollOpts))
 			return b, reason, nil
 		}
-		logger.Info("process observability: linux_ebpf backend active — real-time fork/exec/exit capture + poll metric sampler")
+		logger.Info("process observability: linux_ebpf backend active - real-time fork/exec/exit capture + poll metric sampler")
 		b, reason := withETW(newEBPFComposite())
 		return b, reason, nil
 	case "etw":
@@ -584,7 +629,7 @@ func selectProcessBackend(pc config.ProcessConfig, observerDir string, logger *s
 		// the listener; it never trades working capture for a feed that might
 		// not show up (plan option C, hybrid).
 		if !pc.ETW.Enabled {
-			logger.Warn(`process observability: backend = "etw" but [observer.process.etw].enabled is false — ` +
+			logger.Warn(`process observability: backend = "etw" but [observer.process.etw].enabled is false - ` +
 				"no accept listener is started (set it to true); capture continues on the poll/bridge baseline")
 		}
 		b, reason := withETW(autoBackend())
@@ -666,7 +711,7 @@ func resolveMetricPolicy(pc config.ProcessConfig, logger *slog.Logger) processob
 	pollMS, _ := resolveProcessPollIntervals(pc)
 	pollInterval := time.Duration(pollMS) * time.Millisecond
 	if logger != nil && p.SampleInterval < pollInterval {
-		logger.Warn("process observability: metrics.sample_interval_ms is below the process poll interval — samples cannot be fresher than the poll that produces them; raise poll_interval_ms too (it costs a /proc scan) or the extra resolution is not real",
+		logger.Warn("process observability: metrics.sample_interval_ms is below the process poll interval - samples cannot be fresher than the poll that produces them; raise poll_interval_ms too (it costs a /proc scan) or the extra resolution is not real",
 			"sample_interval_ms", p.SampleInterval.Milliseconds(),
 			"poll_interval_ms", pollInterval.Milliseconds())
 	}
@@ -696,22 +741,199 @@ func resolveCorrelateInterval(pc config.ProcessConfig) time.Duration {
 // active-session query error is returned to the caller. windowMinutes bounds the
 // session set to recent activity.
 func sweepCrossOSCorrelation(ctx context.Context, st *store.Store, windowMinutes int, logger *slog.Logger) (sessions, attributed int, err error) {
+	return sweepCrossOSCorrelationWith(ctx, st, nil, windowMinutes, logger)
+}
+
+// sweepCrossOSCorrelationWith is sweepCrossOSCorrelation with the daemon's
+// cross-OS sweeper (T-413): a session whose candidate pool no newly captured
+// process row can enter skips its full pass. A nil sweeper runs every pass.
+func sweepCrossOSCorrelationWith(ctx context.Context, st *store.Store, sw *store.CrossOSSweeper, windowMinutes int, logger *slog.Logger) (sessions, attributed int, err error) {
 	ids, err := st.ActiveSessionIDs(ctx, windowMinutes)
 	if err != nil {
 		return 0, 0, err
 	}
+	res, err := st.SweepCrossOS(ctx, sw, ids)
+	if err != nil {
+		return 0, 0, err
+	}
+	if logger != nil && (res.Failed > 0 || res.FullPasses > 0) {
+		logger.Debug("process observability: correlation sweep",
+			"full_passes", res.FullPasses, "skipped", res.Skipped, "failed", res.Failed)
+	}
+	return res.Swept, res.Attributed, nil
+}
+
+// actionSweepCursor is the per-session watermark sweepActionCorrelation uses
+// to skip a session with nothing new since its last look (see
+// store.SessionActionCursor). unlinked is the count of turn-unlinked
+// process_runs (advances on INSERT or cross-OS UPDATE, self-heals after a
+// linking pass); action is the highest run_command action id.
+type actionSweepCursor struct {
+	unlinked int64
+	action   int64
+}
+
+// sweepActionCorrelation runs ONE background process→action correlation pass:
+// for each recent-active session it drives the SAME idempotent
+// store.CorrelateProcessActions seam the lazy Processes-drawer poll and
+// `observer process tree` already trigger on demand (so they never fight —
+// whichever runs first, the other is a no-op). It is the turn-level sibling
+// of sweepCrossOSCorrelation: where that pass makes an unattributed process
+// row VISIBLE to a session, this one links an already-session-attributed
+// process to the run_command turn that spawned it, filling
+// process_runs.action_id/turn_index without a human opening the drawer.
+//
+// cursors is a per-session watermark (the count of turn-unlinked process_runs
+// + the run_command actions.id high-water mark, from store.SessionActionCursor)
+// that the
+// caller owns across ticks: a session whose watermark hasn't moved since the
+// last sweep has no new processes or run_command actions, so the (relatively
+// expensive) correlate pass is skipped — this keeps a marathon long-running
+// session from being re-scanned every tick once it has converged. The
+// watermark is updated even when a pass links nothing (e.g. only ambiguous
+// residue remains), so that session isn't re-scanned until something actually
+// changes. Entries for sessions no longer in the active window are pruned
+// from cursors so the map cannot grow unbounded across a long daemon run.
+//
+// A per-session cursor or correlate error is logged at DEBUG and skipped,
+// never fatal (fail-open); an active-session query error is returned to the
+// caller. windowMinutes bounds the session set to recent activity.
+func sweepActionCorrelation(ctx context.Context, st *store.Store, windowMinutes int, logger *slog.Logger, cursors map[string]actionSweepCursor) (sessions, linked int, err error) {
+	ids, err := st.ActiveSessionIDs(ctx, windowMinutes)
+	if err != nil {
+		return 0, 0, err
+	}
+	active := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		n, aerr := st.CorrelateCrossOS(ctx, id)
-		if aerr != nil {
+		active[id] = struct{}{}
+	}
+	for _, id := range ids {
+		unlinkedRuns, actionMark, cerr := st.SessionActionCursor(ctx, id)
+		if cerr != nil {
 			if logger != nil {
-				logger.Debug("process observability: correlation sweep — correlate failed", "session", id, "err", aerr)
+				logger.Debug("process observability: action-correlation sweep - cursor failed", "session", id, "err", cerr)
 			}
 			continue
 		}
+		if prev, ok := cursors[id]; ok && prev.unlinked == unlinkedRuns && prev.action == actionMark {
+			// Nothing new since the last sweep — skip the expensive pass.
+			continue
+		}
+		n, lerr := st.CorrelateProcessActions(ctx, id)
+		if lerr != nil {
+			if logger != nil {
+				logger.Debug("process observability: action-correlation sweep - correlate failed", "session", id, "err", lerr)
+			}
+			continue
+		}
+		// Store the POST-link unlinked count: the pass just linked n rows (moving
+		// them out of the unlinked set) and added no actions, so the settled mark
+		// is unlinkedRuns-n. Storing the pre-link count instead would make the
+		// very next tick see the count drop as "changed" and re-run a no-op pass.
+		// A concurrent capture INSERT between the read and here just makes the
+		// real count higher than this next tick, correctly triggering one more
+		// sweep.
+		cursors[id] = actionSweepCursor{unlinked: unlinkedRuns - int64(n), action: actionMark}
 		sessions++
-		attributed += n
+		linked += n
 	}
-	return sessions, attributed, nil
+	for id := range cursors {
+		if _, ok := active[id]; !ok {
+			delete(cursors, id)
+		}
+	}
+	return sessions, linked, nil
+}
+
+// launchSeedStaleTTL bounds how long an unconsumed launch seed survives. It
+// must exceed the matcher's full window (back-skew + forward window); beyond
+// that a seed can no longer be matched reliably and only lingers because its
+// launcher died before retracting it (SIGKILL, crash).
+const launchSeedStaleTTL = time.Hour
+
+// consumeLaunchSeeds is the daemon half of launcher attribution (migration
+// 086): it expires stale seeds, pairs pending seeds against recently ingested
+// sessions with the pure processobs.MatchLaunchSeeds rule, and for each match
+// writes the authoritative HIGH-confidence session_pid_bridge row before
+// claiming (deleting) the seed.
+//
+// An EXISTING bridge row for a pid always wins: hook-written rows
+// (claude-code/codex/cursor/hermes) stay byte-authoritative and the seed is
+// merely claimed away. Fail-open throughout — any error degrades to the lazy
+// CorrelateCrossOS path and is logged at DEBUG, never fatal to the sweep.
+func consumeLaunchSeeds(ctx context.Context, st *store.Store, bridge *pidbridge.Store, logger *slog.Logger) {
+	if _, err := st.ExpireStaleLaunchSeeds(ctx, launchSeedStaleTTL); err != nil && logger != nil {
+		logger.Debug("process observability: launch-seed expiry failed", "err", err)
+	}
+	seeds, err := st.PendingLaunchSeeds(ctx, processobs.LaunchSeedBackSkew+processobs.LaunchSeedForwardWindow)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("process observability: launch-seed query failed", "err", err)
+		}
+		return
+	}
+	if len(seeds) == 0 {
+		return
+	}
+	refs, err := st.RecentSessionRefsForLaunchMatch(ctx, 60)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("process observability: launch-seed session query failed", "err", err)
+		}
+		return
+	}
+	// The deterministic half (migration 091 / task 9f): resolve the terminal
+	// run each dashboard-launched seed carries to the session that run was
+	// observed to produce. A failure here is NON-FATAL by design — the matcher
+	// simply falls back to the pre-091 heuristic for every seed, which is what
+	// a bare-shell launch gets anyway.
+	runSessions, rerr := st.LaunchSeedRunSessions(ctx, launchSeedRunIDs(seeds), termcore.MinLinkConfidence)
+	if rerr != nil && logger != nil {
+		logger.Debug("process observability: launch-seed run binding unavailable (falling back to heuristic matching)", "err", rerr)
+	}
+	matches := processobs.MatchLaunchSeeds(seeds, refs, nil, runSessions)
+	byPID := make(map[int]processobs.LaunchSeed, len(seeds))
+	for _, s := range seeds {
+		byPID[s.PID] = s
+	}
+	for pid, sessionID := range matches {
+		seed := byPID[pid]
+		if _, ok, lerr := bridge.Lookup(ctx, pid); lerr == nil && ok {
+			// An existing writer (hook ancestor-walk) owns this pid already.
+			_, _ = st.ClaimLaunchSeed(ctx, pid)
+			continue
+		}
+		if werr := bridge.Write(ctx, pidbridge.Entry{
+			PID:       pid,
+			SessionID: sessionID,
+			Tool:      seed.Tool,
+			CWD:       seed.CWD,
+		}); werr != nil {
+			if logger != nil {
+				logger.Debug("process observability: launch-seed bridge write failed", "pid", pid, "err", werr)
+			}
+			continue
+		}
+		if _, cerr := st.ClaimLaunchSeed(ctx, pid); cerr != nil && logger != nil {
+			logger.Debug("process observability: launch-seed claim failed", "pid", pid, "err", cerr)
+		} else if logger != nil {
+			logger.Debug("process observability: launch seed consumed",
+				"pid", pid, "tool", seed.Tool, "session", sessionID)
+		}
+	}
+}
+
+// launchSeedRunIDs projects the non-empty terminal run ids off a seed batch.
+// Most seeds carry none (every launch the daemon did not spawn), so this keeps
+// the store seam from being asked about runs that do not exist.
+func launchSeedRunIDs(seeds []processobs.LaunchSeed) []string {
+	out := make([]string, 0, len(seeds))
+	for _, s := range seeds {
+		if s.RunID != "" {
+			out = append(out, s.RunID)
+		}
+	}
+	return out
 }
 
 // buildProcessScrubber maps the [observer.process] config into the pure

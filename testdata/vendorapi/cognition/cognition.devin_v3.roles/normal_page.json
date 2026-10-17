@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "role_id": "role_synth_enterprise_admin",
+      "role_name": "Enterprise Admin",
+      "role_type": "enterprise"
+    },
+    {
+      "role_id": "role_synth_org_admin",
+      "role_name": "Org Admin",
+      "role_type": "org"
+    }
+  ],
+  "has_next_page": true,
+  "end_cursor": "synthroles0002",
+  "total": 3
+}

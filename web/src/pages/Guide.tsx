@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { PageHeader, Pill } from "@/components/primitives";
+import { navIcon } from "@/lib/nav";
 
-// Guide — the single-page demo tour for the Daily Briefing + virtuous-cycle
+// Guide - the single-page demo tour for the Daily Briefing + virtuous-cycle
 // workstream. Static by design (zero data, zero polling): it tells the story
 // of the six-step loop the briefing surfaces, how to run the seeded demo, and
 // exactly which parts of the repo were built upon vs tweaked vs added anew.
@@ -17,7 +18,7 @@ const CYCLE_STEPS: { n: string; title: string; body: string; where: string }[] =
   {
     n: "2",
     title: "Learn",
-    body: "The data is priced per-turn through the cost engine and aggregated into content-free facts — sessions, turns, spend, cache hit rate, error share, model mix — nothing raw ever leaves the machine by default.",
+    body: "The data is priced per-turn through the cost engine and aggregated into content-free facts - sessions, turns, spend, cache hit rate, error share, model mix - nothing raw ever leaves the machine by default.",
     where: "internal/briefing (pure composer)",
   },
   {
@@ -29,7 +30,7 @@ const CYCLE_STEPS: { n: string; title: string; body: string; where: string }[] =
   {
     n: "4",
     title: "Act",
-    body: "Each card is one click away from a config change — reroute trivial sessions, adopt a routing policy, fix a cache-hostile pattern. Applies are recorded in a versioned CTA ledger.",
+    body: "Each card is one click away from a config change - reroute trivial sessions, adopt a routing policy, fix a cache-hostile pattern. Applies are recorded in a versioned CTA ledger.",
     where: "/api/briefing/cta/plan · apply · revert",
   },
   {
@@ -49,7 +50,7 @@ const CYCLE_STEPS: { n: string; title: string; body: string; where: string }[] =
 const BUILT_UPON: { title: string; detail: string }[] = [
   {
     title: "The capture backbone",
-    detail: "Watcher + fsnotify, adapter registry, store idempotent ingest, scrubbing — untouched upstream code that everything below rides on.",
+    detail: "Watcher + fsnotify, adapter registry, store idempotent ingest, scrubbing - untouched upstream code that everything below rides on.",
   },
   {
     title: "The cost engine",
@@ -61,7 +62,7 @@ const BUILT_UPON: { title: string; detail: string }[] = [
   },
   {
     title: "The dashboard SPA shell",
-    detail: "Routing, sidebar, useApi, primitives, theming — the new pages are authored in the same conventions and register in the same nav.",
+    detail: "Routing, sidebar, useApi, primitives, theming - the new pages are authored in the same conventions and register in the same nav.",
   },
 ];
 
@@ -72,11 +73,11 @@ const TWEAKED: { title: string; detail: string }[] = [
   },
   {
     title: "Top sessions carry their model mix + errors",
-    detail: "SessionRef gained per-model turns/cost and error counts — surfaced in the UI and sent to the LLM as richer, still content-free, context.",
+    detail: "SessionRef gained per-model turns/cost and error counts - surfaced in the UI and sent to the LLM as richer, still content-free, context.",
   },
   {
     title: "Briefing page is configurable",
-    detail: "Sections (numbers / opportunities / top sessions / activity) are toggleable and reorderable, persisted per-browser — and the LLM open-questions call is now an opt-in toggle, not a default egress.",
+    detail: "Sections (numbers / opportunities / top sessions / activity) are toggleable and reorderable, persisted per-browser - and the LLM open-questions call is now an opt-in toggle, not a default egress.",
   },
   {
     title: "Facts loaders aggregate more",
@@ -87,11 +88,11 @@ const TWEAKED: { title: string; detail: string }[] = [
 const ADDED_NEW: { title: string; detail: string }[] = [
   {
     title: "The pure briefing composer",
-    detail: "internal/briefing — deterministic Compose(Facts) → Briefing with narrative, opportunities, justifications, realized-vs-estimated and virtuous-cycle detectors. No DB, no network, no prompts.",
+    detail: "internal/briefing - deterministic Compose(Facts) → Briefing with narrative, opportunities, justifications, realized-vs-estimated and virtuous-cycle detectors. No DB, no network, no prompts.",
   },
   {
     title: "The LLM briefing runner",
-    detail: "internal/llmrun — narrative, open questions, ask, ask-past, triage, coaching, diagnose over a content-free evidence projection; every call is explicit opt-in with template fallbacks.",
+    detail: "internal/llmrun - narrative, open questions, ask, ask-past, triage, coaching, diagnose over a content-free evidence projection; every call is explicit opt-in with template fallbacks.",
   },
   {
     title: "The CTA loop",
@@ -99,14 +100,14 @@ const ADDED_NEW: { title: string; detail: string }[] = [
   },
   {
     title: "Four new dashboard pages",
-    detail: "Briefing, Model Fit, API Explorer, Licenses — plus the LLM-connections card in Settings (web) and the org-side Briefing rollup page (web2).",
+    detail: "Briefing, Model Fit, API Explorer, Licenses - plus the LLM-connections card in Settings (web) and the org-side Briefing rollup page (web2).",
   },
   {
     title: "The demo seeder",
-    detail: "observer demoseed — deterministic multi-user data: last 5 completed days + next 20 future-dated days so a demo keeps working without re-seeding.",
+    detail: "observer demoseed - deterministic multi-user data: last 5 completed days + next 20 future-dated days so a demo keeps working without re-seeding.",
   },
   {
-    title: "Backbone migrations 074–084",
+    title: "Backbone migrations 074-084",
     detail: "api_turns latency/error columns, briefing snapshots, failure contexts, routing realized-delta and the FTS session-summary index.",
   },
 ];
@@ -115,19 +116,19 @@ const BENEFITS: string[] = [
   "Every number is recomputable: cards carry their own drill-down math, so 'why does it say $X?' has an answer built in.",
   "No-network-by-default: LLM surfaces are all opt-in and fall back to deterministic templates; raw content never leaves the machine unless you configure it.",
   "Action is measurable: applies are versioned and revertable, and realized-vs-estimated grades the outcome rather than the promise.",
-  "Content-free by construction: prompts and pushes carry numbers, tool names and opaque hashes — never transcripts, paths, or prompt text.",
+  "Content-free by construction: prompts and pushes carry numbers, tool names and opaque hashes - never transcripts, paths, or prompt text.",
   "Demoable on a laptop: one command seeds a month of realistic activity across 30 users and 6 projects.",
 ];
 
 export function GuidePage() {
   return (
     <div className="mx-auto max-w-4xl space-y-8 p-6">
-      <PageHeader
+      <PageHeader icon={navIcon("guide")}
         title="Guide"
         sub="The Daily Briefing's six-step virtuous cycle, the demo, and exactly what this build added to the stock observer."
       />
 
-      {/* Hero — the loop */}
+      {/* Hero - the loop */}
       <section>
         <h2 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-fg-3">
           The virtuous cycle
@@ -182,19 +183,19 @@ export function GuidePage() {
               Daily Briefing
             </Link>
             , flip the date picker across the window, and drill into any
-            opportunity card — every savings claim carries its math.
+            opportunity card - every savings claim carries its math.
           </p>
           <ul className="ml-4 list-disc space-y-1 text-[12.5px] text-fg-3">
             <li>
-              <span className="text-fg-2">Routing shadow</span> — yesterday's
+              <span className="text-fg-2">Routing shadow</span> - yesterday's
               would-have-done under the candidate policy, live on the briefing.
             </li>
             <li>
-              <span className="text-fg-2">Realized vs estimated</span> — apply a
+              <span className="text-fg-2">Realized vs estimated</span> - apply a
               card, then watch the ledger grade the outcome.
             </li>
             <li>
-              <span className="text-fg-2">Open questions</span> — toggle LLM
+              <span className="text-fg-2">Open questions</span> - toggle LLM
               generation on in the briefing header (off by default; template
               questions otherwise).
             </li>

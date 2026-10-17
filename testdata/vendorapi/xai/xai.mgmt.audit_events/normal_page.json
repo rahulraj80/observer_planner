@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "eventTime": "2025-01-15T10:30:00Z",
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "description": "API key 'Production Key' was created",
+      "user": {
+        "userId": "user-123",
+        "email": "admin@example.com",
+        "givenName": "John",
+        "familyName": "Doe"
+      }
+    }
+  ],
+  "nextPageToken": "550e8400-e29b-41d4-a716-446655440000"
+}

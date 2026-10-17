@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -95,7 +97,7 @@ func itoa(i int) string {
 func TestServer_ListActionsAround_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -141,7 +143,7 @@ func TestServer_ListActionsAround_HappyPath(t *testing.T) {
 func TestServer_ListActionsAround_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -170,7 +172,7 @@ func TestServer_ListActionsAround_NotFound(t *testing.T) {
 func TestServer_ListActionsAround_AtSessionBoundary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -204,7 +206,7 @@ func TestServer_ListActionsAround_AtSessionBoundary(t *testing.T) {
 func TestServer_ListActionsAround_DefaultsAndCaps(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

@@ -1,0 +1,112 @@
+// Sparkline — tiny inline SVG. No tooltip / axis / legend; that's
+// what ChartShell + Recharts are for. Use for at-a-glance trend
+// indicators in StatCard.
+
+/**
+ * hasSparkline is true when a series draws a sparkline (two or more points;
+ * fewer renders an empty box). StatCard (shared and web2's) and HeroStat
+ * reserve the right-hand gutter the corner sparkline floats in ONLY when
+ * this is true: without a sparkline the sub text gets the tile's full width
+ * (a half-width phone tile no longer squeezes it into a narrow column).
+ */
+export function hasSparkline(spark: readonly number[] | null | undefined): boolean {
+  return spark != null && spark.length >= 2;
+}
+
+export function Sparkline({
+  data,
+  width = 80,
+  height = 28,
+  color = "var(--accent)",
+  fill = true,
+  strokeWidth = 1.4,
+  stretch = false,
+  reveal = false,
+}: {
+  data: number[];
+  width?: number;
+  height?: number;
+  color?: string;
+  fill?: boolean;
+  strokeWidth?: number;
+  /** Fill the container's width (viewBox + non-scaling stroke). */
+  stretch?: boolean;
+  /** Draw the line in left-to-right on mount (a transform-only reveal). */
+  reveal?: boolean;
+}) {
+  if (!data || data.length < 2) {
+    return <svg width={width} height={height} />;
+  }
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  // When every datapoint is identical (e.g. all zeros, or a flat run
+  // with no variance) the prior implementation pinned the line to the
+  // bottom edge, which looked like a hard underline glued to the
+  // baseline — degenerate visual. Render a centered flat line instead
+  // so the spark reads as "constant" rather than "broken".
+  const isFlat = max - min < 1e-9;
+  const range = isFlat ? 1 : max - min;
+  const step = width / (data.length - 1);
+  const points = data.map((v, i) => {
+    const x = i * step;
+    const y = isFlat
+      ? height / 2
+      : height - ((v - min) / range) * (height - 2) - 1;
+    return [x, y] as const;
+  });
+  const linePath = points
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(" ");
+  const fillPath = fill
+    ? `${linePath} L${width.toFixed(1)},${height} L0,${height} Z`
+    : "";
+  const uid = Math.random().toString(36).slice(2, 8);
+  const fillId = `spark-fill-${uid}`;
+  const clipId = `spark-clip-${uid}`;
+
+  return (
+    <svg
+      width={stretch ? "100%" : width}
+      height={height}
+      viewBox={stretch ? `0 0 ${width} ${height}` : undefined}
+      preserveAspectRatio={stretch ? "none" : undefined}
+      className="overflow-visible"
+    >
+      {reveal && (
+        <defs>
+          <clipPath id={clipId}>
+            {/* The clip rect grows with transform: scaleX (sb-bar-grow),
+                revealing the line left to right. */}
+            <rect
+              width={width}
+              height={height + 4}
+              y={-2}
+              className="sb-bar-grow"
+              style={{ transformBox: "fill-box", transformOrigin: "left center" }}
+            />
+          </clipPath>
+        </defs>
+      )}
+      <g clipPath={reveal ? `url(#${clipId})` : undefined}>
+      {fill && (
+        <defs>
+          <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+      )}
+      {fill && <path d={fillPath} fill={`url(#${fillId})`} />}
+      <path
+        d={linePath}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect={stretch ? "non-scaling-stroke" : undefined}
+      />
+      </g>
+    </svg>
+  );
+}

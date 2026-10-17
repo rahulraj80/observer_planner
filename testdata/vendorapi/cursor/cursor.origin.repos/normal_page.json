@@ -1,0 +1,20 @@
+{
+  "repositories": [
+    {
+      "id": "repo_01k2ja2000e0080000000000q4",
+      "name": "rocket",
+      "fullName": "acme/rocket",
+      "webUrl": "https://cursor.com/codebase/acme/rocket",
+      "owner": {
+        "slug": "acme",
+        "id": "ns_01k2ja2000e0080000000000p3",
+        "type": "team"
+      },
+      "defaultBranch": "main",
+      "createdAt": "2026-08-01T09:30:00Z",
+      "updatedAt": "2026-08-02T14:45:00Z",
+      "pushedAt": "2026-08-02T14:45:00Z",
+      "cloneUrl": "https://origin.cursor.com/git/acme/rocket.git"
+    }
+  ]
+}

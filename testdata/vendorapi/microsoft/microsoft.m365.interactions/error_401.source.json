@@ -1,0 +1,26 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial"
+  },
+  "fixture_sha256": "2db88f089182b9b21107d1fbba2702e166813a8b2a0ba18fd4fcc5ed47012f12",
+  "http": {
+    "method": "GET",
+    "path": "/v1.0/copilot/users/254efcd0-5094-4fc5-b2b3-1637629393e1/interactionHistory/getAllEnterpriseInteractions",
+    "query": {
+      "$top": "100"
+    },
+    "status": 401
+  },
+  "notes": "The documented Graph error resource shape (error.code, error.message) with the 401 row's status text and description from the status-code table.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "microsoftgraph/microsoft-graph-docs-contrib main, concepts/errors.md (ms.date 11/07/2024), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "96c754c1354854888eb536e11d31be3d305d2ad45f6fb9f32d566df9b451ffa8",
+  "source_url": "https://raw.githubusercontent.com/microsoftgraph/microsoft-graph-docs-contrib/main/concepts/errors.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "microsoft.m365.interactions"
+}

@@ -5,22 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/marmutapp/superbased-observer/internal/models"
 )
-
-// TestName pins the adapter's Tool name to the wire-stable value the
-// store + dashboard key off. Bumping it later would require a
-// migration; pinning here makes the rename visible in code review.
-func TestName(t *testing.T) {
-	t.Parallel()
-	if got := New().Name(); got != models.ToolClineCLI {
-		t.Errorf("Name() = %q; want %q", got, models.ToolClineCLI)
-	}
-	if models.ToolClineCLI != "cline-cli" {
-		t.Errorf("ToolClineCLI = %q; want \"cline-cli\"", models.ToolClineCLI)
-	}
-}
 
 // TestWatchPathsRespectsCLINE_DIR confirms that setting CLINE_DIR makes
 // the adapter walk that path in addition to the per-home defaults.

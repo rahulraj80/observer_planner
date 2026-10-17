@@ -31,6 +31,10 @@ type pattern struct {
 	replace string // If empty, the full match is replaced with Redacted.
 	// If replace uses references like $1[REDACTED]$2, callers must include
 	// the full template.
+	// validate, when set, is a structural check on the whole match: a
+	// match it rejects is left in place (the JWT row, whose regex only
+	// finds candidates). replace must then be a literal (no $ refs).
+	validate func(string) bool
 }
 
 // sensitiveKeyRE matches JSON/map keys whose string values should always be
@@ -53,16 +57,33 @@ type pattern struct {
 var sensitiveKeyRE = regexp.MustCompile(`(?i)(password|secret|token|credential|api[_-]?key|auth)|(^|[_-])(?:api|access|private|master|encryption|signing|hmac)[_-]?key($|[_-])`)
 
 var defaultPatterns = []pattern{
+	// The full-match value rows below write the TYPED marker
+	// "[REDACTED:<type>]" naming the scrub.DetectorNames() row with the
+	// same shape (audit P4, prompt-guard coverage 2026-10-02): the post-hoc
+	// prompt guard reads a typed marker in a stored prompt as a certain
+	// finding, so a classic token typed into a tool with no pre-send seam
+	// is flagged, not just redacted. A bare "[REDACTED]" is never read that
+	// way. Context rows (JSON keys, assignments, export, connection
+	// strings) stay bare: their key word makes the value certain, but
+	// they also redact prose ("max token: 4096"), so they are not evidence.
+	//
 	// GitHub Personal Access Tokens: ghp_, gho_, ghu_, ghs_, ghr_ prefix.
-	{re: regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`)},
-	// Bearer tokens
+	{re: regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`), replace: TypedRedactedMarker("github_pat")},
+	// Bearer tokens. Split on the typed detector's {8,} value floor: a
+	// header-length value gets the bearer_token marker, a short one
+	// ("Bearer token auth", "Bearer of") stays a bare redaction exactly as
+	// before, so prose is never promoted to a finding.
+	{re: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-._~+/]{8,}=*`), replace: TypedRedactedMarker("bearer_token")},
 	{re: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-._~+/]+=*`)},
 	// Common API key prefixes: sk-..., pk-..., ak-..., api_key=..., etc.
-	// Allow underscores inside the body to catch forms like pk_test_abc123...
-	{re: regexp.MustCompile(`(?i)(?:sk|pk|ak)[_-][A-Za-z0-9_]{16,}`)},
-	{re: regexp.MustCompile(`(?i)api[_-]?key[_-]?[A-Za-z0-9_]{20,}`)},
+	// Allow underscores AND hyphens inside the body: pk_test_abc123... and
+	// Anthropic's sk-ant-api03-... both carry separators past the prefix.
+	// Without `-` the match died at `sk-ant`, passing the key through
+	// unredacted (grokbot Phase-0 finding, 2026-08-29).
+	{re: regexp.MustCompile(`(?i)(?:sk|pk|ak)[_-][A-Za-z0-9_-]{16,}`), replace: TypedRedactedMarker("api_key_prefixed")},
+	{re: regexp.MustCompile(`(?i)api[_-]?key[_-]?[A-Za-z0-9_]{20,}`), replace: TypedRedactedMarker("api_key_named")},
 	// AWS access key IDs
-	{re: regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
+	{re: regexp.MustCompile(`AKIA[0-9A-Z]{16}`), replace: TypedRedactedMarker("aws_access_key")},
 	// JSON-style sensitive key → replace the string value.
 	// Matches: "password": "value" / "api_key":"value" / etc.
 	{
@@ -99,6 +120,103 @@ var defaultPatterns = []pattern{
 		re:      regexp.MustCompile(`(://[^:/\s]+:)([^@\s]+)(@)`),
 		replace: `$1` + Redacted + `$3`,
 	},
+
+	// --- Fixed-prefix secret shapes the typed detector table (detect.go)
+	// already certainly flags but this storage table did not redact
+	// (prompt-guard coverage audit 2026-10-02, ledger PGC-1): a GitHub
+	// fine-grained PAT typed into an Antigravity CLI prompt was stored
+	// verbatim in actions.target / raw_tool_input / otel_content and, on a
+	// full-content node, shipped to the org. Same regexes as the typed
+	// rows github_pat_fine / gcp_api_key / slack_token, so "a value the
+	// egress scan flags is a value storage redacts" holds for them too.
+	//
+	// They sit LAST and replace with the TYPED marker "[REDACTED:<type>]"
+	// (the vocabulary scrub.MaskSecrets already writes on the proxy mask
+	// path) rather than the bare Redacted: running after the generic
+	// assignment rows means a "token: github_pat_…" assignment is still
+	// consumed by those rows as before, while a STANDALONE token keeps its
+	// type name. The post-hoc prompt guard (internal/guard, the watcher
+	// lane for tools with no pre-send seam) reads a typed marker in a
+	// stored prompt as a certain finding of that detector; a bare
+	// "[REDACTED]" is never read that way, because the generic rows also
+	// redact prose like "Bearer token auth" or "max token: 4096".
+	{
+		re:      regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`),
+		replace: TypedRedactedMarker("github_pat_fine"),
+	},
+	{
+		re:      regexp.MustCompile(`AIza[0-9A-Za-z\-_]{35}`),
+		replace: TypedRedactedMarker("gcp_api_key"),
+	},
+	{
+		re:      slackTokenRE,
+		replace: TypedRedactedMarker("slack_token"),
+	},
+	// JWTs and PEM private-key blocks (audit P5): previously typed-path
+	// only. The JWT row is the typed detector's own candidate regex AND
+	// structural validator (Sol A2-05). The PEM row is
+	// STRICTER than the typed detector's lazy dotall body (pemKeyBlockRE):
+	// it needs real key material after the BEGIN line, a base64 line of
+	// 40+ characters, so code or prose that merely NAMES the header is
+	// never rewritten.
+	{
+		re:       jwtCandidateRE,
+		replace:  TypedRedactedMarker("jwt"),
+		validate: jwtValidate,
+	},
+	{re: pemKeyBlockRE, replace: TypedRedactedMarker("private_key_block")},
+}
+
+// pemKeyBlockRE matches a PEM private-key block for the storage table:
+// the BEGIN line; optional Proc-Type / DEK-Info header lines (an
+// encrypted key); at least one base64 line of 40+ characters; further
+// base64 lines of 16+; then the END line (a short last line before it is
+// taken too) or nothing at all for a truncated paste. A separator is
+// whitespace or a JSON-escaped newline (\n, \r), so a block inside a
+// stored JSON string matches as well.
+var pemKeyBlockRE = regexp.MustCompile(
+	`-----BEGIN [A-Z ]*PRIVATE KEY-----` +
+		`(?:(?:\s|\\[nr])+(?:Proc-Type|DEK-Info):[^\n\\]*)*` +
+		`(?:\s|\\[nr])+[A-Za-z0-9+/=]{40,}` +
+		`(?:(?:\s|\\[nr])+[A-Za-z0-9+/=]{16,})*` +
+		`(?:(?:\s|\\[nr])+[A-Za-z0-9+/=]{1,15}(?:\s|\\[nr])*-----END [A-Z ]*PRIVATE KEY-----|(?:\s|\\[nr])*-----END [A-Z ]*PRIVATE KEY-----)?`)
+
+// TypedRedactedMarker is the "[REDACTED:<type>]" marker that names the
+// detector whose value was removed — the shape MaskSecrets writes on the
+// proxy mask path and the storage table writes for the fixed-prefix rows
+// above. detector must be a scrub.DetectorNames() id.
+func TypedRedactedMarker(detector string) string {
+	return "[REDACTED:" + detector + "]"
+}
+
+// typedRedactedMarkerRE matches a typed marker and captures the detector id.
+var typedRedactedMarkerRE = regexp.MustCompile(`\[REDACTED:([a-z0-9_]+)\]`)
+
+// HasRedaction reports whether v carries a storage redaction marker of
+// either form: the bare Redacted or a typed "[REDACTED:<type>]". Callers
+// asking "was something removed here" use this rather than Contains on
+// the bare marker, which a typed marker does not contain.
+func HasRedaction(v string) bool {
+	return strings.Contains(v, Redacted) || strings.Contains(v, "[REDACTED:")
+}
+
+// TypedRedactedMarkers returns, in order of appearance, the detector id of
+// every "[REDACTED:<type>]" marker in v whose type is a known SECRET-class
+// detector. Unknown ids and PII-class ids are skipped, so a marker can only
+// ever stand for a detector this package actually runs. A bare
+// "[REDACTED]" is never returned (see the storage-table comment above for
+// why it is not evidence of a certain secret).
+func TypedRedactedMarkers(v string) []string {
+	if !strings.Contains(v, "[REDACTED:") {
+		return nil
+	}
+	var out []string
+	for _, m := range typedRedactedMarkerRE.FindAllStringSubmatch(v, -1) {
+		if class, ok := DetectorClass(m[1]); ok && class == ClassSecret {
+			out = append(out, m[1])
+		}
+	}
+	return out
 }
 
 // New returns a Scrubber loaded with the default patterns (spec §8.1).
@@ -155,9 +273,22 @@ func (s *Scrubber) String(v string) string {
 	shielded, restorations := shieldFernetEncryptedContent(v)
 	out := shielded
 	for _, p := range s.patterns {
-		if p.replace == "" {
+		switch {
+		case p.validate != nil:
+			repl := p.replace
+			if repl == "" {
+				repl = Redacted
+			}
+			check := p.validate
+			out = p.re.ReplaceAllStringFunc(out, func(m string) string {
+				if check(m) {
+					return repl
+				}
+				return m
+			})
+		case p.replace == "":
 			out = p.re.ReplaceAllString(out, Redacted)
-		} else {
+		default:
 			out = p.re.ReplaceAllString(out, p.replace)
 		}
 	}
@@ -343,6 +474,36 @@ func Truncate(v string) string {
 	cut := MaxRawInputBytes - len(marker)
 	if cut < 0 {
 		cut = 0
+	}
+	return v[:cut] + marker
+}
+
+// TruncateN caps v at maxBytes, appending the same trailing "…[truncated]"
+// marker as [Truncate] when the value was cut. Unlike Truncate — which is
+// pinned to the fixed MaxRawInputBytes (1 MiB) raw_tool_input ceiling — this
+// takes a caller-supplied cap, for stores with a tighter size ceiling (e.g.
+// otel_content's 32 KiB, mirroring the org gateway's classify.Policy body
+// bound). The cut point backs up to a UTF-8 rune boundary (a continuation
+// byte is 0b10xxxxxx) so the stored value never ends mid-rune, matching
+// classify's own boundBytes convention. maxBytes<=0 returns "" for a
+// non-empty v (the degenerate "no room" case).
+func TruncateN(v string, maxBytes int) string {
+	if maxBytes <= 0 {
+		if v == "" {
+			return v
+		}
+		return ""
+	}
+	if len(v) <= maxBytes {
+		return v
+	}
+	const marker = "…[truncated]"
+	cut := maxBytes - len(marker)
+	if cut < 0 {
+		cut = 0
+	}
+	for cut > 0 && v[cut]&0xC0 == 0x80 {
+		cut--
 	}
 	return v[:cut] + marker
 }

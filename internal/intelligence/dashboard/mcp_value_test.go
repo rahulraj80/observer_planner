@@ -23,7 +23,7 @@ func mcpTestServer(t *testing.T, cfgBody string) (*Server, string) {
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestHandleConfigSection_MCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.RestartRequired {
-		t.Error("mcp saves bind at the next MCP server spawn — restart_required must be false")
+		t.Error("mcp saves bind at the next MCP server spawn - restart_required must be false")
 	}
 
 	reloaded, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})

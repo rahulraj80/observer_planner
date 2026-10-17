@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "claude_chat_ids": "VerifiedOfficial",
+    "claude_chat_ids[]": "VerifiedOfficial",
+    "created_at": "VerifiedOfficial",
+    "filename": "VerifiedOfficial",
+    "id": "VerifiedOfficial",
+    "md5": "VerifiedOfficial",
+    "message_ids": "VerifiedOfficial",
+    "message_ids[]": "VerifiedOfficial",
+    "mime_type": "VerifiedOfficial",
+    "size_bytes": "VerifiedOfficial"
+  },
+  "fixture_sha256": "1d1d699bbbb7c9e6ae38ecfca2f8b1f5acfd3e385e4fb145ed3425ec8a42169f",
+  "http": {
+    "method": "GET",
+    "path": "/v1/compliance/apps/chats/files/{claude_file_id}",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/compliance/apps/chats/files/{claude_file_id}.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Compliance API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2ece9f3f845885fdfa0f44bbe7ea6c31fe869a313eabf2c3e6f5babf9e17a0ed",
+  "source_url": "https://platform.claude.com/docs/en/api/compliance.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.compliance.files"
+}

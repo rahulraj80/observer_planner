@@ -1,0 +1,58 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "organization.external_storage",
+      "id": "extstorage_abc123",
+      "project_id": "proj_abc123",
+      "provider": {
+        "type": "aws",
+        "account_id": "123456789012",
+        "region": "us-east-1",
+        "bucket": "customer-logs",
+        "role_arn": "arn:aws:iam::123456789012:role/OpenAIExternalStorageRole",
+        "external_id": "proj_abc123"
+      },
+      "geography": "US",
+      "status": "validated",
+      "created_at": 1711471533
+    },
+    {
+      "object": "organization.external_storage",
+      "id": "extstorage_azure123",
+      "project_id": "proj_azure123",
+      "provider": {
+        "type": "azure",
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "subscription_id": "22222222-2222-2222-2222-222222222222",
+        "resource_group": "customer-rg",
+        "account_name": "customerstorage",
+        "container": "openai-data",
+        "region": "eastus"
+      },
+      "geography": "US",
+      "status": "validated",
+      "created_at": 1711471500
+    },
+    {
+      "object": "organization.external_storage",
+      "id": "extstorage_gcp123",
+      "project_id": "proj_gcp123",
+      "provider": {
+        "type": "gcp",
+        "bucket": "customer-gcp-retention",
+        "workload_identity_project_number": "123456789012",
+        "workload_identity_pool_id": "customer-pool",
+        "workload_identity_provider_id": "customer-provider",
+        "region": "us-central1",
+        "audience": "proj_gcp123"
+      },
+      "geography": "US",
+      "status": "validated",
+      "created_at": 1711471400
+    }
+  ],
+  "first_id": "extstorage_abc123",
+  "last_id": "extstorage_gcp123",
+  "has_more": false
+}

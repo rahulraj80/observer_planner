@@ -1,87 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import clsx from "clsx";
-import { NAV_GROUPS, type NavIcon } from "@/lib/nav";
+import { ChevronLeft, X } from "lucide-react";
+import { NAV_GROUPS } from "@/lib/nav";
 import { useApi } from "@/lib/useApi";
-import { fmtBytes, fmtCompact } from "@/lib/format";
-import {
-  BarChartIcon,
-  BoltIcon,
-  BriefingIcon,
-  CoinsIcon,
-  CompassIcon,
-  DatabaseIcon,
-  DollarIcon,
-  DropletIcon,
-  EyeIcon,
-  GearIcon,
-  LightningIcon,
-  ListIcon,
-  PercentIcon,
-  SearchIcon,
-  ShieldIcon,
-  SparklesIcon,
-  WrenchIcon,
-  APIExplorerIcon,
-  LicensesIcon,
-  ModelFitIcon,
-  GuideIcon,
-} from "@/components/icons";
-import { Tooltip } from "@/components/primitives";
+import { filterNavGroups, useGovernance, useGovernanceVisibility } from "@/lib/governance";
+import { hiddenNavIds } from "@/lib/visibility";
+import { filterNavByComponents } from "@/lib/componentState";
+import { useInactiveNavIds } from "@/lib/useComponents";
+import { fmtBytes, fmtCompact, fmtInt } from "@/lib/format";
+import { BrandMark, Icon, LiveDot, Tooltip } from "@/components/primitives";
+import { CAPTURE_DOT, liveDotProps, withDotClass } from "@/lib/liveSignals";
+import { slideFromX } from "@shared/lib/motion";
 import type { StatusSnapshot, SetupClaude, WatcherHealth } from "@/lib/types";
-
-function NavIconSvg({ icon }: { icon: NavIcon }) {
-  switch (icon) {
-    case "briefing":
-      return <BriefingIcon size={13} />;
-    case "overview":
-      return <EyeIcon size={13} />;
-    case "live":
-      return <BoltIcon size={13} />;
-    case "search":
-      return <SearchIcon size={13} />;
-    case "sessions":
-      return <ListIcon size={13} />;
-    case "actions":
-      return <LightningIcon size={13} />;
-    case "security":
-      return <ShieldIcon size={13} />;
-    case "egress":
-      return <CompassIcon size={13} />;
-    case "cost":
-      return <DollarIcon size={13} />;
-    case "analysis":
-      return <BarChartIcon size={13} />;
-    case "tools":
-      return <WrenchIcon size={13} />;
-    case "compression":
-      return <DropletIcon size={13} />;
-    case "cache":
-      return <DatabaseIcon size={13} />;
-    case "suggestions":
-      return <CoinsIcon size={13} />;
-    case "benchmarks":
-      return <PercentIcon size={13} />;
-    case "discovery":
-      return <SearchIcon size={13} />;
-    case "patterns":
-      return <SparklesIcon size={13} />;
-    case "privacy":
-      return <ShieldIcon size={13} />;
-    case "remote":
-      return <CompassIcon size={13} />;
-    case "settings":
-      return <GearIcon size={13} />;
-    case "modelfit":
-      return <ModelFitIcon size={13} />;
-    case "apiexplorer":
-      return <APIExplorerIcon size={13} />;
-    case "licenses":
-      return <LicensesIcon size={13} />;
-    case "guide":
-      return <GuideIcon size={13} />;
-  }
-}
+import { WATCHER_LINE_LABEL, WATCHER_LINE_TOOLTIP, watcherLineState } from "@/lib/watcherLine";
 
 export function Sidebar({
   open = false,
@@ -92,16 +24,41 @@ export function Sidebar({
   open?: boolean;
   onClose?: () => void;
 } = {}) {
-  // Live-capture refresh: 5s on the status snapshot keeps the
-  // sidebar's nav counts current as fresh actions land.
-  const status = useApi<StatusSnapshot>("/api/status", undefined, [], { refreshMs: 5000 });
+  // Live-capture refresh: 5s on the status snapshot, so the sidebar's nav
+  // counts follow fresh activity within seconds. Note the 5s is the POLL
+  // cadence, not the freshness guarantee — the daemon memoizes /api/status
+  // for ~15s because it is an unfiltered scan of every table, so on a large
+  // database a count can lag reality by up to ~20s. Fine for badges; do not
+  // build anything that needs to-the-second accuracy on these numbers.
+  //
+  // The nav reads only the badge counts, selected by value, so a poll that
+  // moves only the per-request fields (uptime) re-renders nothing here; the
+  // footer (which shows uptime) subscribes to the full payload itself.
+  const counts = useApi<StatusSnapshot, Record<string, number | null>>(
+    "/api/status",
+    undefined,
+    [],
+    { refreshMs: 5000, select: navCounts },
+  ).data ?? NO_COUNTS;
   const setupClaude = useApi<SetupClaude>("/api/setup/claude");
   // Watcher health (P1.7): behind/orphan/misroute counts only — a
   // slow 60s cadence is plenty for a lag signal.
   const watcherHealth = useApi<WatcherHealth>("/api/health/watcher", undefined, [], {
     refreshMs: 60000,
   });
-  const counts = navCounts(status.data);
+  // Governed nodes (enrolled + granted dashboard.visibility authority)
+  // may have nav sections hidden by their organization — a no-op on
+  // an ordinary solo node (gov.data is {active: false, ...} or null
+  // while loading, both of which filterNavGroups passes through
+  // unchanged).
+  const gov = useGovernance();
+  // Filtering fails CLOSED until the posture is known (Sol A4-05): only the
+  // floor pages are listed while /api/governance is pending or failing.
+  const visibility = useGovernanceVisibility();
+  // Pages of components that are not active on this machine leave the nav
+  // too (modular packaging plan 7.3); a direct visit renders NotInstalled.
+  const inactiveNav = useInactiveNavIds();
+  const navGroups = filterNavByComponents(filterNavGroups(NAV_GROUPS, visibility.gov), inactiveNav);
   // Desktop (lg+) icon-only rail collapse. The pref is persisted in
   // localStorage ("1"/"0", ProcessesSection pattern) and only bites at
   // lg+ — the mobile drawer keeps full width + labels regardless (the
@@ -114,7 +71,29 @@ export function Sidebar({
       return false;
     }
   });
+  // Collapse motion, transform/opacity only: the rail's WIDTH switches in
+  // one frame (one layout and one chart resize instead of a width tween that
+  // re-laid-out the whole page, and every ResponsiveContainer chart, on each
+  // frame). The visible motion is (1) the content column sliding from where
+  // it was to where it now sits (FLIP, compositor-only; the column is the
+  // aside's next sibling, <main> in App.tsx), (2) the labels fading in with a
+  // short slide on expand (sb-nav-reveal, only after a toggle so a page load
+  // never replays it) and (3) the chevron rotating. All three honour
+  // prefers-reduced-motion.
+  const asideRef = useRef<HTMLElement>(null);
+  const flipFrom = useRef<number | null>(null);
+  const [toggled, setToggled] = useState(false);
+  const reveal = toggled && !collapsed ? "sb-nav-reveal" : undefined;
+  useLayoutEffect(() => {
+    const from = flipFrom.current;
+    flipFrom.current = null;
+    const col = asideRef.current?.nextElementSibling;
+    if (from != null && col instanceof HTMLElement) slideFromX(col, from);
+  }, [collapsed]);
   function toggleCollapsed() {
+    const col = asideRef.current?.nextElementSibling;
+    flipFrom.current = col instanceof HTMLElement ? col.getBoundingClientRect().left : null;
+    setToggled(true);
     setCollapsed((v) => {
       const next = !v;
       try {
@@ -125,14 +104,6 @@ export function Sidebar({
       return next;
     });
   }
-  // Footer "refreshed Xs ago" — recomputes every second so the clock
-  // walks even between /api/status fetches.
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), 5000);
-    return () => window.clearInterval(id);
-  }, []);
-  void tick;
   return (
     <>
       {/* Backdrop — only on mobile while the drawer is open. Tapping it
@@ -145,22 +116,35 @@ export function Sidebar({
         />
       )}
       <aside
+        ref={asideRef}
+        id="app-sidebar"
         className={clsx(
           "flex w-[var(--sidebar-w)] shrink-0 flex-col border-r border-line-1 bg-bg-1",
           // Mobile: fixed overlay drawer that slides in from the left.
           // Desktop (lg+): a normal static flex sibling, always visible.
-          // Width AND transform animate so the desktop collapse and the
-          // mobile slide both tween smoothly.
-          "fixed inset-y-0 left-0 z-40 transition-[transform,width] duration-200 ease-out lg:static lg:z-auto lg:translate-x-0",
+          // Only transform animates (the mobile slide); the desktop collapse
+          // snaps the width and slides the content column instead (above).
+          "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out lg:static lg:z-auto lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
           // Collapse is desktop-only: shrink to the icon rail at lg+ while
           // the mobile drawer keeps the full 220px.
           collapsed && "lg:w-[var(--sidebar-w-collapsed)]",
         )}
       >
-        <Brand onClose={onClose} collapsed={collapsed} />
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          {NAV_GROUPS.map((g) => (
+        <Brand onClose={onClose} collapsed={collapsed} reveal={reveal} />
+        {/* The nav scrolls when the window is shorter than the full list
+            (at 1440x900 the Configure group sits below the fold). The bottom
+            fade says "more below" instead of a row that looks cut off, and
+            pb-8 keeps the last row clear of the fade once scrolled to the
+            end (T-803). */}
+        <nav
+          className="flex-1 overflow-y-auto px-3 pb-8 pt-4"
+          style={{
+            maskImage: "linear-gradient(to bottom, black calc(100% - 28px), transparent)",
+            WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 28px), transparent)",
+          }}
+        >
+          {navGroups.map((g) => (
             <div key={g.id} className="mb-5">
               <div
                 className={clsx(
@@ -168,6 +152,7 @@ export function Sidebar({
                   // Group labels are noise on the icon rail — hide at lg+
                   // when collapsed; the mobile drawer still shows them.
                   collapsed && "lg:hidden",
+                  reveal,
                 )}
               >
                 {g.label}
@@ -189,7 +174,7 @@ export function Sidebar({
                     data-tour={`nav-${it.id}`}
                     className={({ isActive }) =>
                       clsx(
-                        "flex items-center gap-2 rounded-2 px-2 py-1.5 text-[12.5px] transition-colors",
+                        "group relative flex items-center gap-2 rounded-2 px-2 py-1.5 text-[12.5px] transition-colors",
                         collapsed && "lg:justify-center",
                         isActive
                           ? "bg-bg-3 text-fg-0"
@@ -197,23 +182,50 @@ export function Sidebar({
                       )
                     }
                   >
-                    <span className="shrink-0 text-fg-3">
-                      <NavIconSvg icon={it.icon} />
-                    </span>
-                    <span
-                      className={clsx("flex-1 truncate", collapsed && "lg:hidden")}
-                    >
-                      {it.label}
-                    </span>
-                    {counts[it.id] != null && (
-                      <span
-                        className={clsx(
-                          "shrink-0 font-mono text-[10px] tabular-nums text-fg-4",
-                          collapsed && "lg:hidden",
+                    {({ isActive }) => (
+                      <>
+                        {/* Active indicator: a 2px accent bar pinned to the
+                            row's left edge. It sits inside the row box, so it
+                            follows the row on the collapsed rail too. */}
+                        {isActive && (
+                          <span
+                            aria-hidden
+                            className="absolute inset-y-1 left-0 w-[2px] rounded-pill bg-accent"
+                          />
                         )}
-                      >
-                        {fmtCompact(counts[it.id] as number)}
-                      </span>
+                        <Icon
+                          icon={it.icon}
+                          size={14}
+                          className={clsx(
+                            "shrink-0 transition-colors",
+                            isActive
+                              ? "text-accent"
+                              : "text-fg-3 group-hover:text-fg-2",
+                          )}
+                        />
+                        <span
+                          className={clsx("flex-1 truncate", collapsed && "lg:hidden", reveal)}
+                        >
+                          {it.label}
+                        </span>
+                        {counts[it.id] != null && (
+                          // The gutter numbers are ALL-TIME totals, while the
+                          // pages window their tables (T-803: "Sessions 5.2K"
+                          // here beside "1,871" on the 30-day Sessions table).
+                          // The label says so for screen readers and on hover.
+                          <span
+                            title={`${fmtInt(counts[it.id] as number)} in total, all time`}
+                            aria-label={`${fmtInt(counts[it.id] as number)} in total, all time`}
+                            className={clsx(
+                              "shrink-0 font-mono text-[10px] tabular-nums text-fg-4",
+                              collapsed && "lg:hidden",
+                              reveal,
+                            )}
+                          >
+                            {fmtCompact(counts[it.id] as number)}
+                          </span>
+                        )}
+                      </>
                     )}
                   </NavLink>
                 </Tooltip>
@@ -232,23 +244,48 @@ export function Sidebar({
             type="button"
             onClick={toggleCollapsed}
             aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-expanded={!collapsed}
+            aria-controls="app-sidebar"
             className={clsx(
               "hidden items-center gap-2 border-t border-line-1 px-3 py-2 text-[11px] text-fg-3 transition-colors hover:bg-bg-2 hover:text-fg-1 lg:flex",
               collapsed && "lg:justify-center",
             )}
           >
             <span className="grid h-6 w-6 shrink-0 place-items-center">
-              <ChevronCollapseIcon collapsed={collapsed} />
+              <Icon
+                icon={ChevronLeft}
+                size={14}
+                className={clsx(
+                  "transition-transform duration-base ease-out",
+                  collapsed && "rotate-180",
+                )}
+              />
             </span>
-            {!collapsed && <span>Collapse</span>}
+            {!collapsed && <span className={reveal}>Collapse</span>}
           </button>
         </Tooltip>
+        {/* Governed-node notice — persistent, never a silent absence.
+            Only renders when this machine is actually governed AND
+            pages were actually hidden, so it never appears on a solo
+            node. Hidden at lg+ when collapsed for the same overflow
+            reason as Foot below. */}
+        {hiddenNavIds(gov.data).length > 0 && (
+          <NavLink
+            to="/privacy"
+            onClick={onClose}
+            className={clsx(
+              "block border-t border-line-1 px-4 py-2 text-[10.5px] text-fg-3 hover:bg-bg-2 hover:text-fg-1",
+              collapsed && "lg:hidden",
+            )}
+          >
+            Some pages are hidden by your organization
+          </NavLink>
+        )}
         {/* Footer detail overflows the 56px rail — hide it at lg+ when
             collapsed. The mobile drawer (always full width) keeps it. */}
-        <div className={clsx(collapsed && "lg:hidden")}>
+        <div className={clsx(collapsed && "lg:hidden", reveal)}>
           <Foot
             setup={setupClaude.data}
-            status={status.data}
             watcher={watcherHealth.data}
           />
         </div>
@@ -257,62 +294,39 @@ export function Sidebar({
   );
 }
 
-// ChevronCollapseIcon — points left (« collapse) when expanded, right
-// (» expand) when collapsed, mirroring the rail's motion direction.
-function ChevronCollapseIcon({ collapsed }: { collapsed: boolean }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      style={{ transform: collapsed ? "rotate(180deg)" : undefined }}
-    >
-      <path
-        d="M10 3.5 5.5 8 10 12.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function Brand({
   onClose,
   collapsed = false,
+  reveal,
 }: {
   onClose?: () => void;
   collapsed?: boolean;
+  reveal?: string;
 }) {
   return (
     <div
       className={clsx(
-        "flex h-[var(--header-h)] items-center gap-2.5 border-b border-line-1 px-4",
+        "flex h-[var(--header-h)] items-center gap-2 border-b border-line-1 px-4",
         // Center the logo on the icon rail (lg+ collapsed); the mobile
         // drawer keeps the full brand row.
         collapsed && "lg:justify-center lg:gap-0 lg:px-2",
       )}
     >
-      <div
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-2 text-base font-extrabold text-white"
-        style={{
-          background:
-            "linear-gradient(135deg, var(--brand-from), var(--brand-to))",
-          boxShadow: "0 4px 12px rgba(124, 92, 246, 0.35)",
-        }}
-      >
-        S
-      </div>
+      {/* The superbased wordmark, matching the marketing site's .sb-brand:
+          the two-square U+259E mark in Blueprint (the shared SVG BrandMark,
+          so it never falls back to an OS font), then lowercase "superbased"
+          in the mono face. The standalone glyph - NOT a badge box. */}
+      <BrandMark size={17} className="shrink-0" />
       <div
         className={clsx(
           "flex flex-col leading-tight",
           collapsed && "lg:hidden",
+          reveal,
         )}
       >
-        <b className="text-[13px] font-bold text-fg-0">SuperBased</b>
+        <b className="font-mono text-[15px] font-medium tracking-tight text-fg-0">
+          superbased
+        </b>
       </div>
       {/* Close button — mobile drawer only. */}
       <button
@@ -321,14 +335,7 @@ function Brand({
         aria-label="Close navigation"
         className="ml-auto grid h-7 w-7 place-items-center rounded-2 border border-line-2 bg-bg-2 text-fg-3 hover:bg-bg-3 hover:text-fg-0 lg:hidden"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path
-            d="M4 4l8 8M12 4l-8 8"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
+        <Icon icon={X} size={14} />
       </button>
     </div>
   );
@@ -341,8 +348,10 @@ function Brand({
 // guard_events / router_decisions) are optional in the type because
 // an older daemon may serve a /api/status without them — `?? null`
 // keeps those badges hidden instead of rendering a bogus 0.
+const NO_COUNTS: Record<string, number | null> = {};
+
 function navCounts(s?: StatusSnapshot | null): Record<string, number | null> {
-  if (!s) return {};
+  if (!s) return NO_COUNTS;
   const c = s.counts;
   return {
     live: c.live_sessions ?? null,
@@ -371,60 +380,77 @@ function distinctTools(s: StatusSnapshot): number {
 
 function Foot({
   setup,
-  status,
   watcher,
 }: {
   setup: SetupClaude | null;
-  status: StatusSnapshot | null;
   watcher: WatcherHealth | null;
 }) {
-  const proxyOn =
-    setup != null &&
-    (setup.status === "oauth_ready" || setup.status === "api_key_ready");
-  // Watcher-lag signal (P1.7): files the watcher is behind on risk
-  // dropped capture; misroute/orphan cursors mean rows silently not
-  // landing. Surface a warn line the moment either is non-zero.
+  // The footer shows uptime / db size / last activity, so it reads the full
+  // status payload (the Sidebar above keeps the 5 s poll alive). Its
+  // "last activity Xs ago" walks on its own 5 s tick between fetches.
+  const status = useApi<StatusSnapshot>("/api/status").data;
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+  void tick;
+  // The watcher line follows the watcher itself (watcher_running on the
+  // watcher-health payload), not the Claude Code proxy-route setup
+  // status it used to borrow (T-585).
+  const watcherState = watcherLineState(watcher);
+  // Watcher-lag signal (P1.7): transcripts the watcher is behind on
+  // risk dropped capture; misroute/orphan cursors mean rows silently
+  // not landing. Surface a warn line the moment either is non-zero.
+  //
+  // Both counts arrive already filtered by cursor semantics: rows
+  // whose saved cursor is a SQLite watermark, whose store is
+  // encrypted, or which never emit actions by design are excluded
+  // server-side (they're still listed in `files` with a cursor_kind +
+  // excluded_reason). Without that filter these numbers were
+  // dominated by files the recovery flow can never close, so the warn
+  // line could never go away — see help "glossary.watcher_lag".
   const lagging = (watcher?.behind_count ?? 0) > 0;
   const misrouted = (watcher?.suspected_misrouted_count ?? 0) > 0;
   return (
     <div className="border-t border-line-1 px-4 py-3 text-[11px] text-fg-3">
-      <div className="mb-0.5 flex items-center gap-1.5 text-fg-2">
-        <span
-          className={clsx(
-            "relative h-1.5 w-1.5 rounded-full",
-            proxyOn ? "bg-success" : "bg-warn",
-          )}
-        >
-          {proxyOn && (
-            <span className="absolute inset-0 -m-0.5 animate-ping rounded-full bg-success/40" />
-          )}
-        </span>
-        watcher {proxyOn ? "active" : "—"}
-        {setup?.proxy_port ? (
-          <>
-            {" · "}
-            <span className="font-mono text-fg-3">
-              proxy {setup.proxy_port}
-            </span>
-          </>
-        ) : null}
-      </div>
+      <Tooltip maxWidth={300} content={WATCHER_LINE_TOOLTIP[watcherState]}>
+        <div tabIndex={0} className="mb-0.5 flex items-center gap-1.5 text-fg-2 focus:outline-none">
+          <LiveDot
+            {...withDotClass(
+              liveDotProps(
+                CAPTURE_DOT,
+                watcherState === "active" ? "active" : watcherState === "off" ? "paused" : "absent",
+              ),
+              "h-1.5 w-1.5 shrink-0",
+            )}
+          />
+          {WATCHER_LINE_LABEL[watcherState]}
+          {setup?.proxy_port ? (
+            <>
+              {" · "}
+              <span className="font-mono text-fg-3">proxy :{setup.proxy_port}</span>
+            </>
+          ) : null}
+        </div>
+      </Tooltip>
       {(lagging || misrouted) && (
         <Tooltip
           maxWidth={320}
           content={
             (lagging
-              ? `Watcher is behind on ${watcher!.behind_count} file(s) (${fmtBytes(watcher!.behind_total_bytes)} unread) — recent activity may not be captured yet. A rescan (Settings → Backfill) catches up if it persists. `
+              ? `Watcher is behind on ${watcher!.behind_count} append-only transcript(s) (${fmtBytes(watcher!.behind_total_bytes)} unread) - recent activity may not be captured yet. A rescan (Settings → Backfill) catches up if it persists. `
               : "") +
             (misrouted
-              ? `${watcher!.suspected_misrouted_count} session file(s) look misrouted (cursor at EOF, zero rows emitted).`
-              : "")
+              ? `${watcher!.suspected_misrouted_count} transcript(s) look misrouted (cursor at EOF, zero rows emitted). `
+              : "") +
+            "Files whose cursor is a SQLite watermark, whose store is encrypted, or that only ever carry tokens are excluded from both counts - that comparison can't close, so counting it would pin this warning on forever."
           }
         >
           {/* tabIndex={0} makes the warning keyboard-focusable so the Tooltip
               (which opens on focus) is reachable without a pointer. */}
           <div tabIndex={0} className="mb-0.5 flex items-center gap-1.5 text-[10px] text-warn">
-            <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+            <LiveDot tone="warn" still className="h-1.5 w-1.5 shrink-0" />
             {lagging && <>behind {watcher!.behind_count} file{watcher!.behind_count === 1 ? "" : "s"}</>}
             {lagging && misrouted && " · "}
             {misrouted && <>{watcher!.suspected_misrouted_count} misrouted</>}
@@ -432,15 +458,17 @@ function Foot({
         </Tooltip>
       )}
       {status && (
-        <div className="font-mono text-[10px] text-fg-4">
-          schema v{status.schema_version}
-          {status.db_size_bytes != null && (
-            <> · {fmtBytes(status.db_size_bytes)}</>
-          )}
-          {status.uptime_seconds != null && status.uptime_seconds > 0 && (
-            <> · up {fmtUptime(status.uptime_seconds)}</>
-          )}
-        </div>
+        // The schema version is a support detail: it rides the tooltip, not
+        // the line (T-803). The database size stays visible: it is the
+        // disk Observer uses on this machine.
+        <Tooltip content={`Database schema version ${status.schema_version}`}>
+          <div tabIndex={0} className="font-mono text-[10px] text-fg-4 focus:outline-none">
+            {status.db_size_bytes != null ? <>database {fmtBytes(status.db_size_bytes)}</> : <>database</>}
+            {status.uptime_seconds != null && status.uptime_seconds > 0 && (
+              <> · up {fmtUptime(status.uptime_seconds)}</>
+            )}
+          </div>
+        </Tooltip>
       )}
       {status?.last_action_at && (
         <div className="font-mono text-[10px] text-fg-4">
@@ -460,7 +488,7 @@ function fmtUptime(sec: number): string {
 
 function fmtRelative(iso: string): string {
   const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
+  if (!Number.isFinite(t)) return "-";
   const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);

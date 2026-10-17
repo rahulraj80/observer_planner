@@ -1,0 +1,21 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "Inferred"
+  },
+  "fixture_sha256": "d7ba41c771d7a7b9a0974e31fd1b8f631b992f1ac78db9b0145168a27578a132",
+  "http": {
+    "method": "GET",
+    "path": "/console/api/v1/budgets/members",
+    "status": 401
+  },
+  "notes": "The reference documents the 401 status (missing, invalid, expired or revoked key) but no error body; this shape is synthesized and Inferred.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "OpenCode Console Budgets API (v2 docs, console/api/budgets), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "c0d91f72aaf2c18c67f77186190c00a958a687a915f4d811cdb8d33e0622aea7",
+  "source_url": "https://opencode.ai/v2/docs/console/api/budgets/",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "opencode.console.budgets_api"
+}

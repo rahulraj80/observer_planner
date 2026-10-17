@@ -1,0 +1,38 @@
+{
+  "categories": [
+    "Model",
+    "Credit Source"
+  ],
+  "data": [
+    {
+      "start_time": 1746144000,
+      "end_time": 1746230400,
+      "results": [
+        {
+          "user_email": "alice@example.com",
+          "count": 120.5,
+          "by_categories": {
+            "Model": [
+              {
+                "category": "claude-opus-4-8",
+                "count": 100
+              },
+              {
+                "category": "sonar-pro",
+                "count": 20.5
+              }
+            ],
+            "Credit Source": [
+              {
+                "category": "paid",
+                "count": 120.5
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

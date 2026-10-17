@@ -1,0 +1,47 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "value": "Inferred",
+    "value[]": "Inferred",
+    "value[].adoptionByProduct": "Inferred",
+    "value[].adoptionByProduct[]": "Inferred",
+    "value[].adoptionByProduct[].anyAppActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].anyAppEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].copilotChatActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].copilotChatEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].excelActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].excelEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].loopActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].loopEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].microsoftTeamsActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].microsoftTeamsEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].oneNoteActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].oneNoteEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].outlookActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].outlookEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].powerPointActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].powerPointEnabledUsers": "Inferred",
+    "value[].adoptionByProduct[].reportPeriod": "Inferred",
+    "value[].adoptionByProduct[].wordActiveUsers": "Inferred",
+    "value[].adoptionByProduct[].wordEnabledUsers": "Inferred",
+    "value[].reportRefreshDate": "Inferred"
+  },
+  "fixture_sha256": "1edef781b2d0166c648b06c446b46ce9188044fce9bd17c55748b9d53ef74e02",
+  "http": {
+    "method": "GET",
+    "path": "/v1.0/copilot/reports/getMicrosoft365CopilotUserCountSummary(period='D7')",
+    "query": {
+      "$format": "application/json"
+    },
+    "status": 200
+  },
+  "notes": "The documented JSON example (beta pivot) verbatim; the v1.0 example request asks $format=application/json. That v1.0 answers this JSON shape is Inferred.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "MicrosoftDocs/m365copilot-docs main, copilotReportRoot: getMicrosoft365CopilotUserCountSummary (ms.date 07/15/2026), fetched 2026-10-08",
+  "source_kind": "api_reference_example",
+  "source_sha256": "a388f556edf7c1a91a94ec4299cc728a79f195e7e7e1395b03870ef3b65111e3",
+  "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/m365copilot-docs/main/docs/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusercountsummary.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "microsoft.m365.reports_user_count_summary"
+}

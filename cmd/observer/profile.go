@@ -9,11 +9,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
 // newProfileCmd is the `observer profile` group (Track R, P2.6):
@@ -31,7 +29,7 @@ func newProfileCmd() *cobra.Command {
 			"the proxy: Anthropic-path requests get the [profiles].by_provider\n" +
 			"\"anthropic\" assignment, OpenAI-path requests the \"openai\" one.\n" +
 			"The master [compression.conversation] enabled switch stays the one\n" +
-			"on/off gate — profiles only supply parameters once it is on.",
+			"on/off gate - profiles only supply parameters once it is on.",
 	}
 	cmd.AddCommand(newProfileListCmd(), newProfileShowCmd(), newProfileAssignCmd(),
 		newProfileCreateCmd(), newProfileDeleteCmd(), newProfileSetCmd())
@@ -128,12 +126,14 @@ func newProfileShowCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"# profile %q resolved against master config (%s)\n"+
 					"# profile keys overlay master parameters; conversation `enabled`\n"+
-					"# and [compression.code_graph] are always master-owned\n",
+					"# is always master-owned\n",
 				name, resolvedPath)
-			enc := toml.NewEncoder(cmd.OutOrStdout())
-			return enc.Encode(struct {
-				Compression config.CompressionConfig `toml:"compression"`
-			}{resolvedCompression})
+			text, err := config.EncodeResolvedCompression(resolvedCompression)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), text)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
@@ -149,7 +149,7 @@ func newProfileAssignCmd() *cobra.Command {
 			"  anthropic   requests on the Anthropic Messages API path (Claude Code, …)\n" +
 			"  openai      requests on the OpenAI paths (codex, …)\n" +
 			"  default     everything without a more specific assignment\n" +
-			"  tool:NAME   one specific tool (R2; e.g. tool:cline, tool:kilo-code-cli) —\n" +
+			"  tool:NAME   one specific tool (R2; e.g. tool:cline, tool:kilo-code-cli) -\n" +
 			"              wins over the provider assignment when the proxy can resolve\n" +
 			"              the connection's owning tool via the session hook bridge\n\n" +
 			"Writes [profiles] in config.toml through the same atomic write+backup\n" +
@@ -171,34 +171,21 @@ func newProfileAssignCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			switch {
-			case target == "default":
-				cfg.Profiles.Default = name
-			case target == models.ProviderAnthropic || target == models.ProviderOpenAI:
-				if cfg.Profiles.ByProvider == nil {
-					cfg.Profiles.ByProvider = map[string]string{}
-				}
-				cfg.Profiles.ByProvider[target] = name
-			case strings.HasPrefix(target, "tool:"):
-				tool := strings.TrimPrefix(target, "tool:")
-				if tool == "" {
-					return fmt.Errorf("tool: prefix needs a tool name (e.g. tool:cline)")
-				}
-				if cfg.Profiles.ByTool == nil {
-					cfg.Profiles.ByTool = map[string]string{}
-				}
-				cfg.Profiles.ByTool[tool] = name
-			default:
-				return fmt.Errorf("unknown traffic class %q (valid: anthropic, openai, default, tool:NAME)", target)
+			// One pure owner of the target grammar and the edit, shared
+			// with the Settings > Profiles per-tool card (T-369).
+			assigned, err := config.AssignProfile(cfg.Profiles, target, name)
+			if err != nil {
+				return err
 			}
+			cfg.Profiles = assigned
 			if err := config.WriteToml(resolvedPath, cfg); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "assigned %s → %s (saved to %s)\n", target, name, resolvedPath)
 			if pokeReload() {
-				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded — new sessions use this assignment now")
+				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded - new sessions use this assignment now")
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected on the dashboard port — applies on next start")
+				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected on the dashboard port - applies on next start")
 			}
 			return nil
 		},
@@ -255,7 +242,7 @@ func newProfileCreateCmd() *cobra.Command {
 		Long: "Creates a user profile file. --from seeds it: a built-in name copies\n" +
 			"that recipe's keys verbatim (tuned starting point, comments included);\n" +
 			"another user profile copies its file; omitted (or \"default\") writes an\n" +
-			"empty parameter file — master passthrough until you set keys.\n" +
+			"empty parameter file - master passthrough until you set keys.\n" +
 			"Edit with `observer profile set <name> <key> <value>`, then assign it.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -307,7 +294,7 @@ func newProfileSetCmd() *cobra.Command {
 		Short: "Set one compression key in a custom profile",
 		Long: "Sets a dotted compression key in a user profile file, e.g.:\n" +
 			"  observer profile set my-tuning compression.conversation.target_ratio 0.9\n" +
-			"Built-ins are immutable — copy one first with `profile create --from`.\n" +
+			"Built-ins are immutable - copy one first with `profile create --from`.\n" +
 			"Edits apply to NEW sessions automatically (no restart, no poke): the\n" +
 			"daemon folds the profile file's generation into its routing key.",
 		Args: cobra.ExactArgs(3),

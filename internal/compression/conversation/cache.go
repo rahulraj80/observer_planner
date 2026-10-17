@@ -23,9 +23,9 @@ func PrefixHash(msgs []Message, n int) string {
 	}
 	h := sha256.New()
 	for i := 0; i < n; i++ {
-		h.Write([]byte(msgs[i].Role))
+		h.Write([]byte(msgs[i].Role)) //nolint:gosec // G602: the index is bounds-checked above
 		h.Write([]byte{0x1f})
-		h.Write([]byte(msgs[i].Text))
+		h.Write([]byte(msgs[i].Text)) //nolint:gosec // G602: the index is bounds-checked above
 		h.Write([]byte{0x1e})
 	}
 	return hex.EncodeToString(h.Sum(nil))

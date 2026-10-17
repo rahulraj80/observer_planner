@@ -17,10 +17,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/adapter/browserchat"
+	"github.com/marmutapp/superbased-observer/internal/browserhost"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/scrub"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -52,7 +51,7 @@ func newBrowserCmd() *cobra.Command {
 		Long: "Reads a captured-turn JSON payload (the browserchat wire\n" +
 			"contract) from stdin, normalizes it, and writes it to the\n" +
 			"observer DB via the unchanged store.Ingest seam. Errors are\n" +
-			"logged to stderr and swallowed — never blocks the browser.",
+			"logged to stderr and swallowed - never blocks the browser.",
 		Args: cobra.ArbitraryArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			event := ""
@@ -62,7 +61,7 @@ func newBrowserCmd() *cobra.Command {
 			handleBrowserHook(cmd.Context(), event, configPath)
 		},
 	}
-	hookCmd.Flags().StringVar(&configPath, "config", "", "Path to observer config.toml — when set, hook DB writes land on the config's observer.db (matches the daemon)")
+	hookCmd.Flags().StringVar(&configPath, "config", "", "Path to observer config.toml - when set, hook DB writes land on the config's observer.db (matches the daemon)")
 	cmd.AddCommand(hookCmd)
 
 	var healthConfigPath string
@@ -72,13 +71,13 @@ func newBrowserCmd() *cobra.Command {
 		Long: "Prints the per-site health the browser extension has relayed\n" +
 			"through the native-messaging host (site, status, reason, age).\n" +
 			"A stale or empty table means the extension isn't talking to the\n" +
-			"host — the fastest way to see a broken manifest or degraded parser.",
+			"host - the fastest way to see a broken manifest or degraded parser.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runBrowserHealth(cmd.OutOrStdout(), healthConfigPath)
 		},
 	}
-	healthCmd.Flags().StringVar(&healthConfigPath, "config", "", "Path to observer config.toml — resolves the observer dir the health file lives in")
+	healthCmd.Flags().StringVar(&healthConfigPath, "config", "", "Path to observer config.toml - resolves the observer dir the health file lives in")
 	cmd.AddCommand(healthCmd)
 	return cmd
 }
@@ -113,7 +112,7 @@ func handleBrowserHook(ctx context.Context, event, configPath string) {
 	// below this dispatch decision, so config's config-JSON is stdout's sole
 	// content. Every other event keeps the ack-first, work-detached behavior.
 	if event == "config" {
-		emitBrowserConfig(configPath, label)
+		emitBrowserConfig(configPath, label, body)
 		return
 	}
 
@@ -137,6 +136,13 @@ func handleBrowserHook(ctx context.Context, event, configPath string) {
 	// so daemon-side failures are LEGIBLE (A6) — it never touches the DB /
 	// store.Ingest path. host.js routes payload.type=="health" here.
 	if event == "health" {
+		// A beacon from an extension speaking a protocol this observer does
+		// not support is not merged: its fields may mean something else
+		// (lane MP-ART). The config handshake already recorded the refusal.
+		if r := browserhost.Refusal(browserhost.ParseHello(body).Protocol); r != "" {
+			fmt.Fprintf(os.Stderr, "observer-browser: %s health refused: %s\n", label, r)
+			return
+		}
 		if err := recordBrowserHealth(ctx, cfg, body); err != nil {
 			fmt.Fprintf(os.Stderr, "observer-browser: %s health: %v\n", label, err)
 		}
@@ -202,9 +208,33 @@ func handleBrowserHook(ctx context.Context, event, configPath string) {
 	}
 	defer database.Close()
 
-	if err := ingestBrowserTurn(workCtx, store.New(database), body, cfg.Browser, healthPath); err != nil {
+	st := store.New(database)
+	guardBrowserHookStore(cfg, st, os.Stderr)
+	if err := ingestBrowserTurn(workCtx, st, body, cfg.Browser, healthPath); err != nil {
 		fmt.Fprintf(os.Stderr, "observer-browser: %s ingest: %v\n", label, err)
 	}
+}
+
+// guardBrowserHookStore composes the guard onto the native-messaging hook's
+// short-lived store so a captured browser prompt runs the post-hoc capture
+// lane at ingest, exactly like every watcher-ingested prompt (PGC-2 / P3).
+// Before this the five *-web rows were rescan-only: nothing evaluated a
+// browser prompt until an operator ran `observer guard rescan`. The hook
+// flavour of the guard (buildHookGuard: lazy DB opens, no project-roots
+// scan) keeps the host's reply-after-exit ack latency where it was; the
+// pre-send lookup reuses the store this process already holds. A disabled
+// guard, or a construction failure, leaves the store unguarded (fail-open
+// at composition, the same contract as every hook path).
+func guardBrowserHookStore(cfg config.Config, st *store.Store, stderr io.Writer) {
+	if !cfg.Guard.Enabled || cfg.Guard.Mode == "off" {
+		return
+	}
+	g := buildHookGuard(cfg, stderr)
+	if g == nil {
+		return
+	}
+	g.SetPromptPreSendLookup(preSendPromptLookup(st, nil))
+	st.SetGuard(g)
 }
 
 // browserConfigResponse is the daemon's effective browser policy, emitted by
@@ -222,6 +252,27 @@ type browserConfigResponse struct {
 	// Degraded flags a fail-closed fallback (a config-load error) so the
 	// extension can tell a real daemon policy from the safe default.
 	Degraded bool `json:"degraded,omitempty"`
+
+	// Native-host protocol handshake (lane MP-ART, T-601), additive: an
+	// older extension ignores these. ProtocolMin / ProtocolMax are the
+	// extension protocols this observer accepts; Refused (with Reason)
+	// answers an extension whose protocol is outside that range, and
+	// Enabled is then false so capture stays off.
+	ProtocolMin     int    `json:"protocol_min"`
+	ProtocolMax     int    `json:"protocol_max"`
+	ObserverVersion string `json:"observer_version,omitempty"`
+	Refused         bool   `json:"refused,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+// withHandshake stamps the host's protocol range on a config reply and, for
+// a refused extension protocol, turns capture off with the reason.
+func (r browserConfigResponse) withHandshake(h browserhost.Hello) browserConfigResponse {
+	r.ProtocolMin, r.ProtocolMax, r.ObserverVersion = browserhost.ProtocolMin, browserhost.ProtocolMax, version
+	if reason := browserhost.Refusal(h.Protocol); reason != "" {
+		r.Enabled, r.Refused, r.Reason = false, true, reason
+	}
+	return r
 }
 
 // normalizeBrowserGranularity maps a raw [browser].granularity_ceiling string
@@ -231,15 +282,27 @@ type browserConfigResponse struct {
 // nested branch, so a new level is one map entry.
 func normalizeBrowserGranularity(s string) string {
 	known := map[string]struct{}{
-		string(browserchat.GranularityUsageOnly): {},
-		string(browserchat.GranularityRedacted):  {},
-		string(browserchat.GranularityFull):      {},
+		browserGranularityUsageOnly: {},
+		browserGranularityRedacted:  {},
+		browserGranularityFull:      {},
 	}
 	if _, ok := known[strings.TrimSpace(s)]; ok {
 		return strings.TrimSpace(s)
 	}
-	return string(browserchat.GranularityUsageOnly)
+	return browserGranularityUsageOnly
 }
+
+// The section 5.1 granularity vocabulary the [browser] config and the
+// extension speak. Spelled out here, not taken from
+// internal/adapter/browserchat, so the bridge builds without the
+// browser-chat adapters (lane MP-L1D, T-598);
+// TestBrowserGranularityMatchesTheAdapter pins them to the adapter's own
+// constants in every build that has it.
+const (
+	browserGranularityUsageOnly = "usage_only"
+	browserGranularityRedacted  = "redacted"
+	browserGranularityFull      = "full"
+)
 
 // emitBrowserConfig handles the `observer browser hook config` event. The
 // extension asks the daemon for its effective browser policy so it can send at
@@ -251,18 +314,28 @@ func normalizeBrowserGranularity(s string) string {
 // fail-closed usage_only default so the extension always gets a parseable
 // answer. Deprecation/warning noise from config.Load goes to stderr, so it
 // never pollutes the relayed stdout line.
-func emitBrowserConfig(configPath, label string) {
+//
+// body is the config request itself: its handshake fields (protocol and
+// extension_version, lane MP-ART) are recorded to the node-local
+// browser-extension.json, best-effort, before the reply, and an extension
+// protocol this observer does not support is answered with refused:true and
+// capture off.
+func emitBrowserConfig(configPath, label string, body []byte) {
+	hello := browserhost.ParseHello(body)
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "observer-browser: %s config: %v\n", label, err)
 		_ = json.NewEncoder(os.Stdout).Encode(browserConfigResponse{
 			Type:        "config",
-			Granularity: string(browserchat.GranularityUsageOnly),
+			Granularity: browserGranularityUsageOnly,
 			Enabled:     true,
 			Sites:       map[string]bool{},
 			Degraded:    true,
-		})
+		}.withHandshake(hello))
 		return
+	}
+	if err := browserhost.RecordSeen(browserObserverDir(cfg), hello, nowMillisFn()); err != nil {
+		fmt.Fprintf(os.Stderr, "observer-browser: %s handshake record: %v\n", label, err)
 	}
 	sites := cfg.Browser.Sites
 	if sites == nil {
@@ -273,7 +346,7 @@ func emitBrowserConfig(configPath, label string) {
 		Granularity: normalizeBrowserGranularity(cfg.Browser.GranularityCeiling),
 		Enabled:     cfg.Browser.Enabled,
 		Sites:       sites,
-	})
+	}.withHandshake(hello))
 }
 
 // ingestBrowserTurn is the ONE OWNER of the browser-capture normalize →
@@ -298,10 +371,14 @@ func ingestBrowserTurn(ctx context.Context, st *store.Store, body []byte, bc con
 		return nil // per-site daemon toggle is off — intentional drop, not a loss.
 	}
 	site, synthetic, idSourceNone := peekBrowserTurn(body)
-	toolEvents, tokenEvents, err := browserchat.NormalizeWith(body, browserchat.Options{
-		Scrubber:           scrub.New(),
-		GranularityCeiling: browserchat.Granularity(bc.GranularityCeiling),
-	})
+	// A turn from an extension speaking a protocol this observer does not
+	// support is refused with a recorded reason, never half-understood (lane
+	// MP-ART). Both transports (native host and loopback listener) land here.
+	if reason := browserhost.Refusal(browserhost.ParseHello(body).Protocol); reason != "" {
+		recordBrowserCapture(ctx, healthPath, captureOutcome{site: site, dropReason: reason})
+		return fmt.Errorf("refused: %s", reason)
+	}
+	toolEvents, tokenEvents, err := normalizeBrowserChatTurn(body, bc.GranularityCeiling)
 	if err != nil {
 		// A real loss (unknown site, malformed body). Record it durably so
 		// the operator can see turns are being dropped even though the
@@ -367,9 +444,8 @@ func peekBrowserTurn(body []byte) (site string, synthetic, idSourceNone bool) {
 	if err := json.Unmarshal(body, &peek); err != nil {
 		return "", false, false
 	}
-	return peek.Site,
-		browserchat.IsSyntheticSessionKey(peek.ConversationID, peek.MessageID),
-		browserchat.NormalizeIDSource(peek.IDSource) == "none"
+	synthetic, idSourceNone = browserChatIDFlags(peek.ConversationID, peek.MessageID, peek.IDSource)
+	return peek.Site, synthetic, idSourceNone
 }
 
 // recordBrowserCapture folds one capture outcome into the node-local health
@@ -825,7 +901,7 @@ func withBrowserHealthLock(ctx context.Context, path string, fn func() error) er
 	}
 	if wait <= 0 {
 		_ = f.Close()
-		return fmt.Errorf("acquire lock: deadline already passed — skipping best-effort health telemetry")
+		return fmt.Errorf("acquire lock: deadline already passed - skipping best-effort health telemetry")
 	}
 
 	// expiresAt is the absolute-clock counterpart to the timer below,
@@ -854,11 +930,11 @@ func withBrowserHealthLock(ctx context.Context, path string, fn func() error) er
 		// timer-vs-ticker select race described above).
 		if err := ctx.Err(); err != nil {
 			_ = f.Close()
-			return fmt.Errorf("acquire lock: %w — skipping best-effort health telemetry", err)
+			return fmt.Errorf("acquire lock: %w - skipping best-effort health telemetry", err)
 		}
 		if time.Now().After(expiresAt) {
 			_ = f.Close()
-			return fmt.Errorf("acquire lock: timed out after %s waiting on %s — skipping best-effort health telemetry", wait, lockPath)
+			return fmt.Errorf("acquire lock: timed out after %s waiting on %s - skipping best-effort health telemetry", wait, lockPath)
 		}
 		lockErr := tryLockFileExclusive(f)
 		if lockErr == nil {
@@ -869,12 +945,12 @@ func withBrowserHealthLock(ctx context.Context, path string, fn func() error) er
 			if err := ctx.Err(); err != nil {
 				_ = unlockFile(f)
 				_ = f.Close()
-				return fmt.Errorf("acquire lock: %w — skipping best-effort health telemetry", err)
+				return fmt.Errorf("acquire lock: %w - skipping best-effort health telemetry", err)
 			}
 			if time.Now().After(expiresAt) {
 				_ = unlockFile(f)
 				_ = f.Close()
-				return fmt.Errorf("acquire lock: timed out after %s waiting on %s — skipping best-effort health telemetry", wait, lockPath)
+				return fmt.Errorf("acquire lock: timed out after %s waiting on %s - skipping best-effort health telemetry", wait, lockPath)
 			}
 			defer func() { _ = unlockFile(f); _ = f.Close() }()
 			return fn()
@@ -889,10 +965,10 @@ func withBrowserHealthLock(ctx context.Context, path string, fn func() error) er
 		select {
 		case <-timer.C:
 			_ = f.Close()
-			return fmt.Errorf("acquire lock: timed out after %s waiting on %s — skipping best-effort health telemetry", wait, lockPath)
+			return fmt.Errorf("acquire lock: timed out after %s waiting on %s - skipping best-effort health telemetry", wait, lockPath)
 		case <-ctx.Done():
 			_ = f.Close()
-			return fmt.Errorf("acquire lock: %w — skipping best-effort health telemetry", ctx.Err())
+			return fmt.Errorf("acquire lock: %w - skipping best-effort health telemetry", ctx.Err())
 		case <-ticker.C:
 			// retry the nonblocking attempt
 		}
@@ -935,7 +1011,7 @@ func loadBrowserHealthFileForUpdate(path string) (browserHealthFile, error) {
 		if rerr := os.Rename(path, bad); rerr != nil {
 			return browserHealthFile{}, fmt.Errorf("quarantine corrupt health file %s: %w", path, rerr)
 		}
-		fmt.Fprintf(os.Stderr, "observer-browser: health file %s corrupt (%v) — quarantined to %s, starting fresh\n", path, err, bad)
+		fmt.Fprintf(os.Stderr, "observer-browser: health file %s corrupt (%v) - quarantined to %s, starting fresh\n", path, err, bad)
 		return browserHealthFile{}, nil
 	}
 	return hf, nil
@@ -1030,7 +1106,7 @@ func runBrowserHealth(out io.Writer, configPath string) error {
 	if len(hf.Sites) == 0 {
 		fmt.Fprintf(out, "no browser health beacons recorded yet (%s)\n", path)
 		fmt.Fprintln(out, "  if you've loaded the extension and used a site, the native-messaging host")
-		fmt.Fprintln(out, "  or manifest may be broken — check `observer init --browser` output.")
+		fmt.Fprintln(out, "  or manifest may be broken - check `observer init --browser` output.")
 		return nil
 	}
 	names := make([]string, 0, len(hf.Sites))
@@ -1044,7 +1120,7 @@ func runBrowserHealth(out io.Writer, configPath string) error {
 		e := hf.Sites[s]
 		line := fmt.Sprintf("  %-14s %-9s %s", s, e.Status, healthAge(now, e.RecordedAt))
 		if e.Reason != "" {
-			line += "  — " + e.Reason
+			line += "  - " + e.Reason
 		}
 		// C1 capture telemetry — the honest landed-vs-dropped surface. Shown
 		// whenever any capture activity has been recorded for the site.
@@ -1059,7 +1135,7 @@ func runBrowserHealth(out io.Writer, configPath string) error {
 			if e.Reason != "" {
 				line += "  (" + seg + ")"
 			} else {
-				line += "  — " + seg
+				line += "  - " + seg
 			}
 		}
 		fmt.Fprintln(out, line)
@@ -1096,24 +1172,88 @@ func resolveBrowserIngestToken(cfg config.Config) (string, error) {
 	if t := cfg.Browser.Listener.Token; t != "" {
 		return t, nil
 	}
-	path := filepath.Join(browserObserverDir(cfg), "browser-ingest-token")
-	if raw, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: path derived from the daemon's own config dir.
-		if tok := string(bytes.TrimSpace(raw)); tok != "" {
-			return tok, nil
-		}
+	return resolveLocalTokenFile(filepath.Join(browserObserverDir(cfg), "browser-ingest-token"))
+}
+
+// resolveLocalTokenFile returns the shared secret stored at path, generating
+// and persisting a fresh 32-byte random one (0600) when the file is missing
+// or empty. One owner for every daemon-generated listener token (the browser
+// rail, the OTLP receiver's non-loopback gate).
+//
+// The file is a credential, so it is trusted only in a shape no other local
+// account can read or redirect (P3-27): a symlink or any non-regular file is
+// refused (fail closed); a file another account owns is refused; a regular
+// file of ours with group or other bits is repaired to 0600 before use. A new
+// file is created with O_EXCL, so a file planted between the check and the
+// write is never written through.
+func resolveLocalTokenFile(path string) (string, error) {
+	tok, err := readLocalTokenFile(path)
+	if err != nil || tok != "" {
+		return tok, err
 	}
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
-	tok := hex.EncodeToString(buf)
+	tok = hex.EncodeToString(buf)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: path derived from the daemon's own config dir.
+	if errors.Is(err, os.ErrExist) {
+		// An empty token file of ours (checked above), or a concurrent
+		// creator: take a token another process wrote, else replace the
+		// empty file.
+		if again, rerr := readLocalTokenFile(path); rerr != nil || again != "" {
+			return again, rerr
+		}
+		if rmErr := os.Remove(path); rmErr != nil {
+			return "", fmt.Errorf("replace empty token file: %w", rmErr)
+		}
+		f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: as above.
+	}
+	if err != nil {
+		return "", fmt.Errorf("persist token: %w", err)
+	}
+	if _, err := f.WriteString(tok + "\n"); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("persist token: %w", err)
+	}
+	if err := f.Close(); err != nil {
 		return "", fmt.Errorf("persist token: %w", err)
 	}
 	return tok, nil
+}
+
+// readLocalTokenFile reads an existing token file under the rules above. A
+// missing file is ("", nil); an empty one is ("", nil) too.
+func readLocalTokenFile(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("token file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("token file %s is not a regular file (a symlink or special file); refusing to use it", path)
+	}
+	if err := ensureTokenFilePrivate(path, info); err != nil {
+		return "", err
+	}
+	f, err := os.Open(path) //nolint:gosec // G304: path derived from the daemon's own config dir.
+	if err != nil {
+		return "", fmt.Errorf("token file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if opened, serr := f.Stat(); serr != nil || !os.SameFile(info, opened) {
+		return "", fmt.Errorf("token file %s changed while it was being read; refusing to use it", path)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 4096))
+	if err != nil {
+		return "", fmt.Errorf("token file: %w", err)
+	}
+	return string(bytes.TrimSpace(raw)), nil
 }
 
 // browserSiteEnabled reports whether the daemon accepts this turn's site.

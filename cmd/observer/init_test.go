@@ -2,9 +2,47 @@ package main
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// TestResolveTools_AllReturnsLongTailVendors pins that `observer init
+// --all` (and the zero-flag auto-detect default, which resolveTools
+// shares the same "requested" accumulation for) actually surfaces
+// every one of the seven long-tail prompt-submit-only vendors with no
+// dedicated CLI flag — the same list
+// TestAutoRegisterRemediation_LongTailVendorsNameNoDedicatedFlag
+// (start_test.go) enumerates, kept identical here for consistency.
+// Each of these seven is a `PromptLaneHook` registry row with
+// Hook.AutoWired=true and a Hook.Mechanism hookSupported's switch
+// explicitly recognizes (see internal/integration's registry rows +
+// hookSupported in init.go), so autoInitSupported should pass all
+// seven today — but this test asserts the RESULT of that live
+// three-predicate OR (hookSupported || mcpSupported || routeSupported),
+// not a hardcoded assumption, so it would fail loudly (not silently
+// pass on a stale list) if a future registry change ever regressed
+// one of them out of auto-detection.
+func TestResolveTools_AllReturnsLongTailVendors(t *testing.T) {
+	longTail := []string{"gemini-cli", "qwen-code", "droid", "qoder", "poolside", "devin", "command-code"}
+	installed := append([]string{"claude-code"}, longTail...)
+
+	got := resolveTools(true, false, false, false, false, installed, false)
+
+	for _, tool := range longTail {
+		wantSelected := autoInitSupported(tool)
+		gotSelected := slices.Contains(got, tool)
+		if gotSelected != wantSelected {
+			t.Errorf("resolveTools(--all) selected=%v for %q, but autoInitSupported(%q)=%v (registry/predicate mismatch)", gotSelected, tool, tool, wantSelected)
+		}
+		if !wantSelected {
+			t.Errorf("autoInitSupported(%q) = false - this long-tail vendor is no longer auto-detected by --all; if this is an intentional registry change, update this test and the brief that assumed all seven pass", tool)
+		}
+	}
+	if !slices.Contains(got, "claude-code") {
+		t.Errorf("resolveTools(--all) = %v, want it to also include claude-code", got)
+	}
+}
 
 // TestSplitExtensionIDs pins the comma-separated --browser-extension-id
 // tokeniser: elements are trimmed, empties dropped, order preserved, and a
@@ -121,13 +159,13 @@ func TestResolveBrowserExtensionIDFlag(t *testing.T) {
 			want:    idA + "," + idB,
 		},
 		{
-			name:    "valid multi-id, flag not changed (defensive — shouldn't happen in practice)",
+			name:    "valid multi-id, flag not changed (defensive - shouldn't happen in practice)",
 			changed: false,
 			raw:     idA + "," + idB,
 			want:    idA + "," + idB,
 		},
 		{
-			name:    "supplied but tokenizes to zero ids — commas and whitespace only — is rejected",
+			name:    "supplied but tokenizes to zero ids - commas and whitespace only - is rejected",
 			changed: true,
 			raw:     ", ,",
 			wantErr: true,
@@ -145,13 +183,13 @@ func TestResolveBrowserExtensionIDFlag(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "flag not supplied at all — empty string tolerated (placeholder path)",
+			name:    "flag not supplied at all - empty string tolerated (placeholder path)",
 			changed: false,
 			raw:     "",
 			want:    "",
 		},
 		{
-			name:    "flag not supplied at all — zero-token garbage tolerated too (defensive)",
+			name:    "flag not supplied at all - zero-token garbage tolerated too (defensive)",
 			changed: false,
 			raw:     ", ,",
 			want:    "",

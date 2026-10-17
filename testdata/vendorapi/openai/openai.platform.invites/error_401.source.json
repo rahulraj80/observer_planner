@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "Inferred",
+    "error.message": "Inferred",
+    "error.param": "VerifiedOfficial",
+    "error.type": "Inferred"
+  },
+  "fixture_sha256": "b69198b2394821db1c9113550428f61b639a4209ea2f4f63f30b43b684bb0ffa",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/invites",
+    "status": 401
+  },
+  "notes": "Envelope from the official openai-openapi ErrorResponse schema (error.code, message, param, type required); the code, type and message values are synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.invites"
+}

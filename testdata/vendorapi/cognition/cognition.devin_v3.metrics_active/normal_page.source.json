@@ -1,0 +1,28 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].active_users": "VerifiedOfficial",
+    "[].end_time": "Inferred",
+    "[].start_time": "Inferred"
+  },
+  "fixture_sha256": "d2e6ec611d53fc7720c00f436cefbca3b7ef0960fbedce3f56055b5af2bde380",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/metrics/dau",
+    "query": {
+      "time_after": "1791072000",
+      "time_before": "1791244800"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from ActiveUserMetricsListResponse (an array, ascending, no overlapping periods) / ActiveUserMetricsResponse. One entry per UTC day (documented). start_time and end_time are integers in the schema; Unix seconds is Inferred. min_sessions and min_searches stay at their documented default 1.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.metrics_active"
+}

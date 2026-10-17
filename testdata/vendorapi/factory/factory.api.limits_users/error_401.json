@@ -1,0 +1,5 @@
+{
+  "title": "Unauthorized",
+  "detail": "Missing or invalid API key",
+  "status": 401
+}

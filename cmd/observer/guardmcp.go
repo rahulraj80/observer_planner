@@ -420,7 +420,7 @@ func newGuardMCPApproveCmd() *cobra.Command {
 				return err
 			}
 			if n == 0 {
-				return fmt.Errorf("no pin for server %q — check `observer guard mcp list` for the exact name", name)
+				return fmt.Errorf("no pin for server %q - check `observer guard mcp list` for the exact name", name)
 			}
 			fmt.Fprintf(out, "approved %d pin(s) for %s; its results no longer mark mcp_unpinned taint\n", n, name)
 			return nil
@@ -469,7 +469,7 @@ func newGuardMCPReportCmd() *cobra.Command {
 			for _, c := range sortedKeysMCP(byClient) {
 				fmt.Fprintf(out, "  %-12s %d server(s)\n", c, byClient[c])
 			}
-			fmt.Fprintf(out, "Pins:        %d total — %d approved, %d pinned (unapproved), %d drifted; tools observed for %d\n",
+			fmt.Fprintf(out, "Pins:        %d total - %d approved, %d pinned (unapproved), %d drifted; tools observed for %d\n",
 				len(pins), byStatus["approved"], byStatus["pinned"], byStatus["drifted"], toolsSeen)
 
 			since := time.Now().UTC().Add(-time.Duration(windowDays) * 24 * time.Hour)

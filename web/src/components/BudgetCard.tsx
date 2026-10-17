@@ -1,9 +1,18 @@
 import { useState } from "react";
-import { ChartShell, Pill } from "@/components/primitives";
+import { Link } from "react-router-dom";
+import { ChartShell, ComboChip, InlineLoading, Meter, Pill } from "@/components/primitives";
+
+// rootBaseName is a project root's last path segment (the chip label).
+function rootBaseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+import type { Tone } from "@shared/lib/tone";
 import { TitleWithHelp } from "@/components/HelpInd";
 import { useApi } from "@/lib/useApi";
-import { fetchJSON } from "@/lib/api";
-import { fmtUSD } from "@/lib/format";
+import { saveConfigSection } from "@/lib/configSectionSave";
+import { dollarsShown, fmtUSD } from "@/lib/format";
+import { budgetShareLine } from "@/lib/costDisplayModel";
 import type {
   BudgetResponse,
   BudgetScope,
@@ -20,6 +29,13 @@ import type {
 // fresh by /api/budget and the Analysis headline on every load, so a
 // save applies on the next poll — no daemon restart, hence no
 // restart-pending store write here.
+//
+// In the org's token-usage view (format.ts cost affordances) the card keeps
+// every budget's share of its cap and its warn/over state but no dollar
+// amount; the editor (dollar caps) is not offered there. These advisory
+// budgets are dollar caps only, so there is no token figure to show in their
+// place; the node's TOKEN caps are the guard budget's, editable on Security >
+// Budgets, and the card links there (T-204: no config-file dead end).
 export function BudgetCard() {
   const budget = useApi<BudgetResponse>("/api/budget", undefined, [], {
     refreshMs: 60000,
@@ -29,18 +45,27 @@ export function BudgetCard() {
   return (
     <ChartShell
       title={<TitleWithHelp text="Budget" helpId="card.budget" />}
-      sub="Advisory monthly budgets — banners at 80% and 100%, never a gate"
+      sub="Advisory monthly budgets - banners at 80% and 100%, never a gate"
       right={
-        <button
-          type="button"
-          onClick={() => setEditing((e) => !e)}
-          className="rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-[11px] text-fg-2 hover:bg-bg-3"
-        >
-          {editing ? "close" : "edit budgets"}
-        </button>
+        dollarsShown() ? (
+          <button
+            type="button"
+            onClick={() => setEditing((e) => !e)}
+            className="rounded-2 border border-line-2 bg-bg-3 px-2 py-0.5 text-[11px] text-fg-2 hover:bg-bg-4"
+          >
+            {editing ? "close" : "edit budgets"}
+          </button>
+        ) : (
+          <Link
+            to="/security?tab=budgets"
+            className="rounded-2 border border-line-2 bg-bg-3 px-2 py-0.5 text-[11px] text-fg-2 hover:bg-bg-4"
+          >
+            set token caps
+          </Link>
+        )
       }
     >
-      {editing ? (
+      {editing && dollarsShown() ? (
         <BudgetEditor
           onSaved={() => {
             setEditing(false);
@@ -49,11 +74,18 @@ export function BudgetCard() {
         />
       ) : !budget.data?.configured ? (
         <p className="py-4 text-center text-[12px] text-fg-3">
-          No budgets set. “Edit budgets” to add a monthly cap — you get a
-          quiet banner at 80% and 100%, and spend is never blocked.
+          {dollarsShown()
+            ? "No budgets set. “Edit budgets” to add a monthly cap - you get a quiet banner at 80% and 100%, and spend is never blocked."
+            : "No budgets set. A monthly cap gives a quiet banner at 80% and 100%; usage is never blocked."}
         </p>
       ) : (
         <div className="space-y-3">
+          {!dollarsShown() && (
+            <p className="text-[11px] text-fg-3">
+              Shown as a share of each cap: your organization hides dollar
+              amounts on developer dashboards.
+            </p>
+          )}
           {budget.data.global && (
             <ScopeBar
               sc={budget.data.global}
@@ -77,6 +109,14 @@ export function BudgetCard() {
   );
 }
 
+// BUDGET_THRESHOLD_TONE - a budget scope's threshold flag (BudgetScope in
+// lib/types.ts): over budget is danger, past 80% warn, otherwise success.
+const BUDGET_THRESHOLD_TONE: Readonly<Record<string, Tone>> = {
+  over100: "danger",
+  warn80: "warn",
+  "": "success",
+};
+
 function ScopeBar({
   sc,
   label,
@@ -89,34 +129,33 @@ function ScopeBar({
   daysInMonth: number;
 }) {
   const pct = Math.min(100, sc.pct);
-  const tone =
-    sc.threshold === "over100"
-      ? "var(--danger)"
-      : sc.threshold === "warn80"
-        ? "var(--warn)"
-        : "var(--success)";
+  const tone = BUDGET_THRESHOLD_TONE[sc.threshold ?? ""] ?? "success";
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-[12px]">
         <span className="min-w-0 truncate font-mono text-[11px] text-fg-2">
           {label}
         </span>
-        <span className="shrink-0 tabular-nums text-fg-1">
-          {fmtUSD(sc.mtd_usd)} / {fmtUSD(sc.budget_usd)}
-          <span className="ml-1.5 text-[10.5px] text-fg-3">
-            ({Math.round(sc.pct)}% · day {daysElapsed}/{daysInMonth} · on pace{" "}
-            {fmtUSD(sc.forecast_usd)})
+        {dollarsShown() ? (
+          <span className="shrink-0 tabular-nums text-fg-1">
+            {fmtUSD(sc.mtd_usd)} / {fmtUSD(sc.budget_usd)}
+            <span className="ml-1.5 text-[10.5px] text-fg-3">
+              ({Math.round(sc.pct)}% · day {daysElapsed}/{daysInMonth} · on pace{" "}
+              {fmtUSD(sc.forecast_usd)})
+            </span>
           </span>
-        </span>
+        ) : (
+          <span className="shrink-0 text-right tabular-nums text-[11px] text-fg-1">
+            {budgetShareLine(sc, daysElapsed, daysInMonth)}
+          </span>
+        )}
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-pill bg-bg-3">
-        <span
-          className="block h-full"
-          style={{ width: `${pct}%`, background: tone }}
-        />
-      </div>
+      <Meter ratio={pct / 100} tone={tone} trackClassName="h-2 w-full" />
       {sc.threshold === "over100" && (
-        <Pill variant="danger">over budget — advisory only</Pill>
+        <Pill variant="danger">over budget - advisory only</Pill>
+      )}
+      {sc.threshold === "warn80" && !dollarsShown() && (
+        <Pill variant="warn">past 80% of cap - advisory only</Pill>
       )}
     </div>
   );
@@ -131,7 +170,6 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
   const cfg = useApi<{
     config: {
       Intelligence: {
-        CodeGraph: unknown;
         APIKeyEnv: string;
         SummaryModel: string;
         MonthlyBudgetUSD: number;
@@ -150,7 +188,7 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
 
   const intel = cfg.data?.config.Intelligence;
   if (!intel) {
-    return <p className="py-3 text-[12px] text-fg-3">Loading config…</p>;
+    return <InlineLoading label="Loading config" className="py-3" />;
   }
   const globalVal = global ?? String(intel.MonthlyBudgetUSD || "");
   const projVals =
@@ -174,15 +212,11 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
       if (v.trim() !== "" && Number.isFinite(n) && n > 0) budgets[root] = n;
     }
     try {
-      await fetchJSON("/api/config/section/intelligence", undefined, {
-        method: "PUT",
-        body: JSON.stringify({
-          CodeGraph: intel.CodeGraph,
-          APIKeyEnv: intel.APIKeyEnv,
-          SummaryModel: intel.SummaryModel,
-          MonthlyBudgetUSD: Number(globalVal) > 0 ? Number(globalVal) : 0,
-          ProjectBudgetsUSD: budgets,
-        }),
+      await saveConfigSection("intelligence", {
+        APIKeyEnv: intel.APIKeyEnv,
+        SummaryModel: intel.SummaryModel,
+        MonthlyBudgetUSD: Number(globalVal) > 0 ? Number(globalVal) : 0,
+        ProjectBudgetsUSD: budgets,
       });
       onSaved();
     } catch (e) {
@@ -203,7 +237,7 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
           value={globalVal}
           onChange={(e) => setGlobal(e.target.value)}
           placeholder="0 = off"
-          className="w-28 rounded-2 border border-line-2 bg-bg-1 px-2 py-1 text-right tabular-nums text-fg-1 outline-none focus:border-accent/60"
+          className="w-28 rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-right tabular-nums text-fg-1 outline-none focus:border-accent/60"
         />
       </label>
       {Object.entries(projVals).map(([root, v]) => (
@@ -220,7 +254,7 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
               onChange={(e) =>
                 setPerProject({ ...projVals, [root]: e.target.value })
               }
-              className="w-28 rounded-2 border border-line-2 bg-bg-1 px-2 py-1 text-right tabular-nums text-fg-1 outline-none focus:border-accent/60"
+              className="w-28 rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-right tabular-nums text-fg-1 outline-none focus:border-accent/60"
             />
             <button
               type="button"
@@ -229,7 +263,7 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
                 delete next[root];
                 setPerProject(next);
               }}
-              className="rounded-2 border border-line-2 bg-bg-2 px-1.5 py-0.5 text-[10.5px] text-fg-3 hover:bg-bg-3"
+              className="rounded-2 border border-line-2 bg-bg-3 px-1.5 py-0.5 text-[10.5px] text-fg-3 hover:bg-bg-4"
             >
               remove
             </button>
@@ -237,18 +271,26 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
         </label>
       ))}
       <div className="flex items-center gap-2">
-        <select
+        {/* Project roots are long absolute paths: the chip shows the
+            folder name, the popover row the full path as a second line. */}
+        <ComboChip
+          label="Add a per-project budget"
+          hideTriggerLabel
+          fullWidth
+          className="min-w-0 flex-1"
           value={addRoot}
-          onChange={(e) => setAddRoot(e.target.value)}
-          className="min-w-0 flex-1 rounded-2 border border-line-2 bg-bg-1 px-2 py-1 font-mono text-[11px] text-fg-2 outline-none"
-        >
-          <option value="">Add a per-project budget…</option>
-          {knownRoots.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
+          onChange={setAddRoot}
+          placeholder="Filter projects…"
+          options={[
+            { value: "", label: <span className="text-fg-3">Add a per-project budget…</span>, searchable: "" },
+            ...knownRoots.map((r) => ({
+              value: r,
+              label: <span className="font-mono">{rootBaseName(r)}</span>,
+              detail: <span className="break-all font-mono">{r}</span>,
+              searchable: r.toLowerCase(),
+            })),
+          ]}
+        />
         <button
           type="button"
           disabled={!addRoot}
@@ -256,7 +298,7 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
             setPerProject({ ...projVals, [addRoot]: "" });
             setAddRoot("");
           }}
-          className="shrink-0 rounded-2 border border-line-2 bg-bg-2 px-2 py-1 text-[11px] text-fg-2 hover:bg-bg-3 disabled:opacity-50"
+          className="shrink-0 rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-[11px] text-fg-2 hover:bg-bg-4 disabled:opacity-50"
         >
           add
         </button>
@@ -265,7 +307,7 @@ function BudgetEditor({ onSaved }: { onSaved: () => void }) {
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10.5px] text-fg-3">
           Saves to config.toml (prior version kept at .bak). Applies on the
-          next refresh — no restart.
+          next refresh - no restart.
         </span>
         <button
           type="button"

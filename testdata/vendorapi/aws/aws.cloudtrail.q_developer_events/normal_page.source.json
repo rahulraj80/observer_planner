@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "Events": "VerifiedOfficial",
+    "Events[]": "VerifiedOfficial",
+    "Events[].AccessKeyId": "VerifiedOfficial",
+    "Events[].CloudTrailEvent": "VerifiedOfficial",
+    "Events[].EventId": "VerifiedOfficial",
+    "Events[].EventName": "VerifiedOfficial",
+    "Events[].EventSource": "VerifiedOfficial",
+    "Events[].EventTime": "Inferred",
+    "Events[].ReadOnly": "VerifiedOfficial",
+    "Events[].Resources": "VerifiedOfficial",
+    "Events[].Resources[]": "VerifiedOfficial",
+    "Events[].Resources[].ResourceName": "VerifiedOfficial",
+    "Events[].Resources[].ResourceType": "VerifiedOfficial",
+    "Events[].Username": "VerifiedOfficial",
+    "NextToken": "VerifiedOfficial"
+  },
+  "fixture_sha256": "768940b017574e249b488a3c483420289bf47fe68df6aeb28ff52efcf4a5b540",
+  "http": {
+    "method": "POST",
+    "path": "/",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/x-amz-json-1.1"
+    }
+  },
+  "notes": "Synthesized from the LookupEvents response syntax (the reference shows no response example). The EventId, EventName, EventSource and Username values follow the Amazon Q Developer CloudTrail page's examples (SendMessage, PassRequest); AccessKeyId is a non-credential-shaped placeholder and the resource names and types are synthetic placeholders the driver lands as opaque strings. EventTime as integer epoch seconds is Inferred (the AWS JSON protocol may send a fraction). NextToken is a synthetic opaque token so the page set spans two pages.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "AWS CloudTrail API Reference LookupEvents (API version 2013-11-01), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "09bf6d7b77b9f9d5f71b932f671aad7828888af1b3a26cd5e3f30a54c8d417cc",
+  "source_url": "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_LookupEvents.html",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "aws.cloudtrail.q_developer_events"
+}

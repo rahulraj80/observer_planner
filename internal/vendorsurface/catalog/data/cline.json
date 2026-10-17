@@ -1,0 +1,4822 @@
+{
+ "group": "cline",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/cline-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "cline.api.account_auth_token",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: user sign-in"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "session",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "POST /api/v1/auth/token, /api/v1/auth/refresh, /api/v1/auth/authorize (extension and CLI sign-in tokens, minted automatically)",
+   "read_write_doc": "n/a",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (SRC; DOC says \"do not handle manually\")",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.api_keys",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: caller"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET/POST /api/v1/api-keys; DELETE /api/v1/api-keys/{key_id}. Caller-owned keys; no scopes, no expiry; deletion immediate",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.budget_request",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: member"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "client cooldown"
+   },
+   "tier": {
+    "doc": "Enterprise (inferred)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "POST /api/v1/users/me/budget/request (member asks org admin to raise spend limit; UI \"Request Increase\")",
+   "read_write_doc": "W",
+   "class_doc": "Limits",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (SRC only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_api_keys",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin (inferred)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{id}/api-keys (list only; no org create/delete documented)",
+   "read_write_doc": "R",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (schema undoc)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_auto_top_up",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET/PUT /api/v1/organizations/{orgId}/auto-top-up",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (body undoc)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_balance",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner (billing)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/balance -> {balance, organizationId} (credits)",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_credits",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "POST /api/v1/organizations/{orgId}/credits/checkout; POST .../credits/purchase",
+   "read_write_doc": "W (money; never driven)",
+   "class_doc": "Cost",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (not to be driven)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "event",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_invites",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "invite expiry \"if configured\"",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET/POST /api/v1/organizations/{orgId}/invites; GET .../invites/count; DELETE .../invites/{inviteId}; invitee POST /api/v1/invites/accept",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_member_usages",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin (members read own via SRC client)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/members/{memberId}/usages -> items[] as row 5 plus memberDisplayName, memberEmail",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (fields from SRC)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_members",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin (Admin cannot remove Admins)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "removed members' audit history kept (DOC)",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/members; DELETE same path (remove members, body undoc)",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/team-management/managing-members.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_metrics",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "undoc",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/metrics \"usage metrics\"",
+   "read_write_doc": "R",
+   "class_doc": "Adoption, Usage",
+   "grain_doc": "undoc (likely OrgDay)",
+   "build": "awaiting_reference",
+   "build_doc": "Driverable path, AwaitingReference shape (no schema in DOC or SRC)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_payment_method",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/payment-method/default; POST .../payment-method/setup-session",
+   "read_write_doc": "R/W",
+   "class_doc": "BillingExport",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (read only for Observer)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_payments",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "undoc",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/payments, /{paymentId}, /{paymentId}/status, /provider/{paymentId}",
+   "read_write_doc": "R",
+   "class_doc": "BillingExport",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_plan",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise (teams plan type exists in SRC)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "history list",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/plan; GET .../plan/history; GET .../plan/{planId}; POST .../plan; DELETE .../plan/{planId}",
+   "read_write_doc": "R/W",
+   "class_doc": "Seats, BillingExport",
+   "grain_doc": "Snapshot + Event (history)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_plan_seats",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "PUT /api/v1/organizations/{orgId}/plan/seats (seat count). Seats consumed per member and per pending invite (DOC)",
+   "read_write_doc": "W",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (body undoc)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_promotions",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{id}/promotions",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_remote_config",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{id}/remote-config (no documented write; write is console UI)",
+   "read_write_doc": "R",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (body = RemoteConfigSchema, SRC zod)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MCPAllowList",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_roles",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin / owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/members/available-roles; PUT /api/v1/organizations/{orgId}/members/{memberId}/role. Fixed roles owner/admin/member (SRC enum)",
+   "read_write_doc": "R/W",
+   "class_doc": "Roles",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.org_usages",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "undoc",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /api/v1/organizations/{orgId}/usages",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "undoc (\"aggregated usage\")",
+   "build": "awaiting_reference",
+   "build_doc": "Driverable path, AwaitingReference shape",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.orgs",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: Owner for PUT/DELETE (inferred from role doc)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "POST /api/v1/organizations; GET/PUT/DELETE /api/v1/organizations/{id}. SRC fields id, name, memberCount, remoteConfigEnabled, defaultRemoteConfig, externalOrganizationId, createdAt, updatedAt, deletedAt",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity (org object)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.plans",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: any"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "catalog",
+   "mechanism_doc": "GET /api/v1/plans (SRC query `type=individual or teams`; fields displayName, features.included[], interval, pricePerSeatCents)",
+   "read_write_doc": "R",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_active_account",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: caller"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "self",
+   "mechanism_doc": "PUT /api/v1/users/active-account body {organizationId or null}",
+   "read_write_doc": "W self",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_auto_top_up",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET/PUT /api/v1/users/{id}/auto-top-up",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_balance",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/users/{id}/balance -> {balance, userId}",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_credits",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "POST /api/v1/users/credits/checkout; POST /api/v1/users/{id}/credits/purchase",
+   "read_write_doc": "W (money; never driven)",
+   "class_doc": "Cost",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (not to be driven)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "event",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_payment_method",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/users/{id}/payment-method/default; POST .../payment-method/setup-session",
+   "read_write_doc": "R/W",
+   "class_doc": "BillingExport",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (read only for Observer)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_payments",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/users/{id}/payments, /payments/{paymentId}, /payments/{paymentId}/status, /payments/provider/{paymentId}. SRC fields paidAt, creatorId, amountCents, credits",
+   "read_write_doc": "R",
+   "class_doc": "BillingExport",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_plan",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/users/me/plan -> {plan, currentPeriodStart/End, cancelAt, subscriptionId, planHistoryId} (ClinePass / individual plan)",
+   "read_write_doc": "R",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (SRC only, not in DOC)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_promotions",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/users/{id}/promotions",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_remote_config",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: caller (member)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live (clients cache, coordinated refresh per CHANGELOG)",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user effective",
+   "mechanism_doc": "GET /api/v1/users/me/remote-config. SRC shape {organizationId, value (JSON string), enabled, organizations[]}",
+   "read_write_doc": "R",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.user_usages",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: self"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undoc (no params in SRC)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/v1/users/{id}/usages -> items[] {id, generationId, createdAt, aiInferenceProviderName, aiModelName, aiModelTypeName, promptTokens, completionTokens, totalTokens, costUsd, creditsUsed, operation, organizationId, userId, metadata}",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (fields from SRC)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.api.users_me",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key or account auth token as Authorization: Bearer (Enterprise API reference, Authentication); role: caller"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any signed-in"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user (self)",
+   "mechanism_doc": "GET/PATCH/DELETE /api/v1/users/me; POST /api/v1/users/me/accept-terms. DOC example fields id, email, name, active_account_id; SRC adds displayName, photoUrl, organizations[{organizationId, memberId, name, roles, active}]",
+   "read_write_doc": "R/W self",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/blob/main/sdk/packages/core/src/account/types.ts",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/authentication.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Cline Enterprise API reference (api-reference.md) and api/authentication.md: every endpoint takes Authorization: Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.console.activity_and_audit",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "\"preserved for compliance\"",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "app.cline.bot \"Activity\" tab; \"selective audit logging for administrative operations\"; \"Authentication Logs\" (pricing); removed members' activity logs preserved",
+   "read_write_doc": "R UI",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no API, no export)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/overview.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://cline.bot/pricing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.console.bulk_invite_csv",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "manual",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "bulk invite CSV import via support@cline.bot",
+   "read_write_doc": "W manual",
+   "class_doc": "Identity",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.console.dashboard_analytics",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "30 d chart shown",
+   "per_user_doc": "both",
+   "mechanism_doc": "app.cline.bot Home: Daily Spend, Active Users, Lines of Code, Avg Cost per Request, Cost Trends (30 d), LOC by model, Top Spending Users, Credits",
+   "read_write_doc": "R UI",
+   "class_doc": "Adoption, Cost, LOC",
+   "grain_doc": "OrgDay (+ top users)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no export documented; org_metrics may back it, unproven)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "org_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://cline.bot/enterprise",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.console.member_spend_limits",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "real time enforcement",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "console setting: per-member USD cap, period daily or monthly, enforced at Cline inference (see row 34); \"Spend Limit Reached\" UI shipped (CHANGELOG)",
+   "read_write_doc": "W UI",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no API read or write)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/blob/main/CHANGELOG.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.console.remote_config_editor",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.console",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "console admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "\"instantly\" to signed-in members",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "app.cline.bot Settings > Cline Settings (\"Enable settings\", API Provider, per-provider fields, Save) and Settings > Enterprise Telemetry (Prompt Uploading, Test Connection); dashboard/organization?tab=settings for OTel",
+   "read_write_doc": "W UI (API read via row 14)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly for write",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/configuration/remote-configuration/overview.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/monitoring/opentelemetry.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.console.sso_attribute_mapping",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "next login",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "Settings > Authentication > User Attributes (email, name mapping)",
+   "read_write_doc": "W UI",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/onboarding.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.export.otel_logs",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.export",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OTLP receiver (Observer PushOTLP)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise (remote config) or any (env override)"
+   },
+   "freshness_doc": "batch 5 s",
+   "lookback_doc": "receiver-side",
+   "per_user_doc": "per-user anonymized",
+   "mechanism_doc": "client OTLP logs (gRPC default, HTTP/protobuf, HTTP/JSON) to customer collector. Events incl. task.created/completed (tokens_total), task.conversation_turn (tokens_in/out), task.tokens (tokens_in, tokens_out, cached_tokens, cost), task.tool_used, task.mcp_tool_called, task.terminal_execution (command_hash), task.ai_output.accepted/rejected (lines_added, lines_removed, file_count), task.subagent_*, task.skill_used, hooks.*, worktree.*, user.auth_*, ui.model_selected, task.provider_api_error, cline.test.connection. Common attrs timestamp, user_id (anonymized), session_id, extension_version, host_type (vscode, jetbrains, cli); resource service_name=cline",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry, Sessions, Usage, Cost, LOC, Adoption",
+   "grain_doc": "PerCall / Event",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "per_call",
+     "unit": "lines",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/monitoring/opentelemetry-events.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.export.otel_metrics",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.export",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OTLP"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "as row 51"
+   },
+   "freshness_doc": "60 s default",
+   "lookback_doc": "receiver",
+   "per_user_doc": "anonymized",
+   "mechanism_doc": "client OTLP metrics; names not catalogued (example cline.task.completed, cline.task.tokens); traces \"not yet implemented\"",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry, Usage",
+   "grain_doc": "UserHour-ish (60 s export)",
+   "build": "buildable",
+   "build_doc": "Driverable (names partly undoc)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "user_hour",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "user_hour",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.export.prompt_storage_bucket",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.export",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "customer bucket read creds (Observer PullBucket)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "bucket listing"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "intervalMs 30 s default",
+   "lookback_doc": "customer lifecycle",
+   "per_user_doc": "per-session, no user field",
+   "mechanism_doc": "client writes to CUSTOMER bucket: `tasks/{taskId}/api_conversation_history.json` (Anthropic MessageParam array incl. all tool I/O) + metadata taskId, createdAt, lastModified, modelInfo.{id,provider}, tokensUsed.{input,output}; no user id; S3 + R2 documented, Azure in SRC; CLI uploads session messages too (SRC)",
+   "read_write_doc": "R",
+   "class_doc": "Content, Sessions",
+   "grain_doc": "PerSession (per task)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.idp.scim",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.idp",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "\"SSO, OIDC, and SCIM provisioning\" in pricing FAQ only; onboarding describes JIT, \"No manual user invites or seat management\"; no SCIM endpoint documented",
+   "read_write_doc": "n/a",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (claimed, unverified)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://cline.bot/pricing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.idp.workos_audit",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.idp",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "WorkOS dashboard"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "WorkOS-side",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "\"Review WorkOS audit logs for authentication events\" (WorkOS dashboard of the org's WorkOS environment)",
+   "read_write_doc": "R UI",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.idp.workos_sso",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.idp",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "WorkOS dashboard (customer admin invited)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "next login",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "WorkOS AuthKit SAML / OIDC (Okta, Entra, Google Workspace, AWS IAM Identity Center, generic, Keycloak via generic); JIT provisioning; IdP Admin/Owner -> Cline Admin, Member -> Member at next login; IdP removal revokes access",
+   "read_write_doc": "W in IdP",
+   "class_doc": "Identity",
+   "grain_doc": "Event (login)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no Cline API; WorkOS-side only)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/sso-setup.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.inference.chat_completions_usage",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc limits; 429"
+   },
+   "tier": {
+    "doc": "any (Cline provider)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-call",
+   "mechanism_doc": "POST https://api.cline.bot/api/v1/chat/completions; final stream chunk usage {prompt_tokens, completion_tokens, prompt_tokens_details.cached_tokens, cost (USD)}; generation id `gen-...` (= usages.generationId, join key)",
+   "read_write_doc": "R (proxy capture)",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/api/chat-completions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.inference.errors",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.inference",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "backoff 1s exp"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-call",
+   "mechanism_doc": "402 insufficient_credits (details.current_balance in SRC), 429 rate limit (no limits or headers documented), x-request-id",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits, Limits",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no published limits)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/api/errors.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.inference.spend_limit_error",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.inference",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise org members"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "429 body code SPEND_LIMIT_EXCEEDED with budget_period (daily or monthly), limit_usd, spent, resets_at (\"org-enforced budget cap\")",
+   "read_write_doc": "R (observed on proxy)",
+   "class_doc": "Limits",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (SRC + CHANGELOG; DOC errors page lists only 402)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/api/errors.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.node.command_permissions",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "MDM / env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "process start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-node",
+   "mechanism_doc": "CLI env `CLINE_COMMAND_PERMISSIONS` JSON {allow, deny, allowRedirects}; `--auto-approve` default true",
+   "read_write_doc": "W node",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node, cline-cli only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/cli/cli-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.node.enterprise_manifest",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "session start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-node",
+   "mechanism_doc": "CLI fetches org remote config and writes a manifest under workspace `.cline/enterprise/` (git-commit risk)",
+   "read_write_doc": "R node",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (ISS + SRC)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline/issues",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.node.global_settings_telemetry_opt_out",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-node",
+   "mechanism_doc": "`telemetryOptOut` in `~/.cline/data/settings/global-settings.json`, read by VS Code, Desktop and CLI (CLI has no UI setting)",
+   "read_write_doc": "W node",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (ISS only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline/issues",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/issues/14853",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.node.hooks",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file / MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "per event",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-node",
+   "mechanism_doc": "hooks dirs `~/.cline/hooks` (`--hooks-dir`, `CLINE_HOOKS_DIR`) and project `.cline/hooks/`; `cline hook` reads payload on stdin",
+   "read_write_doc": "W node",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/customization/hooks.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.node.otel_env_override",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "local_file",
+    "doc": "MDM / env (Rail B)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "process start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-node",
+   "mechanism_doc": "env `CLINE_OTEL_TELEMETRY_ENABLED`, `CLINE_OTEL_METRICS_EXPORTER`, `CLINE_OTEL_LOGS_EXPORTER`, `CLINE_OTEL_EXPORTER_OTLP_{PROTOCOL,ENDPOINT,HEADERS,INSECURE}`, per-signal `..._METRICS_/..._LOGS_{PROTOCOL,ENDPOINT}`, `CLINE_OTEL_METRIC_EXPORT_INTERVAL` 60000, `CLINE_OTEL_LOG_BATCH_SIZE` 512, `CLINE_OTEL_LOG_BATCH_TIMEOUT` 5000, `CLINE_OTEL_LOG_MAX_QUEUE_SIZE` 2048, `TEL_DEBUG_DIAGNOSTICS`. Precedence env > remote config > defaults; bypasses user telemetry opt-out",
+   "read_write_doc": "W node",
+   "class_doc": "Telemetry, Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/monitoring/opentelemetry_override.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.global_instructions",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`globalRules[]`, `globalWorkflows[]` ({alwaysEnabled, name, contents}); VS Code copy adds `globalSkills[]` (\"Enterprise Skills\")",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.kanban",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`kanbanEnabled` (dashboard toggle; read by nothing per #14765)",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read (unenforced)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/issues",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.mcp_controls",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`mcpMarketplaceEnabled`, `allowedMCPServers[{id}]`, `remoteMCPServers[{name,url,alwaysEnabled,headers}]`, `blockPersonalRemoteMCPServers`",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/configuration/infrastructure-configuration/control-other-cline-features/mcp-server-controls.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.otel",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`openTelemetryEnabled`, `openTelemetryMetricsExporter`, `openTelemetryLogsExporter`, `openTelemetryOtlpProtocol`, `openTelemetryOtlpEndpoint`, `openTelemetryOtlpHeaders`, `openTelemetryOtlpMetricsProtocol/Endpoint/Headers`, `openTelemetryOtlpLogsProtocol/Endpoint/Headers`, `openTelemetryMetricExportInterval`, `openTelemetryOtlpInsecure`, `openTelemetryLogBatchSize`, `openTelemetryLogBatchTimeout`, `openTelemetryLogMaxQueueSize`; VS Code copy adds `openTelemetryTracesExporter`",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Telemetry, Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.prompt_uploading",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`enterpriseTelemetry.promptUploading.{enabled, type (s3_access_keys, r2_access_keys, azure_access_keys), s3AccessSettings, r2AccessSettings, azureAccessSettings}` with bucket, accessKeyId, secretAccessKey, region, endpoint, accountId (DOC adds intervalMs, maxRetries, batchSize, maxQueueSize, maxFailedAgeMs, backfillEnabled). Holds a bucket secret: Observer must never store the read body unsanitized",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Content, Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read (secret-bearing)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "snapshot",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/monitoring/prompt-storage.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.provider_settings",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "read via row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "at sign-in / refresh",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`providerSettings.{Cline, AwsBedrock, Vertex, Anthropic, OpenAiCompatible, LiteLLM}`; each has `models[]` allow-list (`id`, plus per-provider thinkingBudgetTokens, temperature, maxTokens, contextWindow, inputPrice, outputPrice, supportsImages, promptCachingEnabled), AwsBedrock customModels/awsRegion/awsUseCrossRegionInference/awsUseGlobalInference/awsBedrockUsePromptCache/awsBedrockEndpoint, Vertex vertexProjectId/vertexRegion, OpenAiCompatible openAiBaseUrl/openAiHeaders/azureApiVersion/azureIdentity, LiteLLM and Anthropic baseUrl. Locks members to the provider",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/cline/cline",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.telemetry_enabled",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`telemetryEnabled` sets default for vendor product telemetry; users can still opt out; #14863 org-off does not stop Cline-provider prompt traces",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Policy, Telemetry",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/monitoring/telemetry.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/issues",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cline.remoteconfig.yolo",
+   "vendor_group": "cline",
+   "vendor": "cline",
+   "plane": "cline.remoteconfig",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "row 14"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "`yoloModeAllowed` (DOC says disables YOLO toggle everywhere; #14765: read by no client, CLI -y not gated)",
+   "read_write_doc": "R API, W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable read (unenforced)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ApprovalPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cline.bot/enterprise-solutions/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/issues",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/cline/cline/issues/14765",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

@@ -23,11 +23,27 @@ const (
 	pushCursorKeyTokenUsage  = "org_push_cursor_token_usage" //nolint:gosec // G101: schema_meta cursor key name, not a credential.
 	pushCursorKeyGuardEvents = "org_push_cursor_guard_events"
 	pushCursorKeyOTelContent = "org_push_cursor_otel_content"
+	pushCursorKeyMCPRelay    = "org_push_cursor_mcp_relay"
+	// pushCursorKeyLimitSnapshots (PushCursor.LimitSnapshots, lane F-WIRE)
+	// is declared in limitgauge.go: its schema_meta key spells the snapshot
+	// table's name, which the privacy sentinel forbids in any string literal
+	// of this file.
+
 	// lastPushPayloadKey holds the JSON of the most recent successfully-pushed
 	// envelope (the content-free rollup, exactly as marshalled before gzip), so
 	// the dashboard can show the developer precisely what was shared. Overwritten
 	// each successful push; cleared on unenrol.
 	lastPushPayloadKey = "org_last_push_payload"
+	// pushBreakerUntilKey / pushBreakerReasonKey hold the OPEN-CIRCUIT record
+	// for the ErrBatchTooLarge breaker (orgclient.oversizedBatchBackoff). The
+	// breaker is a deterministic local condition — a composed envelope larger
+	// than the accepted limit — so retrying it aggressively only burns CPU/RAM
+	// (the 2026-08-26 host-crash amplifier). Parking is correct, but a silent
+	// park means telemetry stops with no operator-visible cause, so the state is
+	// PERSISTED here: `observer org push-status` and the dashboard run in
+	// different processes from the daemon that opened the circuit.
+	pushBreakerUntilKey  = "org_push_breaker_until"
+	pushBreakerReasonKey = "org_push_breaker_reason"
 	// orgPolicyETagKey holds the ETag of the last verified policy bundle
 	// (guard spec §14.2) so the hourly poll sends If-None-Match and an
 	// unchanged bundle costs a 304 instead of a re-download + re-verify.
@@ -38,9 +54,24 @@ const (
 // recent window; T2/T3 cap the per-push row count (windowed-recompute v1 — the
 // server upserts by composite key, so a re-pushed window is idempotent).
 const (
-	obsOrgWindowDays           = 7
-	virtuousCycleAggWindowDays = 90
-	obsOrgRowCap               = 5000
+	obsOrgWindowDays = 7
+	obsOrgRowCap     = 5000
+	// pushEnvelopeBudgetReserve leaves room for envelope field names,
+	// separators, cursors, and identity strings after per-row estimates.
+	// orgclient still enforces the exact serialized length before sending.
+	pushEnvelopeBudgetReserve = 64 << 10
+
+	// pushEnvelopeCursorSlack is the headroom the CURSOR wires leave below
+	// max. Their per-row jsonSize is exact for the row's own JSON but
+	// excludes the array commas BETWEEN rows and the envelope's top-level
+	// keys — caught live 2026-08-27: a 1,371-row backlog drain composed
+	// est just under the 1 MiB cap and serialized 693 bytes OVER it, so
+	// the client's exact-size check (correctly) refused the batch and the
+	// push breaker paused the loop. 16 KiB covers the comma-per-row error
+	// out past 10k rows plus the envelope scaffolding, and stays well
+	// under pushEnvelopeBudgetReserve so snapshot wires still yield more
+	// room than cursor wires, preserving the spine's priority order.
+	pushEnvelopeCursorSlack = 16 << 10
 )
 
 // ObsOrgProviders is the obs→org bridge: the host binds these funcs at the obs
@@ -76,6 +107,10 @@ type ObsOrgProviders struct {
 	// other content tiers (the content_hash always ships). nil when obs is
 	// compiled out (no_obs) or the provider isn't wired.
 	EvalItems func(ctx context.Context, cur orgcontract.ObsCursor, max int) (orgcontract.ObsEvalItemBatch, error) // T7
+	// Egress is the T8 egress-routing decision provider (W5.3): what the
+	// node's compiled routing policy decided for outbound model/provider
+	// calls. nil when obs is compiled out or the tier is off.
+	Egress func(ctx context.Context, cur orgcontract.ObsCursor, max int) (orgcontract.ObsEgressBatch, error) // T8
 }
 
 // PushCursor is the agent's per-table push position. Each field is the
@@ -88,22 +123,227 @@ type PushCursor struct {
 	TokenUsage  int64
 	GuardEvents int64
 	OTelContent int64
+	// MCPRelay is the node relay chain's seq high-water mark (Agent Access
+	// P4 W4e): the per-record MCPRelayEvents wire is a cursor wire like
+	// GuardEvents, read through the internal/mcprelay/record seam so this
+	// file names no relay table.
+	MCPRelay int64
+	// LimitSnapshots is the node's rate-limit snapshot id high-water mark
+	// (lane F-WIRE): the per-session SessionLimitSnapshots wire is a cursor
+	// wire whose rows are COALESCED to the newest per (session, provider),
+	// read through the internal/store/limitgauge.go seam so this file names
+	// no snapshot table. Every id at or below it was shipped, superseded by a
+	// shipped newer row for the same key, or unlinked (never shippable).
+	LimitSnapshots int64
 }
 
 // PushBatch is one batch of content-free rows read from the agent DB, plus the
 // cursor the agent should persist if the server accepts it.
+//
+// EVERY slice field here is a "wire family" and MUST be composed under the
+// envelope budget — the six cursor wires through the fits() guard, every
+// snapshot/aggregate wire through fitRows(budget, …) or its gate-aware wrapper
+// fitSnapshot. A new slice field added without budget handling is precisely the
+// 2026-08-26 host-crash defect, so TestPushBatchWireFamiliesAllBudgeted fails by
+// name until the new family is registered in the composed-envelope sentinel.
+//
+// Each snapshot family is ALSO classified by the Track R2 change-detection gate
+// (internal/store/orgsnapgate.go): either guarded by s.snapChanged so an
+// unchanged family costs one O(1) probe instead of a full recompute, or
+// explicitly recorded as ungated with a reason. TestSnapGateCoversEveryGatedWire
+// fails by name on an unclassified new family.
 type PushBatch struct {
-	Cursor      PushCursor
-	Sessions    []orgcontract.SessionRow
-	Actions     []orgcontract.ActionRow
-	APITurns    []orgcontract.APITurnRow
-	TokenUsage  []orgcontract.TokenUsageRow
-	GuardEvents []orgcontract.GuardEventRow
-	OTelContent []orgcontract.OTelContentRow
+	// Full reports that a cursor lane stopped on the byte budget with rows
+	// still waiting above the new cursor (2026-10-02 budget-latency arc,
+	// P3): the push loop pushes again shortly instead of sleeping a whole
+	// interval. Snapshot-wire trimming never sets it.
+	Full       bool
+	Cursor     PushCursor
+	Sessions   []orgcontract.SessionRow
+	Actions    []orgcontract.ActionRow
+	APITurns   []orgcontract.APITurnRow
+	TokenUsage []orgcontract.TokenUsageRow
+	// Deletions are the TOMBSTONES (agent migration 141, lane R2-TOMB) for
+	// cursor-wire rows the node deleted as a correction after pushing them,
+	// and SessionManifests the `observer org resync --deletions` heal. Both
+	// are composed by internal/store/orgpushtomb.go from node-local queues
+	// this file never names (privacy sentinel), bounded with the re-send lane
+	// to half the envelope, and acknowledged only after a 200 (Acks). They
+	// are control items, not rows: counted by hasControl, not RowCount.
+	Deletions        []orgcontract.PushDeletion
+	SessionManifests []orgcontract.SessionManifest
+	GuardEvents      []orgcontract.GuardEventRow
+	OTelContent      []orgcontract.OTelContentRow
 	// RoutingSummaries is the OPTIONAL §R19.4 aggregate, attached only
 	// under ShareOptions.RoutingSummary. It rides along with row data
 	// and does not affect cursors (the server upsert is idempotent).
 	RoutingSummaries []orgcontract.RoutingSummaryRow
+	// CacheSummaries is the OPTIONAL Arc 4 P5c cache-detail aggregate,
+	// attached only under ShareOptions.CacheDetail and computed by
+	// store.SelectCacheSummaries (which owns the node-local cache_events
+	// read; this file names no cache_* table). Windowed-recompute +
+	// server-upsert-idempotent, so it does not affect the per-table cursors.
+	CacheSummaries []orgcontract.CacheSummaryRow
+	// CodeintelSummaries is the OPTIONAL Arc 4 P5f codeintel-detail aggregate,
+	// attached only under ShareOptions.CodeintelDetail and computed by
+	// store.SelectCodeintelSummaries (which owns the node-local codeintel_*
+	// read; this file names no codeintel_* table). Snapshot-recompute +
+	// server-upsert-idempotent, so it does not affect the per-table cursors.
+	CodeintelSummaries []orgcontract.CodeintelSummaryRow
+	// ProcessSummaries is the OPTIONAL Arc 4 P5g process-detail aggregate,
+	// attached only under ShareOptions.ProcessDetail and computed by
+	// store.SelectProcessSummaries (which owns the node-local process_runs
+	// read; this file names no process_* table). Windowed-recompute +
+	// server-upsert-idempotent, so it does not affect the per-table cursors.
+	ProcessSummaries []orgcontract.ProcessSummaryRow
+	// SessionVerbositySummaries / SessionCacheSummaries / SessionProcesses
+	// are the org-parity session-scoped enterprise wires (W3.1 / W2.1 /
+	// W2.2), attached only under share.shipsRawContent() (FullContent ||
+	// AdminManaged — deliberately NOT the teams-tier detail flags above;
+	// session-scoped telemetry is per-developer detail the enterprise
+	// posture treats as admin-visible-by-default). Computed by
+	// store.SelectSessionVerbositySummaries / SelectSessionCacheSummaries /
+	// SelectSessionProcessRows, which own the node-local reads — this file
+	// names none of those tables (the privacy sentinel forbids it).
+	// Windowed-recompute + server-upsert-idempotent; no cursor effect.
+	SessionVerbositySummaries []orgcontract.SessionVerbosityRow
+	SessionCacheSummaries     []orgcontract.SessionCacheRow
+	SessionProcesses          []orgcontract.SessionProcessRow
+	SessionNetworkEvents      []orgcontract.SessionNetworkEventRow
+	// SessionCacheEvents is the PER-EVENT cache timeline (operator directive
+	// item 6) — the same shipsRawContent() posture as SessionCacheSummaries
+	// beside it, and deliberately NOT the teams-tier CacheDetail flag.
+	// Composed by store.SelectSessionCacheEvents, which owns the node-local
+	// read AND re-applies the gate itself; this file names no cache_* table
+	// (the privacy sentinel forbids it). Windowed-recompute + upsert-
+	// idempotent on the node's own event id scoped by pusher; no cursor
+	// effect.
+	SessionCacheEvents []orgcontract.SessionCacheEventRow
+	// SessionTaskItems / SessionTaskTransitions are the W2 task-checklist
+	// wires, attached only under ShareOptions.TaskDetail and computed by
+	// store.SelectSessionTaskItems / SelectSessionTaskTransitions (which own
+	// the node-local task_* read; this file names no such table — the privacy
+	// sentinel forbids it). The per-item PROSE inside those rows carries a
+	// SECOND gate (share.shipsRawContent(), passed into the Select), so a
+	// task_detail-only node ships statuses and never the plan text.
+	// Windowed-recompute + server-upsert-idempotent; no cursor effect.
+	SessionTaskItems       []orgcontract.SessionTaskItemRow
+	SessionTaskTransitions []orgcontract.SessionTaskTransitionRow
+	// SessionToolAccounts is the W3 vendor-login observation wire, attached
+	// only under ShareOptions.ToolAccountDetail and computed by
+	// store.SelectSessionToolAccounts (which owns the node-local read; this
+	// file names that table nowhere). The raw identity columns inside those
+	// rows carry the SECOND shipsRawContent() gate (decision D2), so a
+	// tool_account_detail-only node ships opaque account keys and never a
+	// developer's vendor e-mail. Windowed-recompute + upsert-idempotent.
+	SessionToolAccounts []orgcontract.SessionToolAccountRow
+	// SessionLOC / LOCDays are the Lines-of-Code aggregates (one row per
+	// session x project root, and one per day x project root). Unlike the
+	// session-scoped wires above they ride the DEFAULT metadata-only posture:
+	// a count of lines authored is the same disclosure class as
+	// SessionRow.TotalActions. The ONE field gated on shipsRawContent() is
+	// each row's own language mix, decided at the call site below. Composed
+	// by store.SelectSessionLOCSummaries / SelectLOCDaySummaries, which own
+	// the node-local per-file read — this file names that table nowhere, and
+	// the privacy sentinel forbids it here by name.
+	SessionLOC []orgcontract.SessionLOCRow
+	LOCDays    []orgcontract.LOCDayRow
+	// SessionQuality is the per-session quality score (BL2-ORG): one row per
+	// session the node's scorer wrote inside a trailing window on scored_at,
+	// so a score that lands after its sessions row already shipped still
+	// goes out. Derived numbers only - it rides the DEFAULT metadata posture
+	// like SessionLOC. Composed by store.SelectSessionQualityRows in
+	// sessionqualitysummary.go. Snapshot-recompute + server-upsert-idempotent
+	// (newest scored_at wins); no cursor effect.
+	SessionQuality []orgcontract.SessionQualityRow
+	// CommitOwnership is commit ownership (lane F-PROJ): one row per (project
+	// root, commit) this node's AI sessions contributed to inside a trailing
+	// window on committed_at, plus identity-only rows for commits that fell
+	// out of HEAD. Ids and counts ride the DEFAULT metadata posture like
+	// SessionLOC, keyed by the commit-sha HASH; the commit subject and the
+	// raw commit sha are gated on shipsRawContent() at the call site (review
+	// 2026-09-29 finding 3). Composed by store.SelectCommitOwnershipRows in
+	// commitownersummary.go, which reaches the node-local commit tables only
+	// through their owning loaders - this file names none of them.
+	// Snapshot-recompute + server-upsert-idempotent; no cursor effect.
+	CommitOwnership []orgcontract.CommitOwnershipRow
+	// UpdatePosture is the node's enum-only self-report of its own update
+	// state (enterprise-update-management plan §2.1, ruling R10). nil until
+	// cmd/observer wires the posture environment, so a node without the
+	// feature pushes a byte-identical envelope.
+	//
+	// It is composed by store.SelectUpdatePosture in the sibling file
+	// internal/store/updateposture.go, which owns the node-local read; this
+	// file names those tables nowhere and the privacy sentinel forbids them
+	// here by name. It IS counted by hasAggregates() — see hasPostures() for
+	// why the original "a posture must never be the reason a push happens"
+	// rule was the wrong trade (SF-19).
+	UpdatePosture *orgcontract.UpdatePostureRow
+	// Wave-3 per-developer enterprise wires — same shipsRawContent() gate
+	// and one-owner Select-file discipline as the session wires above.
+	AdvisorSuggestions []orgcontract.AdvisorSuggestionRow
+	ProjectPatterns    []orgcontract.ProjectPatternRow
+	BenchmarkRuns      []orgcontract.BenchmarkRunRow
+	BenchmarkAttempts  []orgcontract.BenchmarkAttemptRow
+	CompressionStats   []orgcontract.CompressionStatRow
+	RoutingDevRows     []orgcontract.RoutingDevRow
+	CodeintelDevRows   []orgcontract.CodeintelDevRow
+	TerminalRuns       []orgcontract.TerminalRunRow
+	TerminalCommands   []orgcontract.TerminalCommandRow
+	RemoteAudit        []orgcontract.RemoteAuditRow
+	GuardPins          []orgcontract.GuardPinRow
+	GuardApprovals     []orgcontract.GuardApprovalRow
+	// TerminalSummaries + RemoteAuditSummaries are the OPTIONAL Arc 4 P5h
+	// terminal-detail aggregates, attached only under ShareOptions.TerminalDetail
+	// and computed by store.SelectTerminalSummaries / SelectRemoteAuditSummaries
+	// (which own the node-local terminal_* / remote_audit reads; this file names
+	// none of those tables). Windowed-recompute + server-upsert-idempotent, so
+	// they do not affect the per-table cursors.
+	TerminalSummaries    []orgcontract.TerminalSummaryRow
+	RemoteAuditSummaries []orgcontract.RemoteAuditSummaryRow
+	// MCPRelayActivity is the OPTIONAL Agent Access P4 HMAC-only daily
+	// aggregate of the node's MCP relay decisions (doc3 §9.5), composed by
+	// store.SelectMCPRelayActivity in mcprelaysummary.go - which reads the
+	// node-local relay chain through internal/mcprelay/record; this file
+	// names no mcp_relay_* table (the privacy sentinel forbids it). Attached
+	// under ShareOptions.MCPActivity on an INDIVIDUAL node, and by
+	// shipsRawContent() posture on an enrolled teams/enterprise node
+	// (R8.30.b / R9.5). Windowed-recompute + server-REPLACE-idempotent.
+	MCPRelayActivity []orgcontract.MCPRelayActivityRow
+	// MCPRelayEvents are the per-record relay events (decision / completion
+	// / gap / gap_resolution, R14.5) - the L2 per-call wire of an enrolled
+	// teams/enterprise node, attached ONLY under shipsRawContent(). A CURSOR
+	// wire (PushCursor.MCPRelay) composed through the same seam and bounded
+	// by fits(), so it is counted by RowCount like GuardEvents.
+	MCPRelayEvents []orgcontract.MCPRelayEventRow
+	// SessionLimitSnapshots is the per-session rate-limit window wire (lane
+	// F-WIRE): the newest window observation per (session, provider) since
+	// PushCursor.LimitSnapshots, metadata only (never the auth scope hash,
+	// raw headers, status or counters). A CURSOR wire composed through the
+	// internal/store/limitgauge.go seam (this file names no such table) and
+	// bounded by the same fits() accounting, so it is counted by RowCount like
+	// MCPRelayEvents. Attached under ShareOptions.LimitGauge or
+	// shipsRawContent(); see the compose block for the gate.
+	SessionLimitSnapshots []orgcontract.SessionLimitSnapshotRow
+	// MCPInventory is the Agent Access P11 (c) configured-MCP-server
+	// inventory, composed by store.SelectMCPInventory (mcpinventory.go)
+	// through the host-bound MCPInventoryProviders seam - this file names no
+	// inventory source. Attached under ShareOptions.MCPActivity on an
+	// INDIVIDUAL node (REDUCED shape) and by shipsRawContent() posture on an
+	// enrolled teams/enterprise node (FULL shape). Snapshot-recompute +
+	// server-upsert-idempotent on (source_scope, locator_fingerprint).
+	MCPInventory []orgcontract.MCPInventoryRow
+	// RoutingDetails is the OPTIONAL Arc 4 P5d routing-detail aggregate,
+	// attached only under ShareOptions.RoutingDetail and computed by
+	// store.SelectRoutingDetail (which owns the node-local router_decisions
+	// read; this file names no such table). Windowed-recompute +
+	// server-upsert-idempotent, so it does not affect the per-table cursors.
+	RoutingDetails []orgcontract.RoutingDetailRow
+	// LimitGauges is the OPTIONAL Arc 4 P5e predictions aggregate, attached
+	// only under ShareOptions.LimitGauge and computed by store.SelectLimitGauges
+	// (which owns the node-local limit_snapshots read; this file names no such
+	// table). Windowed-recompute + server-upsert-idempotent.
+	LimitGauges []orgcontract.LimitGaugeRow
 	// Obs* are the OPTIONAL org-tier observability rollups
 	// (obs-org-tier plan), each attached only under its own ShareOptions
 	// flag and composed via the obs provider seam (this file names no
@@ -138,22 +378,52 @@ type PushBatch struct {
 	// T2/T3 structure rows + T6 events); windowed-recompute + server-upsert
 	// idempotent, so it does not affect the per-table cursors.
 	ObsEvalItems []orgcontract.ObsEvalItemRow // T7 per-item eval scores
-	// BriefingAggregates is the OPTIONAL Daily-Briefing AGGREGATE (Phase C of
-	// docs/design/standup-briefing.md §4), attached only under
-	// ShareOptions.BriefingAggregates and composed by SelectBriefingAggregates
-	// (this file names no briefing table — the privacy sentinel stays green).
-	// Content-free counts + sums by (day, tool, project_hash). Windowed-
-	// recompute + server-upsert idempotent: not counted by RowCount, consulted
-	// by hasAggregates so an aggregate-only batch still pushes.
-	BriefingAggregates []orgcontract.BriefingAggregateRow
-	// VirtuousCycle is the OPTIONAL Virtuous-Cycle trend rollup (Stage 3 of
-	// docs/design/standup-briefing.md), attached only under
-	// ShareOptions.VirtuousCycle and composed by SelectVirtuousCycle
-	// (this file names no ledger/router_decisions — the privacy sentinel stays green).
-	// Content-free cumulative applies + projected + realized (broad filter);
-	// weekly trend in ByWeek. Not counted by RowCount, consulted by hasAggregates.
-	VirtuousCycle []orgcontract.VirtuousCycleRow
-	EstBytes      int64
+	// ObsEgressDecisions is the OPTIONAL T8 egress-routing decision feed
+	// (W5.3), attached only under ShareOptions.ObsEgress and composed via
+	// the obs provider seam (this file names no obs_* table).
+	ObsEgressDecisions []orgcontract.ObsEgressRow // T8 egress routing decisions
+	// BudgetPosture is the node's enum-only self-report of whether the org's
+	// BUDGET is holding here (org-budget plan §3.3d). nil until cmd/observer
+	// wires the provider, so a node without the feature pushes a
+	// byte-identical envelope.
+	//
+	// Composed by Store.composeBudgetPosture in the sibling file
+	// internal/store/budgetposture.go through a func seam — there is no budget
+	// table on the node, and this file names none. Like UpdatePosture it IS
+	// counted by hasAggregates(), through hasPostures() — see there.
+	BudgetPosture *orgcontract.BudgetPostureRow
+	// ComponentPosture is the node's enum-only component posture (modular
+	// packaging plan 6.4, T-682), composed by Store.composeComponentPosture in
+	// componentposture.go through a func seam. nil until cmd/observer wires
+	// the provider. It forces a push only when it changed since the last
+	// delivered one (componentPostureChanged), so an idle node reports a
+	// change once, not every interval.
+	ComponentPosture *orgcontract.ComponentPostureRow
+	// componentPostureChanged: ComponentPosture differs from the last one the
+	// org server accepted from this process.
+	componentPostureChanged bool
+	// AgentConfigState is a MANAGED node's applied state of the org's AI tool
+	// settings policy (adapter config P7). Composed by
+	// Store.composeAgentConfigState in agentconfigorg.go through a func seam
+	// so this file names no node table; nil on an individual node, so the
+	// envelope stays byte-identical there.
+	AgentConfigState *orgcontract.AgentConfigStateReport
+	// AgentConfigInventory is a MANAGED node's whole AI tool configuration
+	// (D-112, T-427), composed by Store.composeAgentConfigInventory in
+	// agentconfiginventory.go through a func seam; attached only under raw
+	// content and only when it changed since the last accepted push.
+	AgentConfigInventory *orgcontract.AgentConfigInventoryReport
+	EstBytes             int64
+	// agentConfigChanged: AgentConfigState differs from the last report this
+	// process composed (hasPostures counts only a change).
+	agentConfigChanged bool
+	// Acks is what an ACCEPTED push acknowledges in the node-local re-send
+	// queue (agent migration 140): the change-sequence snapshot every
+	// cursor-wire row carried as NodeRev, the id range each cursor lane
+	// shipped, and the rows the re-send lane shipped. orgclient hands it to
+	// Store.AckPushedChanges after a 200 and nowhere else, so a failed push
+	// leaves every queued change queued. Not a wire family (not a slice).
+	Acks PushAcks
 }
 
 // RowCount is the total number of rows across all row-bearing tables in the
@@ -161,29 +431,92 @@ type PushBatch struct {
 // recompute idempotently and don't gate batch progress).
 func (b PushBatch) RowCount() int {
 	return len(b.Sessions) + len(b.Actions) + len(b.APITurns) + len(b.TokenUsage) +
-		len(b.GuardEvents) + len(b.OTelContent) +
+		len(b.GuardEvents) + len(b.OTelContent) + len(b.MCPRelayEvents) +
+		len(b.SessionLimitSnapshots) +
 		len(b.ObsTraces) + len(b.ObsSpans) + len(b.ObsSpanEvents) + len(b.ObsContent) +
-		len(b.ObsAdmissionEvents) + len(b.ObsEvalItems)
+		len(b.ObsAdmissionEvents) + len(b.ObsEvalItems) + len(b.ObsEgressDecisions)
 }
 
 // hasAggregates reports whether the batch carries any windowed-recompute
 // aggregate rollups that RowCount deliberately omits (they recompute
-// idempotently and don't gate cursor progress): the routing summaries, the
-// briefing/virtuous-cycle rollups, and the obs T1/T4 aggregates. A node
-// opted into an aggregate-only tier (e.g. obs_summary with no trace rows)
-// has zero RowCount but must still push, so the aggregates are consulted
-// here rather than being silently dropped by the PushOnce empty-batch early
-// return.
+// idempotently and don't gate cursor progress): the routing summaries and the
+// obs T1/T4 aggregates, and the envelope-level posture rows (hasPostures). A
+// node opted into an aggregate-only tier (e.g. obs_summary with no trace rows),
+// or one whose only news this tick is its own posture, has zero RowCount but
+// must still push — so both are consulted here rather than being silently
+// dropped by the PushOnce empty-batch early return.
 func (b PushBatch) hasAggregates() bool {
-	return len(b.RoutingSummaries) > 0 || len(b.ObsSummaries) > 0 ||
+	return len(b.RoutingSummaries) > 0 || len(b.CacheSummaries) > 0 ||
+		len(b.CodeintelSummaries) > 0 || len(b.ProcessSummaries) > 0 ||
+		len(b.SessionLOC) > 0 || len(b.LOCDays) > 0 ||
+		len(b.AdvisorSuggestions) > 0 || len(b.ProjectPatterns) > 0 ||
+		len(b.BenchmarkRuns) > 0 || len(b.BenchmarkAttempts) > 0 ||
+		len(b.CompressionStats) > 0 ||
+		len(b.RoutingDevRows) > 0 || len(b.CodeintelDevRows) > 0 ||
+		len(b.TerminalRuns) > 0 || len(b.TerminalCommands) > 0 ||
+		len(b.RemoteAudit) > 0 ||
+		len(b.GuardPins) > 0 || len(b.GuardApprovals) > 0 ||
+		len(b.TerminalSummaries) > 0 || len(b.RemoteAuditSummaries) > 0 ||
+		len(b.RoutingDetails) > 0 || len(b.LimitGauges) > 0 ||
+		len(b.MCPRelayActivity) > 0 || len(b.MCPInventory) > 0 ||
+		len(b.ObsSummaries) > 0 ||
 		len(b.ObsEvalRuns) > 0 || len(b.ObsEndUserSpend) > 0 ||
-		len(b.ObsAdmissionPolicies) > 0 || len(b.BriefingAggregates) > 0 ||
-		len(b.VirtuousCycle) > 0
+		len(b.ObsAdmissionPolicies) > 0 ||
+		b.hasSessionAggregates() || b.hasPostures()
+}
+
+// hasControl reports whether the batch carries control items (agent migration
+// 141): tombstones or resync session manifests. They are neither rows nor
+// aggregates, but a batch carrying only them must still push, or a node with
+// nothing new would never deliver its deletions.
+func (b PushBatch) hasControl() bool {
+	return len(b.Deletions) > 0 || len(b.SessionManifests) > 0
+}
+
+// hasPostures reports whether the batch carries an envelope-level POSTURE row
+// — the node's self-report of whether the org's budget is holding here
+// (BudgetPosture) or of its own updater (UpdatePosture).
+//
+// WHY THEY COUNT (SF-19). Both fields shipped with the comment "a posture must
+// never be the reason a push happens, or an idle node's egress would change the
+// day this feature shipped". That trade was wrong, and the live estate proved
+// it: a managed node whose intervention controller is running but which
+// produced no new rows this tick pushes NOTHING, so the server never hears the
+// posture at all and the Budgets page renders `direct_control =
+// not_reported` — an absence — over a node that is in fact controlling
+// processes. A posture that only ships alongside unrelated telemetry is a
+// posture the admin cannot rely on, which is precisely the
+// not-covered-vs-not-reported confusion these rows exist to remove.
+//
+// The egress this costs is one posture-sized envelope per push interval on a
+// node that has opted into the rail at all (both fields are nil until their
+// feature is wired), against a coverage cell that is otherwise structurally
+// unable to tell "not enforcing" from "not reporting". Reporting rides the
+// EXISTING push loop; there is deliberately no second loop.
+func (b PushBatch) hasPostures() bool {
+	return b.BudgetPosture != nil || b.UpdatePosture != nil || b.agentConfigChanged || b.AgentConfigInventory != nil || b.componentPostureChanged
+}
+
+// hasSessionAggregates is the SESSION-SCOPED half of hasAggregates, split
+// mechanically to keep each function inside the gocyclo bound as wire families
+// accumulate — the same split forcePusherOrgIDRest makes on the server side.
+// The two halves are one predicate: a family belongs in exactly one of them,
+// and hasAggregates ORs this in, so adding a row here has identical semantics
+// to adding it there.
+func (b PushBatch) hasSessionAggregates() bool {
+	return len(b.SessionVerbositySummaries) > 0 || len(b.SessionCacheSummaries) > 0 ||
+		len(b.SessionCacheEvents) > 0 ||
+		len(b.SessionProcesses) > 0 || len(b.SessionNetworkEvents) > 0 ||
+		len(b.SessionTaskItems) > 0 || len(b.SessionTaskTransitions) > 0 ||
+		len(b.SessionToolAccounts) > 0 || len(b.SessionQuality) > 0 ||
+		len(b.CommitOwnership) > 0
 }
 
 // Empty reports whether the batch carries nothing to push — no rows AND no
 // aggregate rollups. An aggregate-only batch is NOT empty (see hasAggregates).
-func (b PushBatch) Empty() bool { return b.RowCount() == 0 && !b.hasAggregates() }
+func (b PushBatch) Empty() bool {
+	return b.RowCount() == 0 && !b.hasAggregates() && !b.hasControl()
+}
 
 // PushLogEntry is one row of org_push_log, surfaced to the dashboard.
 type PushLogEntry struct {
@@ -195,18 +528,29 @@ type PushLogEntry struct {
 	Error    string
 }
 
-// LoadPushCursor reads the per-table push cursor from schema_meta. Missing
-// keys (a never-pushed agent) read as 0.
-func (s *Store) LoadPushCursor(ctx context.Context) (PushCursor, error) {
-	var c PushCursor
-	for key, dst := range map[string]*int64{
+// pushCursorFields maps every schema_meta cursor key to the PushCursor field
+// it persists. Load, save and compare-and-swap all walk this ONE table, so a
+// new cursor column cannot be read by one path and silently forgotten by
+// another.
+func pushCursorFields(c *PushCursor) map[string]*int64 {
+	return map[string]*int64{
 		pushCursorKeySessions:    &c.Sessions,
 		pushCursorKeyActions:     &c.Actions,
 		pushCursorKeyAPITurns:    &c.APITurns,
 		pushCursorKeyTokenUsage:  &c.TokenUsage,
 		pushCursorKeyGuardEvents: &c.GuardEvents,
 		pushCursorKeyOTelContent: &c.OTelContent,
-	} {
+		pushCursorKeyMCPRelay:    &c.MCPRelay,
+		// Per-session rate-limit windows (lane F-WIRE).
+		pushCursorKeyLimitSnapshots: &c.LimitSnapshots,
+	}
+}
+
+// LoadPushCursor reads the per-table push cursor from schema_meta. Missing
+// keys (a never-pushed agent) read as 0.
+func (s *Store) LoadPushCursor(ctx context.Context) (PushCursor, error) {
+	var c PushCursor
+	for key, dst := range pushCursorFields(&c) {
 		v, err := s.readMeta(ctx, key)
 		if err != nil {
 			return PushCursor{}, fmt.Errorf("store.LoadPushCursor: %w", err)
@@ -222,30 +566,203 @@ func (s *Store) LoadPushCursor(ctx context.Context) (PushCursor, error) {
 	return c, nil
 }
 
-// SavePushCursor persists the per-table push cursor to schema_meta in one tx.
+// readPushCursorTx reads the persisted cursor inside tx. Missing keys read as
+// 0, exactly like LoadPushCursor.
+func readPushCursorTx(ctx context.Context, tx *sql.Tx) (PushCursor, error) {
+	var c PushCursor
+	for key, dst := range pushCursorFields(&c) {
+		var v string
+		err := tx.QueryRowContext(ctx, `SELECT value FROM schema_meta WHERE key = ?`, key).Scan(&v)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return PushCursor{}, fmt.Errorf("read %s: %w", key, err)
+		}
+		if v == "" {
+			continue
+		}
+		n, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil {
+			return PushCursor{}, fmt.Errorf("parse %s=%q: %w", key, v, perr)
+		}
+		*dst = n
+	}
+	return c, nil
+}
+
+// writePushCursorTx upserts every cursor key inside tx.
+func writePushCursorTx(ctx context.Context, tx *sql.Tx, c PushCursor) error {
+	for key, val := range pushCursorFields(&c) {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_meta(key, value) VALUES(?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			key, strconv.FormatInt(*val, 10)); err != nil {
+			return fmt.Errorf("set %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+// SavePushCursor persists the per-table push cursor to schema_meta in one tx,
+// unconditionally. This is the CURSOR-MOVER path: enrolment seeding it at the
+// live high-water mark and `observer org backfill` resetting it are both
+// deliberate operator acts that must win. The push loop must NOT use it — see
+// SavePushCursorIfUnchanged.
 func (s *Store) SavePushCursor(ctx context.Context, c PushCursor) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store.SavePushCursor: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	for key, val := range map[string]int64{
-		pushCursorKeySessions:    c.Sessions,
-		pushCursorKeyActions:     c.Actions,
-		pushCursorKeyAPITurns:    c.APITurns,
-		pushCursorKeyTokenUsage:  c.TokenUsage,
-		pushCursorKeyGuardEvents: c.GuardEvents,
-		pushCursorKeyOTelContent: c.OTelContent,
-	} {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO schema_meta(key, value) VALUES(?, ?)
-			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			key, strconv.FormatInt(val, 10)); err != nil {
-			return fmt.Errorf("store.SavePushCursor: set %s: %w", key, err)
-		}
+	if err := writePushCursorTx(ctx, tx, c); err != nil {
+		return fmt.Errorf("store.SavePushCursor: %w", err)
+	}
+	// A cursor MOVER also moves the re-send floor with it (agent migration
+	// 140): enrolment's seed is exactly the line below which rows were
+	// deliberately never shared, and a backfill reset to 0 deliberately
+	// shares everything. Same transaction, so the triggers never see a
+	// cursor without its floor.
+	if err := resetPushTrackingTx(ctx, tx, c); err != nil {
+		return fmt.Errorf("store.SavePushCursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store.SavePushCursor: commit: %w", err)
+	}
+	return nil
+}
+
+// SavePushCursorIfUnchanged writes next only if the stored cursor still equals
+// expected, re-reading and writing inside ONE transaction. The agent DSN opens
+// every transaction with BEGIN IMMEDIATE (internal/db.Open's `_txlock=immediate`),
+// so the re-read and the write are atomic against any other writer — including
+// a separate `observer` process. It reports whether the write happened.
+//
+// This is the guard for the push loop's read-then-write cycle. Two legitimate
+// movers use the plain SavePushCursor and own the stored value: enrolment,
+// which seeds it at the current high-water mark, and
+// `observer org backfill --all --confirm`, which deliberately resets it to
+// zero. A push cycle that loaded the cursor BEFORE either landed must not save
+// its own now-stale value afterwards — writing it back DOWN replays the whole
+// pre-enrolment history (the 2026-09-07 re-enrolment regression), and writing
+// it back UP silently undoes an operator's backfill reset. The CAS covers both
+// directions because it compares for equality, not ordering.
+//
+// A false return is not an error: the rows the cycle already delivered are
+// absorbed by the server's INSERT OR IGNORE dedup, so the caller simply keeps
+// the stored cursor and drops its own.
+func (s *Store) SavePushCursorIfUnchanged(ctx context.Context, expected, next PushCursor) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("store.SavePushCursorIfUnchanged: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	stored, err := readPushCursorTx(ctx, tx)
+	if err != nil {
+		return false, fmt.Errorf("store.SavePushCursorIfUnchanged: %w", err)
+	}
+	if stored != expected {
+		return false, nil
+	}
+	if err := writePushCursorTx(ctx, tx, next); err != nil {
+		return false, fmt.Errorf("store.SavePushCursorIfUnchanged: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("store.SavePushCursorIfUnchanged: commit: %w", err)
+	}
+	return true, nil
+}
+
+// PushEligibleCounts returns, for the five cursor tables a status report
+// shows (sessions, actions, api_turns, token_usage, guard_events), how many
+// rows sit ABOVE cur: exactly the rows the next push would read for that
+// table, before scope and budget.
+//
+// IT IS A ROW COUNT, NOT MAX-ID MINUS CURSOR (T-373). Ids have gaps (a
+// deleted or retention-pruned row leaves one), and sessions has no INTEGER
+// PRIMARY KEY, so its implicit rowid can fall BELOW the cursor when the
+// newest rows are deleted (the orphaned-session sweep at daemon start). The
+// subtraction then over-stated the count or went negative. A count over the rowid range is an index seek bounded by what
+// is actually waiting. Pass the zero cursor for every row in each table.
+func (s *Store) PushEligibleCounts(ctx context.Context, cur PushCursor) (PushCursor, error) {
+	var c PushCursor
+	for _, q := range []struct {
+		sql   string
+		after int64
+		dst   *int64
+	}{
+		{`SELECT COUNT(*) FROM sessions WHERE rowid > ?`, cur.Sessions, &c.Sessions},
+		{`SELECT COUNT(*) FROM actions WHERE id > ?`, cur.Actions, &c.Actions},
+		{`SELECT COUNT(*) FROM api_turns WHERE id > ?`, cur.APITurns, &c.APITurns},
+		{`SELECT COUNT(*) FROM token_usage WHERE id > ?`, cur.TokenUsage, &c.TokenUsage},
+		{`SELECT COUNT(*) FROM guard_events WHERE id > ?`, cur.GuardEvents, &c.GuardEvents},
+	} {
+		if err := s.db.QueryRowContext(ctx, q.sql, q.after).Scan(q.dst); err != nil {
+			return PushCursor{}, fmt.Errorf("store.PushEligibleCounts: %w", err)
+		}
+	}
+	return c, nil
+}
+
+// clampSessionPushCursor lowers the sessions push cursor to the table's
+// current MAX(rowid) when it is above it (T-373).
+//
+// sessions keys the push by its IMPLICIT rowid, and SQLite assigns a new
+// implicit rowid as MAX(rowid)+1. When the newest sessions are deleted
+// (the orphaned-session sweep removes sessions that never produced a row),
+// MAX(rowid) drops below the cursor and every new session is then allocated
+// a rowid AT OR BELOW it, so `rowid > cursor` never selects it: new sessions
+// stopped shipping until the table grew past the old high-water mark.
+// Lowering the cursor to the current maximum cannot re-ship anything (no row
+// exists between the two) and lets the next new session through. The other
+// cursor tables use AUTOINCREMENT ids, which are never reused, so they need
+// no clamp.
+//
+// VACUUM DOES NOT RENUMBER sessions (T-423, grounded 2026-10-05). SQLite
+// only "may" change implicit rowids on VACUUM; in practice VACUUM and VACUUM
+// INTO keep them for any table with an index, and sessions always has its
+// TEXT PRIMARY KEY autoindex. Every product VACUUM path (archive reclaim,
+// db vacuum / backup, the auto_vacuum conversion, the update snapshot) is
+// pinned by orgpush_vacuum_test.go, and a manual VACUUM from the system
+// sqlite3 CLI (3.31.1) behaves the same. A hand-made dump/reload of the database file WOULD renumber sessions and is
+// not covered by this clamp; it is not a product path.
+func (s *Store) clampSessionPushCursor(ctx context.Context, cursor int64) (int64, error) {
+	var maxRowid int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid), 0) FROM sessions`).Scan(&maxRowid); err != nil {
+		return cursor, fmt.Errorf("store.clampSessionPushCursor: %w", err)
+	}
+	if cursor > maxRowid {
+		return maxRowid, nil
+	}
+	return cursor, nil
+}
+
+// SessionPushCursorClamper is the one method ClampSessionPushCursor needs:
+// both *sql.DB and *sql.Tx satisfy it, so a deleter clamps inside its own
+// delete transaction.
+type SessionPushCursorClamper interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// ClampSessionPushCursor lowers the PERSISTED sessions push cursor and the
+// sessions re-send floor (migration 140) to the table's current
+// MAX(rowid), when they are above it (T-373). Every node-side deleter of
+// sessions calls it right after its delete, before any new session can be
+// inserted: that is the only moment the lowering is provably exact, since
+// the next implicit rowid SQLite hands out is MAX(rowid)+1 and would
+// otherwise land at or below the cursor and never ship (and, below the
+// floor, never be re-sent). No row exists between the new and the old value,
+// so nothing is re-shipped. A node that is not enrolled has neither key and
+// the statements change nothing.
+func ClampSessionPushCursor(ctx context.Context, ex SessionPushCursorClamper) error {
+	for _, key := range []string{pushCursorKeySessions, "org_push_floor_sessions"} {
+		if _, err := ex.ExecContext(ctx, `
+			UPDATE schema_meta
+			   SET value = CAST((SELECT COALESCE(MAX(rowid), 0) FROM sessions) AS TEXT)
+			 WHERE key = ?
+			   AND CAST(value AS INTEGER) > (SELECT COALESCE(MAX(rowid), 0) FROM sessions)`, key); err != nil {
+			return fmt.Errorf("store.ClampSessionPushCursor: %s: %w", key, err)
+		}
 	}
 	return nil
 }
@@ -268,6 +785,20 @@ func (s *Store) CurrentMaxIDs(ctx context.Context) (PushCursor, error) {
 			return PushCursor{}, fmt.Errorf("store.CurrentMaxIDs: %w", err)
 		}
 	}
+	// The relay chain's high-water mark comes through its one-owner seam
+	// (mcprelaysummary.go) rather than a table name here - the privacy
+	// sentinel forbids the relay tables in this file.
+	seq, err := s.mcpRelayHeadSeq(ctx)
+	if err != nil {
+		return PushCursor{}, fmt.Errorf("store.CurrentMaxIDs: %w", err)
+	}
+	c.MCPRelay = seq
+	// Same for the rate-limit snapshot log: limitgauge.go owns that read.
+	lim, err := s.limitSnapshotHeadID(ctx)
+	if err != nil {
+		return PushCursor{}, fmt.Errorf("store.CurrentMaxIDs: %w", err)
+	}
+	c.LimitSnapshots = lim
 	return c, nil
 }
 
@@ -334,6 +865,77 @@ func (s *Store) LoadOrgPolicyETag(ctx context.Context) (string, error) {
 	return v, nil
 }
 
+// PushBreakerState is an OPEN oversized-batch circuit: the push loop is parked
+// until Until because the composed envelope could not satisfy the accepted body
+// limit. Reason is the underlying ErrBatchTooLarge message (serialized vs limit
+// bytes) — operator-facing diagnostics, never row content.
+type PushBreakerState struct {
+	Reason string
+	Until  time.Time
+}
+
+// OpenPushBreaker records that the push loop is parked until `until` because of
+// an oversized batch. Overwrites any previous record (each park restarts the
+// clock), so the surface always shows the CURRENT pause, not the first one.
+func (s *Store) OpenPushBreaker(ctx context.Context, until time.Time, reason string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store.OpenPushBreaker: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for key, val := range map[string]string{
+		pushBreakerUntilKey:  until.UTC().Format(time.RFC3339),
+		pushBreakerReasonKey: reason,
+	} {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_meta(key, value) VALUES(?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, val); err != nil {
+			return fmt.Errorf("store.OpenPushBreaker: set %s: %w", key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store.OpenPushBreaker: commit: %w", err)
+	}
+	return nil
+}
+
+// ClearPushBreaker closes the circuit. Idempotent — a no-op when no record
+// exists, so the push loop can call it unconditionally after a successful cycle.
+func (s *Store) ClearPushBreaker(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM schema_meta WHERE key IN (?, ?)`,
+		pushBreakerUntilKey, pushBreakerReasonKey); err != nil {
+		return fmt.Errorf("store.ClearPushBreaker: %w", err)
+	}
+	return nil
+}
+
+// LoadPushBreaker returns the OPEN circuit, or (nil, nil) when pushes are not
+// parked. An elapsed Until reads as nil: the park is over and the next cycle
+// retries, so reporting it as still-open would be dishonest. A re-failing push
+// immediately re-opens the record, so a genuinely stuck node stays lit.
+func (s *Store) LoadPushBreaker(ctx context.Context) (*PushBreakerState, error) {
+	raw, err := s.readMeta(ctx, pushBreakerUntilKey)
+	if err != nil {
+		return nil, fmt.Errorf("store.LoadPushBreaker: %w", err)
+	}
+	if raw == "" {
+		return nil, nil
+	}
+	until, perr := time.Parse(time.RFC3339, raw)
+	if perr != nil {
+		return nil, fmt.Errorf("store.LoadPushBreaker: parse %s=%q: %w", pushBreakerUntilKey, raw, perr)
+	}
+	if !until.After(time.Now().UTC()) {
+		return nil, nil
+	}
+	reason, err := s.readMeta(ctx, pushBreakerReasonKey)
+	if err != nil {
+		return nil, fmt.Errorf("store.LoadPushBreaker: %w", err)
+	}
+	return &PushBreakerState{Reason: reason, Until: until}, nil
+}
+
 // LastPushLog returns the most recent org_push_log row, or (nil, nil) when the
 // agent has never pushed.
 func (s *Store) LastPushLog(ctx context.Context) (*PushLogEntry, error) {
@@ -357,7 +959,7 @@ func (s *Store) LastPushLog(ctx context.Context) (*PushLogEntry, error) {
 // `observer org status` after a re-enroll shows "(none yet)" instead of
 // a stale timestamp. Called by orgclient.Enroll alongside the cursor
 // seed; idempotent on a never-pushed agent. N5 in
-// docs/teams-test-regression-2026-06-03.md.
+// docs/audits/teams-test-regression-2026-06-03.md.
 func (s *Store) ClearLastPushState(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -369,6 +971,12 @@ func (s *Store) ClearLastPushState(ctx context.Context) error {
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM org_push_log`); err != nil {
 		return fmt.Errorf("store.ClearLastPushState: clear log: %w", err)
+	}
+	// A re-enrol starts a fresh push history, so a pause carried over from the
+	// previous enrolment would be stale copy on the dashboard.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM schema_meta WHERE key IN (?, ?)`,
+		pushBreakerUntilKey, pushBreakerReasonKey); err != nil {
+		return fmt.Errorf("store.ClearLastPushState: clear push breaker: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store.ClearLastPushState: commit: %w", err)
@@ -390,6 +998,10 @@ func (s *Store) ClearLastPushState(ctx context.Context) error {
 type ScopeOptions struct {
 	ProjectRootAllowlist []string
 	ProjectRootDenylist  []string
+	// Settle is the token_usage settle holdback (pushsettle.go): which
+	// rows are not yet ELIGIBLE this tick because their generation timing
+	// may still be stamped. Zero value = no holdback.
+	Settle PushSettle
 }
 
 // IsScoped reports whether either list is non-empty (the query path
@@ -429,25 +1041,30 @@ type ShareOptions struct {
 	// test is unchanged. shipsRawContent() is the single place this OR's with
 	// FullContent.
 	AdminManaged bool
+	// EnterpriseGranted flips shipsRawContent() on under the Plane B
+	// dual-mode gateway / RBAC-IA design's enterprise grant (2026-08-29,
+	// §5.3 scope item 4): govern.Effective.GrantsEnterpriseContent() — a
+	// managed node whose enrolment grant honors the extract.managed umbrella
+	// AND all three highest-sensitivity extraction tokens (extract.codeintel,
+	// extract.process, extract.terminal). It is a THIRD, independent way to
+	// authorize raw content, alongside the node-local opt-in (FullContent)
+	// and the admin-driven provisioning default-flip (AdminManaged) — set at
+	// the ONE ShareOptions construction site (internal/orgclient), never
+	// here, exactly like FullToolBodies/CacheDetail/etc.'s own managed-raise
+	// wiring. Default false, so the zero value remains the metadata-only
+	// posture and the privacy invariant test is unchanged. The invariant
+	// this field exists to uphold: raw content ships ONLY under local
+	// opt-in (FullContent) OR the enterprise grant (EnterpriseGranted) —
+	// never server-forced outside of one of those two node-consulted paths
+	// (AdminManaged is itself a node-authored config, per the package-level
+	// "never server-forced" doc already governing AdminManaged above).
+	EnterpriseGranted bool
 	// RoutingSummary opts the §R19.4 aggregate rollup onto the wire
 	// (counts + dollars by tier/reason only — see
 	// store.SelectRoutingSummaries, which owns the aggregation; this
 	// file never names the underlying node-local tables). Its own
 	// consent toggle (model-routing spec §R26.4), default false.
 	RoutingSummary bool
-	// BriefingAggregates opts the Daily-Briefing AGGREGATE rollup onto the
-	// wire (content-free counts + sums by (day, tool, project_hash) — Phase C
-	// of docs/design/standup-briefing.md §4). See store.SelectBriefingAggregates,
-	// which owns the aggregation; this file names no briefing table, so the
-	// privacy sentinel stays green (like RoutingSummary). Its own consent
-	// toggle, default false, node-side only — the org admin cannot force it.
-	BriefingAggregates bool
-	// VirtuousCycle opts the Virtuous-Cycle trend rollup onto the wire
-	// (cumulative CTA applies with projected vs realized savings, weekly
-	// trend). See store.SelectVirtuousCycle, which owns the aggregation.
-	// Content-free; its own consent toggle, default false, node-side only
-	// — the org admin cannot force it.
-	VirtuousCycle bool
 	// ObsSummary / ObsTraces / ObsContent / ObsEvalSummary are the
 	// org-tier observability opt-ins (obs-org-tier plan §1, the T1–T4
 	// ladder). Each default false, each independent, none server-forced.
@@ -475,15 +1092,150 @@ type ShareOptions struct {
 	// additionally require shipsRawContent() (score metadata + content_hash ship
 	// regardless).
 	ObsEvalItems bool // T7 per-item eval scores
+	// ObsEgress gates the T8 egress-routing decision feed (W5.3). Default
+	// false, node-side only, never server-forced. Tenant/User columns
+	// additionally require shipsRawContent().
+	ObsEgress bool // T8 egress routing decisions
+	// FullToolBodies ships the four `actions` body columns (raw_tool_input,
+	// raw_tool_output, preceding_reasoning, error_message) that the local
+	// dashboard renders inline and that this seam NEVER ships in any other
+	// mode. It is a DISTINCT tier from shipsRawContent() (which ships
+	// paths/targets, never these bodies), so extraction is granular per the
+	// enterprise-managed control model. Default false; on an individual node
+	// it is node-opt-in only, on a managed node the org may RAISE it
+	// (extract.managed) — the merge that can raise it lives at the ONE
+	// ShareOptions construction site (internal/orgclient), never here.
+	FullToolBodies bool
+	// CacheDetail ships the Arc 4 P5c cache-detail aggregate (day × model ×
+	// kind counts + tokens + cost delta) computed by store.SelectCacheSummaries
+	// — which owns the node-local cache_events read; this file never names the
+	// cache_* tables (the privacy sentinel forbids them here). Default false; on
+	// an individual node node-opt-in only, on a managed node org-raisable
+	// (extract.managed). The cache_* tables stay node-local except for this
+	// content-free aggregate under this explicit tier.
+	CacheDetail bool
+	// RoutingDetail ships the Arc 4 P5d routing-detail aggregate (day ×
+	// original_model × selected_model × turn_kind × mode counts + savings)
+	// computed by store.SelectRoutingDetail — which owns the node-local
+	// router_decisions read; this file never names that table. Distinct from
+	// RoutingSummary (model-id-free tier aggregate); this tier discloses the
+	// actual model ids. Default false; node-opt-in individual, org-raisable
+	// (extract.managed) managed.
+	RoutingDetail bool
+	// LimitGauge ships the Arc 4 P5e predictions aggregate (per day × provider
+	// rate-limit utilization) computed by store.SelectLimitGauges — which owns
+	// the node-local limit_snapshots read; this file never names that table.
+	// Content-free (utilization stats only). Default false; node-opt-in
+	// individual, org-raisable (extract.managed) managed. It also gates the
+	// per-session sibling PushBatch.SessionLimitSnapshots (lane F-WIRE), which
+	// additionally ships under shipsRawContent().
+	LimitGauge bool
+	// CodeintelDetail ships the Arc 4 P5f codeintel-detail aggregate (per
+	// project-hash × language file/symbol/edge counts) computed by
+	// store.SelectCodeintelSummaries — which owns the node-local codeintel_*
+	// read; this file never names those tables (the privacy sentinel forbids
+	// them here). Content-free STRUCTURE counts only — no symbol name, fqn,
+	// signature, or raw path. Default false; on an individual node
+	// node-opt-in only, on a managed node org-raisable via the DISTINCT
+	// extract.codeintel authority (NOT the umbrella extract.managed — this is
+	// the highest-sensitivity tier and gets its own explicit consent).
+	CodeintelDetail bool
+	// ProcessDetail ships the Arc 4 P5g process-detail aggregate (per day ×
+	// tool run/exit/duration counts) computed by store.SelectProcessSummaries
+	// — which owns the node-local process_runs read; this file never names the
+	// process_* tables (the privacy sentinel forbids them here). Content-free
+	// counts only — no exe path, argv, cwd, network body, or hash. Default
+	// false; on an individual node node-opt-in only, on a managed node
+	// org-raisable via the DISTINCT extract.process authority (NOT the umbrella
+	// extract.managed — the process/eBPF trees are a highest-sensitivity tier).
+	ProcessDetail bool
+	// TerminalDetail ships the Arc 4 P5h terminal-detail aggregates (per
+	// day×tool×kind terminal run/command counts + per day×kind×decision×principal
+	// remote-audit event counts) computed by store.SelectTerminalSummaries /
+	// SelectRemoteAuditSummaries — which own the node-local terminal_* /
+	// remote_audit reads; this file never names those tables (the privacy
+	// sentinel forbids them here, and they carry dedicated never-ships tests).
+	// Content-free counts only — no command, hash, session id, peer address, or
+	// route. Default false; on an individual node node-opt-in only, on a managed
+	// node org-raisable via the DISTINCT extract.terminal authority. Shipping
+	// this aggregate is the deliberate, reviewed reversal of the raw tables'
+	// never-ships pin.
+	TerminalDetail bool
+	// TaskDetail ships the session task/todo checklist (W2 of
+	// docs/plans/node-session-detail-trickle-up-to-org-plan-2026-09-10.md),
+	// composed by store.SelectSessionTaskItems / SelectSessionTaskTransitions
+	// — which own the node-local read; this file never names the task_*
+	// tables (the privacy sentinel forbids them here). It is a TWO-LEVEL
+	// tier: this flag alone ships the status vocabulary, the vendor
+	// raw_status spelling, the counters and the transitions; the item PROSE
+	// (Content / ActiveForm / Owner) additionally requires shipsRawContent(),
+	// decided at the ONE composition site by passing the predicate into the
+	// Select. Default false; node-opt-in on an individual node, org-raisable
+	// on a managed node via the DISTINCT extract.tasks authority. Shipping
+	// these rows at all is the deliberate, reviewed reversal of migration
+	// 109's node-local pin.
+	TaskDetail bool
+	// ToolAccountDetail ships the vendor login / account observations (W3 of
+	// the same plan), composed by store.SelectSessionToolAccounts — which
+	// owns the node-local read; this file never names the observation table.
+	// Also a TWO-LEVEL tier: this flag alone ships
+	// the binding enums plus the opaque account_key and observation time; the
+	// raw identity (Email / Name / AccountID — developer PII) additionally
+	// requires shipsRawContent() (operator decision D2). Default false;
+	// node-opt-in individual, org-raisable managed via the DISTINCT
+	// extract.tool_accounts authority. Reverses migration 111's node-local
+	// pin under this explicit tier.
+	ToolAccountDetail bool
+	// MCPActivity opts an INDIVIDUAL (non-org-enrolled) node's HMAC-only
+	// daily MCP relay aggregate (MCPRelayActivityRow) onto the wire - Agent
+	// Access ruling R8.30.b, [org_client.share].mcp_activity, default false.
+	// It applies ONLY to an individual node: an enrolled teams/enterprise
+	// node ships the aggregate AND the per-record L2 events by capture
+	// posture (shipsRawContent(), R9.5 / R11.10 - the raise on an already-
+	// enrolled node is the SIGNED governance grant, EnterpriseGranted, never
+	// a config rewrite), and this flag neither adds nor removes anything
+	// there. Deliberately NOT an org-raisable share tier (absent from the
+	// node-governance share vocabulary): there is nothing for an org to
+	// raise on a node it does not manage. Composed by
+	// store.SelectMCPRelayActivity, which owns the read; this file never
+	// names the relay tables.
+	MCPActivity bool
 }
 
 // shipsRawContent reports whether raw content-bearing columns ship under these
-// options: true when the node opted into full content (FullContent) OR when the
-// node is in admin-managed mode (AdminManaged, the native-console default-flip).
-// This is the ONE predicate every content-strip site consults so the two knobs
-// can never diverge.
+// options: true when the node opted into full content (FullContent), OR when
+// the node is in admin-managed mode (AdminManaged, the native-console
+// default-flip), OR when the node's managed enrolment grant carries the
+// enterprise-content grant (EnterpriseGranted,
+// govern.Effective.GrantsEnterpriseContent() — the Plane B dual-mode gateway
+// / RBAC-IA design, 2026-08-29 §5.3). This is the ONE predicate every
+// content-strip site consults so the three knobs can never diverge. Raw
+// content ships ONLY under one of these three node-consulted paths — never
+// server-forced outside of them.
 func (o ShareOptions) shipsRawContent() bool {
-	return o.FullContent || o.AdminManaged
+	return o.FullContent || o.AdminManaged || o.EnterpriseGranted
+}
+
+// ShipsRawContent exposes [ShareOptions.shipsRawContent] — verbatim, by
+// delegation, never by re-deriving the disjunction — to callers OUTSIDE this
+// package that must make the same decision the wire seam makes. Today that is
+// the adapter-side message-content producer's gate
+// (internal/store/messagecontent.go, wired in
+// cmd/observer/content_capture_wire.go). Delegating is what keeps the local
+// capture decision and the wire decision from ever disagreeing: there is still
+// exactly ONE predicate, and tests/invariant's source-level pin on that
+// predicate's body stays meaningful.
+func (o ShareOptions) ShipsRawContent() bool {
+	return o.shipsRawContent()
+}
+
+// shipsToolBodies reports whether the four `actions` body columns ship. It is
+// deliberately its OWN predicate, NOT folded into shipsRawContent(): the body
+// columns are the highest-sensitivity per-action content and were never shipped
+// under FullContent/AdminManaged, so they get an independent tier the privacy
+// sentinel pins separately.
+func (o ShareOptions) shipsToolBodies() bool {
+	return o.FullToolBodies
 }
 
 // targetAllowed reports whether the given action type may ship a raw
@@ -543,17 +1295,34 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	if maxBytes <= 0 {
 		maxBytes = 1 << 20
 	}
+	sessionCursor, err := s.clampSessionPushCursor(ctx, cur.Sessions)
+	if err != nil {
+		return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: %w", err)
+	}
+	cur.Sessions = sessionCursor
 	batch := PushBatch{Cursor: cur}
-	var est int64
+	// One budget spine for the whole envelope: cursor wires bound against
+	// budget.max (unchanged semantics), snapshot wires against
+	// budget.snapshotLimit via fitRows. See envelopeBudget.
+	budget := &envelopeBudget{max: maxBytes, snapshotLimit: maxBytes - pushEnvelopeBudgetReserve}
 	budgetHit := false
 
 	// fits reports whether a row of the given size may be added: always true
-	// for the first row (forward progress), otherwise only within budget.
+	// for the first row (forward progress), otherwise only within budget —
+	// minus pushEnvelopeCursorSlack, because per-row jsonSize excludes the
+	// inter-row commas and the envelope's own keys (the 2026-08-27
+	// 693-bytes-over live catch; see the const's doc comment).
 	fits := func(rowBytes int64) bool {
 		if batch.RowCount() == 0 {
 			return true
 		}
-		return est+rowBytes <= maxBytes
+		if budget.est+rowBytes <= budget.max-pushEnvelopeCursorSlack {
+			return true
+		}
+		// A cursor lane stopped on the byte budget with this row still
+		// waiting: the push loop re-kicks instead of sleeping (P3).
+		batch.Full = true
+		return false
 	}
 
 	// Scope: resolve allow/deny project roots to the set of allowed
@@ -571,18 +1340,57 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		return batch, nil
 	}
 
+	// --- change tracking (agent migration 140, lane R2-RESEND) ---
+	// rev is the node's change-sequence snapshot, read ONCE before any row:
+	// every cursor-wire row below carries it as NodeRev so the org applies a
+	// row only when it is newer than the copy it holds. tracking is nil on a
+	// node that is not enrolled (no floors), which disables the re-send lane.
+	//
+	// Tombstones (agent migration 141) settle FIRST, before the snapshot: a
+	// tombstone whose identity is live again becomes an ordinary re-send at
+	// a fresh sequence, which this batch's snapshot then covers.
+	if err := s.settleOrgPushDeletions(ctx); err != nil {
+		return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: %w", err)
+	}
+	rev, tracking, err := s.loadPushTracking(ctx)
+	if err != nil {
+		return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: %w", err)
+	}
+	batch.Acks = PushAcks{Rev: rev, scopeFilter: scopeFilter}
+	if tracking != nil {
+		batch.Acks.tracked, batch.Acks.floor = true, tracking.floor
+	}
+
+	// --- re-send lane ---
+	// Rows at or below the cursor that CHANGED after they shipped (queued by
+	// migration 140's triggers). Composed through the SAME select heads and
+	// per-row scan + privacy strip as the cursor lane below, so a re-send is
+	// byte-for-byte the shape a first send of the same row would have today.
+	// Capped (pushResendRowCap rows, half the envelope) so a large queue - an
+	// `observer org resync`, a backfill that rewrote many rows - drains over
+	// several pushes instead of crowding out new rows.
+	if tracking != nil {
+		if err := s.composeResends(ctx, &batch, budget, cur, rev, *tracking, scopeFilter, share, orgID, userEmail); err != nil {
+			return PushBatch{}, err
+		}
+		// --- tombstone + manifest lanes (agent migration 141, R2-TOMB) ---
+		// Deletions the node made as corrections after pushing the rows, and
+		// the resync heal's per-session identity manifests. Identity fields
+		// only (hashes, ids) - never a raw path or body - and scope-filtered
+		// like every other lane.
+		if err := s.composeDeletions(ctx, &batch, budget, rev, scopeFilter); err != nil {
+			return PushBatch{}, err
+		}
+		if err := s.composeManifests(ctx, &batch, budget, rev, scopeFilter); err != nil {
+			return PushBatch{}, err
+		}
+	}
+
 	// --- sessions ---
 	if !budgetHit {
-		q := `SELECT s.rowid, s.id,
-		             COALESCE(p.root_path_hash,''), COALESCE(p.git_remote_hash,''),
-		             COALESCE(p.root_path,''),      COALESCE(p.git_remote,''),
-		             s.tool,
-		             COALESCE(s.model,''), COALESCE(s.git_branch,''), s.started_at,
-		             COALESCE(s.ended_at,''), COALESCE(s.total_actions,0)
-		        FROM sessions s JOIN projects p ON s.project_id = p.id
-		       WHERE s.rowid > ?`
+		q := sessionPushSelect + ` WHERE s.rowid > ?`
 		if scopeFilter != "" {
-			q += ` AND p.id IN (` + scopeFilter + `)`
+			q += ` AND p.id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY s.rowid ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.Sessions)
@@ -590,29 +1398,11 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: sessions: %w", err)
 		}
 		for rows.Next() {
-			var rowid int64
-			var r orgcontract.SessionRow
-			if err := rows.Scan(&rowid, &r.ID,
-				&r.ProjectRootHash, &r.GitRemoteHash,
-				&r.ProjectRoot, &r.GitRemote,
-				&r.Tool,
-				&r.Model, &r.GitBranch, &r.StartedAt, &r.EndedAt, &r.TotalActions); err != nil {
+			rowid, r, err := scanSessionPushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
 				_ = rows.Close()
 				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan session: %w", err)
 			}
-			// Privacy seam: strip raw paths when not opted into full-content
-			// sharing. The hash counterparts (already scanned) carry the
-			// signal the server needs. git_branch is stripped outright — it has
-			// no hash counterpart and no server feature keys on it, yet branch
-			// names routinely encode client/codename/ticket identifiers, so in
-			// the default metadata-only posture it must not ship raw (it was
-			// previously leaking, inconsistent with git_remote here).
-			if !share.shipsRawContent() {
-				r.ProjectRoot = ""
-				r.GitRemote = ""
-				r.GitBranch = ""
-			}
-			r.OrgID, r.UserEmail = orgID, userEmail
 			sz := jsonSize(r)
 			if !fits(sz) {
 				budgetHit = true
@@ -620,7 +1410,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			}
 			batch.Sessions = append(batch.Sessions, r)
 			batch.Cursor.Sessions = rowid
-			est += sz
+			budget.est += sz
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: sessions rows: %w", err)
@@ -629,16 +1419,9 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 
 	// --- actions ---
 	if !budgetHit {
-		q := `SELECT a.id, a.session_id,
-		             COALESCE(a.target_hash,''), COALESCE(a.source_file_hash,''),
-		             COALESCE(a.source_file,''), COALESCE(a.source_event_id,''),
-		             a.timestamp, a.tool, a.action_type,
-		             COALESCE(a.target,''),
-		             COALESCE(a.turn_index,0), COALESCE(a.success,1), COALESCE(a.duration_ms,0),
-		             COALESCE(a.is_sidechain,0)
-		        FROM actions a WHERE a.id > ?`
+		q := actionPushSelect + ` WHERE a.id > ?`
 		if scopeFilter != "" {
-			q += ` AND a.project_id IN (` + scopeFilter + `)`
+			q += ` AND a.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY a.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.Actions)
@@ -646,31 +1429,11 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: actions: %w", err)
 		}
 		for rows.Next() {
-			var id, success, sidechain int64
-			var r orgcontract.ActionRow
-			if err := rows.Scan(&id, &r.SessionID,
-				&r.TargetHash, &r.SourceFileHash,
-				&r.SourceFile, &r.SourceEventID,
-				&r.Timestamp, &r.Tool, &r.ActionType,
-				&r.Target, &r.TurnIndex,
-				&success, &r.DurationMs, &sidechain); err != nil {
+			id, r, err := scanActionPushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
 				_ = rows.Close()
 				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan action: %w", err)
 			}
-			r.Success = success != 0
-			r.IsSidechain = sidechain != 0
-			// Privacy seam:
-			//   - SourceFile is a filesystem path → strip when not opted in.
-			//   - Target is per-action: in full-content mode, always ship;
-			//     in metadata-only mode, ship only when the action type is
-			//     in the explicit TargetActionAllowlist (e.g. read_file).
-			if !share.shipsRawContent() {
-				r.SourceFile = ""
-			}
-			if !share.targetAllowed(r.ActionType) {
-				r.Target = ""
-			}
-			r.OrgID, r.UserEmail = orgID, userEmail
 			sz := jsonSize(r)
 			if !fits(sz) {
 				budgetHit = true
@@ -678,7 +1441,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			}
 			batch.Actions = append(batch.Actions, r)
 			batch.Cursor.Actions = id
-			est += sz
+			budget.est += sz
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: actions rows: %w", err)
@@ -687,21 +1450,9 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 
 	// --- api_turns ---
 	if !budgetHit {
-		q := `SELECT t.id, COALESCE(t.session_id,''),
-		             COALESCE(p.root_path_hash,''), COALESCE(p.root_path,''),
-		             t.timestamp,
-		             t.provider, COALESCE(t.model,''), COALESCE(t.request_id,''),
-		             t.input_tokens, t.output_tokens, COALESCE(t.cache_read_tokens,0),
-		             COALESCE(t.cache_creation_tokens,0), COALESCE(t.cache_creation_1h_tokens,0),
-		             COALESCE(t.web_search_requests,0), COALESCE(t.cost_usd,0),
-		             COALESCE(t.message_count,0), COALESCE(t.tool_use_count,0),
-		             COALESCE(t.system_prompt_hash,''), COALESCE(t.message_prefix_hash,''),
-		             COALESCE(t.time_to_first_token_ms,0), COALESCE(t.total_response_ms,0),
-		             COALESCE(t.stop_reason,''), COALESCE(t.http_status,0), COALESCE(t.error_class,'')
-		        FROM api_turns t LEFT JOIN projects p ON t.project_id = p.id
-		       WHERE t.id > ?`
+		q := apiTurnPushSelect + ` WHERE t.id > ?`
 		if scopeFilter != "" {
-			q += ` AND t.project_id IN (` + scopeFilter + `)`
+			q += ` AND t.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY t.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.APITurns)
@@ -709,23 +1460,11 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: api_turns: %w", err)
 		}
 		for rows.Next() {
-			var id int64
-			var r orgcontract.APITurnRow
-			if err := rows.Scan(&id, &r.SessionID,
-				&r.ProjectRootHash, &r.ProjectRoot,
-				&r.Timestamp, &r.Provider,
-				&r.Model, &r.RequestID, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
-				&r.CacheCreationTokens, &r.CacheCreation1hTokens, &r.WebSearchRequests, &r.CostUSD,
-				&r.MessageCount, &r.ToolUseCount, &r.SystemPromptHash, &r.MessagePrefixHash,
-				&r.TimeToFirstTokenMS, &r.TotalResponseMS, &r.StopReason, &r.HTTPStatus,
-				&r.ErrorClass); err != nil {
+			id, r, err := scanAPITurnPushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
 				_ = rows.Close()
 				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan api_turn: %w", err)
 			}
-			if !share.shipsRawContent() {
-				r.ProjectRoot = ""
-			}
-			r.OrgID, r.UserEmail = orgID, userEmail
 			sz := jsonSize(r)
 			if !fits(sz) {
 				budgetHit = true
@@ -733,7 +1472,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			}
 			batch.APITurns = append(batch.APITurns, r)
 			batch.Cursor.APITurns = id
-			est += sz
+			budget.est += sz
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: api_turns rows: %w", err)
@@ -742,60 +1481,76 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 
 	// --- token_usage ---
 	if !budgetHit {
-		q := `SELECT tu.id, tu.session_id,
-		             COALESCE(p.root_path_hash,''), COALESCE(p.root_path,''),
-		             tu.timestamp, tu.tool,
-		             COALESCE(tu.model,''), COALESCE(tu.input_tokens,0), COALESCE(tu.output_tokens,0),
-		             COALESCE(tu.cache_read_tokens,0), COALESCE(tu.cache_creation_tokens,0),
-		             COALESCE(tu.cache_creation_1h_tokens,0), COALESCE(tu.reasoning_tokens,0),
-		             COALESCE(tu.web_search_requests,0), COALESCE(tu.estimated_cost_usd,0),
-		             tu.source, COALESCE(tu.reliability,'unknown'),
-		             COALESCE(tu.source_file_hash,''), COALESCE(tu.source_file,''),
-		             COALESCE(tu.source_event_id,'')
-		        FROM token_usage tu
-		        LEFT JOIN sessions s ON tu.session_id = s.id
-		        LEFT JOIN projects p ON s.project_id = p.id
-		       WHERE tu.id > ?`
+		heldSQL, heldArgs := "0", []any(nil)
+		if scope.Settle.active() {
+			heldSQL, heldArgs = scope.Settle.heldExpr()
+		}
+		//nolint:gosec // G202: the head embeds heldSQL ("0" or PushSettle.heldExpr's in-package CASE, values bound via heldArgs); scopeFilter is the resolved integer project-id list.
+		q := tokenUsagePushSelect(heldSQL) + ` WHERE tu.id > ?`
 		if scopeFilter != "" {
 			q += ` AND s.project_id IN (` + scopeFilter + `)`
 		}
 		q += ` ORDER BY tu.id ASC`
-		rows, err := s.db.QueryContext(ctx, q, cur.TokenUsage)
+		rows, err := s.db.QueryContext(ctx, q, append(heldArgs, cur.TokenUsage)...)
 		if err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: token_usage: %w", err)
 		}
-		for rows.Next() {
-			var id int64
-			var r orgcontract.TokenUsageRow
-			if err := rows.Scan(&id, &r.SessionID,
-				&r.ProjectRootHash, &r.ProjectRoot,
-				&r.Timestamp, &r.Tool,
-				&r.Model, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreationTokens,
-				&r.CacheCreation1hTokens, &r.ReasoningTokens, &r.WebSearchRequests, &r.EstimatedCostUSD,
-				&r.Source, &r.Reliability,
-				&r.SourceFileHash, &r.SourceFile,
-				&r.SourceEventID); err != nil {
-				_ = rows.Close()
-				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan token_usage: %w", err)
-			}
-			if !share.shipsRawContent() {
-				r.ProjectRoot = ""
-				r.SourceFile = ""
-			}
-			r.OrgID, r.UserEmail = orgID, userEmail
-			sz := jsonSize(r)
+		// S10-SPEED settle holdback (pushsettle.go), SCOPED to the held
+		// row's own session (2026-10-02 budget-latency arc, P3). An
+		// unsettled row is the LAST token row of its session (the predicate
+		// requires it), so holding it can only ever delay OTHER sessions'
+		// rows behind the single id watermark. It is therefore held only
+		// while nothing that is ready waits behind it: consecutive held rows
+		// are buffered, and the first ready row after them ships the buffer
+		// with it. A held row that ships early carries no gen_ms; since
+		// agent migration 140 the stamp that lands later is RE-SENT
+		// (org_push_change_token_usage covers gen_ms/gen_basis), so the
+		// holdback only ever saved a round trip, never the stamp itself.
+		// Held rows still at the tail stay unshipped and the cursor stops
+		// before the first of them, exactly as before.
+		type heldRow struct {
+			id int64
+			r  orgcontract.TokenUsageRow
+			sz int64
+		}
+		var heldBuf []heldRow
+		ship := func(id int64, r orgcontract.TokenUsageRow, sz int64) bool {
 			if !fits(sz) {
 				// token_usage is the last table; no need to set budgetHit.
-				break
+				return false
 			}
 			batch.TokenUsage = append(batch.TokenUsage, r)
 			batch.Cursor.TokenUsage = id
-			est += sz
+			budget.est += sz
+			return true
+		}
+	tokenRows:
+		for rows.Next() {
+			id, held, r, err := s.scanTokenUsagePushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
+				_ = rows.Close()
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan token_usage: %w", err)
+			}
+			sz := jsonSize(r)
+			if held {
+				heldBuf = append(heldBuf, heldRow{id: id, r: r, sz: sz})
+				continue
+			}
+			for _, h := range heldBuf {
+				if !ship(h.id, h.r, h.sz) {
+					break tokenRows
+				}
+			}
+			heldBuf = heldBuf[:0]
+			if !ship(id, r, sz) {
+				break
+			}
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: token_usage rows: %w", err)
 		}
 	}
+	batch.Acks.recordMain(cur, batch.Cursor)
 
 	// --- guard_events (guard spec §10.2 / §14.3) ---
 	// Unlike the NODE-LOCAL cache_* / advisor_* tables, guard events DO
@@ -813,7 +1568,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		             COALESCE(ge.degraded_from,''), COALESCE(ge.enforced,0), COALESCE(ge.source,''),
 		             COALESCE(ge.target_hash,''),
 		             COALESCE(ge.reason,''), COALESCE(ge.target_excerpt,''), COALESCE(ge.taint_origin,''),
-		             ge.chain_prev, ge.chain_hash
+		             ge.chain_prev, ge.chain_hash, COALESCE(ge.grant_id, 0)
 		        FROM guard_events ge
 		        LEFT JOIN sessions s ON ge.session_id = s.id
 		       WHERE ge.id > ?`
@@ -823,7 +1578,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			// posture event) is conservatively EXCLUDED under a scoped
 			// push — when the operator restricts by project, unattributable
 			// rows don't ship.
-			q += ` AND s.project_id IN (` + scopeFilter + `)`
+			q += ` AND s.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY ge.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.GuardEvents)
@@ -839,7 +1594,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 				&r.DegradedFrom, &enforced, &r.Source,
 				&r.TargetHash,
 				&r.Reason, &r.TargetExcerpt, &r.TaintOrigin,
-				&r.ChainPrev, &r.ChainHash); err != nil {
+				&r.ChainPrev, &r.ChainHash, &r.GrantID); err != nil {
 				_ = rows.Close()
 				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan guard_event: %w", err)
 			}
@@ -861,7 +1616,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			}
 			batch.GuardEvents = append(batch.GuardEvents, r)
 			batch.Cursor.GuardEvents = id
-			est += sz
+			budget.est += sz
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: guard_events rows: %w", err)
@@ -883,7 +1638,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		        LEFT JOIN sessions s ON oc.session_id = s.id
 		       WHERE oc.id > ?`
 		if scopeFilter != "" {
-			q += ` AND s.project_id IN (` + scopeFilter + `)`
+			q += ` AND s.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY oc.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.OTelContent)
@@ -912,11 +1667,83 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			}
 			batch.OTelContent = append(batch.OTelContent, r)
 			batch.Cursor.OTelContent = id
-			est += sz
+			budget.est += sz
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: otel_content rows: %w", err)
 		}
+	}
+
+	// --- MCP relay per-record events (Agent Access P4 W4e, R14.5) ---
+	// The seventh cursor wire. ONLY under shipsRawContent(): the per-record
+	// rows carry the plain server/tool names and the L2 payloads AS STORED
+	// (an enrolled teams/enterprise node's capture posture, R9.5 / R10.6);
+	// an individual node ships none of them and its cursor stays put. Read
+	// through the one-owner seam in mcprelaysummary.go - this file names no
+	// relay table (the privacy sentinel forbids it). The server de-dupes a
+	// replay on (source_node_key, local_record_seq, record_kind), which is
+	// what makes the cursor CAS's "keep the stored cursor" branch safe here
+	// exactly as it is for guard_events.
+	if !budgetHit && share.shipsRawContent() {
+		evs, err := s.SelectMCPRelayEvents(ctx, cur.MCPRelay, mcpRelayEventsPerBatch)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: mcp relay events: %w", err)
+		}
+		for i := range evs {
+			r := evs[i]
+			r.OrgID, r.UserEmail = orgID, userEmail
+			sz := jsonSize(r)
+			if !fits(sz) {
+				break
+			}
+			batch.MCPRelayEvents = append(batch.MCPRelayEvents, r)
+			batch.Cursor.MCPRelay = r.LocalRecordSeq
+			budget.est += sz
+		}
+	}
+
+	// --- per-session rate-limit windows (lane F-WIRE) ---
+	// The eighth cursor wire: the newest subscription-window observation per
+	// (session, provider), so the org session drawer renders the same "% of
+	// limit spent" gauge the node's session detail does. It is the
+	// per-session sibling of the limit_gauge aggregate tier, so it ships under
+	// the SAME consent: the node's limit_gauge opt-in (an individual node's
+	// own choice, or an admin raise of it on a managed node), OR a node that
+	// already ships everything (shipsRawContent(): every enrolled
+	// teams/enterprise node under the full-capture ruling). An individual node
+	// that never opted in ships nothing and its cursor stays put.
+	//
+	// Read and coalesced through the one-owner seam in limitgauge.go - this
+	// file names no snapshot table (the privacy sentinel forbids it). The
+	// scan is bounded (limitSnapshotsScanPerBatch rows), and the coalesced
+	// rows are admitted by the same budget accounting as fits(): the first
+	// row of an otherwise-empty batch always ships (forward progress), later
+	// ones only within budget.max minus the cursor slack. A row that does not
+	// fit stops the walk unconsumed, so the cursor never passes a window that
+	// did not ship.
+	if !budgetHit && (share.LimitGauge || share.shipsRawContent()) {
+		cands, err := s.SelectSessionLimitSnapshots(ctx, cur.LimitSnapshots, limitSnapshotsScanPerBatch, scopeFilter)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session limit snapshots: %w", err)
+		}
+		for i := range cands {
+			cands[i].Row.OrgID, cands[i].Row.UserEmail = orgID, userEmail
+		}
+		first := batch.RowCount() == 0
+		var used int64
+		admit := func(extra int64) bool {
+			switch {
+			case extra <= 0, first && used == 0:
+			case budget.est+used+extra > budget.max-pushEnvelopeCursorSlack:
+				return false
+			}
+			used += extra
+			return true
+		}
+		rows, next := coalesceSessionLimitSnapshots(cands, cur.LimitSnapshots, admit)
+		batch.SessionLimitSnapshots = rows
+		batch.Cursor.LimitSnapshots = next
+		budget.est += used
 	}
 
 	// §R19.4 aggregate rollup — attached only under the node-side
@@ -924,53 +1751,521 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	// node-local read; this file deliberately never names the source
 	// tables — the privacy sentinel forbids it). Counts + dollars by
 	// tier/reason only.
-	if share.RoutingSummary {
+	if share.RoutingSummary && s.snapChanged(ctx, snapFamRoutingSummary) {
 		sums, err := s.SelectRoutingSummaries(ctx)
 		if err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: routing summaries: %w", err)
 		}
 		for i := range sums {
 			sums[i].OrgID, sums[i].UserEmail = orgID, userEmail
-			est += jsonSize(sums[i])
 		}
-		batch.RoutingSummaries = sums
+		batch.RoutingSummaries = fitSnapshot(s, budget, snapFamRoutingSummary, sums)
 	}
 
-	// Daily-Briefing AGGREGATE rollup (Phase C of docs/design/standup-briefing.md
-	// §4) — attached only under the node-side opt-in. Computed by
-	// store.SelectBriefingAggregates (which owns the node-local read in
-	// store/briefingorg.go; this file deliberately never names the source
-	// tables — the privacy sentinel forbids it). Content-free counts + sums by
-	// (day, tool, project_hash); windowed-recompute + server-upsert idempotent.
-	if share.BriefingAggregates {
-		rows, err := s.SelectBriefingAggregates(ctx, briefingAggWindowDays)
+	// MCP relay activity aggregate (Agent Access P4 W4e, doc3 §9.5). The
+	// HMAC-only day x vserver x tool x decision x attestation counts. Two
+	// postures, ONE composition site: an INDIVIDUAL node attaches it only
+	// under its own mcp_activity opt-in (R8.30.b); an ENROLLED teams/
+	// enterprise node attaches it by capture posture (shipsRawContent(),
+	// R9.5) whatever the flag says. Composed by store.SelectMCPRelayActivity
+	// (mcprelaysummary.go), which owns the read through the
+	// internal/mcprelay/record seam - this file names no relay table.
+	if (share.MCPActivity || share.shipsRawContent()) && s.snapChanged(ctx, snapFamMCPRelayActivity) {
+		act, err := s.SelectMCPRelayActivity(ctx)
 		if err != nil {
-			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: briefing aggregates: %w", err)
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: mcp relay activity: %w", err)
 		}
-		for i := range rows {
-			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
-			est += jsonSize(rows[i])
+		for i := range act {
+			act[i].OrgID, act[i].UserEmail = orgID, userEmail
 		}
-		batch.BriefingAggregates = rows
+		batch.MCPRelayActivity = fitSnapshot(s, budget, snapFamMCPRelayActivity, act)
 	}
 
-	// Virtuous-Cycle trend rollup (Stage 3) — attached only under the
-	// node-side opt-in. Computed by store.SelectVirtuousCycle (which reads
-	// the briefing-CTA ledger + router_decisions; this file deliberately
-	// never names the source tables/files — the privacy sentinel forbids it).
-	// Content-free cumulative applies + projected + realized (broad filter);
-	// weekly trend in ByWeek. Its own consent toggle, default false,
-	// node-side only — the org admin cannot force it.
-	if share.VirtuousCycle {
-		rows, err := s.SelectVirtuousCycle(ctx, virtuousCycleAggWindowDays)
+	// Shadow-MCP discovery inventory (Agent Access P11 (c), R12.10 / R13.8 /
+	// R14.6). Same two-posture gate as the relay aggregate above; the SHAPE
+	// is decided here by passing shipsRawContent() in - FULL (raw locator)
+	// for an enrolled teams/enterprise node, REDUCED (identity + metadata
+	// only) otherwise. Composed by store.SelectMCPInventory (mcpinventory.go)
+	// through the host-bound provider seam - this file names no source.
+	if (share.MCPActivity || share.shipsRawContent()) && s.snapChanged(ctx, snapFamMCPInventory) {
+		inv, err := s.SelectMCPInventory(ctx, orgID, share.shipsRawContent())
 		if err != nil {
-			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: virtuous cycle: %w", err)
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: mcp inventory: %w", err)
 		}
-		for i := range rows {
-			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
-			est += jsonSize(rows[i])
+		for i := range inv {
+			inv[i].OrgID, inv[i].UserEmail = orgID, userEmail
 		}
-		batch.VirtuousCycle = rows
+		batch.MCPInventory = fitSnapshot(s, budget, snapFamMCPInventory, inv)
+	}
+
+	// Org BUDGET posture (org-budget plan §3.3d) — one enum-only envelope-level
+	// row saying whether the org's budget is actually holding on this node.
+	// Composed through the func seam in budgetposture.go, exactly like the
+	// routing summaries above, so this file names nothing the posture is
+	// derived from. It is tiny and unconditional in size terms, so it is
+	// attached before the size-bounded snapshot wires rather than competing
+	// with them: a posture the admin cannot see is the failure the row exists
+	// to prevent. nil = nothing to report; the envelope stays byte-identical.
+	batch.BudgetPosture = s.composeBudgetPosture()
+	// The component posture (modular packaging plan 6.4): composed through
+	// the func seam in componentposture.go; metadata about the binary, so it
+	// ships in every share mode. A change forces a push until delivered.
+	batch.ComponentPosture, batch.componentPostureChanged = s.composeComponentPosture(ctx)
+
+	// The org AI tool policy state (adapter config P7): a managed node's
+	// applied state, composed through the func seam in agentconfigorg.go so
+	// this file names no node table. Observed values ride only under
+	// shipsRawContent(). A changed report forces a push (an admin must see
+	// drift without waiting for unrelated telemetry); an unchanged one only
+	// rides along.
+	batch.AgentConfigState = s.composeAgentConfigState(ctx, share.shipsRawContent())
+	batch.agentConfigChanged = s.noteAgentConfigDigest(batch.AgentConfigState)
+	// The AI tool configuration inventory (D-112, T-427): same func-seam
+	// posture, value-bearing, so raw content only; attached only when it
+	// changed since the last accepted push (a change forces a push).
+	batch.AgentConfigInventory = s.composeAgentConfigInventory(ctx, share.shipsRawContent())
+
+	// Cache-detail aggregate (Arc 4 P5c) — attached only under the
+	// cache_detail tier. Computed by store.SelectCacheSummaries (which owns
+	// the node-local cache_events read; this file deliberately never names the
+	// cache_* tables — the privacy sentinel forbids it). Day × model × kind
+	// counts + tokens + cost delta only, no content.
+	if share.CacheDetail && s.snapChanged(ctx, snapFamCacheSummary) {
+		sums, err := s.SelectCacheSummaries(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: cache summaries: %w", err)
+		}
+		for i := range sums {
+			sums[i].OrgID, sums[i].UserEmail = orgID, userEmail
+		}
+		batch.CacheSummaries = fitSnapshot(s, budget, snapFamCacheSummary, sums)
+	}
+
+	// Lines-of-Code aggregates (docs/plans/
+	// lines-of-code-tracking-plan-2026-09-07.md §3.4). DELIBERATELY OUTSIDE
+	// the shipsRawContent() block below: per plan §2 / §6 ruling 2 the counts,
+	// the classifier version and the human-capture flag are the same
+	// disclosure class as SessionRow.TotalActions and ship under the DEFAULT
+	// metadata-only posture. The single content-adjacent field — the row's
+	// language mix, which says what KIND of files a developer touched — is
+	// gated here by passing share.shipsRawContent() into the composer, so the
+	// extra per-language query is not even run when it will not ship.
+	//
+	// The composers live in internal/store/locsummary.go and own the
+	// node-local per-file read; this file names that table nowhere.
+	if s.snapChanged(ctx, snapFamSessionLOC) {
+		sl, err := s.SelectSessionLOCSummaries(ctx, scope, share.shipsRawContent())
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session loc: %w", err)
+		}
+		for i := range sl {
+			sl[i].OrgID, sl[i].UserEmail = orgID, userEmail
+		}
+		batch.SessionLOC = fitSnapshot(s, budget, snapFamSessionLOC, sl)
+	}
+	if s.snapChanged(ctx, snapFamLOCDays) {
+		ld, err := s.SelectLOCDaySummaries(ctx, scope)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: loc days: %w", err)
+		}
+		for i := range ld {
+			ld[i].OrgID, ld[i].UserEmail = orgID, userEmail
+		}
+		batch.LOCDays = fitSnapshot(s, budget, snapFamLOCDays, ld)
+	}
+
+	// Session quality score (BL2-ORG). Same DEFAULT metadata posture as the
+	// LOC aggregates above: a rule-based score, ratios and token counts, no
+	// content. Windowed on scored_at (not started_at) because the scorer
+	// writes after the session's own row has usually shipped. Composed in
+	// sessionqualitysummary.go.
+	if s.snapChanged(ctx, snapFamSessionQuality) {
+		sq, err := s.SelectSessionQualityRows(ctx, scope)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session quality: %w", err)
+		}
+		for i := range sq {
+			sq[i].OrgID, sq[i].UserEmail = orgID, userEmail
+		}
+		batch.SessionQuality = fitSnapshot(s, budget, snapFamSessionQuality, sq)
+	}
+
+	// Commit ownership (lane F-PROJ). Same DEFAULT metadata posture as the
+	// LOC aggregates above: commit-sha hashes, session ids and counts. The
+	// commit subject and the RAW commit sha are the gated fields, decided
+	// here by passing share.shipsRawContent() into the composer; author
+	// identity and paths
+	// have no wire field at all. Composed in commitownersummary.go, which
+	// reads the node-local commit tables only through their owning loaders.
+	if s.snapChanged(ctx, snapFamCommitOwnership) {
+		co, err := s.SelectCommitOwnershipRows(ctx, scope, share.shipsRawContent(), orgCommitLinkWindow)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: commit ownership: %w", err)
+		}
+		for i := range co {
+			co[i].OrgID, co[i].UserEmail = orgID, userEmail
+		}
+		batch.CommitOwnership = fitSnapshot(s, budget, snapFamCommitOwnership, co)
+	}
+
+	// Session task/todo checklist (W2) and vendor-login observations (W3) —
+	// docs/plans/node-session-detail-trickle-up-to-org-plan-2026-09-10.md.
+	// Each is attached only under its OWN tier flag, and each composes through
+	// a FUNCTION CALL into the sibling file that owns the node-local read, so
+	// this file never names any of the three node-local source tables behind
+	// them (see internal/store/taskflowsummary.go and toolaccountsummary.go,
+	// which are their one reader each).
+	//
+	// The SECOND gate — the plan prose and the raw account identity — is
+	// passed INTO the Select as share.shipsRawContent(), so the gated columns
+	// are not even read in the metadata posture. That is the whole two-level
+	// tier: task_detail / tool_account_detail buy the STATUS, raw content is a
+	// separate consent on top.
+	if share.TaskDetail && s.snapChanged(ctx, snapFamSessionTasks) {
+		ti, err := s.SelectSessionTaskItems(ctx, share.shipsRawContent())
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session task items: %w", err)
+		}
+		for i := range ti {
+			ti[i].OrgID, ti[i].UserEmail = orgID, userEmail
+		}
+		tt, err := s.SelectSessionTaskTransitions(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session task transitions: %w", err)
+		}
+		for i := range tt {
+			tt[i].OrgID, tt[i].UserEmail = orgID, userEmail
+		}
+		// ONE recompute feeding TWO wires shares a single gate entry (the
+		// benchmark precedent): a truncation of either slice keeps the pair
+		// dirty, so the dropped tail is recomposed next tick.
+		batch.SessionTaskItems = fitSnapshot(s, budget, snapFamSessionTasks, ti)
+		batch.SessionTaskTransitions = fitSnapshot(s, budget, snapFamSessionTasks, tt)
+	}
+
+	if share.ToolAccountDetail && s.snapChanged(ctx, snapFamSessionToolAccount) {
+		ta, err := s.SelectSessionToolAccounts(ctx, share.shipsRawContent())
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session tool accounts: %w", err)
+		}
+		for i := range ta {
+			ta[i].OrgID, ta[i].UserEmail = orgID, userEmail
+		}
+		batch.SessionToolAccounts = fitSnapshot(s, budget, snapFamSessionToolAccount, ta)
+	}
+
+	// The node's own update posture (enterprise-update-management plan §2.1).
+	// Composed through a FUNCTION CALL into the sibling file that owns the
+	// node-local read, exactly like the LOC aggregates above — so the tables
+	// behind it are never named here. A nil result (the feature unwired) is
+	// the pre-feature envelope, and a failure NEVER fails the push: a node
+	// that cannot describe its updater must still deliver its telemetry.
+	if posture, err := s.SelectUpdatePosture(ctx); err == nil {
+		batch.UpdatePosture = posture
+	}
+
+	// Session-scoped enterprise wires (org-parity W3.1 verbosity / W2.1
+	// cache / W2.2 process) — attached only under shipsRawContent()
+	// (FullContent || AdminManaged), deliberately NOT the teams-tier detail
+	// flags: session-scoped telemetry is per-developer detail the enterprise
+	// posture treats as admin-visible-by-default. Each Select lives in its
+	// own file and owns its node-local table reads; this file deliberately
+	// never names those tables (the privacy sentinel forbids it).
+	if share.shipsRawContent() {
+		if s.snapChanged(ctx, snapFamSessionVerbosity) {
+			sv, err := s.SelectSessionVerbositySummaries(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session verbosity: %w", err)
+			}
+			for i := range sv {
+				sv[i].OrgID, sv[i].UserEmail = orgID, userEmail
+			}
+			batch.SessionVerbositySummaries = fitSnapshot(s, budget, snapFamSessionVerbosity, sv)
+		}
+
+		if s.snapChanged(ctx, snapFamSessionCache) {
+			sc, err := s.SelectSessionCacheSummaries(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session cache summaries: %w", err)
+			}
+			for i := range sc {
+				sc[i].OrgID, sc[i].UserEmail = orgID, userEmail
+			}
+			batch.SessionCacheSummaries = fitSnapshot(s, budget, snapFamSessionCache, sc)
+		}
+
+		// The PER-EVENT timeline beside its bucketed sibling (operator
+		// directive item 6). A SEPARATE snap family from snapFamSessionCache
+		// even though both read one source: they are two independently
+		// truncatable slices, so sharing one gate entry would let a
+		// truncation of the events keep the buckets dirty forever (the
+		// task-items pair share an entry precisely BECAUSE they come from one
+		// recompute; these are two). The Select re-applies the
+		// shipsRawContent() gate itself.
+		if s.snapChanged(ctx, snapFamSessionCacheEvents) {
+			ce, err := s.SelectSessionCacheEvents(ctx, share)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session cache events: %w", err)
+			}
+			for i := range ce {
+				ce[i].OrgID, ce[i].UserEmail = orgID, userEmail
+			}
+			batch.SessionCacheEvents = fitSnapshot(s, budget, snapFamSessionCacheEvents, ce)
+		}
+
+		if s.snapChanged(ctx, snapFamSessionProcess) {
+			sp, err := s.SelectSessionProcessRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session processes: %w", err)
+			}
+			for i := range sp {
+				sp[i].OrgID, sp[i].UserEmail = orgID, userEmail
+			}
+			// The per-row metric-samples ring is already capped in the SELECT;
+			// this second guard drops it across the WHOLE slice when the rows
+			// would otherwise overrun the remaining snapshot budget, so the
+			// far-more-valuable process tree / metadata ships rather than being
+			// truncated off the tail by fitSnapshot to make room for sparklines.
+			dropProcessMetricSamplesIfOverBudget(budget, sp)
+			batch.SessionProcesses = fitSnapshot(s, budget, snapFamSessionProcess, sp)
+		}
+
+		// Wave-3 per-developer enterprise wires (advisor / patterns /
+		// benchmarks / compression / routing-dev / codeintel-dev /
+		// terminals+remote / guard pins+approvals). Each Select lives in its
+		// own file and owns its node-local table reads; this file names none
+		// of them. All windowed/snapshot recomputes with idempotent server
+		// upserts — no cursor effect.
+		//
+		// Each is additionally guarded by the Track R2 change-detection gate
+		// (internal/store/orgsnapgate.go), so an unchanged family costs one
+		// O(1) probe instead of its full recompute. The ADVISOR wire is the
+		// deliberate exception: it is a snapshot of the injected advisor
+		// provider rather than a SQL recompute, no honest cheap probe exists
+		// over its inputs, and its org rollup windows on `pushed_at` — so it
+		// keeps the pre-R2 every-tick behaviour and stays on bare fitRows.
+		as, err := s.SelectAdvisorSuggestionRows(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: advisor suggestions: %w", err)
+		}
+		for i := range as {
+			as[i].OrgID, as[i].UserEmail = orgID, userEmail
+		}
+		batch.AdvisorSuggestions = fitRows(budget, as)
+
+		if s.snapChanged(ctx, snapFamProjectPatterns) {
+			pp, err := s.SelectProjectPatternRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: project patterns: %w", err)
+			}
+			for i := range pp {
+				pp[i].OrgID, pp[i].UserEmail = orgID, userEmail
+			}
+			batch.ProjectPatterns = fitSnapshot(s, budget, snapFamProjectPatterns, pp)
+		}
+
+		// Benchmarks are ONE recompute feeding TWO wire families, so they
+		// share a single gate entry: a truncation of either slice keeps the
+		// pair dirty.
+		if s.snapChanged(ctx, snapFamBenchmark) {
+			bruns, batts, err := s.SelectBenchmarkOrgRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: benchmark rows: %w", err)
+			}
+			for i := range bruns {
+				bruns[i].OrgID, bruns[i].UserEmail = orgID, userEmail
+			}
+			for i := range batts {
+				batts[i].OrgID, batts[i].UserEmail = orgID, userEmail
+			}
+			batch.BenchmarkRuns = fitSnapshot(s, budget, snapFamBenchmark, bruns)
+			batch.BenchmarkAttempts = fitSnapshot(s, budget, snapFamBenchmark, batts)
+		}
+
+		if s.snapChanged(ctx, snapFamCompressionStats) {
+			cs, err := s.SelectCompressionStatRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: compression stats: %w", err)
+			}
+			for i := range cs {
+				cs[i].OrgID, cs[i].UserEmail = orgID, userEmail
+			}
+			batch.CompressionStats = fitSnapshot(s, budget, snapFamCompressionStats, cs)
+		}
+
+		if s.snapChanged(ctx, snapFamRoutingDev) {
+			rd, err := s.SelectRoutingDevRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: routing dev: %w", err)
+			}
+			for i := range rd {
+				rd[i].OrgID, rd[i].UserEmail = orgID, userEmail
+			}
+			batch.RoutingDevRows = fitSnapshot(s, budget, snapFamRoutingDev, rd)
+		}
+
+		if s.snapChanged(ctx, snapFamCodeintelDev) {
+			cd, err := s.SelectCodeintelDevRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: codeintel dev: %w", err)
+			}
+			for i := range cd {
+				cd[i].OrgID, cd[i].UserEmail = orgID, userEmail
+			}
+			batch.CodeintelDevRows = fitSnapshot(s, budget, snapFamCodeintelDev, cd)
+		}
+
+		if s.snapChanged(ctx, snapFamTerminalRuns) {
+			tr, err := s.SelectTerminalRunRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: terminal runs: %w", err)
+			}
+			for i := range tr {
+				tr[i].OrgID, tr[i].UserEmail = orgID, userEmail
+			}
+			batch.TerminalRuns = fitSnapshot(s, budget, snapFamTerminalRuns, tr)
+		}
+
+		if s.snapChanged(ctx, snapFamTerminalCommands) {
+			tc, err := s.SelectTerminalCommandRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: terminal commands: %w", err)
+			}
+			for i := range tc {
+				tc[i].OrgID, tc[i].UserEmail = orgID, userEmail
+			}
+			batch.TerminalCommands = fitSnapshot(s, budget, snapFamTerminalCommands, tc)
+		}
+
+		if s.snapChanged(ctx, snapFamRemoteAuditRows) {
+			ra, err := s.SelectRemoteAuditRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: remote audit: %w", err)
+			}
+			for i := range ra {
+				ra[i].OrgID, ra[i].UserEmail = orgID, userEmail
+			}
+			batch.RemoteAudit = fitSnapshot(s, budget, snapFamRemoteAuditRows, ra)
+		}
+
+		if s.snapChanged(ctx, snapFamGuardPins) {
+			gp, err := s.SelectGuardPinRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: guard pins: %w", err)
+			}
+			for i := range gp {
+				gp[i].OrgID, gp[i].UserEmail = orgID, userEmail
+			}
+			batch.GuardPins = fitSnapshot(s, budget, snapFamGuardPins, gp)
+		}
+
+		if s.snapChanged(ctx, snapFamGuardApprovals) {
+			ga, err := s.SelectGuardApprovalRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: guard approvals: %w", err)
+			}
+			for i := range ga {
+				ga[i].OrgID, ga[i].UserEmail = orgID, userEmail
+			}
+			batch.GuardApprovals = fitSnapshot(s, budget, snapFamGuardApprovals, ga)
+		}
+	}
+
+	// Codeintel-detail aggregate (Arc 4 P5f) — attached only under the
+	// codeintel_detail tier. Computed by store.SelectCodeintelSummaries (which
+	// owns the node-local codeintel_* read; this file deliberately never names
+	// the codeintel_* tables — the privacy sentinel forbids it). Per
+	// project-hash × language file/symbol/edge STRUCTURE counts only — no
+	// symbol name, fqn, signature, or raw path.
+	if share.CodeintelDetail && s.snapChanged(ctx, snapFamCodeintelSummary) {
+		sums, err := s.SelectCodeintelSummaries(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: codeintel summaries: %w", err)
+		}
+		for i := range sums {
+			sums[i].OrgID, sums[i].UserEmail = orgID, userEmail
+		}
+		batch.CodeintelSummaries = fitSnapshot(s, budget, snapFamCodeintelSummary, sums)
+	}
+
+	// Process-detail aggregate (Arc 4 P5g) — attached only under the
+	// process_detail tier. Computed by store.SelectProcessSummaries (which owns
+	// the node-local process_runs read; this file deliberately never names the
+	// process_* tables — the privacy sentinel forbids it). Per day × tool
+	// run/exit/duration counts only — no exe path, argv, cwd, network body, or
+	// hash.
+	if share.ProcessDetail && s.snapChanged(ctx, snapFamProcessSummary) {
+		sums, err := s.SelectProcessSummaries(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: process summaries: %w", err)
+		}
+		for i := range sums {
+			sums[i].OrgID, sums[i].UserEmail = orgID, userEmail
+		}
+		batch.ProcessSummaries = fitSnapshot(s, budget, snapFamProcessSummary, sums)
+	}
+
+	// Terminal-detail aggregates (Arc 4 P5h) — attached only under the
+	// terminal_detail tier. Computed by store.SelectTerminalSummaries /
+	// SelectRemoteAuditSummaries (which own the node-local terminal_* /
+	// remote_audit reads; this file deliberately never names those tables — the
+	// privacy sentinel forbids them AND they carry dedicated never-ships tests).
+	// Content-free counts only. Shipping these is the deliberate, reviewed
+	// reversal of the raw tables' never-ships pin — the raw rows still never
+	// cross, only these aggregates under this explicit tier.
+	if share.TerminalDetail {
+		if s.snapChanged(ctx, snapFamTerminalSummary) {
+			tsums, err := s.SelectTerminalSummaries(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: terminal summaries: %w", err)
+			}
+			for i := range tsums {
+				tsums[i].OrgID, tsums[i].UserEmail = orgID, userEmail
+			}
+			batch.TerminalSummaries = fitSnapshot(s, budget, snapFamTerminalSummary, tsums)
+		}
+
+		if s.snapChanged(ctx, snapFamRemoteAuditSummary) {
+			rsums, err := s.SelectRemoteAuditSummaries(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: remote audit summaries: %w", err)
+			}
+			for i := range rsums {
+				rsums[i].OrgID, rsums[i].UserEmail = orgID, userEmail
+			}
+			batch.RemoteAuditSummaries = fitSnapshot(s, budget, snapFamRemoteAuditSummary, rsums)
+		}
+	}
+
+	// Routing-detail aggregate (Arc 4 P5d) — attached only under the
+	// routing_detail tier. Computed by store.SelectRoutingDetail (which owns
+	// the node-local router_decisions read; this file never names that table).
+	// Model-id-bearing per-decision aggregate, distinct from the model-id-free
+	// RoutingSummaries above.
+	if share.RoutingDetail && s.snapChanged(ctx, snapFamRoutingDetail) {
+		dets, err := s.SelectRoutingDetail(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: routing details: %w", err)
+		}
+		for i := range dets {
+			dets[i].OrgID, dets[i].UserEmail = orgID, userEmail
+		}
+		batch.RoutingDetails = fitSnapshot(s, budget, snapFamRoutingDetail, dets)
+	}
+
+	// Predictions / limit-gauge aggregate (Arc 4 P5e) — attached only under the
+	// limit_gauge tier. Computed by store.SelectLimitGauges (which owns the
+	// node-local limit_snapshots read; this file never names that table).
+	// Per day × provider utilization stats only, no scope/session/headers.
+	if share.LimitGauge && s.snapChanged(ctx, snapFamLimitGauge) {
+		gauges, err := s.SelectLimitGauges(ctx)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: limit gauges: %w", err)
+		}
+		for i := range gauges {
+			gauges[i].OrgID, gauges[i].UserEmail = orgID, userEmail
+		}
+		batch.LimitGauges = fitSnapshot(s, budget, snapFamLimitGauge, gauges)
 	}
 
 	// Org-tier observability rollups (obs-org-tier plan §2). Each tier is
@@ -979,12 +2274,411 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	// schema), so the privacy sentinel's source-walk stays green, exactly
 	// like the RoutingSummaries composition above. A nil provider (obs
 	// compiled out via no_obs, or disabled) makes every tier a no-op.
-	if err := s.composeObsTiers(ctx, &batch, &est, orgID, userEmail, share); err != nil {
+	if err := s.composeObsTiers(ctx, &batch, budget, orgID, userEmail, share); err != nil {
 		return PushBatch{}, err
 	}
 
-	batch.EstBytes = est
+	// Network rows carry the largest fields in the enterprise snapshot
+	// (request/response bodies). Compose them LAST and — uniquely among the
+	// snapshot wires — push the remaining budget DOWN into the selector as well,
+	// because their SQL cost is per-BODY: every other snapshot wire reads
+	// metadata-sized rows where measuring-then-truncating in fitRows is cheap,
+	// while this one would materialise megabytes per row just to discard them.
+	// The in-Go fitRows pass still runs, so the wire obeys the same spine as
+	// every other family; the Bounded selector is a scan-side early exit on top.
+	//
+	// This wire is also the one the Track R2 gate saves the most on, and the
+	// one where "truncated" must not be mistaken for "delivered": it can lose
+	// its tail INSIDE the scan (the Bounded selector's byte ceiling) as well as
+	// in fitRows, so the selector reports that separately and the gate keeps
+	// the family dirty until the whole snapshot has actually shipped.
+	if share.shipsRawContent() && budget.remainingSnapshot() > 0 && s.snapChanged(ctx, snapFamSessionNetwork) {
+		sne, scanTruncated, err := s.selectSessionNetworkEventsBounded(ctx, budget.remainingSnapshot())
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session network events: %w", err)
+		}
+		for i := range sne {
+			sne[i].OrgID, sne[i].UserEmail = orgID, userEmail
+		}
+		s.snap.recomputed(snapFamSessionNetwork, !scanTruncated)
+		batch.SessionNetworkEvents = fitSnapshot(s, budget, snapFamSessionNetwork, sne)
+	}
+
+	batch.EstBytes = budget.est
 	return batch, nil
+}
+
+// composeResends is the RE-SEND lane of SelectUnpushedSince (agent migration
+// 140): rows at or below the cursor that changed after they shipped, oldest
+// changes first, through the SAME select heads and scan*PushRow privacy strip
+// as the cursor lane. Only queue rows with seq <= rev are read (a newer change
+// waits for the next batch, which will carry a newer rev). Bounded by
+// pushResendRowCap and half the envelope.
+func (s *Store) composeResends(ctx context.Context, batch *PushBatch, budget *envelopeBudget, cur PushCursor, rev int64, tr pushTracking, scopeFilter string, share ShareOptions, orgID, userEmail string) error {
+	limit := (budget.max - pushEnvelopeCursorSlack) / 2
+	n := 0
+	fits := func(sz int64) bool {
+		if batch.RowCount() == 0 {
+			return true
+		}
+		return n < pushResendRowCap && budget.est+sz <= limit
+	}
+	// add scans one row and appends it when it fits; ok=false means the
+	// lane is full.
+	type addFn func(rows *sql.Rows) (id int64, ok bool, err error)
+	lanes := []struct {
+		table, head, idExpr, scopeExpr string
+		ceil                           int64
+		add                            addFn
+	}{
+		{"sessions", sessionPushSelect, "s.rowid", "p.id", cur.Sessions, func(rows *sql.Rows) (int64, bool, error) {
+			id, r, err := scanSessionPushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
+				return 0, false, err
+			}
+			sz := jsonSize(r)
+			if !fits(sz) {
+				return 0, false, nil
+			}
+			batch.Sessions = append(batch.Sessions, r)
+			budget.est += sz
+			return id, true, nil
+		}},
+		{"token_usage", tokenUsagePushSelect("0"), "tu.id", "s.project_id", cur.TokenUsage, func(rows *sql.Rows) (int64, bool, error) {
+			id, _, r, err := s.scanTokenUsagePushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
+				return 0, false, err
+			}
+			sz := jsonSize(r)
+			if !fits(sz) {
+				return 0, false, nil
+			}
+			batch.TokenUsage = append(batch.TokenUsage, r)
+			budget.est += sz
+			return id, true, nil
+		}},
+		{"api_turns", apiTurnPushSelect, "t.id", "t.project_id", cur.APITurns, func(rows *sql.Rows) (int64, bool, error) {
+			id, r, err := scanAPITurnPushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
+				return 0, false, err
+			}
+			sz := jsonSize(r)
+			if !fits(sz) {
+				return 0, false, nil
+			}
+			batch.APITurns = append(batch.APITurns, r)
+			budget.est += sz
+			return id, true, nil
+		}},
+		{"actions", actionPushSelect, "a.id", "a.project_id", cur.Actions, func(rows *sql.Rows) (int64, bool, error) {
+			id, r, err := scanActionPushRow(rows, share, orgID, userEmail, rev)
+			if err != nil {
+				return 0, false, err
+			}
+			sz := jsonSize(r)
+			if !fits(sz) {
+				return 0, false, nil
+			}
+			batch.Actions = append(batch.Actions, r)
+			budget.est += sz
+			return id, true, nil
+		}},
+	}
+	for _, l := range lanes {
+		floor, tracked := tr.floor[l.table]
+		if !tracked || n >= pushResendRowCap {
+			continue
+		}
+		q := l.head + pushChangesFilter(l.table, l.idExpr) //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
+		if scopeFilter != "" {
+			q += ` AND ` + l.scopeExpr + ` IN (` + scopeFilter + `)`
+		}
+		q += ` ORDER BY ` + l.idExpr + ` ASC`
+		rows, err := s.db.QueryContext(ctx, q, rev, l.ceil, floor, pushResendRowCap-n)
+		if err != nil {
+			return fmt.Errorf("store.SelectUnpushedSince: resend %s: %w", l.table, err)
+		}
+		full := false
+		for rows.Next() {
+			id, ok, err := l.add(rows)
+			if err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("store.SelectUnpushedSince: resend scan %s: %w", l.table, err)
+			}
+			if !ok {
+				full = true
+				break
+			}
+			n++
+			batch.Acks.addResent(l.table, id)
+		}
+		if err := closeRows(rows); err != nil {
+			return fmt.Errorf("store.SelectUnpushedSince: resend %s rows: %w", l.table, err)
+		}
+		if full {
+			break
+		}
+	}
+	return nil
+}
+
+// Cursor-wire SELECT heads (SELECT list + FROM/JOIN, no WHERE). The cursor
+// lane in SelectUnpushedSince and the re-send lane in composeResends both
+// build their queries from these and both decode through the matching
+// scan*PushRow below, so there is ONE column list and ONE per-row privacy
+// strip per table: a re-sent row can never ship a column (or a raw value)
+// that a first send of the same row would not.
+const sessionPushSelect = `SELECT s.rowid, s.id,
+		             COALESCE(p.root_path_hash,''), COALESCE(p.git_remote_hash,''),
+		             COALESCE(p.root_path,''),      COALESCE(p.git_remote,''),
+		             s.tool,
+		             COALESCE(s.model,''), COALESCE(s.git_branch,''), s.started_at,
+		             COALESCE(s.ended_at,''), COALESCE(s.total_actions,0),
+		             COALESCE(p.git_upstream_remote_hash,''), COALESCE(p.git_remote_owner_hash,''),
+		             COALESCE(p.git_upstream_owner_hash,''), COALESCE(p.root_commit_hash,''),
+		             COALESCE(p.content_fingerprint_hash,''), COALESCE(p.git_upstream_remote,''),
+		             COALESCE(s.workspace_hash,''), COALESCE(s.workspace,''), COALESCE(s.is_worktree,0),
+		             COALESCE(s.surface,''), COALESCE(s.surface_host,''), COALESCE(s.tool_version,''),
+		             COALESCE(s.parent_thread_id,''), COALESCE(s.tool_version_last,'')
+		        FROM sessions s JOIN projects p ON s.project_id = p.id`
+
+const actionPushSelect = `SELECT a.id, a.session_id,
+		             COALESCE(a.target_hash,''), COALESCE(a.source_file_hash,''),
+		             COALESCE(a.source_file,''), COALESCE(a.source_event_id,''),
+		             a.timestamp, a.tool, a.action_type,
+		             COALESCE(a.target,''),
+		             COALESCE(a.turn_index,0), COALESCE(a.success,1), COALESCE(a.duration_ms,0),
+		             COALESCE(a.is_sidechain,0),
+		             COALESCE(a.raw_tool_input,''), COALESCE(a.raw_tool_output,''),
+		             COALESCE(a.preceding_reasoning,''), COALESCE(a.error_message,''),
+		             COALESCE(json_extract(a.metadata,'$.effort_level'),''),
+		             COALESCE(json_extract(a.metadata,'$.stop_reason'),''),
+		             COALESCE(a.message_id,'')
+		        FROM actions a`
+
+const apiTurnPushSelect = `SELECT t.id, COALESCE(t.session_id,''),
+		             COALESCE(p.root_path_hash,''), COALESCE(p.root_path,''),
+		             t.timestamp,
+		             t.provider, COALESCE(t.model,''), COALESCE(t.request_id,''),
+		             t.input_tokens, t.output_tokens, COALESCE(t.cache_read_tokens,0),
+		             COALESCE(t.cache_creation_tokens,0), COALESCE(t.cache_creation_1h_tokens,0),
+		             COALESCE(t.web_search_requests,0), COALESCE(t.cost_usd,0),
+		             COALESCE(t.message_count,0), COALESCE(t.tool_use_count,0),
+		             COALESCE(t.system_prompt_hash,''), COALESCE(t.message_prefix_hash,''),
+		             COALESCE(t.time_to_first_token_ms,0), COALESCE(t.total_response_ms,0),
+		             COALESCE(t.stop_reason,''), COALESCE(t.http_status,0), COALESCE(t.error_class,''),
+		             COALESCE(t.route,''), COALESCE(t.routing_generation,0), COALESCE(t.authority_source,''),
+		             COALESCE(t.request_class,'')
+		        FROM api_turns t LEFT JOIN projects p ON t.project_id = p.id`
+
+// tokenUsagePushSelect is the token_usage head. heldSQL is the S10-SPEED
+// settle-holdback expression ("0" when the holdback is off, and always "0"
+// on the re-send lane, which never holds).
+func tokenUsagePushSelect(heldSQL string) string {
+	//nolint:gosec // G202: heldSQL is "0" or PushSettle.heldExpr's in-package CASE with ?-placeholders (values bound by the caller).
+	return `SELECT tu.id, tu.session_id,
+		             COALESCE(p.root_path_hash,''), COALESCE(p.root_path,''),
+		             tu.timestamp, tu.tool,
+		             COALESCE(tu.model,''), COALESCE(tu.input_tokens,0), COALESCE(tu.output_tokens,0),
+		             COALESCE(tu.cache_read_tokens,0), COALESCE(tu.cache_creation_tokens,0),
+		             COALESCE(tu.cache_creation_1h_tokens,0), COALESCE(tu.reasoning_tokens,0),
+		             COALESCE(tu.web_search_requests,0), COALESCE(tu.estimated_cost_usd,0),
+		             tu.source, COALESCE(tu.reliability,'unknown'),
+		             COALESCE(tu.source_file_hash,''), COALESCE(tu.source_file,''),
+		             COALESCE(tu.source_event_id,''), COALESCE(tu.message_id,''),
+		             COALESCE(tu.is_sidechain,0), COALESCE(tu.fast,0), COALESCE(tu.turn_id,''),
+		             COALESCE(tu.gen_ms,0), COALESCE(tu.gen_basis,''),
+		             ` + heldSQL + `
+		        FROM token_usage tu
+		        LEFT JOIN sessions s ON tu.session_id = s.id
+		        LEFT JOIN projects p ON s.project_id = p.id`
+}
+
+// scanSessionPushRow decodes one sessionPushSelect row into its wire shape,
+// applying the sessions privacy strip. rev is stamped as NodeRev.
+func scanSessionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail string, rev int64) (int64, orgcontract.SessionRow, error) {
+	var rowid int64
+	var r orgcontract.SessionRow
+	var isWorktree int
+	if err := rows.Scan(&rowid, &r.ID,
+		&r.ProjectRootHash, &r.GitRemoteHash,
+		&r.ProjectRoot, &r.GitRemote,
+		&r.Tool,
+		&r.Model, &r.GitBranch, &r.StartedAt, &r.EndedAt, &r.TotalActions,
+		&r.GitUpstreamRemoteHash, &r.GitRemoteOwnerHash,
+		&r.GitUpstreamOwnerHash, &r.RootCommitHash,
+		&r.ContentFingerprintHash, &r.GitUpstreamRemote,
+		&r.WorkspaceHash, &r.Workspace, &isWorktree,
+		&r.Surface, &r.SurfaceHost, &r.ToolVersion,
+		&r.ParentThreadID, &r.ToolVersionLast); err != nil {
+		return 0, r, err
+	}
+	r.IsWorktree = isWorktree != 0
+	// Closed-vocabulary gate on the capture-surface HOST (PRIV-2,
+	// codebase audit 2026-09-16). surface_host ships in EVERY posture
+	// on the grounds that it is a bounded host token; this is what
+	// makes that true rather than merely conventional. Unrecognized ⇒
+	// "other"; empty stays empty (unstamped, not unknown-host). See
+	// knownSurfaceHosts at the bottom of this file.
+	r.SurfaceHost = surfaceHostForWire(r.SurfaceHost)
+	// Privacy seam: strip raw paths when not opted into full-content
+	// sharing. The hash counterparts (already scanned) carry the
+	// signal the server needs. git_branch is stripped outright — it has
+	// no hash counterpart and no server feature keys on it, yet branch
+	// names routinely encode client/codename/ticket identifiers, so in
+	// the default metadata-only posture it must not ship raw (it was
+	// previously leaking, inconsistent with git_remote here).
+	// git_upstream_remote / workspace (Project Identity Resolver v2,
+	// §3.2) join the same strip: they are the ONLY two resolver-v2
+	// fields with a raw counterpart on the wire. The other resolver-v2
+	// fields (the four owner/root-commit/fingerprint hashes plus
+	// IsWorktree) have no raw counterpart at all — they stay above
+	// this gate and always ship, exactly like ProjectRootHash /
+	// GitRemoteHash do. root_commit_sha and content_fingerprint (the
+	// raw pre-images) are never selected into r in the first place.
+	// Capture surface (W1, agent 107 / server 139) is likewise NOT in
+	// this strip: surface is a closed vocabulary (models.KnownSurface)
+	// and surface_host a bounded host token, so they are METADATA and
+	// ship in every posture. Empty stays empty — an unstamped session
+	// must reach the org as UNKNOWN, never as a defaulted "cli".
+	// tool_version (server 161 / pg 0027) joins the same unconditional
+	// bucket: it is not a closed vocabulary like surface, but it is a
+	// bounded, non-prose, vendor-authored token
+	// (internal/store/toolversion.go::validToolVersion rejects
+	// whitespace/control chars/prose before it ever lands in the
+	// column), so it carries no developer-authored content risk and
+	// ships in every posture, same as AgentVersion already does for
+	// the Observer binary itself. tool_version_last (agent 162 / server
+	// 232 / pg 0099) is the same token class, the latest build seen in
+	// the session, so it ships unconditionally too. parent_thread_id (server 162 / pg
+	// 0028) joins the same unconditional bucket for a different
+	// reason: it is not a closed vocabulary or a bounded token, it
+	// is an OPAQUE vendor-minted session id, and the child session
+	// it points at already ships as its own row on the wire — so
+	// shipping the pointer adds structure (fan-out), not content.
+	// forked_from_id / thread_source (the fact/kind of a fork) stay
+	// NODE-LOCAL and are deliberately not selected above.
+	if !share.shipsRawContent() {
+		r.ProjectRoot = ""
+		r.GitRemote = ""
+		r.GitBranch = ""
+		r.GitUpstreamRemote = ""
+		r.Workspace = ""
+	}
+	r.OrgID, r.UserEmail = orgID, userEmail
+	r.NodeRev = rev
+	return rowid, r, nil
+}
+
+// scanActionPushRow decodes one actionPushSelect row into its wire shape,
+// applying the actions privacy strip. rev is stamped as NodeRev.
+func scanActionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail string, rev int64) (int64, orgcontract.ActionRow, error) {
+	var id, success, sidechain int64
+	var r orgcontract.ActionRow
+	if err := rows.Scan(&id, &r.SessionID,
+		&r.TargetHash, &r.SourceFileHash,
+		&r.SourceFile, &r.SourceEventID,
+		&r.Timestamp, &r.Tool, &r.ActionType,
+		&r.Target, &r.TurnIndex,
+		&success, &r.DurationMs, &sidechain,
+		&r.RawToolInput, &r.RawToolOutput,
+		&r.PrecedingReasoning, &r.ErrorMessage,
+		&r.EffortLevel, &r.StopReason, &r.MessageID); err != nil {
+		return 0, r, err
+	}
+	r.Success = success != 0
+	r.IsSidechain = sidechain != 0
+	// Privacy seam:
+	//   - SourceFile is a filesystem path → strip when not opted in.
+	//   - Target is per-action: in full-content mode, always ship;
+	//     in metadata-only mode, ship only when the action type is
+	//     in the explicit TargetActionAllowlist (e.g. read_file).
+	//   - The four body columns ship ONLY under the distinct
+	//     shipsToolBodies() tier (never under shipsRawContent alone).
+	if !share.shipsRawContent() {
+		r.SourceFile = ""
+	}
+	if !share.targetAllowed(r.ActionType) {
+		r.Target = ""
+	}
+	if !share.shipsToolBodies() {
+		r.RawToolInput = ""
+		r.RawToolOutput = ""
+		r.PrecedingReasoning = ""
+		r.ErrorMessage = ""
+	}
+	r.OrgID, r.UserEmail = orgID, userEmail
+	r.NodeRev = rev
+	return id, r, nil
+}
+
+// scanAPITurnPushRow decodes one apiTurnPushSelect row into its wire shape,
+// applying the api_turns privacy strip. rev is stamped as NodeRev.
+func scanAPITurnPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail string, rev int64) (int64, orgcontract.APITurnRow, error) {
+	var id int64
+	var r orgcontract.APITurnRow
+	if err := rows.Scan(&id, &r.SessionID,
+		&r.ProjectRootHash, &r.ProjectRoot,
+		&r.Timestamp, &r.Provider,
+		&r.Model, &r.RequestID, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
+		&r.CacheCreationTokens, &r.CacheCreation1hTokens, &r.WebSearchRequests, &r.CostUSD,
+		&r.MessageCount, &r.ToolUseCount, &r.SystemPromptHash, &r.MessagePrefixHash,
+		&r.TimeToFirstTokenMS, &r.TotalResponseMS, &r.StopReason, &r.HTTPStatus,
+		&r.ErrorClass,
+		// Plane B per-turn authority stamps (content-free metadata,
+		// always shipped — never gated by shipsRawContent below).
+		&r.Route, &r.RoutingGeneration, &r.AuthoritySource, &r.RequestClass); err != nil {
+		return 0, r, err
+	}
+	if !share.shipsRawContent() {
+		r.ProjectRoot = ""
+	}
+	r.OrgID, r.UserEmail = orgID, userEmail
+	r.NodeRev = rev
+	return id, r, nil
+}
+
+// scanTokenUsagePushRow decodes one tokenUsagePushSelect row into its wire
+// shape, applying the token_usage privacy strip and push-time pricing. held
+// reports the settle-holdback column. rev is stamped as NodeRev.
+func (s *Store) scanTokenUsagePushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail string, rev int64) (int64, bool, orgcontract.TokenUsageRow, error) {
+	var id int64
+	var fast, sidechain, held int
+	var r orgcontract.TokenUsageRow
+	if err := rows.Scan(&id, &r.SessionID,
+		&r.ProjectRootHash, &r.ProjectRoot,
+		&r.Timestamp, &r.Tool,
+		&r.Model, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreationTokens,
+		&r.CacheCreation1hTokens, &r.ReasoningTokens, &r.WebSearchRequests, &r.EstimatedCostUSD,
+		&r.Source, &r.Reliability,
+		&r.SourceFileHash, &r.SourceFile,
+		&r.SourceEventID, &r.MessageID, &sidechain, &fast, &r.TurnID,
+		&r.GenMs, &r.GenBasis, &held); err != nil {
+		return 0, false, r, err
+	}
+	// W1 (agent 087 / server 139): the sub-agent flag is METADATA — one
+	// bool over a row that already ships — so it rides UNCONDITIONALLY,
+	// above the content gate, exactly like ActionRow.IsSidechain does.
+	r.IsSidechain = sidechain != 0
+	// §7 follow-up (server 160 / pg 0026): turn_id is an opaque
+	// grouping id, METADATA by construction — rides UNCONDITIONALLY,
+	// same posture as IsSidechain/MessageID (r.TurnID already scanned
+	// above; nothing further to gate here). GenMs/GenBasis (server 174
+	// / pg 0040) are the same posture — a duration + closed enum,
+	// already scanned above; nothing further to gate here either.
+	if !share.shipsRawContent() {
+		r.ProjectRoot = ""
+		r.SourceFile = ""
+	}
+	// G1-COST(b): price the row at push time when the adapter stored
+	// $0 (most hook/transcript adapters do — the node prices
+	// read-side, the org rollup SUMs the column). Fills the EXISTING
+	// estimated_cost_usd field; no wire-shape change. The node-local
+	// `fast` flag is a pricing input only, never a wire field.
+	s.priceTokenUsageRow(&r, fast != 0)
+	r.OrgID, r.UserEmail = orgID, userEmail
+	r.NodeRev = rev
+	return id, held != 0, r, nil
 }
 
 // composeObsTiers attaches the opt-in org-tier observability rollups to the
@@ -992,7 +2686,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 // composition point; it deliberately holds no obs_* table names (the reads are
 // owned by internal/obs/store and returned as plain orgcontract rows). Each
 // tier gates on its own ShareOptions flag AND on the provider being wired.
-func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int64, orgID, userEmail string, share ShareOptions) error {
+func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, budget *envelopeBudget, orgID, userEmail string, share ShareOptions) error {
 	p := s.obsOrg
 	since := orgcontract.ObsCursor{SinceDay: time.Now().UTC().AddDate(0, 0, -obsOrgWindowDays).Format("2006-01-02")}
 	// T1 — aggregate rollup (content-free; windowed-recompute, idempotent).
@@ -1003,12 +2697,11 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 		}
 		for i := range rows {
 			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
-			*est += jsonSize(rows[i])
 		}
-		batch.ObsSummaries = rows
+		batch.ObsSummaries = fitRows(budget, rows)
 	}
 	// T2 — trace/span structure (hashes only; no bodies ever).
-	if err := s.composeObsSpans(ctx, batch, est, orgID, userEmail, share, since); err != nil {
+	if err := s.composeObsSpans(ctx, batch, budget, orgID, userEmail, share, since); err != nil {
 		return err
 	}
 	// T3 — raw span content (content gated by shipsRawContent(); hash always).
@@ -1022,9 +2715,8 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 			if !share.shipsRawContent() {
 				rows[i].Content = "" // hash-only when raw content isn't shared
 			}
-			*est += jsonSize(rows[i])
 		}
-		batch.ObsContent = rows
+		batch.ObsContent = fitRows(budget, rows)
 	}
 	// T4 — eval-run health (content-free summaries).
 	if share.ObsEvalSummary && p.EvalRuns != nil {
@@ -1034,9 +2726,8 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 		}
 		for i := range rows {
 			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
-			*est += jsonSize(rows[i])
 		}
-		batch.ObsEvalRuns = rows
+		batch.ObsEvalRuns = fitRows(budget, rows)
 	}
 	// T5 — per-end-user spend (org-budget guardrails plan §2.1). The end-user
 	// id is PII, so this tier rides ONLY under ObsSummary AND shipsRawContent()
@@ -1051,9 +2742,8 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 		}
 		for i := range rows {
 			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
-			*est += jsonSize(rows[i])
 		}
-		batch.ObsEndUserSpend = rows
+		batch.ObsEndUserSpend = fitRows(budget, rows)
 	}
 	// T6 — input-admission verdicts + policy snapshots (Plane-A admission org
 	// tier, gap-audit §2.1 / #1a). Windowed like T2/T3 (since = now-window).
@@ -1061,7 +2751,7 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 	// here under !shipsRawContent() — mirroring the ObsContent body strip and
 	// the guard reason/excerpt strip in SelectUnpushedSince; the policy Body is
 	// admin-authored config and ALWAYS ships (like RoutingPolicyDoc.Body).
-	if err := s.composeObsAdmission(ctx, batch, est, orgID, userEmail, share, since); err != nil {
+	if err := s.composeObsAdmission(ctx, batch, budget, orgID, userEmail, share, since); err != nil {
 		return err
 	}
 	// T7 — per-item eval scores (Plane-A eval-run detail org tier, gap-audit §1
@@ -1070,7 +2760,10 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 	// are stripped here under !shipsRawContent() — mirroring the ObsContent body
 	// strip and the admission PII/prose strip above; the score metadata and the
 	// content_hash always ship.
-	if err := s.composeObsEvalItems(ctx, batch, est, orgID, userEmail, share, since); err != nil {
+	if err := s.composeObsEvalItems(ctx, batch, budget, orgID, userEmail, share, since); err != nil {
+		return err
+	}
+	if err := s.composeObsEgress(ctx, batch, budget, orgID, userEmail, share, since); err != nil {
 		return err
 	}
 	return nil
@@ -1080,7 +2773,7 @@ func (s *Store) composeObsTiers(ctx context.Context, batch *PushBatch, est *int6
 // bodies). Gated on ObsTraces + the Spans provider being wired; project_root
 // raw values ride only under shipsRawContent(). Extracted from composeObsTiers
 // to keep that function's cyclomatic complexity in check.
-func (s *Store) composeObsSpans(ctx context.Context, batch *PushBatch, est *int64, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
+func (s *Store) composeObsSpans(ctx context.Context, batch *PushBatch, budget *envelopeBudget, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
 	if !share.ObsTraces || s.obsOrg.Spans == nil {
 		return nil
 	}
@@ -1094,17 +2787,16 @@ func (s *Store) composeObsSpans(ctx context.Context, batch *PushBatch, est *int6
 		if !share.shipsRawContent() {
 			sb.Traces[i].ProjectRoot = ""
 		}
-		*est += jsonSize(sb.Traces[i])
 	}
 	for i := range sb.Spans {
 		sb.Spans[i].OrgID, sb.Spans[i].UserEmail = orgID, userEmail
-		*est += jsonSize(sb.Spans[i])
 	}
 	for i := range sb.Events {
 		sb.Events[i].OrgID, sb.Events[i].UserEmail = orgID, userEmail
-		*est += jsonSize(sb.Events[i])
 	}
-	batch.ObsTraces, batch.ObsSpans, batch.ObsSpanEvents = sb.Traces, sb.Spans, sb.Events
+	batch.ObsTraces = fitRows(budget, sb.Traces)
+	batch.ObsSpans = fitRows(budget, sb.Spans)
+	batch.ObsSpanEvents = fitRows(budget, sb.Events)
 	return nil
 }
 
@@ -1113,7 +2805,7 @@ func (s *Store) composeObsSpans(ctx context.Context, batch *PushBatch, est *int6
 // PII/prose columns (Tenant/EndUser/ReasonExcerpt) are stripped under
 // !shipsRawContent(); the admin-authored policy Body always ships. Extracted
 // from composeObsTiers to keep that function's cyclomatic complexity in check.
-func (s *Store) composeObsAdmission(ctx context.Context, batch *PushBatch, est *int64, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
+func (s *Store) composeObsAdmission(ctx context.Context, batch *PushBatch, budget *envelopeBudget, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
 	if !share.ObsAdmission || s.obsOrg.Admission == nil {
 		return nil
 	}
@@ -1128,14 +2820,12 @@ func (s *Store) composeObsAdmission(ctx context.Context, batch *PushBatch, est *
 			ab.Events[i].EndUser = ""
 			ab.Events[i].ReasonExcerpt = ""
 		}
-		*est += jsonSize(ab.Events[i])
 	}
 	for i := range ab.Policies {
 		ab.Policies[i].OrgID, ab.Policies[i].UserEmail = orgID, userEmail
-		*est += jsonSize(ab.Policies[i])
 	}
-	batch.ObsAdmissionEvents = ab.Events
-	batch.ObsAdmissionPolicies = ab.Policies
+	batch.ObsAdmissionEvents = fitRows(budget, ab.Events)
+	batch.ObsAdmissionPolicies = fitRows(budget, ab.Policies)
 	return nil
 }
 
@@ -1143,7 +2833,7 @@ func (s *Store) composeObsAdmission(ctx context.Context, batch *PushBatch, est *
 // ObsEvalItems + the EvalItems provider. The item content excerpts are stripped
 // under !shipsRawContent(); score metadata + content_hash always ship. Extracted
 // from composeObsTiers to keep that function's cyclomatic complexity in check.
-func (s *Store) composeObsEvalItems(ctx context.Context, batch *PushBatch, est *int64, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
+func (s *Store) composeObsEvalItems(ctx context.Context, batch *PushBatch, budget *envelopeBudget, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
 	if !share.ObsEvalItems || s.obsOrg.EvalItems == nil {
 		return nil
 	}
@@ -1159,9 +2849,31 @@ func (s *Store) composeObsEvalItems(ctx context.Context, batch *PushBatch, est *
 			eb.Items[i].OutputExcerpt = ""
 			eb.Items[i].Rationale = ""
 		}
-		*est += jsonSize(eb.Items[i])
 	}
-	batch.ObsEvalItems = eb.Items
+	batch.ObsEvalItems = fitRows(budget, eb.Items)
+	return nil
+}
+
+// composeObsEgress attaches the T8 egress-routing decision feed (W5.3).
+// Gated on ObsEgress + the Egress provider. Tenant/User (the only
+// PII-shaped columns) are stripped under !shipsRawContent(); everything
+// else ships whenever the tier is on, mirroring composeObsAdmission.
+func (s *Store) composeObsEgress(ctx context.Context, batch *PushBatch, budget *envelopeBudget, orgID, userEmail string, share ShareOptions, since orgcontract.ObsCursor) error {
+	if !share.ObsEgress || s.obsOrg.Egress == nil {
+		return nil
+	}
+	eb, err := s.obsOrg.Egress(ctx, since, obsOrgRowCap)
+	if err != nil {
+		return fmt.Errorf("store.SelectUnpushedSince: obs egress: %w", err)
+	}
+	for i := range eb.Events {
+		eb.Events[i].OrgID, eb.Events[i].UserEmail = orgID, userEmail
+		if !share.shipsRawContent() {
+			eb.Events[i].Tenant = ""
+			eb.Events[i].User = ""
+		}
+	}
+	batch.ObsEgressDecisions = fitRows(budget, eb.Events)
 	return nil
 }
 
@@ -1257,6 +2969,105 @@ func (s *Store) projectIDsByRoot(ctx context.Context) (map[string]int64, error) 
 	return out, rows.Err()
 }
 
+// envelopeBudget is the ONE byte budget threaded through every wire family
+// composed into a PushBatch. It exists because of the 2026-08-26 host-crash
+// incident: the network-events wire composed a full 7-day body snapshot with no
+// envelope budget at all (233–253 MB against a 1 MiB configured maximum), the
+// server verified the signature over its truncated read, every push failed as
+// an auth error, and the backoff re-materialised the identical snapshot each
+// cycle. Bounding one wire fixed that wire; bounding EVERY wire through a
+// shared spine is what stops the next one reintroducing it.
+//
+// Two ceilings, deliberately:
+//
+//   - max is the caller's hard ceiling ([org_client].max_push_bytes). The six
+//     CURSOR wires (sessions/actions/api_turns/token_usage/guard_events/
+//     otel_content) bound against it directly and keep their forward-progress
+//     exception (a single oversized row still ships when the batch is otherwise
+//     empty) — their cursor semantics are unchanged by the spine.
+//   - snapshotLimit is max minus pushEnvelopeBudgetReserve, the room left for
+//     envelope field names, separators, cursors, and identity strings. Every
+//     SNAPSHOT/AGGREGATE wire composes against it via fitRows, so the sum of
+//     all of them can never consume the reserve the exact serialized check in
+//     orgclient needs.
+//
+// orgclient's exact serialized-length check remains the final authority; this
+// source-side spine is what prevents allocating hundreds of megabytes merely to
+// discover the batch cannot be sent.
+type envelopeBudget struct {
+	est           int64
+	max           int64
+	snapshotLimit int64
+}
+
+// remainingSnapshot is the bytes still available to snapshot wires. It can go
+// negative once the cursor wires have consumed the whole envelope; callers that
+// pass it to a Bounded selector must check for > 0 first.
+func (b *envelopeBudget) remainingSnapshot() int64 { return b.snapshotLimit - b.est }
+
+// fitRows returns the leading prefix of rows that fits the remaining snapshot
+// budget, advancing b.est by exactly the kept rows' JSON size. It is the ONE
+// mechanism every snapshot/aggregate wire uses; a wire that appends to PushBatch
+// without going through it is the defect this spine exists to prevent (pinned by
+// TestPushBatchWireFamiliesAllBudgeted).
+//
+// Rows are kept prefix-first, so a truncated wire drops its TAIL in whatever
+// order its owning SELECT produced — most-recent-first for the windowed wires
+// (network events, terminal runs, remote audit, benchmarks), key-ordered for the
+// grouped aggregates (day/model/session buckets). Truncation is never data loss:
+// every snapshot wire is a windowed or whole-snapshot recompute that the server
+// upserts by natural key, so a dropped tail is simply re-composed on the next
+// push tick. Only the six cursor wires carry unrepeatable progress, and they do
+// not use this path.
+func fitRows[T any](b *envelopeBudget, rows []T) []T {
+	for i := range rows {
+		sz := jsonSize(rows[i])
+		if b.est+sz > b.snapshotLimit {
+			if i == 0 {
+				return nil
+			}
+			return rows[:i]
+		}
+		b.est += sz
+	}
+	return rows
+}
+
+// fitSnapshot is fitRows plus the Track R2 gate bookkeeping: it records whether
+// the family composed COMPLETELY, so a wire whose tail the envelope budget cut
+// stays dirty and actually ships that tail on a later tick. Every gated
+// snapshot wire goes through this instead of bare fitRows; the ungated ones
+// (the advisor and obs provider tiers) keep using fitRows directly.
+//
+// See internal/store/orgsnapgate.go for why truncation must not count as
+// delivery.
+func fitSnapshot[T any](s *Store, b *envelopeBudget, fam snapFamily, rows []T) []T {
+	kept := fitRows(b, rows)
+	s.snap.recomputed(fam, len(kept) == len(rows))
+	return kept
+}
+
+// dropProcessMetricSamplesIfOverBudget clears the high-volume MetricSamplesJSON
+// ring on every session-process row when the slice would not otherwise fit the
+// remaining snapshot budget. The ring is a display-only sparkline the server
+// upserts by natural key (recomposed on the next tick), so dropping it is never
+// data loss; the process tree, timing, and resource counters on the same row
+// are worth far more per byte and must survive when the envelope is tight. This
+// runs BEFORE fitSnapshot so the fit is computed against the reduced rows; if
+// the rows already fit, it is a no-op and the samples ship.
+func dropProcessMetricSamplesIfOverBudget(b *envelopeBudget, rows []orgcontract.SessionProcessRow) {
+	total := int64(0)
+	for i := range rows {
+		total += jsonSize(rows[i])
+	}
+	if b.est+total <= b.snapshotLimit {
+		return
+	}
+	for i := range rows {
+		rows[i].MetricSamplesJSON = ""
+	}
+}
+
 // jsonSize returns the marshalled byte length of v, used to budget a batch.
 func jsonSize(v any) int64 {
 	b, err := json.Marshal(v)
@@ -1286,4 +3097,136 @@ func (s *Store) readMeta(ctx context.Context, key string) (string, error) {
 		return "", err
 	}
 	return v, nil
+}
+
+// surfaceHostOther is what an out-of-vocabulary sessions.surface_host becomes
+// on the wire (PRIV-2, codebase audit 2026-09-16). It is deliberately a
+// non-empty token distinct from "": empty means UNSTAMPED (the session's origin
+// was never grounded, the honest unknown the W1 canary pins), while "other"
+// means "stamped with something this seam does not recognize". Collapsing the
+// two would make an unrecognized value look like no capture at all.
+const surfaceHostOther = "other"
+
+// knownSurfaceHosts is the CLOSED wire vocabulary for sessions.surface_host.
+//
+// Why a gate exists at all: `surface` is refused outside models.KnownSurface by
+// the store's own writer, but surface_host has never had a counterpart check —
+// internal/store/surface.go says so in as many words ("SurfaceHost is free-form
+// (lowercase token by convention)"). It nevertheless ships UNGATED under every
+// posture, including the metadata-only teams default, on the stated grounds
+// that it is "a bounded host token" that "can never carry a path, a prompt or a
+// branch name". That was a convention, not a constraint: one adapter resolving
+// a host from a directory name, a client_name or a vendor suffix could put an
+// arbitrary string on a wire that ships in EVERY posture. This is the
+// constraint.
+//
+// Why it is a hand-maintained ALLOW-LIST and not a call into the producers'
+// tables: a gate that automatically admits whatever the producer emits gates
+// nothing. The whole value is that this list is independent of the resolution
+// tables in internal/adapter/* and internal/platform/{vscodehost,jetbrainshost}
+// — a new host token has to be looked at by someone editing THIS file before it
+// can cross to an org.
+//
+// The failure mode is COARSENING, never a leak: an unlisted token ships as
+// "other", so the org sees a session it cannot attribute to a product rather
+// than a value nobody reviewed. Adding a row is the fix when that happens; the
+// vocabulary below is grounded on every token the adapters emit as of
+// 2026-09-16.
+var knownSurfaceHosts = map[string]bool{
+	// VS Code family (internal/platform/vscodehost).
+	"vscode":          true,
+	"vscode-insiders": true,
+	"vscode-remote":   true,
+	"vscodium":        true,
+	"cursor":          true,
+	"cursor-remote":   true,
+	"windsurf":        true,
+	"kiro":            true,
+	"qoder":           true,
+	"trae":            true,
+	// JetBrains family (internal/platform/jetbrainshost) + the generic token
+	// an adapter stamps when it knows "a JetBrains IDE" but not which.
+	"jetbrains":                true,
+	"jetbrains-idea":           true,
+	"jetbrains-pycharm":        true,
+	"jetbrains-webstorm":       true,
+	"jetbrains-goland":         true,
+	"jetbrains-clion":          true,
+	"jetbrains-rider":          true,
+	"jetbrains-phpstorm":       true,
+	"jetbrains-rubymine":       true,
+	"jetbrains-rustrover":      true,
+	"jetbrains-datagrip":       true,
+	"jetbrains-dataspell":      true,
+	"jetbrains-android-studio": true,
+	// Other editors / editor-shaped hosts.
+	"neovim": true,
+	"zed":    true,
+	"ide":    true,
+	// Claude Code (internal/adapter/claudecode): the CLI, Claude Desktop's
+	// own tab, and the Agent SDK tokens ("sdk-ts" ⇒ "ts"). An SDK token this
+	// list has not caught up with coarsens to "other".
+	//
+	// "cli" is entrypoint "sdk-cli": Claude Code's own headless / print mode
+	// (`claude -p`), which the adapter resolves to surface=sdk, host=cli.
+	// It was missing here, so every such session read `sdk · cli` on the
+	// node and `sdk · other` on the org (MCP audit #4c, 2026-09-27; 22 of
+	// the grounding host's claude-code sessions carry it). A fixed vendor
+	// token, not a path or free text.
+	"claude":         true,
+	"claude-desktop": true,
+	"sdk":            true,
+	"ts":             true,
+	"py":             true,
+	"cli":            true,
+	// Codex + its Open Interpreter rebadge (internal/adapter/codex).
+	"codex-cli":        true,
+	"codex-exec":       true,
+	"codex-desktop":    true,
+	"open-interpreter": true,
+	// Per-adapter hosts.
+	"antigravity":      true,
+	"antigravity-cli":  true,
+	"cline-api":        true,
+	"cline-cli":        true,
+	"cline-core":       true,
+	"cline-desktop":    true,
+	"cline-enterprise": true,
+	"cline-kanban":     true,
+	"cline-subagent":   true,
+	"cline-web":        true,
+	"copilot-cli":      true,
+	"cursor-agent":     true,
+	"devin-desktop":    true,
+	"factory-desktop":  true,
+	"freebuff":         true,
+	"freebuff-desktop": true,
+	"junie-cli":        true,
+	"kiro-cli":         true,
+	"kiro-crew":        true,
+	"poolside-cli":     true,
+	"qoder-work":       true,
+	"vibe":             true,
+}
+
+// surfaceHostForWire applies the closed vocabulary to one stored
+// sessions.surface_host (PRIV-2). Empty passes through as empty — an unstamped
+// session must reach the org as UNKNOWN, never as a defaulted host — and every
+// other unrecognized value becomes surfaceHostOther.
+func surfaceHostForWire(stored string) string {
+	if stored == "" || knownSurfaceHosts[stored] {
+		return stored
+	}
+	return surfaceHostOther
+}
+
+// SurfaceHostShipsVerbatim reports whether a stored sessions.surface_host
+// token crosses the org wire as itself (it is in knownSurfaceHosts) rather
+// than coarsening to "other". Exported for PRODUCER-side drift guards only:
+// a producer's test asserts every host token it can mint ships verbatim, so a
+// new token fails a test and gets reviewed into the list above instead of
+// silently reading "other" on the org (the MCP audit #4c class). It never
+// widens the gate: the list itself stays hand-maintained.
+func SurfaceHostShipsVerbatim(host string) bool {
+	return knownSurfaceHosts[host]
 }

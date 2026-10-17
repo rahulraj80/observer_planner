@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "org_id": "org_synth03",
+      "name": "Mobile",
+      "created_at": 1767232800,
+      "updated_at": 1767232800,
+      "max_session_acu_limit": 20,
+      "max_cycle_acu_limit": null
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null,
+  "total": 3
+}

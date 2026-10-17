@@ -36,8 +36,12 @@ func (s *Server) handleConfigProfiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
+	// Review M3-05: profile create / edit / delete carry the confirm token.
+	if !requireJSONConfirm(w, r) {
+		return
+	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no profiles directory", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no profiles directory", http.StatusConflict)
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
@@ -99,14 +103,25 @@ func (s *Server) handleConfigProfile(w http.ResponseWriter, r *http.Request) {
 		if b, rerr := ps.Read(name); rerr == nil {
 			raw = string(b)
 		}
+		// resolved_toml is `observer profile show`'s body: the same renderer,
+		// so the keys shown are the config keys a user can set.
+		resolvedTOML, err := config.EncodeResolvedCompression(resolved)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
 		writeJSON(w, map[string]any{
-			"name":     name,
-			"builtin":  config.IsBuiltin(name),
-			"editable": !config.IsBuiltin(name),
-			"resolved": resolved,
-			"raw":      raw,
+			"name":          name,
+			"builtin":       config.IsBuiltin(name),
+			"editable":      !config.IsBuiltin(name),
+			"resolved":      resolved,
+			"resolved_toml": resolvedTOML,
+			"raw":           raw,
 		})
 	case http.MethodPatch:
+		if !requireJSONConfirm(w, r) {
+			return
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
@@ -130,6 +145,9 @@ func (s *Server) handleConfigProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"set": req.Key, "value": req.Value, "name": name})
 	case http.MethodDelete:
+		if !requireJSONConfirm(w, r) {
+			return
+		}
 		if err := ps.Delete(name); err != nil {
 			status := http.StatusBadRequest
 			if errors.Is(err, os.ErrNotExist) {

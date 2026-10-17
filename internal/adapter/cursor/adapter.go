@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,19 +54,31 @@ import (
 // docstring rationalized away these two events as "fires on every
 // text/thought delta, low marginal value because the JSONL transcript
 // walker delivers the same content on stop." Both halves of that
-// reasoning are stale on modern Cursor (3.4.x):
-//   - The agent-transcripts/<conv>.jsonl files that
-//     BuildStopTranscriptEvents walks are no longer written to disk;
-//     Cursor moved conversation storage into
-//     User/globalStorage/state.vscdb. The hook payload still names a
-//     transcript_path but the file doesn't materialize. The walker is
-//     dead-code on current builds.
+// reasoning were wrong for the builds measured in 2026-05:
+//   - On the Cursor 3.4.20 install captured in the 2026-05-21 audit,
+//     no agent-transcripts/<conv>.jsonl materialised for the hook's
+//     transcript_path, so BuildStopTranscriptEvents had nothing to
+//     walk. Do NOT read that as "Cursor stopped writing transcripts":
+//     the walker is very much alive on Cursor 3.14.27, where the
+//     `.cursor/projects/<slug>/agent-transcripts/<conv>/<conv>.jsonl`
+//     files ARE written and are the ONLY thing capturing Windows-IDE
+//     Cursor activity today (grounded 2026-08-07, see
+//     docs/audits/cursor-windows-capture-diagnosis-2026-08-07.md §1
+//     Path A / §2.8). What those files still do NOT carry is usage:
+//     every line is `{"message","role"}` — no `usage`, no `model` —
+//     which is why tokens remain hook-only. Treat transcript
+//     presence as version- and surface-dependent, never as settled.
 //   - Captured live payloads show finalized blocks (single text, single
 //     duration_ms per thought/response), not per-token deltas. The
-//     overhead concern was wrong for current Cursor.
+//     overhead concern was wrong for the builds measured.
 //
-// So afterAgentThought now emits a cursor.thinking row carrying the
-// finalized thinking-text + duration_ms; afterAgentResponse emits a
+// So afterAgentThought is now CAPTURED (it was skipped entirely
+// pre-v1.6.18) — though as of the 2026-07-31 B3 convergence it mints no
+// row of its own: its finalized thinking-text is stashed and threaded
+// onto the next recordable event's PrecedingReasoning (see pending.go
+// and the EventAfterAgentThought case below). The one exception is a
+// root-less Cloud Agent (cloudagent.go), whose thought lands a thin
+// step-marker row because no local successor ever fires. afterAgentResponse emits a
 // cursor.assistant_response row carrying the final assistant prose. Per-
 // turn token counts are still sourced from the `stop` event (single
 // source of truth — afterAgentResponse's input_tokens/output_tokens
@@ -120,6 +133,11 @@ type rawHookPayload struct {
 	CacheRead      int64           `json:"cache_read_tokens"`
 	CacheWrite     int64           `json:"cache_write_tokens"`
 	TranscriptPath string          `json:"transcript_path"`
+
+	// IsBackgroundAgent is the payload's own Cloud Agent flag
+	// (sessionStart). FALSE on the 3.23.12 bc- payloads, so it is only one
+	// of the two signals classifyConversation reads (cloudagent.go).
+	IsBackgroundAgent bool `json:"is_background_agent"`
 
 	// Per-event fields:
 	Command  string          `json:"command"`     // beforeShellCommand
@@ -177,8 +195,11 @@ type rawHookPayload struct {
 	ExitCode     *int    `json:"exit_code"`   // afterShellExecution: 0 ⇒ success
 	Output       string  `json:"output"`      // after*: legacy fallback output body (used for derived success)
 	ToolOutput   string  `json:"tool_output"` // postToolUse: tool result body (audit F3)
-	DurationSecs float64 `json:"duration"`    // postToolUse: duration in seconds (audit F2)
-	Content      string  `json:"content"`     // beforeReadFile: file body Cursor just read (audit F4)
+	DurationSecs float64 `json:"duration"`    // postToolUse: `duration`; unit depends on cursor_version (postToolUseDurationMs)
+	// CursorVersion is the emitting Cursor build ("3.20.21"); present on
+	// every payload of current builds, absent on the 3.4.x captures.
+	CursorVersion string `json:"cursor_version"`
+	Content       string `json:"content"` // beforeReadFile: file body Cursor just read (audit F4)
 
 	// Tier 4 (v1.6.18) — afterAgentThought / afterAgentResponse. Both
 	// events carry the finalized prose for that thought/response in a
@@ -191,6 +212,31 @@ type rawHookPayload struct {
 	Text string `json:"text"` // afterAgentThought, afterAgentResponse
 }
 
+// SessionToolVersionFromHook extracts the emitting Cursor build
+// (`cursor_version`, e.g. "3.20.21") keyed to the payload's
+// conversation_id (== the session id) for tool-version capture
+// (migration 125, T-784). ok=false when either field is absent (the 3.4.x
+// payloads carry no cursor_version) or the body does not decode. The
+// value is passed through unvalidated: the store seam
+// (Store.SetSessionToolVersion) owns the bounded-token check and the
+// first-wins-unless-empty write, so this stays a pure decode used by both
+// the live hook and the hooks-log replay.
+func SessionToolVersionFromHook(body []byte) (models.SessionToolVersion, bool) {
+	var p struct {
+		ConversationID string `json:"conversation_id"`
+		CursorVersion  string `json:"cursor_version"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return models.SessionToolVersion{}, false
+	}
+	id := strings.TrimSpace(p.ConversationID)
+	ver := strings.TrimSpace(p.CursorVersion)
+	if id == "" || ver == "" {
+		return models.SessionToolVersion{}, false
+	}
+	return models.SessionToolVersion{SessionID: id, Version: ver}, true
+}
+
 // BuildEvent maps a Cursor hook payload to a normalized ToolEvent. The
 // caller passes the hook event name (from CLI or payload), the raw JSON
 // body, and a scrubber. Returns (event, true) when the payload represents
@@ -200,6 +246,26 @@ type rawHookPayload struct {
 // Errors indicate malformed input — the caller should log and continue
 // (spec §17 row 1) since hooks must never break the host tool.
 func BuildEvent(eventName string, body []byte, sc *scrub.Scrubber) (models.ToolEvent, bool, error) {
+	return buildEvent(eventName, body, sc, defaultStash)
+}
+
+// reasoningCarrier is the afterAgentThought → next-recordable-event
+// carrier buildEvent threads reasoning through (pending.go). The live
+// hook uses the on-disk cross-process stash (defaultStash) because each
+// hook event is its own process; the hooks-log replay (hookslog.go)
+// uses an in-memory carrier scoped to one parse, because it sees the
+// whole event sequence in one process and must NEVER read or consume
+// the live stash a concurrently running Cursor session depends on.
+type reasoningCarrier interface {
+	stash(conversationID, preview string)
+	take(conversationID, eventID string) string
+	clear(conversationID string)
+}
+
+// buildEvent is BuildEvent with the reasoning carrier injected (the one
+// seam both the live hook and the hooks-log replay go through, so the
+// two can never drift on row shape or identity).
+func buildEvent(eventName string, body []byte, sc *scrub.Scrubber, carrier reasoningCarrier) (models.ToolEvent, bool, error) {
 	var raw rawHookPayload
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return models.ToolEvent{}, false, fmt.Errorf("cursor.BuildEvent: parse: %w", err)
@@ -217,7 +283,8 @@ func BuildEvent(eventName string, body []byte, sc *scrub.Scrubber) (models.ToolE
 		return models.ToolEvent{}, false, nil
 	}
 
-	projectRoot := decodeWorkspaceRoot(raw.WorkspaceRoots)
+	class := classOf(raw)
+	projectRoot := hookProjectRoot(eventName, raw.WorkspaceRoots, class)
 	if raw.ConversationID == "" {
 		return models.ToolEvent{}, false, errors.New("cursor.BuildEvent: conversation_id missing")
 	}
@@ -380,30 +447,54 @@ func BuildEvent(eventName string, body []byte, sc *scrub.Scrubber) (models.ToolE
 		return models.ToolEvent{}, false, nil
 	case EventAfterAgentThought:
 		// Finalized assistant thinking block. text is the full prose
-		// (no per-token deltas — Cursor 3.4+ emits one event per
-		// finalized thought, not one per fragment). duration_ms is
-		// the rendered "Thought for Ns" timer Cursor's UI surfaces.
-		// Drop empty-text events (rare but observed in capture
-		// dumps) — they're metadata-only and carry nothing the
-		// dashboard can render.
+		// (no per-token deltas — on the builds captured live, 3.4.20
+		// and 3.9.16, Cursor emits one event per finalized thought,
+		// not one per fragment; unverified on 3.14.x).
+		//
+		// REASONING SEMANTICS (B3 convergence, 2026-07-31): this event
+		// mints NO row. A thought is not an action; the row it used to
+		// emit was a phantom that polluted every action aggregate and
+		// carried the text nowhere but its own self-preview (see
+		// docs/plans/b3-reasoning-convergence-plan-2026-07-31.md §1).
+		// Instead the scrubbed 200-char preview — byte-for-byte the
+		// string that used to land in that row's preceding_reasoning
+		// column, cap unchanged — is stashed for the conversation and
+		// threaded onto the NEXT recordable event of that conversation
+		// (see pending.go for the consumed-once / last-wins / user-turn
+		// -discard semantics and why cursor needs an on-disk carrier).
+		// duration_ms is dropped with the row: it described the thought,
+		// and no successor row can honestly claim it.
+		//
+		// Empty-text events (rare but observed in capture dumps) carry
+		// nothing to stash.
 		text := strings.TrimSpace(raw.Text)
 		if text == "" {
 			return models.ToolEvent{}, false, nil
 		}
-		ev.ActionType = models.ActionTaskComplete
-		ev.RawToolName = "cursor.thinking"
-		ev.DurationMs = raw.DurationMs
 		preview := text
 		if sc != nil {
 			preview = sc.String(preview)
 		}
-		body := preview
 		if len(preview) > 200 {
 			preview = preview[:200]
 		}
-		ev.Target = preview
+		if !thoughtMintsRow(class, projectRoot) {
+			carrier.stash(raw.ConversationID, preview)
+			return models.ToolEvent{}, false, nil
+		}
+		// A root-less Cloud Agent (cloudagent.go): its turns run in
+		// Cursor's remote VM, so no local successor event ever fires to
+		// claim a stash (grounded 3.23.12: afterAgentThought is the only
+		// per-step hook such a conversation sends). The thought therefore
+		// lands a thin step-marker row of its own under the placeholder.
+		// The reasoning keeps the B3 placement (PrecedingReasoning, same
+		// 200-char scrubbed preview); the row is the remote step, and its
+		// duration_ms honestly describes that step.
+		ev.ActionType = models.ActionHarnessCall
+		ev.RawToolName = cloudAgentThoughtRawName
+		ev.Target = "cloud agent step"
 		ev.PrecedingReasoning = preview
-		ev.ToolOutput = contentcap.Cap(body, contentcap.DefaultMaxBytes)
+		ev.DurationMs = raw.DurationMs
 	case EventAfterAgentResponse:
 		// Finalized assistant response prose. Mirrors the transcript
 		// walker's cursor.assistant_text emit so a session ingested
@@ -432,11 +523,54 @@ func BuildEvent(eventName string, body []byte, sc *scrub.Scrubber) (models.ToolE
 		ev.PrecedingReasoning = preview
 		ev.ToolOutput = contentcap.Cap(body, contentcap.DefaultMaxBytes)
 	default:
+		// An event this build has no mapping for. Keep the payload for
+		// forensics, but through the same scrubber and size cap as every
+		// other content field (Codex S10-CURSOR pass 2, finding 7): a
+		// future Cursor event must never persist secrets or an unbounded
+		// body verbatim, live or on a hooks-log replay.
 		ev.ActionType = models.ActionUnknown
-		ev.RawToolInput = string(body)
+		in := string(body)
+		if sc != nil {
+			in = sc.RawJSON(body)
+		}
+		ev.RawToolInput = contentcap.Cap(in, contentcap.DefaultMaxBytes)
+	}
+
+	// Thread the pending thought (see pending.go) onto this row. The
+	// consumer set is a TABLE, not a name ladder: only the events that
+	// are genuinely the model's next act can claim a thought. A
+	// lifecycle marker (sessionEnd, preCompact, subagentStop) that
+	// happened to fire next must not eat it — it would both mis-attribute
+	// the reasoning and rob the real successor.
+	if reasoningConsumers[eventName] {
+		if pending := carrier.take(raw.ConversationID, ev.SourceEventID); pending != "" {
+			// A real thought beats the self-preview afterAgentResponse
+			// otherwise writes here (a row echoing its own body into its
+			// reasoning column tells a reader nothing).
+			ev.PrecedingReasoning = pending
+		}
+	}
+	if eventName == EventBeforeSubmitPrompt {
+		// A new user turn ends the previous one — an unclaimed thought
+		// from it must not leak forward (grok's emitUserPrompt discard).
+		carrier.clear(raw.ConversationID)
 	}
 
 	return ev, true, nil
+}
+
+// reasoningConsumers is the set of hook events that may claim a pending
+// afterAgentThought as their PrecedingReasoning: the model's own next
+// act — a tool call it decided on, or the prose it produced. Lifecycle
+// and bookkeeping events (sessionStart/End, preCompact, subagent*,
+// postToolUseFailure) are deliberately absent; see BuildEvent.
+var reasoningConsumers = map[string]bool{
+	EventBeforeShellCommand: true,
+	EventBeforeMCPExecution: true,
+	EventBeforeReadFile:     true,
+	EventAfterFileEdit:      true,
+	EventPreToolUse:         true,
+	EventAfterAgentResponse: true,
 }
 
 // OutcomeUpdate is the paired-after-event enrichment payload for the
@@ -500,15 +634,21 @@ func BuildAfterOutcome(eventName string, body []byte) (OutcomeUpdate, bool, erro
 		// has no tool_use_id we can't pair, so skip.
 		return OutcomeUpdate{}, false, nil
 	}
+	if beforeName == EventBeforeReadFile && raw.FilePath == "" {
+		// beforeReadFile's id hashes its top-level `file_path`; the Read
+		// tool's postToolUse carries the SAME path (verbatim, grounded
+		// on 936 Cursor 3.17-3.21 pairs, 2026-09-23) only inside
+		// tool_input. Without this every Read outcome missed its row
+		// ("outcome update touched 0 rows ...:beforeReadFile:").
+		raw.FilePath = toolInputFilePath(raw.ToolInput)
+	}
 	id := cursorEventID(raw.GenerationID, beforeName, raw)
-	// Duration: postToolUse sends `duration` (float seconds — audit F2);
-	// afterAgentThought / postToolUseFailure use the conventional
-	// `duration_ms` (int64). Prefer the seconds variant when present
-	// (multiplying to ms); fall back to the legacy field for events
-	// that emit it.
+	// Duration: postToolUse sends a float `duration` whose unit changed
+	// across builds (postToolUseDurationMs); afterAgentThought /
+	// postToolUseFailure use the conventional `duration_ms` (int64).
 	durationMs := raw.DurationMs
 	if raw.DurationSecs > 0 {
-		durationMs = int64(raw.DurationSecs * 1000)
+		durationMs = postToolUseDurationMs(raw.DurationSecs, raw.CursorVersion)
 	}
 	return OutcomeUpdate{
 		SourceFile:    "cursor:hook",
@@ -520,6 +660,59 @@ func BuildAfterOutcome(eventName string, body []byte) (OutcomeUpdate, bool, erro
 		ToolName:      raw.ToolName,
 		Target:        cursorTranscriptTarget(raw.ToolName, raw.ToolInput),
 	}, true, nil
+}
+
+// postToolUseDurationMillisSince is the first Cursor build whose
+// postToolUse `duration` is grounded as MILLISECONDS: across 2,055
+// payloads from 3.17.21 / 3.20.17 / 3.20.21 / 3.21.13 (2026-09-23) the
+// median is 101 and the maximum 120086.182 — the 120 s shell timeout in
+// ms — and a Read logged 1401.838 for a ~1.6 s hook span. The 3.4.20
+// captures the v1.6.23 audit (F2) grounded carry no cursor_version and
+// keep the seconds reading.
+var postToolUseDurationMillisSince = [2]int{3, 17}
+
+// postToolUseDurationMs converts postToolUse's `duration` to ms by the
+// emitting build's unit (postToolUseDurationMillisSince).
+func postToolUseDurationMs(d float64, cursorVersion string) int64 {
+	if major, minor, ok := cursorMajorMinor(cursorVersion); ok &&
+		(major > postToolUseDurationMillisSince[0] ||
+			(major == postToolUseDurationMillisSince[0] && minor >= postToolUseDurationMillisSince[1])) {
+		return int64(d)
+	}
+	return int64(d * 1000)
+}
+
+// cursorMajorMinor parses "3.20.21" → (3, 20).
+func cursorMajorMinor(v string) (int, int, bool) {
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
+
+// toolInputFilePath returns tool_input.file_path (or `path`), the
+// location Cursor's Read tool carries its target in on postToolUse.
+func toolInputFilePath(in json.RawMessage) string {
+	if len(in) == 0 {
+		return ""
+	}
+	var ti struct {
+		FilePath string `json:"file_path"`
+		Path     string `json:"path"`
+	}
+	if err := json.Unmarshal(in, &ti); err != nil {
+		return ""
+	}
+	if ti.FilePath != "" {
+		return ti.FilePath
+	}
+	return ti.Path
 }
 
 // beforeEventNameFor maps an after-event name to the before-event
@@ -585,32 +778,57 @@ func deriveAfterSuccess(raw rawHookPayload) bool {
 }
 
 // BuildStopTokenEvent maps Cursor's `stop` hook payload to a normalized
-// TokenEvent. Retained for older Cursor builds that still fire `stop`;
-// Cursor 3.4+ routes per-generation usage through afterAgentResponse
-// instead (see BuildResponseTokenEvent). Both share buildTokenEvent.
+// TokenEvent. Retained for Cursor builds that fire `stop`; on the
+// builds captured live (3.4.20, 3.9.16) per-generation usage arrived
+// on afterAgentResponse instead (see BuildResponseTokenEvent). Both
+// share buildTokenEvent and dedup against each other, so registering
+// BOTH is the safe posture on an unmeasured build — which 3.14.x
+// currently is (docs/audits/cursor-windows-capture-diagnosis-2026-08-07.md
+// §2.6, probe P4).
 func BuildStopTokenEvent(body []byte) (models.TokenEvent, bool, error) {
-	return buildTokenEvent(body)
+	return buildTokenEvent(body, EventStop)
 }
 
 // BuildResponseTokenEvent maps Cursor's `afterAgentResponse` payload to a
-// normalized TokenEvent. Cursor 3.4+ STOPPED firing `stop`;
-// afterAgentResponse carries the IDENTICAL per-generation usage fields
+// normalized TokenEvent. On the builds captured live (3.4.20 in the
+// 2026-05-21 audit, 3.9.16 in the last cursor-stop-debug.jsonl lines)
+// `stop` was not observed to fire, while afterAgentResponse carried
+// the IDENTICAL per-generation usage fields
 // (input_tokens / output_tokens / cache_read_tokens / cache_write_tokens,
-// model, generation_id — verified by live capture, see
-// TestBuildEvent_AfterAgentResponse), so this is now the PRIMARY cursor
-// token path. It shares the (source_file, source_event_id) identity with
+// model, generation_id — see TestBuildEvent_AfterAgentResponse), which
+// is why this is the PRIMARY cursor token path.
+//
+// 2026-08-22 LIVE AUDIT (C1 close-out) found cursor 3.15.19 stop
+// payloads carrying NO usage fields. That was build-specific: on 3.17.21,
+// 3.20.21 and 3.21.13 (grounded 2026-09-23, S10-CURSOR) BOTH stop and
+// afterAgentResponse carry input_tokens / output_tokens /
+// cache_read_tokens / cache_write_tokens again, and Cursor's IDE keeps a
+// durable copy of every payload in its hooks output-channel log, which
+// hookslog.go replays under this same identity. The live hook writes
+// these token rows FIRST and alone (internal/hook/cursor.go
+// ingestCursorTokens) — bundled behind the action rows they were lost to
+// the ingest deadline (session 8be96a3f, 2026-09-19).
+//
+// It shares the (source_file, source_event_id) identity with
 // the stop path via buildTokenEvent, so a generation seen on BOTH events
 // dedups to a single token_usage row (UNIQUE(source_file, source_event_id)
 // + the (tool, session_id, message_id) guard) instead of double-counting.
 func BuildResponseTokenEvent(body []byte) (models.TokenEvent, bool, error) {
-	return buildTokenEvent(body)
+	return buildTokenEvent(body, EventAfterAgentResponse)
 }
 
 // buildTokenEvent is the shared per-generation usage extractor for the
 // stop / afterAgentResponse hook payloads (identical usage shape).
 // Returns (zero, false, nil) when every usage field is zero — an
 // observationally empty turn worth no row.
-func buildTokenEvent(body []byte) (models.TokenEvent, bool, error) {
+//
+// hookEvent is the event that delivered the payload. Both kinds share
+// ONE row identity (`<generation>:stop`), so a generation seen on both
+// dedups by key; the kind rides along on TokenEvent.HookEvent (in-memory
+// provenance, never persisted) because the store's mislabelled-stop rule
+// must know whether a restating row came from a `stop` or from the
+// authoritative afterAgentResponse (review finding F3, 2026-09-26).
+func buildTokenEvent(body []byte, hookEvent string) (models.TokenEvent, bool, error) {
 	var raw rawHookPayload
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return models.TokenEvent{}, false, fmt.Errorf("cursor.buildTokenEvent: parse: %w", err)
@@ -641,7 +859,15 @@ func buildTokenEvent(body []byte) (models.TokenEvent, bool, error) {
 	// (see internal/intelligence/cost/engine.go), so net at emit time
 	// to stop the cached portion being billed at BOTH the full input
 	// rate AND the cache_read rate. Clamp at 0 against any anomaly.
-	netInput := raw.InputTokens - raw.CacheRead
+	//
+	// The cache-WRITE bucket is inside the gross total too: cursor-agent's
+	// own client (2026.09.18 + 2026.09.26 bundles, read 2026-09-27) passes
+	// the raw turnEnded counts to these hooks and, where it prints usage
+	// itself (headless result + turn-outcome log), computes
+	// input = max(input - cache_read - cache_write, 0). Subtracting only
+	// cache_read billed every cache-written token twice (full input rate
+	// AND the cache-write rate).
+	netInput := raw.InputTokens - raw.CacheRead - raw.CacheWrite
 	if netInput < 0 {
 		netInput = 0
 	}
@@ -651,7 +877,7 @@ func buildTokenEvent(body []byte) (models.TokenEvent, bool, error) {
 		SourceEventID:       raw.GenerationID + ":" + EventStop,
 		SessionID:           raw.ConversationID,
 		MessageID:           raw.GenerationID,
-		ProjectRoot:         decodeWorkspaceRoot(raw.WorkspaceRoots),
+		ProjectRoot:         hookProjectRoot(EventStop, raw.WorkspaceRoots, classOf(raw)),
 		Timestamp:           time.Now().UTC(),
 		Tool:                models.ToolCursor,
 		Model:               raw.Model,
@@ -661,6 +887,7 @@ func buildTokenEvent(body []byte) (models.TokenEvent, bool, error) {
 		CacheCreationTokens: raw.CacheWrite,
 		Source:              models.TokenSourceHook,
 		Reliability:         models.ReliabilityAccurate,
+		HookEvent:           hookEvent,
 	}, true, nil
 }
 
@@ -681,6 +908,56 @@ type transcriptPart struct {
 type transcriptAssistantLine struct {
 	LineNumber int
 	Parts      []transcriptPart
+	// Replays counts the later assistant lines of the same turn folded into
+	// this one because they repeated its text verbatim (T-034i, see
+	// appendAssistantLine). Zero for a line that was never replayed.
+	Replays int
+}
+
+// assistantTextOnly returns the joined, trimmed text of an assistant line
+// whose every part is text ("" and false when any part is not text, or the
+// line carries no text at all).
+func assistantTextOnly(parts []transcriptPart) (string, bool) {
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type != "text" {
+			return "", false
+		}
+		if t := strings.TrimSpace(p.Text); t != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(t)
+		}
+	}
+	if b.Len() == 0 {
+		return "", false
+	}
+	return b.String(), true
+}
+
+// appendAssistantLine adds an assistant line to a turn, folding a retry
+// replay (T-034i). Live-grounded on node 1 (cursor-agent 2026.10.01,
+// transcript bb9f3afb, 2026-10-03): when a model request fails mid-turn
+// (LostConnection) and cursor-agent retries it, the transcript gains one
+// more assistant line carrying the SAME reply text, so a reply that reached
+// the developer once was stored as four assistant_message rows. A text-only
+// line whose text equals the immediately preceding text-only line of the
+// same turn (nothing in between: no tool call, no user line) is therefore
+// one reply, not two: it is folded into the kept line, whose Replays count
+// keeps the retries countable (they are also counted by the api_error rows
+// the CLI turn path emits per failed attempt). Anything else is appended as
+// before, so a reply that genuinely repeats after a tool call is kept.
+func appendAssistantLine(turn *transcriptTurn, line transcriptAssistantLine) {
+	if n := len(turn.Assistant); n > 0 {
+		if txt, ok := assistantTextOnly(line.Parts); ok {
+			if prev, pok := assistantTextOnly(turn.Assistant[n-1].Parts); pok && prev == txt {
+				turn.Assistant[n-1].Replays++
+				return
+			}
+		}
+	}
+	turn.Assistant = append(turn.Assistant, line)
 }
 
 // transcriptUserLine captures the user-role line that opens a turn.
@@ -775,7 +1052,7 @@ func parseTranscriptTurns(path string) ([]transcriptTurn, error) {
 				turns = append(turns, transcriptTurn{})
 				current = &turns[len(turns)-1]
 			}
-			current.Assistant = append(current.Assistant, transcriptAssistantLine{
+			appendAssistantLine(current, transcriptAssistantLine{
 				LineNumber: lineNo,
 				Parts:      tl.Message.Content,
 			})
@@ -787,6 +1064,11 @@ func parseTranscriptTurns(path string) ([]transcriptTurn, error) {
 	return turns, nil
 }
 
+// BuildTranscriptToolEvents emits the assistant-text and tool_use rows
+// for one transcript turn. Every content-bearing field (Target,
+// RawToolInput, PrecedingReasoning, ToolOutput) is scrubbed; a nil sc
+// is replaced with a default [scrub.New] scrubber rather than skipping
+// the pass, so no caller can land raw transcript text in the DB.
 func BuildTranscriptToolEvents(
 	turn transcriptTurn,
 	sessionID, projectRoot, generationID, sourceFile string,
@@ -802,7 +1084,15 @@ func buildTranscriptToolEvents(
 	ts time.Time,
 	sc *scrub.Scrubber,
 ) []models.ToolEvent {
+	// Scrubbing is mandatory on every content-bearing field: a nil
+	// scrubber is treated as "caller forgot", never as "opt out", so no
+	// call site (live hook or backfill) can land transcript text in the
+	// DB unredacted.
+	if sc == nil {
+		sc = scrub.New()
+	}
 	var out []models.ToolEvent
+	var todoStoreChecked, todoStoreExists bool
 	for _, line := range turn.Assistant {
 		reasoning := ""
 		for partIdx, part := range line.Parts {
@@ -810,24 +1100,25 @@ func buildTranscriptToolEvents(
 			case "text":
 				txt := strings.TrimSpace(part.Text)
 				if txt != "" {
-					reasoning = txt
+					// The carried reasoning is scrubbed prose: it is
+					// copied into the NEXT tool row's
+					// PrecedingReasoning, so it must never hold the
+					// raw text.
+					reasoning = sc.String(txt)
 					// Emit a standalone cursor.assistant_text row matching the
 					// cross-adapter convention. The body is sourced from the
 					// transcript JSONL the stop-hook handler walks, not from
 					// the per-delta `afterAgentResponse` hook (which fires
 					// per-token and is intentionally not registered).
-					preview := txt
-					if sc != nil {
-						preview = sc.String(txt)
-					}
+					preview := reasoning
 					if len(preview) > 200 {
 						preview = preview[:200]
 					}
-					body := txt
-					if sc != nil {
-						body = sc.String(txt)
+					body := contentcap.Cap(reasoning, contentcap.DefaultMaxBytes)
+					var meta *models.ActionMetadata
+					if line.Replays > 0 {
+						meta = &models.ActionMetadata{RetryReplays: line.Replays}
 					}
-					body = contentcap.Cap(body, contentcap.DefaultMaxBytes)
 					out = append(out, models.ToolEvent{
 						SourceFile:         sourceFile,
 						SourceEventID:      fmt.Sprintf("%s:transcript:L%d:P%d:asst:%s", generationID, line.LineNumber, partIdx, shortHash(txt)),
@@ -842,13 +1133,20 @@ func buildTranscriptToolEvents(
 						PrecedingReasoning: preview,
 						RawToolName:        "cursor.assistant_text",
 						ToolOutput:         body,
+						Metadata:           meta,
 					})
 				}
 			case "tool_use":
-				rawInput := string(part.Input)
-				if sc != nil {
-					rawInput = sc.RawJSON(part.Input)
+				if strings.EqualFold(part.Name, "TodoWrite") {
+					if !todoStoreChecked {
+						todoStoreExists = cursorTodoStoreExists(sourceFile, sessionID)
+						todoStoreChecked = true
+					}
+					if todoStoreExists {
+						continue
+					}
 				}
+				rawInput := sc.RawJSON(part.Input)
 				out = append(out, models.ToolEvent{
 					SourceFile:         sourceFile,
 					SourceEventID:      fmt.Sprintf("%s:transcript:L%d:P%d:%s", generationID, line.LineNumber, partIdx, shortHash(part.Name+":"+string(part.Input))),
@@ -858,7 +1156,7 @@ func buildTranscriptToolEvents(
 					Timestamp:          ts,
 					Tool:               models.ToolCursor,
 					ActionType:         cursorTranscriptActionType(part.Name),
-					Target:             cursorTranscriptTarget(part.Name, part.Input),
+					Target:             sc.String(cursorTranscriptTarget(part.Name, part.Input)),
 					Success:            true,
 					PrecedingReasoning: reasoning,
 					RawToolName:        part.Name,
@@ -881,24 +1179,30 @@ func buildTranscriptToolEvents(
 // from token_usage rows in the backfill path); MessageID on the row
 // becomes "user:" + generationID, matching the live hook path's
 // MessageID convention so dashboard joins land cleanly.
+//
+// Both Target and RawToolInput carry the SCRUBBED prompt; a nil sc is
+// replaced with a default [scrub.New] scrubber rather than skipping
+// the pass.
 func BuildTranscriptUserPromptEvent(
 	turn transcriptTurn,
 	sessionID, projectRoot, generationID, sourceFile string,
 	ts time.Time,
 	sc *scrub.Scrubber,
 ) (models.ToolEvent, bool) {
+	// A nil scrubber means the caller forgot, never "ship raw": user
+	// prompts are the single most secret-dense field Cursor gives us.
+	if sc == nil {
+		sc = scrub.New()
+	}
 	stripped := stripUserQueryWrapper(turn.User.Text)
 	stripped = strings.TrimSpace(stripped)
 	if stripped == "" {
 		return models.ToolEvent{}, false
 	}
-	preview := stripped
+	rawInput := sc.String(stripped)
+	preview := rawInput
 	if len(preview) > 200 {
 		preview = preview[:200]
-	}
-	rawInput := stripped
-	if sc != nil {
-		rawInput = sc.String(stripped)
 	}
 	return models.ToolEvent{
 		SourceFile:         sourceFile,
@@ -996,6 +1300,8 @@ func cursorTranscriptActionType(name string) string {
 		// Cursor's semantic codebase search; conceptually grep over an
 		// embedding index, fold into ActionSearchText.
 		return models.ActionSearchText
+	case "todowrite":
+		return models.ActionTodoUpdate
 	case "applypatch", "editfile", "strreplace":
 		// strreplace is the cursor in-place string-edit primitive
 		// (analogue of claudecode's Edit tool).
@@ -1071,6 +1377,53 @@ func firstString(m map[string]any, keys ...string) string {
 // Returns "" when the payload doesn't include any roots — the store layer
 // will skip events without a project root (spec §20 fallback to cwd doesn't
 // apply here because the hook process isn't in the user's cwd).
+// SyntheticProjectRoot is the placeholder project root for a Cursor
+// conversation that has NO workspace folder: an empty-window chat, or a
+// Cursor Cloud Agent (`bc-<uuid>` conversation id) whose workspace lives
+// in Cursor's remote VM. Their hook payloads carry `workspace_roots: []`
+// and state.vscdb has no composerHeaders fsPath for them, and
+// store.Ingest skips any event with an empty ProjectRoot — so before
+// this placeholder existed such conversations never got a session row at
+// all (grounded 2026-09-23: Cloud Agent bc-4e387d38, Cursor 3.21.13, 70
+// hook events, zero rows). Same convention as antigravity's
+// "[antigravity]" and grokbot's "[grokbot]".
+const SyntheticProjectRoot = "[cursor]"
+
+// rootlessNoBootstrap is the set of hook events that must NOT fall back
+// to SyntheticProjectRoot. Lifecycle markers fire for draft / never-used
+// conversations (`draft-<uuid>` sessionStart+sessionEnd pairs are
+// observed with empty roots) and, for sessionEnd, even for FOLDER
+// sessions (observed live for ae2b71a6 / aca3b692) — so a placeholder
+// here would both conjure phantom sessions and, because
+// Store.UpsertSession always overwrites project_id, flip a real
+// project's session onto the placeholder. Those events keep an empty
+// root, which leaves them exactly as before (attached only when the
+// session already exists — see store.Ingest's session_end guard — or
+// dropped).
+//
+// The exclusion is lifted for a conversation whose class says
+// BootstrapsRootless (a Cloud Agent, cloudagent.go): it has no folder to
+// flip, and on Cursor 3.23.12 its sessionStart is the only lifecycle event
+// it sends, so excluding it left the conversation with no session at all.
+var rootlessNoBootstrap = map[string]bool{
+	EventSessionStart: true,
+	EventSessionEnd:   true,
+}
+
+// hookProjectRoot resolves a hook payload's project root: the decoded
+// workspace root when present, else SyntheticProjectRoot for events
+// allowed to bootstrap a root-less conversation (rootlessNoBootstrap,
+// lifted for a class that BootstrapsRootless).
+func hookProjectRoot(eventName string, roots json.RawMessage, class conversationClass) string {
+	if root := decodeWorkspaceRoot(roots); root != "" {
+		return root
+	}
+	if rootlessNoBootstrap[eventName] && !class.BootstrapsRootless {
+		return ""
+	}
+	return SyntheticProjectRoot
+}
+
 func decodeWorkspaceRoot(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -1094,15 +1447,35 @@ func decodeWorkspaceRoot(raw json.RawMessage) string {
 // matches how the rest of observer represents paths on the host.
 //
 // Cursor-agent on Windows (the CLI) sends workspace_roots as a raw
-// Windows backslash path, e.g. `C:\programsx\superbased-observer`.
-// Stored verbatim that's not stat-able from a WSL observer and lands
-// under a non-canonical project root distinct from the `/mnt/c/...`
-// form pathnorm produces everywhere else (verified against session
-// 90dd2512, 2026-05-24). Route through crossmount.TranslateForeignPath
-// (a thin wrapper over pathnorm.Normalize) so `C:\...` and `file://`
-// URIs canonicalize to `/mnt/c/...`. No-op for already-native Linux
-// paths and for the IDE's `/c:/...` forward-slash form (pathnorm
-// leaves that untouched, so existing IDE rows don't fragment).
+// Windows backslash path, e.g. `C:\programsx\superbased-observer`;
+// the IDE sends the `Uri.fsPath` spelling `/c:/programsx/...`. Stored
+// verbatim neither is stat-able from a WSL observer, and neither
+// matches the `/mnt/c/...` form pathnorm produces everywhere else
+// (verified against session 90dd2512, 2026-05-24). Route through
+// crossmount.TranslateForeignPath (a thin wrapper over
+// pathnorm.Normalize) so `C:\...`, `/c:/...` and `file://` URIs all
+// canonicalize to `/mnt/c/...`. No-op for already-native Linux paths.
+//
+// The pre-2026-08-07 rationale here — "leave `/c:/...` alone so
+// existing IDE rows don't fragment" — is INVERTED, and was already
+// only half-true (it described a pathnorm gap as a deliberate
+// choice). Two changes flipped it:
+//
+//   - F4 (commit 82372dca) made the watcher path emit canonical
+//     `/mnt/c/...` roots via resolveProjectRoot (scan.go). Leaving
+//     the hook path on `/c:/...` is now precisely what fragments a
+//     project: one directory, two project rows.
+//   - pathnorm layer 7a now strips the URI fsPath leading slash, so
+//     this function converges the hook path onto the watcher's form
+//     with no cursor-local special-casing.
+//
+// Hence NO behaviour change is needed here: the delegation was
+// already correct, and inherits the fix. Pinned by
+// TestNormalizeWorkspaceRoot_CanonicalizesWindowsShapes.
+//
+// Historic rows written before this landed keep their `/c:/...`
+// roots until a re-parse (`observer scan --force`) — the fix is on
+// the write path only, per the "measure by RE-PARSING" rule.
 func normalizeWorkspaceRoot(p string) string {
 	if p == "" {
 		return ""
@@ -1143,6 +1516,13 @@ func cursorEventID(generationID, eventName string, raw rawHookPayload) string {
 			agentKey = raw.SubagentID
 		}
 		id += ":" + shortHash(agentKey)
+	case EventAfterAgentThought:
+		// Only a Cloud Agent's thought mints a row (thoughtMintsRow), and
+		// its generation_id is "" on every grounded payload, so the base
+		// is the conversation id: the text plus its duration is what tells
+		// one remote step from the next. Content-derived, so the live hook
+		// and the hooks-log replay compute the same identity.
+		id += ":" + shortHash(raw.Text+"|"+strconv.FormatInt(raw.DurationMs, 10))
 	case EventPreToolUse:
 		// preToolUse fires for every tool call within a turn; multiple
 		// tool calls of different names share the same generation_id.

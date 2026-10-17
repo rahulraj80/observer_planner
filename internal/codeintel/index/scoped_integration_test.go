@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package index_test
 
 import (
@@ -5,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 
 	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/codeintel/index"
@@ -19,7 +23,7 @@ import (
 // It also checks a qualified b.Helper() call binds into the imported package.
 func TestScopedResolution_KillsCrossPackageOverlink(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

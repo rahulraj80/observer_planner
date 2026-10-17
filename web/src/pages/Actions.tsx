@@ -5,19 +5,33 @@ import {
   ActiveFilterChips,
   ChartShell,
   type FilterChip,
+  Icon,
+  InlineLoading,
+  LiveDot,
   PageHeader,
   Pill,
   SegmentedControl,
+  SinglePicker,
   ToolBadge,
   Tooltip,
 } from "@/components/primitives";
+import { keepSelected } from "@/lib/pickerOptions";
+import { useSessionOptions } from "@/lib/usePickerSources";
 import { HelpInd } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import { DataTable, Pagination } from "@/components/DataTable";
 import { ChartState } from "@/components/ChartState";
 import { SessionDetailPanel } from "@/components/SessionDetailPanel";
+import { vocabIcon } from "@shared/lib/vocabIcons";
 import { useFilters, windowParams } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
+import {
+  fmtDateOnly,
+  fmtDateTime,
+  fmtShortId,
+  localeDateString,
+  localeTimeString,
+} from "@/lib/format";
 import {
   actionMeta,
   mcpIdentity,
@@ -30,6 +44,10 @@ import type {
   ActionsDayCountsResponse,
   ActionsResponse,
 } from "@/lib/types";
+import { navIcon } from "@/lib/nav";
+import { LIVE_TAIL_DOT, liveDotProps, withDotClass } from "@/lib/liveSignals";
+import { useArrivals } from "@/lib/useArrivals";
+import { ChartGantt, Table2 } from "lucide-react";
 
 type View = "table" | "timeline";
 
@@ -41,9 +59,10 @@ const PAGE_LIMIT = 50;
 const TIMELINE_LIMIT = 500;
 
 export function ActionsPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
 
   const [page, setPage] = useState(1);
@@ -99,7 +118,7 @@ export function ActionsPage() {
   // day pick. Switching from "Apr 23 (2275)" to "May 15 (4173)"
   // should re-anchor at page 1, not preserve the prior page
   // offset that may be past the new day's row count.
-  const filterKey = `${win}|${tool}|${project}|${actionType}|${effortLevel}|${permissionMode}|${isInterrupt}|${assistantText}|${sessionFilter}|${pickedDay ?? ""}`;
+  const filterKey = `${win}|${tool}|${project}|${model}|${actionType}|${effortLevel}|${permissionMode}|${isInterrupt}|${assistantText}|${sessionFilter}|${pickedDay ?? ""}`;
   useMemo(() => setPage(1), [filterKey]);
 
   const actions = useApi<ActionsResponse>(
@@ -112,6 +131,7 @@ export function ActionsPage() {
       // (only the Timeline day-counts strip honored it).
       ...winParams,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       action_type: actionType || undefined,
       effort_level: effortLevel || undefined,
@@ -133,6 +153,7 @@ export function ActionsPage() {
       customRange,
       tool,
       project,
+      model,
       actionType,
       effortLevel,
       permissionMode,
@@ -142,6 +163,13 @@ export function ActionsPage() {
       sessionFilter,
       pickedDay,
     ],
+  );
+  // Rows that land on a live-tail poll fade in; a filter / page change
+  // (stale data on screen) re-takes the baseline so the new list never
+  // animates as a whole.
+  const arrived = useArrivals(
+    (actions.data?.rows ?? []).map((r) => String(r.id)),
+    actions.data != null && !actions.isStale,
   );
 
   // Day-count strip for the Timeline view — populates every day in
@@ -153,9 +181,10 @@ export function ActionsPage() {
     {
       ...winParams,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [view, win, customRange, tool, project],
+    [view, win, customRange, tool, model, project],
   );
 
   const columns = useMemo<ColumnDef<ActionListRow, unknown>[]>(
@@ -165,7 +194,7 @@ export function ActionsPage() {
         header: () => <>Time<HelpInd id="column.actions.when" /></>,
         accessorKey: "timestamp",
         cell: ({ row }) => (
-          <Tooltip content={row.original.timestamp}>
+          <Tooltip content={fmtDateTime(row.original.timestamp)}>
             <span tabIndex={0} className="cursor-help text-fg-2 focus:outline-none">
               {relativeTime(row.original.timestamp)}
             </span>
@@ -202,7 +231,7 @@ export function ActionsPage() {
               </span>
             </Tooltip>
           ) : (
-            <span className="text-fg-4">—</span>
+            <span className="text-fg-4">-</span>
           ),
       },
       {
@@ -228,7 +257,7 @@ export function ActionsPage() {
           row.original.effort_level ? (
             <Pill>{row.original.effort_level}</Pill>
           ) : (
-            <span className="text-fg-4">—</span>
+            <span className="text-fg-4">-</span>
           ),
       },
       {
@@ -237,7 +266,7 @@ export function ActionsPage() {
         accessorKey: "source_file",
         cell: ({ row }) => {
           const sf = row.original.source_file;
-          if (!sf) return <span className="text-fg-4">—</span>;
+          if (!sf) return <span className="text-fg-4">-</span>;
           // Short-display: just the filename. Hover reveals the full path.
           const i = sf.lastIndexOf("/");
           const tail = i >= 0 ? sf.slice(i + 1) : sf;
@@ -278,7 +307,7 @@ export function ActionsPage() {
               </span>
             </Tooltip>
           ) : (
-            <span className="text-fg-4">—</span>
+            <span className="text-fg-4">-</span>
           ),
       },
       {
@@ -296,7 +325,7 @@ export function ActionsPage() {
                 }}
                 className="font-mono text-[11px] text-accent hover:text-accent-strong hover:underline"
               >
-                {row.original.session_id.slice(0, 8)}…
+                {fmtShortId(row.original.session_id, 8)}
               </button>
             </Tooltip>
             <CopyOnClick value={row.original.session_id}>
@@ -345,10 +374,11 @@ export function ActionsPage() {
         clearAll={clearAll}
       />
 
-      <div className="min-w-0 space-y-4 overflow-y-auto p-6">
+      <div className="min-w-0 space-y-6 overflow-y-auto p-4 sm:p-6">
         <PageHeader
+          icon={navIcon("actions")}
           title="Actions"
-          sub="The flat firehose — every recorded tool-call action across the window, filterable by tool, type, effort, and permission. Row-click expands inline detail; the session pill opens the session slide-over."
+          sub="The flat firehose - every recorded tool-call action across the window, filterable by tool, type, effort, and permission. Row-click expands inline detail; the session pill opens the session slide-over."
           helpId="tab.actions"
         />
         <ChartShell
@@ -364,13 +394,13 @@ export function ActionsPage() {
           sub={
             actions.data
               ? `${actions.data.total.toLocaleString()} matching · row-click expands details · session pill opens slide-over`
-              : "Loading…"
+              : <InlineLoading label="Loading actions" />
           }
           right={
             <SegmentedControl<View>
               options={[
-                { value: "table", label: "Table" },
-                { value: "timeline", label: "Timeline" },
+                { value: "table", label: "Table", icon: Table2 },
+                { value: "timeline", label: "Timeline", icon: ChartGantt },
               ]}
               value={view}
               onChange={setView}
@@ -424,6 +454,8 @@ export function ActionsPage() {
               <ChartState
                 loading={actions.loading && !actions.data}
                 error={actions.error}
+                denied={actions.denied}
+                deniedPermission={actions.deniedPermission}
                 empty={
                   !actions.loading &&
                   actions.data != null &&
@@ -436,7 +468,11 @@ export function ActionsPage() {
                   data={actions.data?.rows ?? []}
                   columns={columns}
                   rowKey={(r) => String(r.id)}
+                  rowClassName={(r) =>
+                    arrived(String(r.id)) ? "sb-fade-up" : undefined
+                  }
                   minWidth={880}
+                  zebra
                   loading={actions.loading}
                   onRowClick={(r) =>
                     setExpandedId((cur) => (cur === r.id ? null : r.id))
@@ -508,6 +544,9 @@ function FilterRail({
   anyFilter: boolean;
   clearAll: () => void;
 }) {
+  // D-571: the session facet picks from this node's recent sessions; an
+  // older id can still be pasted.
+  const sessions = useSessionOptions();
   return (
     <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto border-r border-line-1 bg-bg-1 p-4">
       <div className="flex items-baseline justify-between gap-2">
@@ -590,13 +629,16 @@ function FilterRail({
         />
       </FacetGroup>
 
-      <FacetGroup label="Session id">
-        <input
-          type="search"
-          placeholder="Exact match…"
+      <FacetGroup label="Session">
+        <SinglePicker
+          options={keepSelected(sessions.options, sessionFilter ? [sessionFilter] : [])}
           value={sessionFilter}
-          onChange={(e) => setSessionFilter(e.target.value)}
-          className="h-7 w-full rounded-2 border border-line-2 bg-bg-2 px-2 font-mono text-[11px] text-fg-1 placeholder:font-sans placeholder:text-fg-4 focus:border-accent focus:outline-none"
+          onChange={setSessionFilter}
+          allowFree
+          freeLabel="Use session id"
+          loading={sessions.loading}
+          placeholder="Any session"
+          ariaLabel="Session"
         />
       </FacetGroup>
     </aside>
@@ -729,10 +771,7 @@ function TimelineView({
       {rows.length === 0 ? (
         <div className="grid h-[200px] place-items-center rounded-3 border border-dashed border-line-2 bg-bg-3/40 text-[11px] text-fg-3">
           {loading ? (
-            <span className="inline-flex items-center gap-2 text-fg-2">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border border-line-3 border-t-accent" />
-              Loading…
-            </span>
+<InlineLoading label="Loading actions" />
           ) : pickedDay ? (
             `No actions on ${pickedDay}. Pick another day from the strip above.`
           ) : (
@@ -793,7 +832,7 @@ function TimelineDayAxis({
           const heightPct = Math.max(8, (c.count / maxCount) * 100);
           const isActive = picked === c.day;
           const date = new Date(c.day + "T00:00:00Z");
-          const monthDay = date.toLocaleDateString("en-US", {
+          const monthDay = localeDateString(date, "en-US", {
             month: "short",
             day: "numeric",
             timeZone: "UTC",
@@ -801,7 +840,7 @@ function TimelineDayAxis({
           return (
             <Tooltip
               key={c.day}
-              content={`${c.day} · ${c.count} action${c.count === 1 ? "" : "s"}`}
+              content={`${fmtDateOnly(c.day)} · ${c.count} action${c.count === 1 ? "" : "s"}`}
             >
               <button
                 type="button"
@@ -882,19 +921,21 @@ function TimelineEntry({
 }) {
   const meta = actionMeta(row.action_type);
   const ts = new Date(row.timestamp);
-  const hhmmss = ts.toLocaleTimeString("en-US", {
+  // Cached, byte-identical toLocale*String: one formatter per option set,
+  // not one per row.
+  const hhmmss = localeTimeString(ts, "en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
   });
-  const monthDay = ts.toLocaleDateString("en-US", {
+  const monthDay = localeDateString(ts, "en-US", {
     month: "short",
     day: "numeric",
   });
   return (
     <li className="flex items-stretch gap-3 py-2">
-      <Tooltip content={ts.toLocaleString()}>
+      <Tooltip content={fmtDateTime(row.timestamp)}>
         <div
           tabIndex={0}
           className="shrink-0 cursor-help pt-2 text-right font-mono text-[10.5px] tabular-nums text-fg-3 focus:outline-none"
@@ -970,13 +1011,13 @@ function EventLogCard({
             if (mcp) {
               return (
                 <CopyOnClick value={row.raw_tool_name || row.target || ""} title="MCP tool call">
-                  <span className="inline-flex items-center gap-1 rounded-pill border border-accent/40 bg-accent/10 px-2 py-0.5 font-mono text-[10px] font-medium leading-none text-accent">
+                  <Pill variant="accent" className="font-mono normal-case">
                     <span className="uppercase tracking-[0.06em] opacity-80">MCP</span>
                     <span className="max-w-[200px] truncate">
                       {mcp.server}
                       {mcp.tool ? ` / ${mcp.tool}` : ""}
                     </span>
-                  </span>
+                  </Pill>
                 </CopyOnClick>
               );
             }
@@ -1057,7 +1098,7 @@ function EventLogCard({
               !sf && "ml-auto",
             )}
           >
-            session {row.session_id.slice(0, 10)}…
+            session {fmtShortId(row.session_id, 10)}
           </button>
         </Tooltip>
       </footer>
@@ -1078,10 +1119,9 @@ function ActionTypeBadge({ type }: { type: string }) {
           color: meta.colorVar,
         }}
       >
-        <span
-          className="h-1 w-1 rounded-full"
-          style={{ background: meta.colorVar }}
-        />
+        {/* Glyph: VOCAB_ICONS.actionType (CircleHelp for an unregistered
+            type - unknown means unknown); colour: the category's --act-*. */}
+        <Icon icon={vocabIcon("actionType", type)} size={11} className="shrink-0" />
         {meta.label}
       </span>
     </Tooltip>
@@ -1118,7 +1158,7 @@ function ExpandedDetail({
         <DetailRow label="Timestamp" value={row.timestamp} mono />
         <DetailRow
           label="Message ID"
-          value={row.message_id || "—"}
+          value={row.message_id || "-"}
           mono
         />
         <DetailRow
@@ -1128,9 +1168,9 @@ function ExpandedDetail({
         />
         <DetailRow
           label="Permission"
-          value={row.permission_mode || "—"}
+          value={row.permission_mode || "-"}
         />
-        <DetailRow label="Effort" value={row.effort_level || "—"} />
+        <DetailRow label="Effort" value={row.effort_level || "-"} />
         <DetailRow
           label="Status"
           value={row.success ? "success" : "failure"}
@@ -1213,13 +1253,7 @@ function LiveTailIndicator({
           : "border-success/40 bg-success-soft text-success hover:bg-success-soft/80",
       )}
     >
-      <span
-        aria-hidden
-        className={clsx(
-          "h-1.5 w-1.5 rounded-full",
-          paused ? "bg-warn" : "animate-pulse bg-success",
-        )}
-      />
+      <LiveDot {...withDotClass(liveDotProps(LIVE_TAIL_DOT, paused ? "paused" : "live"), "h-1.5 w-1.5 shrink-0")} />
       {paused ? "paused" : "live"}
     </button>
     </Tooltip>
@@ -1270,7 +1304,8 @@ function buildActionChips(props: {
     });
   if (props.sessionFilter)
     chips.push({
-      label: `session: ${props.sessionFilter.slice(0, 10)}…`,
+      label: `session: ${fmtShortId(props.sessionFilter, 10)}`,
+      title: `Remove filter (session ${props.sessionFilter})`,
       onClear: () => props.setSessionFilter(""),
     });
   return chips;
@@ -1287,7 +1322,7 @@ function todayIsoDate(): string {
 
 function relativeTime(iso: string): string {
   const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
+  if (!Number.isFinite(t)) return "-";
   const ms = Date.now() - t;
   if (ms < 0) return "future";
   const s = ms / 1000;

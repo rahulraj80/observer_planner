@@ -279,8 +279,8 @@ func TestMetricPolicyDefaults(t *testing.T) {
 		t.Fatalf("unexpected persist defaults: %+v", p)
 	}
 	// 5 min / 2s + 1 = 151 points, under the 300 hard cap.
-	if got := p.ringCap(); got != 151 {
-		t.Errorf("ringCap = %d, want 151", got)
+	if got := p.RingCap(); got != 151 {
+		t.Errorf("RingCap = %d, want 151", got)
 	}
 	// An Attributor that was never handed a policy uses these.
 	a := NewAttributor(nil, nil, nil)

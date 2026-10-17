@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
@@ -15,6 +17,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/benchmark"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // benchmark_ephemeral.go stands up an isolated, throwaway observer daemon so a
@@ -30,8 +33,9 @@ import (
 // The correlation seam for claude-code is HOOKS + PROXY, not the watcher (the
 // sandbox transcripts live under the per-attempt temp home the watcher never
 // sees — see benchmark_provision.go::prepareClaude). So the ephemeral watcher
-// runs with an EMPTY enabled-adapters allow-list: it enters idle mode and never
-// scans (or ingests) the operator's real ~/.claude etc. into the throwaway DB.
+// runs with an EMPTY enabled-adapters allow-list: Detected stays empty so the
+// watcher never scans (or ingests) the operator's real ~/.claude etc. into the
+// throwaway DB.
 
 // isolatedDaemonDriver is implemented by a HarnessDriver whose Preflight
 // requires a dedicated isolated observer daemon (its own small DB). The runner
@@ -55,17 +59,32 @@ func newBenchmarkDrivers(observerBin, dbPath string) map[string]HarnessDriver {
 
 // shouldEngageEphemeralDaemon decides whether to stand up an isolated ephemeral
 // daemon for this run. The operator's explicit --ephemeral-daemon always wins;
-// otherwise auto-engage only when they gave NO --config (so we won't override a
-// daemon they wired themselves) AND the spec uses a harness whose Preflight
-// needs daemon isolation. Pure so the decision is unit-tested without I/O.
-func shouldEngageEphemeralDaemon(flag bool, configPath string, spec benchmark.Spec, drivers map[string]HarnessDriver) bool {
+// otherwise engage only when the spec uses a harness whose Preflight needs
+// daemon isolation AND either they gave NO --config (so we won't override a
+// daemon they wired themselves) or they asked for isolation when needed
+// (--isolate-if-needed, the dashboard's spend run, T-664). Pure so the
+// decision is unit-tested without I/O.
+func shouldEngageEphemeralDaemon(flag, ifNeeded bool, configPath string, spec benchmark.Spec, drivers map[string]HarnessDriver) bool {
 	if flag {
 		return true
 	}
-	if strings.TrimSpace(configPath) != "" {
+	if strings.TrimSpace(configPath) != "" && !ifNeeded {
 		return false
 	}
 	return specNeedsIsolatedDaemon(spec, drivers)
+}
+
+// importIsolatedBenchmarkRun copies a finished isolated run into this node's
+// database (T-664) before the throwaway database is deleted, and says what it
+// carried.
+func importIsolatedBenchmarkRun(ctx context.Context, node *store.Store, ephDBPath, runID string, out io.Writer) error {
+	stats, err := node.ImportBenchmarkRunFrom(ctx, ephDBPath, runID)
+	if err != nil {
+		return fmt.Errorf("copy benchmark run %s into this node's database: %w", runID, err)
+	}
+	fmt.Fprintf(out, "benchmark: copied run %s into this node's database (%d attempts, %d sessions, %d api turns, %d scores).\n",
+		runID, stats.Attempts, stats.Sessions, stats.APITurns, stats.Scores)
+	return nil
 }
 
 // specNeedsIsolatedDaemon reports whether any harness in the spec is driven by a
@@ -137,7 +156,8 @@ func startEphemeralDaemon(ctx context.Context) (*ephemeralDaemon, error) {
 	// run-ctx cancel / ctrl-c) stops the proxy+watcher.
 	dctx, cancel := context.WithCancel(ctx)
 
-	p, pCleanup, addr, _, _, err := buildProxy(dctx, configPath, "", 0, "127.0.0.1")
+	pwire, err := buildProxy(dctx, configPath, "", 0, "127.0.0.1", nil)
+	p, pCleanup, addr := pwire.Proxy, pwire.Cleanup, pwire.Addr
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("build proxy: %w", err)
@@ -163,8 +183,11 @@ func startEphemeralDaemon(ctx context.Context) (*ephemeralDaemon, error) {
 		}
 		return nil
 	})
+	// serveErr is written once before done closes, so a read after <-done is
+	// ordered by the close.
+	var serveErr error
 	go func() {
-		_ = g.Wait()
+		serveErr = g.Wait()
 		close(done)
 	}()
 
@@ -180,8 +203,32 @@ func startEphemeralDaemon(ctx context.Context) (*ephemeralDaemon, error) {
 		pCleanup()
 	}
 
-	if err := waitProxyReady(dctx, addr, 15*time.Second); err != nil {
+	// The readiness wait also ends when the serving goroutines exit: a proxy
+	// whose ListenAndServe returned at once (the port taken, or a build
+	// without capture.proxy, whose inert proxy answers errProxyNotInBuild)
+	// will never accept a connection, so dialling it for the full timeout
+	// would only replace the real reason with "timeout".
+	rctx, rcancel := context.WithCancel(dctx)
+	go func() {
+		select {
+		case <-done:
+			rcancel()
+		case <-rctx.Done():
+		}
+	}()
+	err = waitProxyReady(rctx, addr, 15*time.Second)
+	rcancel()
+	if err != nil {
 		teardown()
+		// teardown waited for done (or 5s); a non-nil serveErr is only read
+		// once done has closed.
+		select {
+		case <-done:
+			if serveErr != nil {
+				return nil, fmt.Errorf("ephemeral daemon stopped before its proxy became ready on %s: %w", addr, serveErr)
+			}
+		default:
+		}
 		return nil, fmt.Errorf("proxy never became ready on %s: %w", addr, err)
 	}
 
@@ -221,34 +268,21 @@ func (d *ephemeralDaemon) Close() {
 // writeEphemeralBenchmarkConfig writes a minimal, isolated config.toml: its own
 // DB in the temp dir, a free proxy port, retention prune off, code-intel and
 // conversation compression off (fast + measures raw billed tokens), and an
-// EMPTY watch allow-list so the watcher idles instead of scanning the
-// operator's real session dirs into the throwaway DB.
+// EMPTY watch allow-list so Detected stays empty and the watcher never
+// scans the operator's real session dirs into the throwaway DB.
 func writeEphemeralBenchmarkConfig(configPath, dbPath string, port int) error {
 	cfg := config.Default()
 	cfg.Observer.DBPath = dbPath
 	cfg.Observer.LogLevel = "error"
 	cfg.Observer.Retention.PruneOnStartup = false
-	// Empty allow-list ⇒ registry.Detected returns nothing ⇒ the watcher enters
-	// idle mode and never scans/ingests the operator's real dirs. The
-	// claude-code correlation seam is hooks+proxy, not the watcher.
+	// Empty allow-list ⇒ registry.Detected returns nothing ⇒ the watcher
+	// never scans/ingests the operator's real dirs. The claude-code
+	// correlation seam is hooks+proxy, not the watcher.
 	cfg.Observer.Watch.EnabledAdapters = []string{}
 	cfg.Proxy.Port = port
 	cfg.CodeIntel.Enabled = false
 	cfg.Compression.Conversation.Enabled = false
 	return config.WriteToml(configPath, cfg)
-}
-
-// freeTCPPort asks the kernel for an unused loopback TCP port. There is a small
-// TOCTOU window between close and the proxy re-binding it; acceptable for a
-// short-lived benchmark daemon (the proxy bind is the authority — a lost race
-// surfaces as a readiness timeout, not silent corruption).
-func freeTCPPort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = l.Close() }()
-	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
 // waitProxyReady dials addr until a TCP connection succeeds (the proxy
@@ -277,6 +311,6 @@ func waitProxyReady(ctx context.Context, addr string, timeout time.Duration) err
 // old Preflight wall-of-text.
 func announceEphemeralDaemon(out io.Writer, d *ephemeralDaemon) {
 	fmt.Fprintf(out,
-		"benchmark: started an isolated ephemeral daemon at %s (proxy %s) — your real Observer data is untouched.\n",
+		"benchmark: started an isolated ephemeral daemon at %s (proxy %s); the run's results are copied into this node's database when it finishes.\n",
 		d.Dir, d.ProxyURL)
 }

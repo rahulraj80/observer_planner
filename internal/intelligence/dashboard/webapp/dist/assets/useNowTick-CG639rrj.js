@@ -1,0 +1,1 @@
+import{i as e}from"./vendor-react-DcQPdiaM.js";function u(t){const[n,o]=e.useState(()=>Date.now());return e.useEffect(()=>{const i=window.setInterval(()=>{typeof document<"u"&&document.visibilityState==="hidden"||o(Date.now())},t);return()=>window.clearInterval(i)},[t]),n}export{u};

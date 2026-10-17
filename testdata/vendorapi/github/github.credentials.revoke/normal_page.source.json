@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "$": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "POST",
+    "path": "/credentials/revoke",
+    "status": 202
+  },
+  "notes": "Synthesized from the declared 202 response schema of operationId credentials/revoke (no example in the description); structure is official, values are placeholders.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.credentials.revoke"
+}

@@ -3,9 +3,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // newAntigravityCmd implements `observer antigravity-cli` — launches Google's
@@ -15,13 +22,14 @@ import (
 // interactive mode"), so a migration INTO Antigravity opens the interactive
 // session pre-loaded with the mission.
 //
-// NON-PROXIED on purpose. Antigravity routes to its own backend with no
-// base-URL knob (a grounded negative in the integration registry —
-// Proxy: nil / RouteStatusNativeExempt); there is nothing to redirect, and
-// token capture happens via observer's local Antigravity `.db` adapter
-// (clidb.go reads the newer CLI's plaintext-protobuf SQLite store), not the
-// proxy. So the launcher execs `agy` with the caller's own environment — it
-// never sets an API key or a base URL.
+// Proxy routing depends on agy's auth mode (audit P2). In Google sign-in
+// mode (the default) agy talks to its own backend with no base-URL knob:
+// nothing to redirect, and token capture happens via observer's local
+// Antigravity `.db` adapter (clidb.go). In API-key mode (settings.json
+// modelProvider "gemini" + GEMINI_API_KEY) agy honours
+// GOOGLE_GEMINI_BASE_URL (vendor install doc), so the launcher points it at
+// the proxy's Gemini lane, which gives the prompt rules a pre-send seam
+// (ask, deny). It never sets or reads an API key.
 func newAntigravityCmd() *cobra.Command {
 	var (
 		configPath   string
@@ -38,20 +46,27 @@ func newAntigravityCmd() *cobra.Command {
 		Use:     "antigravity-cli [-- agy-args...]",
 		Aliases: []string{"antigravity", "agy"},
 		Short:   "Launch Antigravity CLI (agy); with --continue-from, seed a handover via agy -i",
-		Long: "Wraps Google's Antigravity CLI (`agy`). Antigravity has no base-URL\n" +
-			"knob, so this launcher is NON-PROXIED — token capture happens via\n" +
-			"observer's local Antigravity `.db` adapter, not the proxy.\n\n" +
+		Long: "Wraps Google's Antigravity CLI (`agy`). In API-key mode\n" +
+			"(settings.json modelProvider \"gemini\") it sets GOOGLE_GEMINI_BASE_URL\n" +
+			"to the observer proxy, so prompt rules can act before send. Google\n" +
+			"sign-in mode has no base-URL knob and stays non-proxied (capture via\n" +
+			"observer's local Antigravity `.db` adapter).\n\n" +
 			"With --continue-from <session-id> the launcher distills a handover\n" +
 			"from that session and seeds it via agy's -i/--prompt-interactive\n" +
 			"flag (delivery=inject_prompt), so Antigravity opens pre-loaded with\n" +
 			"the mission. See docs/session-handoff.md.\n\n" +
 			"All arguments after the subcommand are forwarded to agy. Use `--`\n" +
 			"to separate observer flags from agy flags. NEVER touches API keys.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach gate (attach-all-launchers): default-on attach hands the PTY
-			// to the daemon. Seed-only spec (agy is native-exempt — no proxy env,
-			// no escape-hatch flag). No -p/--prompt headless predicate: this
+			// to the daemon. Seed-only spec (no escape-hatch flag; the API-key
+			// mode base-URL env below is process-local). No -p/--prompt headless predicate: this
 			// launcher only grounds -i/--prompt-interactive + a bare positional
 			// seed, so a headless one-shot flag is NOT grounded here — the
 			// handoff-fork family is the only incompatible mode (both-TTY guard
@@ -119,7 +134,16 @@ func newAntigravityCmd() *cobra.Command {
 				continueDir = cwd
 			}
 
-			return runSeedOnlyLaunch("agy", bin, args, continueDir)
+			// Best-effort attribution config: a load failure just disables
+			// the launch seed (recordLaunchSeed treats "" as off).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+				// API-key mode only: route through the proxy (audit P2).
+				home, _ := os.UserHomeDir()
+				routeAgyAPIKeyMode(os.Environ(), home, resolveProxyURL(cfg.Proxy.Port, ""), os.Setenv, cmd.ErrOrStderr())
+			}
+			return runSeedOnlyLaunchSeeded(configPath, dbPath, "antigravity-cli", "agy", bin, args, continueDir)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
@@ -130,8 +154,48 @@ func newAntigravityCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "antigravity-cli")
 	resume = registerResumeFlag(cmd, "antigravity-cli")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+// agySettings is the non-secret part of agy's settings.json the launcher
+// reads to tell the auth mode.
+type agySettings struct {
+	ModelProvider string `json:"modelProvider"`
+}
+
+// agyAPIKeyMode reports whether agy runs in API-key mode: the vendor's
+// documented switch is settings.json modelProvider "gemini" (with the key
+// in GEMINI_API_KEY). Without it agy uses Google sign-in.
+func agyAPIKeyMode(home string) bool {
+	raw, err := os.ReadFile(filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"))
+	if err != nil {
+		return false
+	}
+	var s agySettings
+	return json.Unmarshal(raw, &s) == nil && s.ModelProvider == "gemini"
+}
+
+// routeAgyAPIKeyMode sets GOOGLE_GEMINI_BASE_URL to the proxy when agy is
+// in API-key mode and the caller did not set it, and says which mode it
+// saw (audit P2). In Google sign-in mode there is nothing to route: the
+// prompt rules then warn before the model call (PreInvocation hook) and
+// flag after send. Reports whether it set the variable.
+func routeAgyAPIKeyMode(env []string, home, proxyURL string, setenv func(k, v string) error, stderr io.Writer) bool {
+	if !agyAPIKeyMode(home) {
+		fmt.Fprintln(stderr, "observer antigravity-cli: Google sign-in mode: not proxy-routable; prompt rules warn before the model call and flag after send.")
+		return false
+	}
+	if cur := envValue(env, "GOOGLE_GEMINI_BASE_URL"); cur != "" {
+		fmt.Fprintf(stderr, "observer antigravity-cli: API-key mode: GOOGLE_GEMINI_BASE_URL already set (%s); leaving it.\n", cur)
+		return false
+	}
+	target := strings.TrimRight(proxyURL, "/")
+	if err := setenv("GOOGLE_GEMINI_BASE_URL", target); err != nil {
+		fmt.Fprintf(stderr, "observer antigravity-cli: API-key mode: could not set GOOGLE_GEMINI_BASE_URL: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(stderr, "observer antigravity-cli: API-key mode: routing via %s\n", target)
+	return true
 }
 
 // antigravityAttachPassthrough forwards the --agy-path wrapper flag to the

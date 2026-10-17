@@ -1,0 +1,32 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1730419200,
+      "end_time": 1730505600,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 0.06,
+            "currency": "usd"
+          },
+          "line_item": "gpt-5.5, input",
+          "project_id": "proj_SYNTHabc123"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 1.25,
+            "currency": "usd"
+          },
+          "line_item": "gpt-5.5, output",
+          "project_id": "proj_SYNTHabc123"
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "page_AAAAAGdGxdEiJdKOAAAAAGcqsYA="
+}

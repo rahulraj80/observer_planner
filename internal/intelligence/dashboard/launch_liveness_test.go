@@ -118,6 +118,11 @@ func TestTerminalBridgeLivePeerSurvivesPings(t *testing.T) {
 // lease-less viewer closes the socket and reaches NO PTY side effect.
 func TestOversizedViewerFrameRejected(t *testing.T) {
 	lm := newRecordingLaunchManager(nil) // no remote writer ⇒ never a lease
+	// Give the handle a KNOWN geometry so the bridge's on-open pty_size frame
+	// (Feature 2) actually fires: an all-zero snapshot is the manager's "size
+	// not yet known" sentinel, for which the bridge deliberately announces
+	// NOTHING, and the drain below would then read the cap-close instead.
+	lm.snapshot = []LaunchInfo{{ID: "HANDLE-abc", Rows: 40, Cols: 120, InitialRows: 24, InitialCols: 80}}
 	t.Cleanup(func() { close(lm.sub.release) })
 	s := newLaunchTestServer(t, lm)
 	ts := remoteExposedWSServer(t, s)
@@ -151,7 +156,7 @@ func TestOversizedViewerFrameRejected(t *testing.T) {
 	}
 	// The server rejects the oversized frame and closes; a read returns an error.
 	if _, _, rerr := c.Read(rctx); rerr == nil {
-		t.Fatal("oversized frame was accepted — read cap not enforced")
+		t.Fatal("oversized frame was accepted - read cap not enforced")
 	}
 	// And no PTY side effect ever occurred (no lease was held).
 	if lm.localWriter.writes.Load() != 0 || lm.localWriter.resizes.Load() != 0 {
@@ -221,7 +226,7 @@ func TestTerminalControlSecretsAbsentFromWebSocketHandshake(t *testing.T) {
 		t.Errorf("upgrade path = %q, want /ws/launch/HANDLE-abc", gotPath)
 	}
 	if gotRawQuery != "" {
-		t.Errorf("upgrade carried a query string %q — no secret channel is permitted there", gotRawQuery)
+		t.Errorf("upgrade carried a query string %q - no secret channel is permitted there", gotRawQuery)
 	}
 	for _, canary := range []string{canaryCap, canaryConfirm, "HANDLE-abc-session"} {
 		if strings.Contains(gotReqLine, canary) || strings.Contains(gotProto, canary) {
@@ -231,7 +236,7 @@ func TestTerminalControlSecretsAbsentFromWebSocketHandshake(t *testing.T) {
 	// Positive proof the secrets DID arrive via the frame body.
 	req := lm.lastRemoteReq.Load()
 	if req == nil {
-		t.Fatal("AcquireWriterRemote was never called — the frame body was not the accept path")
+		t.Fatal("AcquireWriterRemote was never called - the frame body was not the accept path")
 	}
 	if req.CapabilityToken != canaryCap || req.Confirm != canaryConfirm {
 		t.Errorf("acquire inputs = {cap:%q confirm:%q}, want the frame-body canaries", req.CapabilityToken, req.Confirm)

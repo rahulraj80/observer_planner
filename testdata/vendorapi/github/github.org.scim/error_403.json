@@ -1,0 +1,9 @@
+{
+  "message": "Requires authentication",
+  "documentation_url": "https://docs.github.com/rest",
+  "detail": "Requires authentication",
+  "status": 403,
+  "schemas": [
+    "urn:ietf:params:scim:api:messages:2.0:Error"
+  ]
+}

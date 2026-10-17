@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -239,7 +241,7 @@ func TestProcessBridgeTaskNotesNeverPrintTheToken(t *testing.T) {
 		"certutil", "-hashfile", "$(", "echo %",
 	} {
 		if strings.Contains(notes, banned) {
-			t.Errorf("notes contain %q — a command that prints (or digests) the token's CONTENTS:\n%s", banned, notes)
+			t.Errorf("notes contain %q - a command that prints (or digests) the token's CONTENTS:\n%s", banned, notes)
 		}
 	}
 
@@ -271,7 +273,7 @@ func TestProcessBridgeTaskProbeZeroValueIsUnknown(t *testing.T) {
 	// they must still run — and still fail — when the ordering regresses.
 	var zero setup.Probe
 	if zero != setup.ProbeUnknown {
-		t.Errorf("the zero value of setup.Probe is %v, want Unknown — "+
+		t.Errorf("the zero value of setup.Probe is %v, want Unknown - "+
 			"a forgotten assignment must not read as 'the task does not exist'", zero)
 	}
 	if setup.ProbeAbsent == 0 || setup.ProbePresent == 0 {

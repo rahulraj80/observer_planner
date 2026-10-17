@@ -21,7 +21,9 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/ratelimitstate"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/tooltax"
 )
 
 // Adapter parses OpenAI Codex CLI rollout JSONL files under
@@ -61,11 +63,40 @@ type Adapter struct {
 	// name checked by WatchPaths (default ".codex"). Set to
 	// ".openinterpreter" for the Open Interpreter variant.
 	homeDirName string
+
+	// desktopAppDir names the Electron userData directory of a DESKTOP
+	// app that embeds this same Rust binary and drives it against its
+	// OWN codex-home. Empty (codex proper) means there is no such app
+	// and WatchPaths adds no desktop root. Set to "interpreter" by the
+	// Open Interpreter variant — see desktopStoreRoots in
+	// openinterpreter.go for the per-OS ladder and its grounding.
+	desktopAppDir string
+
+	// surface is this instance's capture-surface vocabulary: the
+	// variant difference resolved into a capability at construction
+	// (CLAUDE.md #3) instead of a name check on the resolve path. The
+	// ZERO VALUE is codex proper's vocabulary — an empty overlay that
+	// falls straight through to surface.go's shared tables — so every
+	// pre-existing instance behaves exactly as before.
+	//
+	// CONSTRUCTION-ONLY for the same reason `name` is: a registered
+	// adapter is read concurrently.
+	surface surfaceVocabulary
+
+	// readsServiceTier is the capability "the owning <root>/config.toml
+	// carries an OpenAI service_tier worth reading" (Codex Fast mode).
+	// True for codex proper only. The Open Interpreter variant leaves it
+	// false: OpenAI service tiers mean nothing on its OpenRouter/Ollama
+	// lane, and its desktop app's codex-home/config.toml holds plaintext
+	// provider API keys (security ledger OI-1) — that file must never be
+	// opened, so the tier read is gated here at construction rather than
+	// by a name check on the parse path (CLAUDE.md #3).
+	readsServiceTier bool
 }
 
 // New returns a Codex adapter with defaults.
 func New() *Adapter {
-	return &Adapter{scrubber: scrub.New()}
+	return &Adapter{scrubber: scrub.New(), readsServiceTier: true}
 }
 
 // NewWithOptions customizes the scrubber and/or watch root.
@@ -73,7 +104,7 @@ func NewWithOptions(s *scrub.Scrubber, watchRoot string) *Adapter {
 	if s == nil {
 		s = scrub.New()
 	}
-	return &Adapter{scrubber: s, watchRoot: watchRoot}
+	return &Adapter{scrubber: s, watchRoot: watchRoot, readsServiceTier: true}
 }
 
 // Name implements adapter.Adapter.
@@ -113,19 +144,36 @@ func (a *Adapter) homeDir() string {
 //
 // The Open Interpreter variant (NewOpenInterpreter) follows the exact
 // same shape against INTERPRETER_HOME / ".openinterpreter" instead —
-// see homeEnv/homeDir.
+// see homeEnv/homeDir — and ADDITIONALLY watches the Interpreter
+// desktop app's embedded codex-home under every cross-mount home (see
+// desktopStoreRoots). Those desktop roots survive the env override:
+// $INTERPRETER_HOME relocates the CLI's own home, and the desktop
+// app's store is a DIFFERENT product's store at a fixed platform
+// convention that no CLI env var moves. Suppressing it would silently
+// zero desktop capture for an operator who only meant to redirect the
+// CLI. The explicit watchRoot (test/backfill) still short-circuits to
+// exactly one root.
+//
+// Roots are deduped by filesystem identity, so a home reachable under
+// two spellings (a cross-mount bind of the native home, a symlink)
+// contributes one root, not two.
 func (a *Adapter) WatchPaths() []string {
 	if a.watchRoot != "" {
 		return []string{a.watchRoot}
 	}
-	if home := os.Getenv(a.homeEnv()); home != "" {
-		return []string{filepath.Join(home, "sessions")}
-	}
 	var roots []string
-	for _, h := range crossmount.AllHomes() {
-		roots = append(roots, filepath.Join(h.Path, a.homeDir(), "sessions"))
+	envHome := os.Getenv(a.homeEnv())
+	if envHome != "" {
+		roots = append(roots, filepath.Join(envHome, "sessions"))
 	}
-	return roots
+	for _, h := range crossmount.AllHomes() {
+		// The env override replaces the per-home CLI root only.
+		if envHome == "" {
+			roots = append(roots, filepath.Join(h.Path, a.homeDir(), "sessions"))
+		}
+		roots = append(roots, a.desktopStoreRoots(h)...)
+	}
+	return adapter.DedupRootsByIdentity(roots)
 }
 
 // IsSessionFile matches rollout-*.jsonl files under one of this
@@ -142,69 +190,22 @@ func (a *Adapter) IsSessionFile(path string) bool {
 }
 
 // actionMap translates Codex tool names to the normalized taxonomy.
-// Synonyms and search/list tool names added per audit C2 — Codex
-// historically captured only the five core tools and silently routed
-// everything else through ActionUnknown.
-var actionMap = map[string]string{
-	// Core tools
-	"shell":       models.ActionRunCommand,
-	"apply_patch": models.ActionEditFile,
-	"file_read":   models.ActionReadFile,
-	"file_write":  models.ActionWriteFile,
-	"web_search":  models.ActionWebSearch,
-	// Synonyms observed in newer Codex builds and IDE extensions
-	"exec":           models.ActionRunCommand,
-	"execute":        models.ActionRunCommand,
-	"command":        models.ActionRunCommand,
-	"read_file":      models.ActionReadFile,
-	"open_file":      models.ActionReadFile,
-	"write_file":     models.ActionWriteFile,
-	"create_file":    models.ActionWriteFile,
-	"edit_file":      models.ActionEditFile,
-	"patch":          models.ActionEditFile,
-	"replace":        models.ActionEditFile,
-	"search":         models.ActionSearchText,
-	"grep":           models.ActionSearchText,
-	"find_text":      models.ActionSearchText,
-	"find_in_files":  models.ActionSearchText,
-	"file_search":    models.ActionSearchFiles,
-	"find":           models.ActionSearchFiles,
-	"glob":           models.ActionSearchFiles,
-	"list_files":     models.ActionSearchFiles,
-	"list_directory": models.ActionSearchFiles,
-	"web_fetch":      models.ActionWebFetch,
-	"fetch_url":      models.ActionWebFetch,
-	// Function-call names emitted via response_item.payload.type=function_call
-	// in current Codex Desktop builds. shell_command is the by-far dominant
-	// one (~95% of function_calls in real sessions); update_plan is Codex's
-	// structured todo planner; list_mcp_resources / list_mcp_resource_templates
-	// are MCP discovery calls; view_image is image-file reading.
-	"shell_command":                models.ActionRunCommand,
-	"update_plan":                  models.ActionTodoUpdate,
-	"list_mcp_resources":           models.ActionMCPCall,
-	"list_mcp_resource_templates":  models.ActionMCPCall,
-	"search_past_outputs":          models.ActionMCPCall,
-	"get_session_summary":          models.ActionMCPCall,
-	"get_project_patterns":         models.ActionMCPCall,
-	"get_last_test_result":         models.ActionMCPCall,
-	"get_session_recovery_context": models.ActionMCPCall,
-	"get_cost_summary":             models.ActionMCPCall,
-	"check_command_freshness":      models.ActionMCPCall,
-	"get_failure_context":          models.ActionMCPCall,
-	"load_workspace_dependencies":  models.ActionMCPCall,
-	"view_image":                   models.ActionReadFile,
-	// exec_command is the modern Codex Desktop (>=v0.130) shell tool
-	// name — distinct from the older "shell" / "shell_command". Without
-	// this mapping these rows land as ActionUnknown; live maintainer DB
-	// shows 260 such rows (Issue #6 cross-adapter sweep).
-	"exec_command": models.ActionRunCommand,
-	// PowerShell / pwsh / cmd.exe surface when Codex on Windows
-	// invokes its shell tool with a windows-shell payload. The tool
-	// name in the function_call envelope is the literal interpreter.
-	"powershell": models.ActionRunCommand,
-	"pwsh":       models.ActionRunCommand,
-	"cmd.exe":    models.ActionRunCommand,
-}
+// It is READ OUT of internal/tooltax, the one owner of the
+// cross-adapter tool vocabulary (WP-T3 of
+// docs/plans/tool-taxonomy-standardization-plan-2026-07-31.md). The
+// hand-maintained literal that used to live here — core tools,
+// newer-build synonyms (audit C2), the function_call names of current
+// Codex Desktop builds, exec_command (>=v0.130) and the Windows
+// interpreter names — is now the codex rows of tooltax's ordered
+// canonical table. Add new native tool names THERE, not here.
+//
+// tooltax.For returns LITERAL rows only, so the `mcp__*` glob is not
+// in this map; codex never relied on it (it allow-lists MCP names).
+//
+// TestActionMapPreservesPreTooltaxFixture pins every pre-conversion
+// pair as still present and unchanged; TestActionMapTooltaxAdditions
+// pins the intended additions so an unreviewed one is loud.
+var actionMap = tooltax.For(models.ToolCodex)
 
 // rawLine is the top-level envelope; payload is decoded per type.
 type rawLine struct {
@@ -223,6 +224,19 @@ type sessionContext struct {
 	Model     string `json:"model"`
 	Cwd       string `json:"cwd"`
 	GitBranch string `json:"git_branch"`
+	// GitRemote is the normalized "origin" remote for Cwd. Unlike
+	// GitBranch (sourced from the rollout JSONL's own git_branch
+	// field), Codex's JSONL never carries a remote — this is resolved
+	// via git.ResolveIdentity(Cwd) at the same call sites that already
+	// resolve the project root (resolveProjectRoot / resolveProjectRemote,
+	// cached by rootCache), never unmarshaled from JSON. `json:"-"`
+	// keeps it out of the wire shape. The fuller Project Identity
+	// Resolver v2 bundle (upstream remote/owner hashes, workspace,
+	// worktree flag, content fingerprint) is applied separately at
+	// ParseSessionFile's return points via
+	// adapter.ApplyProjectIdentityByRoot(identitiesByRoot(rootCache)),
+	// not threaded through sessionContext.
+	GitRemote string `json:"-"`
 	// EffortLevel is the per-turn reasoning effort the model was
 	// asked to use (minimal | low | medium | high). Populated from
 	// turn_context.payload.collaboration_mode.settings.reasoning_effort
@@ -285,6 +299,54 @@ type sessionMetaPayload struct {
 	// the replay discriminator compares task_started.started_at
 	// against.
 	Timestamp string `json:"timestamp"`
+	// Originator + Source are the client-identity discriminator codex
+	// stamps on every session_meta (`codex_cli_rs` / `codex_exec` /
+	// `codex_vscode` / "Codex Desktop" / ... paired with `cli` / `exec`
+	// / `vscode`). Only the OWNING session_meta's values are used —
+	// resolveCodexSurface (surface.go) turns them into the normalized
+	// models.Surface* vocabulary for Part E capture-surface
+	// attribution. See docs/plans/ide-surface-capture-remediation-
+	// plan-2026-09-02.md §0/§3.
+	Originator string `json:"originator"`
+	// Source is the flat `source` string. A spawned subagent's
+	// session_meta carries an OBJECT there instead
+	// ({"subagent":{"thread_spawn":{...}}}); sessionMetaSource decodes
+	// that to "" so the rest of the record (id, thread_source,
+	// parent_thread_id) still decodes (T-582).
+	Source sessionMetaSource `json:"source"`
+	// CLIVersion is the codex CLI version the runtime stamped on the
+	// OWNING session_meta ("0.150.0", "0.130.0-alpha.5"). Captured
+	// node-local per Issue 2 (migration 125) and emitted as a
+	// models.SessionToolVersion at the same owner-gated site as the
+	// surface attribution below.
+	CLIVersion string `json:"cli_version"`
+}
+
+// sessionMetaSource is session_meta's `source`, tolerant of both wire
+// shapes codex writes: a plain string ("cli", "exec", "vscode") on a
+// primary session, and an object on a spawned subagent
+// ({"subagent":{"thread_spawn":{...}}} or {"subagent":"review"}). With a
+// plain string field the object shape failed the WHOLE session_meta
+// unmarshal, so a subagent rollout lost its id (every row landed under
+// the filename-derived id) and its thread_source / parent_thread_id
+// lineage (T-582). Anything that is not a JSON string decodes to "": a
+// subagent has no flat surface source, so resolveCodexSurface falls back
+// to the originator exactly as it does for an absent source. The subagent
+// marker itself is read from thread_source / parent_thread_id, never
+// from here.
+type sessionMetaSource string
+
+// UnmarshalJSON implements json.Unmarshaler. It never fails: a value of
+// any other JSON type is the "no flat source" case, not a malformed
+// record.
+func (s *sessionMetaSource) UnmarshalJSON(b []byte) error {
+	var v string
+	if err := json.Unmarshal(b, &v); err != nil {
+		*s = ""
+		return nil
+	}
+	*s = sessionMetaSource(v)
+	return nil
 }
 
 // turnContextPayload extends sessionContext with developer_instructions —
@@ -355,6 +417,12 @@ type responseItemMessage struct {
 type responseItemMessageContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+	// ImageURL carries an `input_image` part's image reference. In the
+	// Codex rollout it is a data URI string ("data:image/png;base64,...")
+	// but the Responses schema also permits an object ({"url":"..."}), so
+	// it is kept raw and only the media-type prefix is read (Issue 1
+	// user-attachment capture). The base64 payload is NEVER decoded/stored.
+	ImageURL json.RawMessage `json:"image_url"`
 }
 
 // agentMessage is the assistant's natural-language preamble that
@@ -368,6 +436,49 @@ type responseItemMessageContent struct {
 type agentMessage struct {
 	TurnID  string `json:"turn_id"`
 	Message string `json:"message"`
+}
+
+// itemCompletedPayload covers event_msg.payload when payload.type ==
+// "item_completed" — a newer Codex CLI wire format (observed live
+// 2026-09-02) that wraps turn activity in a discriminated Item union
+// (item.type: AgentMessage / Reasoning / CommandExecution /
+// UserMessage) instead of the legacy flat event_msg types
+// ("agent_message" / "user_message" above). On rollouts using this
+// schema exclusively, the legacy types never fire, so without this
+// case assistant text is silently dropped entirely (0 assistant_
+// message rows) and every tool call falls back to the dashboard's
+// "no recovered text" placeholder.
+//
+// item.type == "AgentMessage" mirrors the "agent_message" case and
+// item.type == "UserMessage" mirrors the "user_message" case below.
+// Reasoning and CommandExecution items are exact-count duplicates of
+// the response_item "reasoning" and "custom_tool_call" /
+// "custom_tool_call_output" entries already captured elsewhere, so
+// handling them here would double-count.
+//
+// UserMessage IS a confirmed gap (T-559, 2026-10-06): every rollout
+// written by Codex 0.148+ (codex_exec and Codex Desktop alike) carries
+// its user prompts ONLY as item_completed/UserMessage plus the
+// role=user response_item; event_msg/user_message never appears. A
+// survey of the operator's corpus found the two shapes mutually
+// exclusive per file (352 files item-only, 189 legacy-only, 0 both),
+// so emitting here cannot double-count a transcript prompt. Before
+// this case existed only the UserPromptSubmit hook row survived, which
+// fires for few Codex Desktop turns, so a multi-turn session showed
+// its first prompt and then no further user messages.
+//
+// The content-block shape ({"type":"Text","text":"..."} for
+// AgentMessage, {"type":"text",...} for UserMessage — casing is
+// inconsistent across item types) matches responseItemMessageContent
+// closely enough to reuse it + concatMessageContent verbatim: only
+// the "text" field is read, and its JSON key case is stable even
+// though the "type" field's case is not.
+type itemCompletedPayload struct {
+	TurnID string `json:"turn_id"`
+	Item   struct {
+		Type    string                       `json:"type"`
+		Content []responseItemMessageContent `json:"content"`
+	} `json:"item"`
 }
 
 type taskStarted struct {
@@ -432,12 +543,16 @@ type webSearchEnd struct {
 // responseItemReasoning is response_item.payload when payload.type ==
 // "reasoning". The `summary` array MAY contain text segments
 // {type:"summary_text"|"text", text:"..."} in future Codex builds; the
-// `encrypted_content` field is opaque and not extractable. Adapter
-// extracts whatever readable text is present and threads it through
-// the turn's agentMessages cache for downstream PrecedingReasoning,
-// AND emits a standalone ToolEvent so reasoning is visible in the
-// action stream (zero-text encrypted-only items appear as opaque
-// placeholders with a byte-size proxy).
+// `encrypted_content` field is opaque and not extractable.
+//
+// B3 (2026-07-31): reasoning mints NO action row. Readable summary text
+// is threaded through the turn's agentMessages cache so the next
+// tool_call / agent_message carries it as PrecedingReasoning; an
+// encrypted-only item (the overwhelming majority — 15,040 of the 15,369
+// historical rows were the `(encrypted reasoning, N bytes)` placeholder)
+// contributes NOTHING and simply vanishes. EncryptedContent is retained
+// as a decode target so the field is documented against the wire shape
+// and a future readable-content build has somewhere to land.
 type responseItemReasoning struct {
 	Summary          []reasoningSummaryPart `json:"summary"`
 	EncryptedContent string                 `json:"encrypted_content"`
@@ -649,8 +764,25 @@ type patchApplyEnd struct {
 	Stderr  string                      `json:"stderr"`
 	Success bool                        `json:"success"`
 	Changes map[string]patchApplyChange `json:"changes"`
+
+	// ChangesRaw is the verbatim `changes` object, filled by
+	// patchChangesRaw at the call site rather than decoded here — a
+	// second field can't share the `changes` tag. The typed map above
+	// drives Target and ContentBytes; the raw bytes are what
+	// RawToolInput stores, so re-marshaling can't silently drop a
+	// field this struct doesn't name.
+	ChangesRaw json.RawMessage `json:"-"`
 }
 
+// patchApplyChange is one entry of patch_apply_end.changes. The producer
+// uses a different payload per change type: `add` and `delete` carry the
+// whole file in `content`, while `update` carries `unified_diff` (plus a
+// `move_path` that is null outside a rename) and no `content` at all.
+//
+// `unified_diff` and `move_path` are deliberately NOT decoded. Nothing in
+// Tier 1 reads them: RawToolInput stores the producer's verbatim bytes
+// (see RenderPatchChangesInput), and the authored-byte count must not
+// include the diff — see authoredBytesFromPatchChanges for why.
 type patchApplyChange struct {
 	Type    string `json:"type"`
 	Content string `json:"content"`
@@ -672,8 +804,8 @@ type modernTokenCount struct {
 	} `json:"info"`
 	// RateLimits is the Codex 0.130+ envelope carried alongside
 	// `info`. Present even when `info` is null (the startup
-	// token_count fires with rate_limits-only). Emitted as
-	// ActionRateLimit ToolEvent rows reusing the cowork-introduced
+	// token_count fires with rate_limits-only). Emitted (change-only, see
+	// codexRateLimitEmit) as ActionRateLimit ToolEvent rows reusing the cowork-introduced
 	// schema (RateLimitStatus / Type / ResetsAt / OverageStatus).
 	RateLimits *codexRateLimits `json:"rate_limits"`
 }
@@ -806,6 +938,9 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	defer f.Close()
 
 	res := adapter.ParseResult{NewOffset: fromOffset}
+	// cxTiming is every record of this window projected for the
+	// generation-timing span rule (gentiming.go), in file order.
+	var cxTiming []codexTimingLine
 
 	// Fall back to the filename stem as session id if no real
 	// session-bearing envelope ever lands (e.g. incremental parse
@@ -857,6 +992,21 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	// prefetch (owner already latched) yet reads no session_meta itself,
 	// so it must NOT re-emit — the guarded SQL would fire every poll.
 	sessionMetaObservedThisChunk := false
+	// ownerOriginator / ownerSource carry the OWNING session_meta's
+	// client-identity fields for Part E surface attribution — captured
+	// alongside sessionMetaObservedThisChunk (same owner-only gate) and
+	// resolved into a models.SessionSurface at the same emission site
+	// as the lineage marker below.
+	var ownerOriginator, ownerSource string
+	// ownerCLIVersion carries the OWNING session_meta's cli_version for
+	// Issue 2 tool-version capture — same owner-only gate as ownerSource.
+	var ownerCLIVersion string
+
+	// rootCache is declared here (rather than after the resume block
+	// below) so the resume path can prime ctxState.GitRemote from the
+	// same cache the live parse's per-event resolveProjectRoot /
+	// resolveProjectRemote calls read from.
+	rootCache := map[string]projectGitInfo{}
 
 	// resumed carries the dedup state rebuilt from the pre-offset bytes
 	// (token-total baseline + already-emitted system-prompt hashes). It
@@ -864,12 +1014,20 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	var resumed resumePrefix
 	lineOffset := 0
 	if fromOffset > 0 {
-		if pre, ok := prefetchSessionContext(f, fromOffset); ok {
+		if pre, ok := prefetchCached(path, f, fromOffset); ok {
 			ctxState = mergeSessionContext(sessionContext{}, pre.ctx)
 			hasRealSessionID = ctxState.SessionID != ""
 			lineOffset = pre.lineCount
 			forkTrack = pre.track
 			resumed = pre
+			// GitRemote is derived (not JSONL data), so
+			// mergeSessionContext never populates it — resolve it here
+			// from the prefetched Cwd, same as applyContext does for
+			// the live parse below.
+			if ctxState.Cwd != "" {
+				a.resolveProjectRoot(ctxState.Cwd, rootCache)
+				ctxState.GitRemote = a.resolveProjectRemote(ctxState.Cwd, rootCache)
+			}
 		}
 		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
 			return adapter.ParseResult{}, fmt.Errorf("codex.ParseSessionFile: seek: %w", err)
@@ -882,12 +1040,25 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	// rollout JSONL, so read the operator's requested tier once from the
 	// owning ~/.codex/config.toml. Sticky for the whole file; surfaces as
 	// the per-message ServiceTier pill (via withEffort) and drives
-	// TokenEvent.Fast (priority → fast → Pricing.FastMultiplier).
-	if tier := codexServiceTier(path); tier != "" {
-		ctxState.ServiceTier = tier
+	// TokenEvent.Fast (priority → fast → Pricing.FastMultiplier). Gated on
+	// the readsServiceTier capability: the Open Interpreter variant never
+	// opens its root's config.toml (see the field doc).
+	if a.readsServiceTier {
+		if tier := codexServiceTier(path); tier != "" {
+			ctxState.ServiceTier = tier
+		}
 	}
-	rootCache := map[string]string{}
-	pending := map[string]int{}            // call_id → res.ToolEvents index
+	pending := map[string]int{} // call_id → res.ToolEvents index
+	// patchInvocations is the SECONDARY index that lets a patch_apply_end
+	// find its own invocation row when the call_id join cannot: modern
+	// Codex runs apply_patch from inside an `exec` custom_tool_call, and
+	// the executor stamps its own `exec-<uuid>` id while the response_item
+	// carries `call_<hash>` — different namespaces, so pending[] misses by
+	// construction. Without this, BOTH rows survive and the same patch is
+	// counted twice (measured over 333 July rollouts: 838 invocation rows
+	// vs 2,445 executor rows, with 57 rollouts carrying both).
+	// Keyed by turn, ordered oldest-first — see claimPatchInvocation.
+	patchInvocations := map[string][]patchInvocation{}
 	lastInputByID := map[string]int64{}    // legacy gross-cumulative input tracker; preserved for the unused branch in case a fixture still drives it (see lastNetInputByID below for the net-cumulative variant the active math uses)
 	lastNetInputByID := map[string]int64{} // tracks (gross_input - cached_input) cumulative per session so the per-turn delta we store excludes the cached portion (Anthropic-shape convention, see cost engine TokenBundle docstring)
 	turnModels := map[string]string{}
@@ -895,11 +1066,29 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	pendingTokenModels := map[string][]int{}
 	pendingUserPromptIdx := -1
 	pendingTurnlessTokenIdxs := []int{}
+	// respUserAtts / respUserAttsIdx carry the attachment parts of the
+	// most recent role=user response_item and the prompt row they were
+	// provisionally stamped onto (-1 when none). On legacy rollouts the
+	// event_msg/user_message prompt PRECEDES that response_item, so the
+	// stamp lands on the right row. On item_completed rollouts the
+	// response_item comes FIRST and the UserMessage prompt follows, so the
+	// provisional stamp would sit on the PREVIOUS turn's prompt; the
+	// UserMessage case moves it onto its own row.
+	var respUserAtts []models.UserAttachment
+	respUserAttsIdx := -1
 	// agentMessages caches the latest assistant preamble per turn so
 	// every tool_call / exec_command_end / web_search_end inside that
 	// turn picks it up as PrecedingReasoning. Keyed by turn_id; entries
 	// stay around for the whole parse since one turn's preamble is
 	// only valid for that turn's tool events.
+	//
+	// This is ALSO the sole destination of response_item.reasoning
+	// summary text (B3, 2026-07-31): reasoning is never its own action
+	// row, it only enriches the turn's successor events here. Semantics
+	// are per-turn FAN-OUT + concatenate (every tool event of the turn
+	// carries the same accumulated preamble) — deliberately unlike the
+	// consumed-once grok default, because Codex's turn boundary
+	// (turn_id) is explicit in the log and already scopes it.
 	agentMessages := map[string]string{}
 	// seenSystemPrompts dedups ActionSystemPrompt emissions across the
 	// parse. Keyed by content hash (shortHash of the prompt body).
@@ -944,6 +1133,9 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	for hash := range resumed.systemPrompts {
 		seenSystemPrompts[hash] = true
 	}
+	// rlTracker is the rate-limit change-only emission state (see the
+	// token_count case), seeded from the prefix on resume.
+	rlTracker := resumed.rateLimits
 	// runningWebSearchCount tallies event_msg/web_search_end records
 	// seen since the last NON-deduped token_count emission. Flushed
 	// onto TokenEvent.WebSearchRequests when the next token_count row
@@ -983,6 +1175,11 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 		}
 		if sc.Cwd != "" {
 			ctxState.Cwd = sc.Cwd
+			// GitRemote is derived from Cwd (git.Resolve), not carried
+			// on the JSONL envelope like GitBranch — re-resolve (cache
+			// hit on repeat cwds) whenever cwd actually changes.
+			a.resolveProjectRoot(ctxState.Cwd, rootCache)
+			ctxState.GitRemote = a.resolveProjectRemote(ctxState.Cwd, rootCache)
 		}
 		if sc.GitBranch != "" {
 			ctxState.GitBranch = sc.GitBranch
@@ -1123,7 +1320,10 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 		return ev
 	}
 
-	reader := bufio.NewReaderSize(f, 64*1024)
+	// A watcher catching up on an over-cap tail bounds this parse to one
+	// window (adapter.LimitTail, T-413); a record cut by the window is
+	// deferred whole exactly like an in-progress append.
+	reader := bufio.NewReaderSize(adapter.LimitTail(ctx, f), 64*1024)
 
 	var bytesRead int64 = fromOffset
 	// Seed from prefetch so :L<linenum>: SourceEventIDs are absolute-
@@ -1131,10 +1331,12 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	lineNum := lineOffset
 	for {
 		if ctx.Err() != nil {
+			adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot(rootCache))
 			return res, ctx.Err()
 		}
 		lineStr, consumed, oversized, readErr := readRecord(reader, maxRecordBytes)
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot(rootCache))
 			return res, fmt.Errorf("codex.ParseSessionFile: read %s: %w", path, readErr)
 		}
 		if consumed == 0 {
@@ -1188,6 +1390,11 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				res.NewOffset = nextOffset
 			}
 			res.Warnings = append(res.Warnings, fmt.Sprintf("line %d: skipped oversized record: %d bytes exceeds %d-byte per-record bound", lineNum, consumed, maxRecordBytes))
+			// S10-SPEED: keep the record's PLACE in the gen-timing walk as
+			// an unknown kind (gentiming.go cxUnknown), exactly as the
+			// look-back does, so the stored span never depends on which
+			// parse window the record fell in.
+			cxTiming = append(cxTiming, codexTimingLine{Kind: cxUnknown, TokIdx: -1})
 			continue
 		}
 
@@ -1225,6 +1432,9 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 
 		ts := parseTimestamp(line.Timestamp)
 		payloadType := payloadType(line.Payload)
+		// Generation timing (S10-SPEED): project every record for the span
+		// rule in gentiming.go.
+		cxTiming = append(cxTiming, classifyCodexRecord(line, payloadType))
 
 		switch line.Type {
 		case "compacted":
@@ -1255,9 +1465,15 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 			if err := json.Unmarshal(line.Payload, &meta); err == nil {
 				// Only the OWNING (first) session_meta triggers lineage
 				// emission — a replayed parent meta read mid-chunk on a
-				// resume must not re-emit the owner's lineage row.
+				// resume must not re-emit the owner's lineage row. The
+				// same owner-only gate applies to originator/source: a
+				// replayed parent's session_meta must not overwrite the
+				// child rollout's own surface attribution.
 				if !forkTrack.ownerLatched {
 					sessionMetaObservedThisChunk = true
+					ownerOriginator = meta.Originator
+					ownerSource = string(meta.Source)
+					ownerCLIVersion = meta.CLIVersion
 				}
 				created, have := sessionMetaCreationSec(meta, line.Timestamp)
 				forkTrack.observeSessionMeta(
@@ -1359,12 +1575,55 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 						res.ToolEvents = append(res.ToolEvents, withEffort(evt))
 					}
 				}
+			case "item_completed":
+				var ic itemCompletedPayload
+				if err := json.Unmarshal(line.Payload, &ic); err == nil && ic.Item.Type == "UserMessage" {
+					// Same row the legacy user_message case builds, keyed
+					// to the item's own turn so MessageID is "user:<turn>"
+					// (the hook's UserPromptSubmit key for the same turn).
+					if ic.TurnID != "" {
+						applyContext(sessionContext{TurnID: ic.TurnID})
+					}
+					msg := concatMessageContent(ic.Item.Content)
+					if msg != "" {
+						projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
+						evt := a.buildUserPromptEvent(path, ctxState, projectRoot, ts, lineNum, msg)
+						evt.MessageID = userMessageID(msg, lineNum)
+						if respUserAtts != nil {
+							if respUserAttsIdx >= 0 && respUserAttsIdx < len(res.ToolEvents) {
+								res.ToolEvents[respUserAttsIdx].UserAttachments = nil
+							}
+							evt.UserAttachments = respUserAtts
+						} else if atts := userAttachmentsFromContent(ic.Item.Content); len(atts) > 0 {
+							evt.UserAttachments = atts
+						}
+						respUserAtts, respUserAttsIdx = nil, -1
+						res.ToolEvents = append(res.ToolEvents, withEffort(evt))
+						if ctxState.TurnID == "" {
+							pendingUserPromptIdx = len(res.ToolEvents) - 1
+						}
+					}
+				} else if err == nil && ic.Item.Type == "AgentMessage" {
+					turnID := firstNonEmpty(ic.TurnID, ctxState.TurnID)
+					msg := strings.TrimSpace(concatMessageContent(ic.Item.Content))
+					if turnID != "" && msg != "" {
+						agentMessages[turnID] = msg
+					}
+					if msg != "" {
+						projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
+						sess := ctxState
+						sess.TurnID = turnID
+						evt := a.buildAgentMessageEvent(path, sess, projectRoot, ts, lineNum, msg)
+						res.ToolEvents = append(res.ToolEvents, withEffort(evt))
+					}
+				}
 			case "user_message":
 				var um userMessage
 				if err := json.Unmarshal(line.Payload, &um); err == nil {
 					projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
 					evt := a.buildUserPromptEvent(path, ctxState, projectRoot, ts, lineNum, um.Message)
 					evt.MessageID = userMessageID(um.Message, lineNum)
+					respUserAtts, respUserAttsIdx = nil, -1
 					res.ToolEvents = append(res.ToolEvents, withEffort(evt))
 					if ctxState.TurnID == "" {
 						pendingUserPromptIdx = len(res.ToolEvents) - 1
@@ -1505,6 +1764,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 						ProjectRoot:        projectRoot,
 						Timestamp:          ts,
 						GitBranch:          ctxState.GitBranch,
+						GitRemote:          ctxState.GitRemote,
 						Model:              ctxState.Model,
 						Tool:               models.ToolCodex,
 						ActionType:         models.ActionReadFile,
@@ -1592,14 +1852,38 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				if err := json.Unmarshal(line.Payload, &pa); err != nil {
 					continue
 				}
+				pa.ChangesRaw = patchChangesRaw(line.Payload)
 				if pa.TurnID != "" {
 					applyContext(sessionContext{TurnID: pa.TurnID})
 				}
 				projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
 				preceding := agentMessages[firstNonEmpty(pa.TurnID, ctxState.TurnID)]
+				turnKey := firstNonEmpty(pa.TurnID, ctxState.TurnID)
+				claimedIdx, claimed := -1, false
 				if idx, ok := pending[pa.CallID]; ok && idx < len(res.ToolEvents) {
-					mergePatchApplyIntoPending(&res.ToolEvents[idx], a, pa, projectRoot)
+					claimedIdx, claimed = idx, true
 					delete(pending, pa.CallID)
+					// The id join won, but this row may ALSO be sitting in
+					// the fallback queue. Drop it there or a later
+					// patch_apply_end could claim an already-merged row.
+					dropPatchInvocation(patchInvocations, idx)
+				} else if cand, ok := claimPatchInvocation(patchInvocations, turnKey, changesFileSet(pa.Changes)); ok && cand.idx < len(res.ToolEvents) {
+					// The call_id join missed (the exec-uuid namespace).
+					// Merging into the invocation row instead of emitting a
+					// second one is what keeps ONE row per patch, and with
+					// it one authored-byte count.
+					claimedIdx, claimed = cand.idx, true
+					// Symmetric to dropPatchInvocation above: this row is
+					// no longer claimable by ANY route, so retire its
+					// pending entry too. Without this, a later
+					// patch_apply_end that DOES carry the call_hash would
+					// merge the same row a second time.
+					if cand.callID != "" {
+						delete(pending, cand.callID)
+					}
+				}
+				if claimed {
+					mergePatchApplyIntoPending(&res.ToolEvents[claimedIdx], a, pa, projectRoot)
 				} else {
 					evt := a.buildPatchApplyStandaloneEvent(path, ctxState, projectRoot, ts, pa, lineNum, preceding)
 					if evt.Model == "" {
@@ -1633,13 +1917,38 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 			case "token_count":
 				// Rate-limit snapshot is independent of token-usage: the
 				// startup token_count fires with `info: null` but already
-				// carries the per-window rate_limits envelope. Emit one
-				// ActionRateLimit row per token_count line that carries
-				// rate_limits, reusing the schema cowork introduced
+				// carries the per-window rate_limits envelope. Emit an
+				// ActionRateLimit row for a token_count line that carries
+				// rate_limits when the reading changed (see the change-only
+				// note below), reusing the schema cowork introduced
 				// (RateLimitStatus / Type / ResetsAt / OverageStatus).
 				// Dedup is handled at store.Ingest via the stable
 				// source_event_id below — re-parses are idempotent.
-				if rl := parseModernRateLimits(line.Payload); rl != nil && rl.PlanType != "" {
+				//
+				// Gate on whether a window actually exists (Primary or
+				// Secondary non-nil), NEVER on PlanType. PlanType is not a
+				// reliable "real data present" signal in either direction:
+				// live-observed 2026-09-22, a ChatGPT plan reports
+				// `"plan_type":null` (Go unmarshals a JSON null into the
+				// PlanType string field as "") while `primary` carries a
+				// fully valid window — the old `rl.PlanType != ""` gate
+				// silently dropped every one of these snapshots. The same
+				// gate ALSO let through a genuinely-empty envelope
+				// (`primary:null,secondary:null,plan_type:"plus"`, the
+				// 2026-08-26 startup-probe shape) purely because PlanType
+				// happened to be set. Checking for an actual window fixes
+				// both directions at once.
+				//
+				// Change-only (2026-09-30): Codex repeats the SAME envelope on
+				// every inference, which used to land one "Rate limit" row per
+				// model turn. codexRateLimitEmit asks the shared
+				// ratelimitstate predicate — first of the file, a meaningful
+				// change (status / plan / window set / used_percent / a reset
+				// move beyond jitter), or a heartbeat so the limit gauge's
+				// "observed N ago" stays bounded. rlTracker is seeded from the
+				// pre-offset prefix on resume, so a watcher poll makes the
+				// same decisions a full rescan does.
+				if rl := parseModernRateLimits(line.Payload); rl != nil && (rl.Primary != nil || rl.Secondary != nil) && codexRateLimitEmit(&rlTracker, rl, ts) {
 					projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
 					evt := buildCodexRateLimitEvent(path, ctxState, projectRoot, ts, rl, lineNum)
 					res.ToolEvents = append(res.ToolEvents, withEffort(evt))
@@ -1739,6 +2048,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 					SessionID:         ctxState.SessionID,
 					ProjectRoot:       projectRoot,
 					GitBranch:         ctxState.GitBranch,
+					GitRemote:         ctxState.GitRemote,
 					Timestamp:         ts,
 					Tool:              models.ToolCodex,
 					Model:             modelForTurn(turnID),
@@ -1760,6 +2070,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				}
 				runningWebSearchCount = 0
 				res.TokenEvents = append(res.TokenEvents, evt)
+				bindCodexTokenCount(cxTiming, len(res.TokenEvents)-1, cxUsage{tk.InputTokens, tk.Cached, tk.OutputTokens, tk.Reasoning})
 				// CACHETRACK §15.3 (was: §14.3 scaffold-only). Codex
 				// Tier-2 emits CacheTurnObservation under
 				// ImplicitCache=true so the engine dispatches to the
@@ -1904,7 +2215,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				}
 				projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
 				preceding := agentMessages[ctxState.TurnID]
-				evt := a.buildCustomToolCallEvent(path, callID, ctxState, projectRoot, ts, rc, preceding)
+				evt, patchText := a.buildCustomToolCallEvent(path, callID, ctxState, projectRoot, ts, rc, preceding)
 				if evt.Model == "" {
 					if turnID := assistantTurnID(""); turnID != "" {
 						evt.Model = modelForTurn(turnID)
@@ -1914,6 +2225,16 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 					}
 				}
 				pending[callID] = len(res.ToolEvents)
+				// Register the invocation for the id-less fallback join.
+				// Both sides key on the turn the row itself carries
+				// (MessageID), so the queue can never be keyed one way and
+				// read another.
+				if patchText != "" && evt.ActionType == models.ActionEditFile {
+					if files := patchFileSet(patchText, ctxState.Cwd); len(files) > 0 {
+						patchInvocations[evt.MessageID] = append(patchInvocations[evt.MessageID],
+							patchInvocation{idx: len(res.ToolEvents), callID: callID, files: files})
+					}
+				}
 				res.ToolEvents = append(res.ToolEvents, withEffort(evt))
 			case "custom_tool_call_output":
 				var ro responseItemCustomToolCallOutput
@@ -1944,24 +2265,24 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				// response_item.reasoning currently carries only opaque
 				// `encrypted_content` plus an empty `summary` array in
 				// every Codex Desktop build inspected (838 reasoning
-				// items, 0% non-empty summary as of 2026-05). Future
-				// builds may populate summary[*].text — when they do,
-				// thread the concatenated text into the per-turn
-				// agentMessages cache so the next tool_call inherits
-				// it as PrecedingReasoning, mirroring agent_message
-				// semantics.
+				// items, 0% non-empty summary as of 2026-05).
 				//
-				// v1.4.53: ALSO emit a standalone ToolEvent so the
-				// reasoning is visible in the action stream rather
-				// than only feeding PrecedingReasoning downstream.
-				// Empty-summary items still emit a row with an opaque
-				// placeholder + encrypted byte count so the operator
-				// can see that reasoning happened at this position
-				// even when the content is unrecoverable.
+				// B3 (2026-07-31): reasoning is NEVER its own action
+				// row. v1.4.53 minted one — including an opaque
+				// "(encrypted reasoning, N bytes)" placeholder for the
+				// unreadable majority — and that produced 15,369
+				// phantom task_complete rows, 15,040 of them content-
+				// free. The ONLY thing that happens here is the
+				// pre-existing threading: readable summary text is
+				// concatenated into the per-turn agentMessages cache so
+				// the next tool_call / agent_message of the same turn
+				// carries it as PrecedingReasoning (see the
+				// agentMessages declaration). An item with no readable
+				// summary contributes nothing at all — a placeholder is
+				// never threaded and never stored.
 				var rr responseItemReasoning
 				if err := json.Unmarshal(line.Payload, &rr); err == nil {
-					text := reasoningSummaryText(rr.Summary)
-					if text != "" {
+					if text := reasoningSummaryText(rr.Summary); text != "" {
 						turnID := assistantTurnID("")
 						if turnID != "" {
 							existing := agentMessages[turnID]
@@ -1972,17 +2293,6 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 							}
 						}
 					}
-					projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
-					evt := a.buildCodexReasoningEvent(path, ctxState, projectRoot, ts, rr, text, lineNum)
-					if evt.Model == "" {
-						if turnID := assistantTurnID(""); turnID != "" {
-							evt.Model = modelForTurn(turnID)
-							if evt.Model == "" {
-								pendingToolModels[turnID] = append(pendingToolModels[turnID], len(res.ToolEvents))
-							}
-						}
-					}
-					res.ToolEvents = append(res.ToolEvents, withEffort(evt))
 				}
 			case "message":
 				// response_item.payload.type=message — role discriminates.
@@ -2004,6 +2314,19 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				var rm responseItemMessage
 				if err := json.Unmarshal(line.Payload, &rm); err == nil {
 					body := concatMessageContent(rm.Content)
+					// User-attachment capture (Issue 1): a role=user
+					// response_item carries the API-side input parts, which
+					// include the image/file attachments the user sent (the
+					// event_msg/user_message record carries only the text).
+					// Merge the attachment metadata onto the most recent
+					// user_prompt event so the turn is flagged without
+					// double-counting the prompt text.
+					if rm.Role == "user" {
+						if atts := userAttachmentsFromContent(rm.Content); len(atts) > 0 {
+							respUserAtts = atts
+							respUserAttsIdx = attachToRecentUserPrompt(res.ToolEvents, atts)
+						}
+					}
 					emit := false
 					role := rm.Role
 					switch rm.Role {
@@ -2169,6 +2492,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				SessionID:         ctxState.SessionID,
 				ProjectRoot:       projectRoot,
 				GitBranch:         ctxState.GitBranch,
+				GitRemote:         ctxState.GitRemote,
 				Timestamp:         ts,
 				Tool:              models.ToolCodex,
 				Model:             model,
@@ -2231,15 +2555,57 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 			ThreadSource:   lin.ThreadSource,
 		})
 	}
+	adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot(rootCache))
+	// Part E: capture-surface attribution (IDE-15 provenance half).
+	// Same owner-only gate as the lineage marker above — a resumed
+	// chunk that never read the owning session_meta must not re-stamp.
+	// The store write is first-wins-unless-empty (models.SessionSurface
+	// doc), so re-stamping the same value on a later full parse is
+	// harmless; this gate just avoids a needless write every poll.
+	if sessionMetaObservedThisChunk && ctxState.SessionID != "" {
+		// a.surface is the per-VARIANT vocabulary set at construction
+		// (zero value == codex proper's shared tables), so the Open
+		// Interpreter desktop's own originator resolves to
+		// desktop/"open-interpreter" without any tool-identity branch
+		// on this path.
+		if kind, host, ok := a.surface.resolve(ownerSource, ownerOriginator); ok {
+			res.SessionSurfaces = append(res.SessionSurfaces, models.SessionSurface{
+				SessionID:   ctxState.SessionID,
+				Surface:     kind,
+				SurfaceHost: host,
+			})
+		}
+		// Issue 2: captured CLI version from the owning session_meta.
+		// The store write is first-wins-unless-empty and bounded-token
+		// validated, so a re-stamp or malformed value is harmless.
+		if ownerCLIVersion != "" {
+			res.SessionToolVersions = append(res.SessionToolVersions, models.SessionToolVersion{
+				SessionID: ctxState.SessionID,
+				Version:   ownerCLIVersion,
+			})
+		}
+	}
+	applyCodexGenTiming(path, fromOffset, cxTiming, res.TokenEvents)
 	return res, nil
 }
 
 // buildCustomToolCallEvent emits the assistant-side row for a
-// response_item/custom_tool_call. In current Codex Desktop builds the
-// only `name` is "apply_patch", but we route through actionMap so a
-// future custom-tool name lands as ActionUnknown without crashing. The
-// patch text is parsed for the first changed file path so the row's
-// Target is meaningful even without the matching patch_apply_end.
+// response_item/custom_tool_call.
+//
+// Two shapes reach here. The legacy one names the tool directly
+// ("apply_patch") and puts the raw patch text in `input`. The modern
+// one (and the Open Interpreter rebadge) names EVERY call "exec" and
+// puts a JavaScript program in `input` that dispatches to the real
+// tool — see unifiedexec.go for the measured vocabulary. Both are
+// resolved to a native tool name first, then routed through actionMap
+// (the tooltax-sourced table) exactly like every other codex path, so
+// an unseen name lands as ActionUnknown instead of being absorbed into
+// run_command, and the emit site never contradicts the taxonomy table.
+//
+// The patch text — inline for the legacy shape, decoded out of the JS
+// program for the modern one — is parsed for the first changed file
+// path so the row's Target is meaningful even without the matching
+// patch_apply_end.
 func (a *Adapter) buildCustomToolCallEvent(
 	sourceFile, callID string,
 	sess sessionContext,
@@ -2247,17 +2613,39 @@ func (a *Adapter) buildCustomToolCallEvent(
 	ts time.Time,
 	rc responseItemCustomToolCall,
 	preceding string,
-) models.ToolEvent {
-	actionType, ok := actionMap[rc.Name]
+) (models.ToolEvent, string) {
+	name, target, patchText, provablyNoCall := a.resolveCustomToolCall(rc)
+
+	actionType, ok := actionMap[name]
 	if !ok {
 		actionType = models.ActionUnknown
 	}
-	target := ""
-	if rc.Name == "apply_patch" {
-		target = applyPatchTarget(rc.Input)
-		if target != "" && projectRoot != "" {
-			target = git.RelativePath(projectRoot, target)
+	// Residual class 1: an `exec` program PROVABLY dispatching to no
+	// tools.* call at all (3 of 7,087 live rows, all harness
+	// introspection over the injected ALL_TOOLS array). It ran no
+	// command, so it keeps neither the dispatcher's run_command row
+	// nor a fabricated target.
+	//
+	// FAIL CLOSED. The downgrade needs the parser's PROOF, not merely
+	// its silence — a program the scanner could not resolve
+	// (`tools["exec_command"](…)`, a call inside a template literal,
+	// tomorrow's syntax) may well have run a real command, and typing
+	// that harness_call would drop it out of run_command analytics AND
+	// out of target-based safety classification. Unresolved therefore
+	// keeps the taxonomy's own conservative `exec` row (run_command)
+	// with an empty Target — the pre-fix behaviour, which under-informs
+	// rather than mis-asserts. See unifiedexec.go RESIDUAL CLASS 1.
+	if rc.Name == unifiedExecToolName && name == unifiedExecToolName && provablyNoCall {
+		actionType = models.ActionHarnessCall
+		target = ""
+	}
+	if patchText != "" {
+		if p := applyPatchTarget(patchText); p != "" {
+			target = p
 		}
+	}
+	if target != "" && (actionType == models.ActionEditFile) && projectRoot != "" {
+		target = git.RelativePath(projectRoot, target)
 	}
 	return models.ToolEvent{
 		SourceFile:         sourceFile,
@@ -2266,23 +2654,83 @@ func (a *Adapter) buildCustomToolCallEvent(
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         actionType,
 		Target:             truncate(target, 200),
 		Success:            true,
 		PrecedingReasoning: truncate(preceding, 500),
-		RawToolName:        rc.Name,
+		RawToolName:        name,
 		RawToolInput:       a.scrubber.String(rc.Input),
-		ContentBytes:       authoredBytes(actionType, []byte(rc.Input)),
+		ContentBytes:       customToolCallAuthoredBytes(actionType, rc, target, patchText),
 		MessageID:          sess.TurnID,
+	}, patchText
+}
+
+// resolveCustomToolCall turns a custom_tool_call payload into (native
+// tool name, target, patch text, provably-no-call). The legacy shape is
+// already named; the modern unified-exec shape is resolved by parsing
+// its JavaScript program (unifiedexec.go). Returning the dispatcher
+// name "exec" unchanged is how the caller recognises an unresolved
+// program; the fourth result separates the two reasons a program can be
+// unresolved — PROVED tool-free (the residual class) versus merely
+// beyond the scanner's syntax (fall back to the taxonomy's exec row).
+func (a *Adapter) resolveCustomToolCall(
+	rc responseItemCustomToolCall,
+) (name, target, patchText string, provablyNoCall bool) {
+	if rc.Name != unifiedExecToolName {
+		if rc.Name == "apply_patch" {
+			return rc.Name, "", rc.Input, false
+		}
+		return rc.Name, "", "", false
+	}
+	call := parseUnifiedExec(rc.Input)
+	if call.Name == "" {
+		return rc.Name, "", "", call.NoToolCall
+	}
+	// The command / written chars / plan explanation are agent-authored
+	// free text that can carry credentials, exactly like the
+	// exec_command_end path's command string — scrub before it becomes
+	// a queryable column.
+	return call.Name, a.scrubber.String(call.Target), call.PatchText, false
+}
+
+// customToolCallAuthoredBytes counts what the AGENT authored in a
+// custom_tool_call. The legacy shape can be measured straight off the
+// payload, but a unified-exec payload is a JavaScript program: passing
+// it to authoredBytes would either fail to parse (edit rows silently
+// scoring 0) or count the whole wrapper as if it were the command.
+// Measure the resolved inner argument instead — the command string for
+// a shell run, the added patch lines for an edit, nothing for plan
+// updates and stdin writes, which author no content.
+func customToolCallAuthoredBytes(actionType string, rc responseItemCustomToolCall, target, patchText string) int64 {
+	if rc.Name != unifiedExecToolName {
+		return authoredBytes(actionType, []byte(rc.Input))
+	}
+	switch actionType {
+	case models.ActionRunCommand:
+		return int64(len(target))
+	case models.ActionWriteFile, models.ActionEditFile:
+		return authoredBytesFromPatch(patchText)
+	default:
+		return 0
 	}
 }
 
 // buildPatchApplyStandaloneEvent emits a row when patch_apply_end lands
-// without a matching pending custom_tool_call (mid-session resume,
-// truncated rollout). Carries the structured `changes` summary as the
-// authoritative source.
+// without a matching pending custom_tool_call. Carries the structured
+// `changes` summary as the authoritative source.
+//
+// This is the DOMINANT path on current builds, not the rare recovery
+// case its name suggests. Codex now invokes apply_patch from inside an
+// `exec` custom_tool_call (`tools.apply_patch(patch)` in the sandbox
+// script), and the executor stamps patch_apply_end with its own
+// `exec-<uuid>` id — a different namespace from the response_item's
+// `call_<hash>`, so pending[pa.CallID] cannot match by construction.
+// Measured over a 393-rollout corpus: 2,059 exec-uuid vs 416 call_hash.
+// There is no id join to repair, which is why the row's RawToolInput is
+// reconstructed from `changes` here instead.
 func (a *Adapter) buildPatchApplyStandaloneEvent(
 	sourceFile string,
 	sess sessionContext,
@@ -2301,6 +2749,7 @@ func (a *Adapter) buildPatchApplyStandaloneEvent(
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         models.ActionEditFile,
@@ -2309,6 +2758,7 @@ func (a *Adapter) buildPatchApplyStandaloneEvent(
 		ErrorMessage:       errorIfFailed(pa.Success, output),
 		PrecedingReasoning: truncate(preceding, 500),
 		RawToolName:        "patch_apply_end",
+		RawToolInput:       RenderPatchChangesInput(a.scrubber, pa.ChangesRaw),
 		ToolOutput:         a.scrubber.String(output),
 		ContentBytes:       authoredBytesFromPatchChanges(pa.Changes),
 		MessageID:          firstNonEmpty(pa.TurnID, sess.TurnID),
@@ -2326,12 +2776,62 @@ func mergePatchApplyIntoPending(row *models.ToolEvent, a *Adapter, pa patchApply
 	row.ToolOutput = a.scrubber.String(output)
 	row.ErrorMessage = errorIfFailed(pa.Success, output)
 	row.RawToolName = "patch_apply_end"
+	// The executor's count wins where it exists, because for an `add` it
+	// is the EXACT file content while the patch-text measure drops every
+	// line terminator (a 29-byte file counts 26 from its `+` lines).
+	//
+	// KNOWN LIMITATION, unquantified: a MIXED envelope (one `add` plus
+	// one `update`) therefore reports only the add — the update carries
+	// no `content`, so its `+` lines are lost from the merged row. The
+	// honest fix is not to special-case this here but to make the
+	// patch-text measure exact by counting line terminators, after which
+	// it covers every change kind and can simply win outright. That
+	// moves ContentBytes on every codex patch row, so it is a separate
+	// decision, not a side effect of collapsing the duplicate row.
 	if n := authoredBytesFromPatchChanges(pa.Changes); n > 0 {
 		row.ContentBytes = n
 	}
 	if t := patchApplyTargetFromChanges(pa.Changes, projectRoot); t != "" {
 		row.Target = truncate(t, 200)
 	}
+	// The pending row already holds the model's own `*** Begin Patch`
+	// text, which is a richer input than the post-execution summary —
+	// only fill from `changes` when there is nothing to preserve.
+	if row.RawToolInput == "" {
+		row.RawToolInput = RenderPatchChangesInput(a.scrubber, pa.ChangesRaw)
+	}
+}
+
+// patchChangesRaw returns the verbatim `changes` object of a
+// patch_apply_end payload, or nil when the payload does not parse.
+func patchChangesRaw(payload []byte) json.RawMessage {
+	var probe struct {
+		Changes json.RawMessage `json:"changes"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return nil
+	}
+	return probe.Changes
+}
+
+// RenderPatchChangesInput renders a patch_apply_end `changes` object for
+// storage in raw_tool_input, scrubbed. Absent, JSON null and the empty
+// object all render "" — a patch_apply_end that recorded no changes has
+// no input to store, and "{}" is a value the producer never wrote.
+//
+// This is the ONE owner of that rendering. The live parse path and
+// `observer backfill --codex-tool-input` both call it, so a row captured
+// live and the same row recovered from disk are byte-identical.
+func RenderPatchChangesInput(sc *scrub.Scrubber, raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" || trimmed == "{}" {
+		return ""
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil || len(probe) == 0 {
+		return ""
+	}
+	return sc.RawJSON(raw)
 }
 
 // dynamicToolCallBody concatenates text content_items into a single
@@ -2388,6 +2888,7 @@ func (a *Adapter) systemPromptEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     sess.GitBranch,
+		GitRemote:     sess.GitRemote,
 		Model:         sess.Model,
 		Tool:          models.ToolCodex,
 		ActionType:    models.ActionSystemPrompt,
@@ -2412,6 +2913,81 @@ func concatMessageContent(parts []responseItemMessageContent) string {
 		}
 	}
 	return strings.Join(pieces, "\n")
+}
+
+// userAttachmentsFromContent scans a role=user response_item message's
+// content parts for the files/images the user attached (Issue 1):
+// `input_image` / `image_url` / `image` parts become kind "image" (with
+// the media_type read from the data-URI prefix when present), and
+// `input_file` / `file` parts become kind "file". Metadata only — the
+// base64 payload and any filename are never read. Returns nil when the
+// message carried no attachment parts.
+func userAttachmentsFromContent(parts []responseItemMessageContent) []models.UserAttachment {
+	var atts []models.UserAttachment
+	for _, p := range parts {
+		switch p.Type {
+		case "input_image", "image_url", "image":
+			atts = append(atts, models.UserAttachment{Kind: "image", MediaType: mediaTypeFromImageURL(p.ImageURL)})
+		case "local_image":
+			// item_completed/UserMessage spelling of an attached image: it
+			// names a local path, which is never read, so no media type.
+			atts = append(atts, models.UserAttachment{Kind: "image"})
+		case "input_file", "file":
+			atts = append(atts, models.UserAttachment{Kind: "file"})
+		}
+	}
+	return atts
+}
+
+// attachToRecentUserPrompt stamps user-attachment metadata onto the most
+// recent user_prompt event in evs (best-effort correlation: the role=user
+// response_item that carries the attachment parts is emitted alongside the
+// event_msg/user_message that produced the prompt row). Scans backward and
+// stops at the first user_prompt; a no-op when none exists yet or the row
+// already carries attachments (idempotent re-parse). Returns the index it
+// stamped, or -1 when it stamped nothing.
+func attachToRecentUserPrompt(evs []models.ToolEvent, atts []models.UserAttachment) int {
+	for i := len(evs) - 1; i >= 0; i-- {
+		if evs[i].ActionType != models.ActionUserPrompt {
+			continue
+		}
+		if len(evs[i].UserAttachments) == 0 {
+			evs[i].UserAttachments = atts
+			return i
+		}
+		return -1
+	}
+	return -1
+}
+
+// mediaTypeFromImageURL extracts the IANA media type from an
+// `input_image` part's image_url — a data URI ("data:image/png;base64,…")
+// carried either as a bare JSON string or as an object {"url":"…"}. Reads
+// ONLY the media-type prefix; the base64 body is never decoded. Returns
+// "" when the reference is not a typed data URI.
+func mediaTypeFromImageURL(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var url string
+	if err := json.Unmarshal(raw, &url); err != nil {
+		var obj struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return ""
+		}
+		url = obj.URL
+	}
+	if !strings.HasPrefix(url, "data:") {
+		return ""
+	}
+	rest := url[len("data:"):]
+	// media type runs up to the first ';' or ',' ("image/png;base64,…").
+	if i := strings.IndexAny(rest, ";,"); i >= 0 {
+		return rest[:i]
+	}
+	return ""
 }
 
 // buildCompactedEvent emits an ActionContextCompacted row summarizing
@@ -2446,6 +3022,7 @@ func (a *Adapter) buildCompactedEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     sess.GitBranch,
+		GitRemote:     sess.GitRemote,
 		Model:         sess.Model,
 		Tool:          models.ToolCodex,
 		ActionType:    models.ActionContextCompacted,
@@ -2482,6 +3059,7 @@ func (a *Adapter) buildTurnAbortedEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     sess.GitBranch,
+		GitRemote:     sess.GitRemote,
 		Model:         sess.Model,
 		Tool:          models.ToolCodex,
 		ActionType:    models.ActionTurnAborted,
@@ -2537,6 +3115,7 @@ func (a *Adapter) buildMCPCallEndStandaloneEvent(
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         models.ActionMCPCall,
@@ -2613,6 +3192,7 @@ func (a *Adapter) buildCodexErrorEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     sess.GitBranch,
+		GitRemote:     sess.GitRemote,
 		Model:         sess.Model,
 		Tool:          models.ToolCodex,
 		ActionType:    models.ActionAPIError,
@@ -2659,6 +3239,160 @@ func applyPatchTarget(patch string) string {
 		}
 	}
 	return ""
+}
+
+// patchInvocation is one unclaimed apply_patch custom_tool_call row,
+// held so a later patch_apply_end that cannot join on call_id can still
+// merge into it instead of emitting a duplicate row. `files` is the set
+// of paths the invocation's own patch text declares.
+type patchInvocation struct {
+	idx int
+	// callID is carried so a FALLBACK claim can invalidate this row's
+	// pending[] entry too. Claimability is otherwise represented in two
+	// places — pending and this queue — and invalidating only one leaves
+	// the mirror of the bug dropPatchInvocation closes: a later
+	// patch_apply_end that DOES carry the call_hash would merge a row the
+	// fallback already merged.
+	callID string
+	files  map[string]struct{}
+}
+
+// patchFileSet extracts the set of paths an apply_patch envelope
+// touches, from its `*** Add/Update/Delete/Move File:` headers. This is
+// the invocation side of the pairing guard in claimPatchInvocation.
+//
+// A RELATIVE header is resolved against `base` (the session cwd) before
+// cleaning, because the executor always reports ABSOLUTE paths — a bare
+// `*** Update File: main.go` could otherwise never equal
+// `/repo/main.go`, and the guard would abstain on a real shape rather
+// than a doubtful one. Resolution is pure lexical joining, never a
+// filesystem lookup. With no base to resolve against, a relative header
+// is still emitted cleaned, so it simply fails to match and falls back
+// to the standalone row.
+func patchFileSet(patch, base string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimSpace(line)
+		const prefix = "*** "
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := line[len(prefix):]
+		for _, header := range []string{"Add File:", "Update File:", "Delete File:", "Move File:"} {
+			if strings.HasPrefix(rest, header) {
+				if p := strings.TrimSpace(rest[len(header):]); p != "" {
+					if !isAbsAnyOS(p) && base != "" {
+						p = filepath.Join(base, p)
+					}
+					out[filepath.Clean(p)] = struct{}{}
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
+// isAbsAnyOS reports whether a path is absolute in EITHER convention,
+// which filepath.IsAbs alone cannot: it answers for the HOST os only, so
+// a WSL/Linux daemon parsing a Windows rollout sees `C:\repo\a.go` as
+// relative and a Windows host parsing a Linux rollout sees `/repo/a.go`
+// the same way. Either mistake would send an already-absolute header
+// through filepath.Join and destroy a pair that used to match — the
+// adapter deliberately supports foreign-OS rollouts (see
+// internal/platform/crossmount), so this is a live shape, not a
+// hypothetical.
+//
+// Detection only: no normalization, no drive-letter rewriting. Both
+// sides of the comparison keep the producer's own spelling, so they
+// match each other exactly as they did before relative resolution
+// existed.
+func isAbsAnyOS(p string) bool {
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return true
+	}
+	// UNC (`\\server\share`) and Windows drive-letter (`C:\`, `c:/`).
+	if strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	if len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
+		c := p[0]
+		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+	}
+	return false
+}
+
+// changesFileSet is the executor side of the same guard: the paths a
+// patch_apply_end reports it actually wrote.
+func changesFileSet(changes map[string]patchApplyChange) map[string]struct{} {
+	out := map[string]struct{}{}
+	for p := range changes {
+		if p != "" {
+			out[filepath.Clean(p)] = struct{}{}
+		}
+	}
+	return out
+}
+
+// sameFileSet reports whether two path sets are equal. Equality — not
+// overlap — is the safety property: it is what makes a wrong pairing
+// structurally impossible rather than merely unlikely.
+func sameFileSet(a, b map[string]struct{}) bool {
+	if len(a) != len(b) || len(a) == 0 {
+		return false
+	}
+	for p := range a {
+		if _, ok := b[p]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// claimPatchInvocation finds the invocation row a patch_apply_end
+// belongs to when the call_id join has already missed, and REMOVES it
+// from the queue so it can never be claimed twice.
+//
+// The match is oldest-first within the SAME TURN, gated on exact
+// file-set equality. Order is what disambiguates the common case of one
+// turn patching the same file repeatedly (every such invocation has an
+// identical file set, so only sequence can tell them apart); the
+// equality gate is what stops order from mis-pairing anything else. A
+// turn is the right scope because sub-agents carry their own turn ids,
+// so their patches cannot interleave into this queue.
+//
+// Known bound, accepted: if an invocation's own patch_apply_end never
+// arrives (an aborted apply), the NEXT executor event for an identical
+// file set in the same turn claims it instead. The row count stays
+// correct and only the association shifts by one, between two patches
+// of the same file in the same turn. Returning false (no claim) always
+// degrades to the standalone row — this function never merges on doubt.
+func claimPatchInvocation(queues map[string][]patchInvocation, turn string, files map[string]struct{}) (patchInvocation, bool) {
+	q := queues[turn]
+	for i, cand := range q {
+		if !sameFileSet(cand.files, files) {
+			continue
+		}
+		queues[turn] = append(q[:i:i], q[i+1:]...)
+		return cand, true
+	}
+	return patchInvocation{}, false
+}
+
+// dropPatchInvocation removes the queue entry for a row index that has
+// already been merged through another path, so it cannot be claimed a
+// second time. Scans every turn because the queue is keyed on the
+// invocation row's own turn, which need not equal the turn the
+// executor event reports.
+func dropPatchInvocation(queues map[string][]patchInvocation, idx int) {
+	for turn, q := range queues {
+		for i, cand := range q {
+			if cand.idx == idx {
+				queues[turn] = append(q[:i:i], q[i+1:]...)
+				return
+			}
+		}
+	}
 }
 
 // patchApplyTargetFromChanges picks the first key from a patch_apply_end
@@ -2805,6 +3539,7 @@ func (a *Adapter) buildUserPromptEvent(sourceFile string, sess sessionContext, p
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         models.ActionUserPrompt,
@@ -2897,15 +3632,20 @@ func (a *Adapter) buildAgentMessageEvent(sourceFile string, sess sessionContext,
 	turnID := sess.TurnID
 	preview := truncate(a.scrubber.String(message), 200)
 	return models.ToolEvent{
-		SourceFile:         sourceFile,
-		SourceEventID:      fmt.Sprintf("agent:%s:L%d:%s", filepath.Base(sourceFile), lineNum, shortHash(message)),
-		SessionID:          sess.SessionID,
-		ProjectRoot:        projectRoot,
-		Timestamp:          ts,
-		GitBranch:          sess.GitBranch,
-		Model:              sess.Model,
-		Tool:               models.ToolCodex,
-		ActionType:         models.ActionTaskComplete,
+		SourceFile:    sourceFile,
+		SourceEventID: fmt.Sprintf("agent:%s:L%d:%s", filepath.Base(sourceFile), lineNum, shortHash(message)),
+		SessionID:     sess.SessionID,
+		ProjectRoot:   projectRoot,
+		Timestamp:     ts,
+		GitBranch:     sess.GitBranch,
+		GitRemote:     sess.GitRemote,
+		Model:         sess.Model,
+		Tool:          models.ToolCodex,
+		// One row per agent_message event — codex emits several per turn
+		// (see buildAgentMessageEvent's caller), so this is per-message
+		// assistant text, not a turn terminus. The genuine terminus is
+		// the `task_complete` event_msg row (buildTaskCompleteEvent).
+		ActionType:         models.ActionAssistantMessage,
 		Target:             preview,
 		Success:            true,
 		PrecedingReasoning: preview,
@@ -2927,6 +3667,7 @@ func (a *Adapter) buildExecCommandEvent(sourceFile string, sess sessionContext, 
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         models.ActionRunCommand,
@@ -2978,6 +3719,7 @@ func buildCodexRateLimitEvent(sourceFile string, sess sessionContext, projectRoo
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     sess.GitBranch,
+		GitRemote:     sess.GitRemote,
 		Model:         sess.Model,
 		Tool:          models.ToolCodex,
 		ActionType:    models.ActionRateLimit,
@@ -2990,43 +3732,6 @@ func buildCodexRateLimitEvent(sourceFile string, sess sessionContext, projectRoo
 	}
 }
 
-// buildCodexReasoningEvent emits a ToolEvent for each
-// response_item.reasoning block. When summary text is present the
-// row carries that text in Target/ToolOutput; encrypted-only items
-// emit an opaque placeholder noting the encrypted byte count so the
-// reasoning's position-in-turn is visible in the action stream.
-// Stable source_event_id keys on filename + line so re-parses are
-// idempotent under the store's unique index.
-func (a *Adapter) buildCodexReasoningEvent(sourceFile string, sess sessionContext, projectRoot string, ts time.Time, rr responseItemReasoning, text string, lineNum int) models.ToolEvent {
-	var preview, output string
-	if text != "" {
-		preview = truncate(text, 200)
-		output = a.scrubber.String(contentcap.Cap(text, contentcap.DefaultMaxBytes))
-	} else if n := len(rr.EncryptedContent); n > 0 {
-		preview = fmt.Sprintf("(encrypted reasoning, %d bytes)", n)
-		output = preview
-	} else {
-		preview = "(reasoning)"
-		output = preview
-	}
-	return models.ToolEvent{
-		SourceFile:    sourceFile,
-		SourceEventID: fmt.Sprintf("reasoning:%s:L%d", filepath.Base(sourceFile), lineNum),
-		SessionID:     sess.SessionID,
-		ProjectRoot:   projectRoot,
-		Timestamp:     ts,
-		GitBranch:     sess.GitBranch,
-		Model:         sess.Model,
-		Tool:          models.ToolCodex,
-		ActionType:    models.ActionTaskComplete,
-		Target:        preview,
-		Success:       true,
-		RawToolName:   "codex.reasoning",
-		ToolOutput:    output,
-		MessageID:     fmt.Sprintf("reasoning:%s:L%d", filepath.Base(sourceFile), lineNum),
-	}
-}
-
 func (a *Adapter) buildWebSearchEvent(sourceFile string, sess sessionContext, projectRoot string, ts time.Time, ws webSearchEnd, lineNum int, preceding string) models.ToolEvent {
 	query := firstNonEmpty(ws.Query, ws.Action.Query, strings.Join(ws.Action.Queries, "; "))
 	return models.ToolEvent{
@@ -3036,6 +3741,7 @@ func (a *Adapter) buildWebSearchEvent(sourceFile string, sess sessionContext, pr
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         models.ActionWebSearch,
@@ -3082,6 +3788,7 @@ func (a *Adapter) buildTaskCompleteEvent(sourceFile string, sess sessionContext,
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         models.ActionTaskComplete,
@@ -3128,6 +3835,7 @@ func (a *Adapter) buildToolEvent(
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          sess.GitBranch,
+		GitRemote:          sess.GitRemote,
 		Model:              sess.Model,
 		Tool:               models.ToolCodex,
 		ActionType:         actionType,
@@ -3194,7 +3902,19 @@ func (a *Adapter) extractTarget(toolName string, rawInput json.RawMessage, proje
 	return ""
 }
 
-func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]string) string {
+// projectGitInfo is the per-cwd cache entry for resolveProjectRoot /
+// resolveProjectRemote: the resolved project root and its normalized
+// "origin" remote, captured together from a single git.ResolveIdentity
+// call so the two never drift and the filesystem walk never happens
+// twice for the same cwd. Identity carries the fuller Project Identity
+// Resolver v2 bundle from the same call.
+type projectGitInfo struct {
+	Root     string
+	Remote   string
+	Identity git.Identity
+}
+
+func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]projectGitInfo) string {
 	if cwd == "" {
 		return ""
 	}
@@ -3209,16 +3929,49 @@ func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]string) string
 	// git.Resolve operates on the actual cross-mount path. No-op on
 	// Windows hosts and on cwds that already look like native paths.
 	cwd = crossmount.TranslateForeignPath(cwd)
-	if root, ok := cache[cwd]; ok {
-		return root
+	if entry, ok := cache[cwd]; ok {
+		return entry.Root
 	}
-	info, err := git.Resolve(cwd)
+	// RootCommit is left nil: the lazy, cached root-commit exec belongs
+	// only in the store-side path (Store.maybeRunLazyRootCommit), never
+	// on a per-line adapter hot path.
+	info, err := git.ResolveIdentity(cwd, git.IdentityOptions{})
 	if err != nil {
-		cache[cwd] = cwd
+		cache[cwd] = projectGitInfo{Root: cwd}
 		return cwd
 	}
-	cache[cwd] = info.Root
+	// info.Remote is already NormalizeRemote'd by ResolveIdentity.
+	cache[cwd] = projectGitInfo{Root: info.Root, Remote: info.Remote, Identity: info}
 	return info.Root
+}
+
+// resolveProjectRemote returns the normalized git remote for cwd, cached
+// alongside the project root by resolveProjectRoot. Callers must invoke
+// resolveProjectRoot for the same cwd first so the cache entry exists —
+// this never triggers its own git.Resolve call, to avoid resolving the
+// same cwd twice.
+func (a *Adapter) resolveProjectRemote(cwd string, cache map[string]projectGitInfo) string {
+	if cwd == "" {
+		return ""
+	}
+	cwd = crossmount.TranslateForeignPath(cwd)
+	return cache[cwd].Remote
+}
+
+// identitiesByRoot flattens a per-cwd projectGitInfo cache into a
+// per-root git.Identity map suitable for
+// adapter.ApplyProjectIdentityByRoot. Multiple cwds resolving to the
+// same repo root collapse to one entry (they carry identical
+// identity, since ResolveIdentity is keyed off the discovered root).
+func identitiesByRoot(cache map[string]projectGitInfo) map[string]git.Identity {
+	out := make(map[string]git.Identity, len(cache))
+	for _, entry := range cache {
+		if entry.Root == "" {
+			continue
+		}
+		out[entry.Root] = entry.Identity
+	}
+	return out
 }
 
 func decodeOutput(raw json.RawMessage) string {
@@ -3286,6 +4039,31 @@ func parseModernTokenCount(raw json.RawMessage) (tokenCount, tokenUsage, bool) {
 // absent. Independent of the token-usage path because Codex emits
 // the startup token_count with `info: null` but rate_limits already
 // populated — we want to capture that snapshot too.
+// codexRateLimitTrackerKey is the one ratelimitstate.Tracker key a codex
+// parse uses: the tracker lives for one parse of one rollout file, so the
+// file (= the session) IS the key.
+const codexRateLimitTrackerKey = "rollout"
+
+// codexRateLimitEmit reports whether a token_count's rate_limits envelope
+// should become an ActionRateLimit row, via the shared change-only
+// predicate (internal/ratelimitstate). The envelope is normalised through
+// the SAME json the row stores in RawToolInput, so capture and the
+// Messages-table display (which re-parses RawToolInput) judge "changed"
+// on identical input. An envelope the predicate cannot read is emitted
+// (fail-open: never lose a reading we could not classify).
+func codexRateLimitEmit(tr *ratelimitstate.Tracker, rl *codexRateLimits, ts time.Time) bool {
+	raw, err := json.Marshal(rl)
+	if err != nil {
+		return true
+	}
+	snap, ok := ratelimitstate.Parse(string(raw))
+	if !ok {
+		return true
+	}
+	emit, _ := tr.Observe(codexRateLimitTrackerKey, snap, ts)
+	return emit
+}
+
 func parseModernRateLimits(raw json.RawMessage) *codexRateLimits {
 	var probe struct {
 		RateLimits *codexRateLimits `json:"rate_limits"`
@@ -3381,7 +4159,17 @@ func authoredBytes(actionType string, rawInput []byte) int64 {
 func authoredBytesFromPatch(patch string) int64 {
 	var n int64
 	for _, line := range strings.Split(patch, "\n") {
-		if line == "" || strings.HasPrefix(line, "+++") {
+		// No "+++" exclusion. Every caller is gated on the apply_patch
+		// envelope (`*** Begin Patch`), which uses `*** Add/Update File:`
+		// headers and never unified-diff `+++ b/file` ones — so the skip
+		// guarded a construct that cannot arrive here, while silently
+		// dropping real added source whose own text begins "++" (a C-style
+		// increment: source `++n` encodes as `+++n`, and source `++ n` as
+		// `+++ n`, so narrowing the predicate to require the space did not
+		// fix it either). Zero lines beginning "+++" of any kind exist in
+		// the reference corpus, so removing this changes no historical
+		// count — it only stops a future undercount.
+		if line == "" {
 			continue
 		}
 		if strings.HasPrefix(line, "+") {
@@ -3397,6 +4185,29 @@ func authoredBytesFromPatchChanges(changes map[string]patchApplyChange) int64 {
 		if ch.Type == "delete" {
 			continue
 		}
+		// UnifiedDiff is deliberately NOT counted, and this is the second
+		// time that needs saying: an `update` change carries only
+		// `unified_diff` (2,746 of the 3,492 changes in the reference
+		// corpus), so it scores zero here and that LOOKS like a bug.
+		//
+		// It is not — in the overwhelmingly common case. A patch normally
+		// ALSO emits an INVOCATION row from its custom_tool_call, and that
+		// row already counts the same authored bytes from its own
+		// `*** Begin Patch` text: measured on a live rollout, 107
+		// invocation rows / 142,823 B alongside 95 executor rows. Counting
+		// the diff here too double-counts authored output on every update,
+		// which is exactly what happened when this line was briefly added.
+		//
+		// The honest caveat: an executor row with NO invocation row (a
+		// truncated or mid-session-resumed rollout) therefore reports 0
+		// authored bytes for an update-only patch. That is real measurement
+		// loss on the recovery path, accepted because the recovery path is
+		// rare and the double-count was not.
+		//
+		// Note `add` content below is STILL double-counted for the same
+		// structural reason (~4.0 MB across the reference corpus). Fixing
+		// that properly means collapsing the duplicate ROW, not making one
+		// of the two rows lie about what it measured.
 		n += int64(len(ch.Content))
 	}
 	return n
@@ -3485,6 +4296,10 @@ type resumePrefix struct {
 	// envelope bodies are deliberately NOT seeded here — see the
 	// docstring of prefetchSessionContext.
 	systemPrompts map[string]bool
+	// rateLimits is the rate-limit emission state (codexRateLimitEmit)
+	// after replaying every prefix token_count, so the resumed parse
+	// emits exactly the rate_limit rows a fromOffset==0 parse would.
+	rateLimits ratelimitstate.Tracker
 }
 
 // noteSystemPrompt records the hash of a system-prompt body under the
@@ -3552,17 +4367,25 @@ func (p *resumePrefix) noteSystemPrompt(body string) {
 // SessionID, empty cwd, and lineNum starting at 0 (the pre-fix
 // behavior — accepting the duplication risk).
 func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
-	var pre resumePrefix
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	var ps prefixScan
+	if !ps.advance(f, until) {
 		return resumePrefix{}, false
 	}
+	return ps.result(), true
+}
+
+// advance continues the prefix scan from where it stopped (ps.bytesRead, a
+// record boundary) up to until, applying exactly the per-record rules a scan
+// from byte 0 applies. A scan advanced in steps ends in the same state as
+// one scan to the final offset, which is what lets prefixcache.go resume it
+// instead of re-reading the whole prefix on every watcher poll (T-413).
+// Returns false only when the file cannot be positioned.
+func (ps *prefixScan) advance(f *os.File, until int64) bool {
+	if _, err := f.Seek(ps.bytesRead, io.SeekStart); err != nil {
+		return false
+	}
 	reader := bufio.NewReaderSize(f, 64*1024)
-	var (
-		bytesRead int64
-		lineNum   int
-		out       sessionContext
-		track     forkReplayTracker
-	)
+	pre, bytesRead, lineNum, out, track := ps.pre, ps.bytesRead, ps.lineNum, ps.out, ps.track
 	for {
 		lineStr, consumed, oversized, err := readRecord(reader, maxRecordBytes)
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -3582,14 +4405,16 @@ func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		bytesRead += consumed // terminator-inclusive; matches ParseSessionFile
-		if bytesRead > until {
+		if bytesRead+consumed > until {
 			// Don't apply context from a line that straddles the resume
 			// offset — the resumed parse will see (and apply) it itself.
 			// Also don't bump lineNum for the straddling line — the
-			// resumed parse will increment its own counter for it.
+			// resumed parse will increment its own counter for it. The
+			// position stays at the line's start, so a later advance
+			// re-reads it whole.
 			break
 		}
+		bytesRead += consumed // terminator-inclusive; matches ParseSessionFile
 		// Count every line that fits before `until`, including empty
 		// (and oversized-skipped) lines, to mirror ParseSessionFile's
 		// lineNum semantics (it increments before the empty-line skip).
@@ -3657,6 +4482,10 @@ func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
 					pre.modernTotal = total
 					pre.haveTotal = true
 				}
+				// Same gate + same decision as the live parse, state only.
+				if rl := parseModernRateLimits(line.Payload); rl != nil && (rl.Primary != nil || rl.Secondary != nil) {
+					codexRateLimitEmit(&pre.rateLimits, rl, parseTimestamp(line.Timestamp))
+				}
 			}
 		case "session_configured", "session_start", "turn_context":
 			var meta turnContextPayload
@@ -3678,10 +4507,8 @@ func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
 			}
 		}
 	}
-	pre.ctx = out
-	pre.track = track
-	pre.lineCount = lineNum
-	return pre, true
+	ps.pre, ps.bytesRead, ps.lineNum, ps.out, ps.track = pre, bytesRead, lineNum, out, track
+	return true
 }
 
 // mergeSessionContext copies non-empty fields from `from` over `into`
@@ -3714,6 +4541,9 @@ func mergeSessionContext(into, from sessionContext) sessionContext {
 	}
 	if from.GitBranch != "" {
 		into.GitBranch = from.GitBranch
+	}
+	if from.GitRemote != "" {
+		into.GitRemote = from.GitRemote
 	}
 	// EffortLevel follows the same sticky rule as applyContext — a
 	// later non-empty value wins, empty does NOT wipe a prior value.

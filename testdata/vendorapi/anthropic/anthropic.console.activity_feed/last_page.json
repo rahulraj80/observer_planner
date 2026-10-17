@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "actor": {
+        "api_key_id": "api_key_id",
+        "ip_address": "ip_address",
+        "user_agent": "user_agent",
+        "type": "api_actor"
+      },
+      "decision": "blocked",
+      "id": "id",
+      "abuse_session_id": "abuse_session_id",
+      "created_at": "2019-12-27T18:11:19.117Z",
+      "organization_id": "organization_id",
+      "organization_uuid": "organization_uuid",
+      "type": "abuse_decision_received"
+    }
+  ],
+  "first_id": "first_id",
+  "has_more": false,
+  "last_id": "last_id"
+}

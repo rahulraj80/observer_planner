@@ -1,0 +1,5 @@
+{
+  "requestId": "req_synth0001",
+  "code": "Unauthorized",
+  "message": "API key missing or invalid"
+}

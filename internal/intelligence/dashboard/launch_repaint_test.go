@@ -159,14 +159,27 @@ var repaintGeometry = []LaunchInfo{{ID: "HANDLE-abc", Rows: 40, Cols: 120, Initi
 // before the test writes its resize frame.
 func dialRepaintWS(t *testing.T, ctx context.Context, ts *httptest.Server) *websocket.Conn {
 	t.Helper()
+	c := dialRepaintWSRaw(t, ctx, ts)
+	if !waitForControl(t, ctx, c, "pty_size") {
+		t.Fatal("bridge never sent the on-open pty_size frame")
+	}
+	return c
+}
+
+// dialRepaintWSRaw dials the same bridge WITHOUT waiting for the on-open
+// pty_size frame. A session whose geometry is never known sends no such frame —
+// the bridge refuses to announce all-zero dimensions, which would carry nothing
+// the client could restore (Q1 probe, P4) — so a test in that state must not
+// wait for one. Nothing is lost: the client's resize frame is queued on the
+// socket and read as soon as the bridge's loop starts, and waitResizeSeq's own
+// deadline absorbs that startup gap.
+func dialRepaintWSRaw(t *testing.T, ctx context.Context, ts *httptest.Server) *websocket.Conn {
+	t.Helper()
 	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/launch/HANDLE-abc", &websocket.DialOptions{
 		HTTPHeader: http.Header{"Origin": {ts.URL}},
 	})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
-	}
-	if !waitForControl(t, ctx, c, "pty_size") {
-		t.Fatal("bridge never sent the on-open pty_size frame")
 	}
 	return c
 }
@@ -221,8 +234,8 @@ func TestTerminalRepaintNudgeDecisionTable(t *testing.T) {
 		{"unknown geometry (all zero)", ptyGeometry{}, 40, 120, false, 0, false},
 		{"unknown rows only", ptyGeometry{rows: 0, cols: 120}, 40, 120, false, 0, false},
 		{"unknown cols only", ptyGeometry{rows: 40, cols: 0}, 40, 120, false, 0, false},
-		{"rows differ — real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 30, 120, false, 0, false},
-		{"cols differ — real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 40, 100, false, 0, false},
+		{"rows differ - real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 30, 120, false, 0, false},
+		{"cols differ - real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 40, 100, false, 0, false},
 		{"both differ", ptyGeometry{rows: 40, cols: 120}, 30, 100, false, 0, false},
 		{"two-row terminal still shrinks", ptyGeometry{rows: 2, cols: 80}, 2, 80, false, 1, true},
 		{"one-row terminal bounces up (underflow guard)", ptyGeometry{rows: 1, cols: 80}, 1, 80, false, 2, true},
@@ -339,7 +352,8 @@ func TestTerminalRepaintNudgeSkippedWhenGeometryUnknown(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	c := dialRepaintWS(t, ctx, ts)
+	// Raw dial: with no geometry there is no on-open pty_size frame to wait for.
+	c := dialRepaintWSRaw(t, ctx, ts)
 	defer func() { _ = c.CloseNow() }()
 
 	if err := c.Write(ctx, websocket.MessageText, []byte(`{"t":"resize","rows":40,"cols":120}`)); err != nil {
@@ -417,7 +431,7 @@ func TestTerminalRepaintNudgeReadsGeometryBeforeResize(t *testing.T) {
 	got := waitResizeSeq(t, w, 1)
 	want := [][2]uint16{{30, 100}}
 	if !sameSeq(got, want) {
-		t.Fatalf("resize sequence = %v, want %v — the geometry snapshot was read AFTER the resize, "+
+		t.Fatalf("resize sequence = %v, want %v - the geometry snapshot was read AFTER the resize, "+
 			"so the converged size misread as a no-op and a spurious nudge fired", got, want)
 	}
 	// The fake really did converge — otherwise the assertion above is vacuous.

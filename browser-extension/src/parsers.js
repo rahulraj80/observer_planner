@@ -987,7 +987,7 @@
       let reason = "";
       if (h.status === "idle") {
         reason =
-          "no capture wire events since page load — endpoint churn or a logged-out/unmatched endpoint set";
+          "no capture wire events since page load - endpoint churn or a logged-out/unmatched endpoint set";
       }
       return {
         status: h.status,
@@ -998,14 +998,14 @@
     if (captures === 0 && empties > 0) {
       return {
         status: "degraded",
-        reason: `shape canary tripped ${empties}x with no successful capture — parser may be stale`,
+        reason: `shape canary tripped ${empties}x with no successful capture - parser may be stale`,
         priority: "normal",
       };
     }
     if (captures > 0 && idMissing === captures) {
       return {
         status: "ok-degraded-id",
-        reason: `${idMissing}/${captures} captures had no conversation_id — id harvest failing (new-chat/thinking churn); daemon uses synthetic session keys`,
+        reason: `${idMissing}/${captures} captures had no conversation_id - id harvest failing (new-chat/thinking churn); daemon uses synthetic session keys`,
         priority: "normal",
       };
     }

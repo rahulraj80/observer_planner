@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -19,8 +19,8 @@ import (
 // offsets in the tables below are readable.
 var metricsBase = time.Unix(1700000000, 0).UTC()
 
-func sampleAt(offsetSec int, cpuMs, ws, rb, wb int64) processobs.MetricSample {
-	return processobs.MetricSample{
+func sampleAt(offsetSec int, cpuMs, ws, rb, wb int64) procmodel.MetricSample {
+	return procmodel.MetricSample{
 		T:          metricsBase.Add(time.Duration(offsetSec) * time.Second),
 		CPUMs:      cpuMs,
 		WorkingSet: ws,
@@ -110,7 +110,7 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 100*mb, 0, 0),
 					sampleAt(10, 5000, 110*mb, 1000, 0),
 					sampleAt(20, 10000, 120*mb, 3000, 0),
@@ -134,12 +134,12 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			// total falls because the process genuinely stopped.
 			name: "process exits mid-window",
 			series: []procMetricSeries{
-				{Key: "p1", StartedAt: metricsBase, Samples: []processobs.MetricSample{
+				{Key: "p1", StartedAt: metricsBase, Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 100*mb, 0, 0),
 					sampleAt(10, 5000, 100*mb, 0, 0),
 					sampleAt(20, 10000, 100*mb, 0, 0),
 				}},
-				{Key: "p2", StartedAt: metricsBase, Exited: true, Samples: []processobs.MetricSample{
+				{Key: "p2", StartedAt: metricsBase, Exited: true, Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 50*mb, 0, 0),
 					sampleAt(10, 10000, 50*mb, 0, 0),
 				}},
@@ -162,12 +162,12 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			// does that.
 			name: "process starts mid-window has no first-bucket rate",
 			series: []procMetricSeries{
-				{Key: "p1", StartedAt: metricsBase, Samples: []processobs.MetricSample{
+				{Key: "p1", StartedAt: metricsBase, Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 100*mb, 0, 0),
 					sampleAt(10, 5000, 100*mb, 0, 0),
 					sampleAt(20, 10000, 100*mb, 0, 0),
 				}},
-				{Key: "p2", StartedAt: metricsBase.Add(10 * time.Second), Samples: []processobs.MetricSample{
+				{Key: "p2", StartedAt: metricsBase.Add(10 * time.Second), Samples: []procmodel.MetricSample{
 					sampleAt(10, 30000, 20*mb, 0, 0),
 					sampleAt(20, 32000, 20*mb, 0, 0),
 				}},
@@ -189,7 +189,7 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 10*mb, 0, 0),
 					sampleAt(10, 5000, 10*mb, 1000, 0),
 					sampleAt(20, 1000, 10*mb, 3000, 0),
@@ -211,7 +211,7 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples:   []processobs.MetricSample{sampleAt(0, 4242, 64*mb, 99, 99)},
+				Samples:   []procmodel.MetricSample{sampleAt(0, 4242, 64*mb, 99, 99)},
 			}},
 			bucket: 10 * time.Second,
 			want: []wantPoint{
@@ -243,12 +243,12 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			// bucket's full width being used as the denominator.
 			name: "unaligned timestamps aggregate without double counting",
 			series: []procMetricSeries{
-				{Key: "p1", StartedAt: metricsBase, Samples: []processobs.MetricSample{
+				{Key: "p1", StartedAt: metricsBase, Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 0, 0, 0),
 					sampleAt(10, 5000, 0, 0, 0),
 					sampleAt(20, 10000, 0, 0, 0),
 				}},
-				{Key: "p2", StartedAt: metricsBase, Samples: []processobs.MetricSample{
+				{Key: "p2", StartedAt: metricsBase, Samples: []procmodel.MetricSample{
 					sampleAt(3, 0, 0, 0, 0),
 					sampleAt(13, 10000, 0, 0, 0),
 					sampleAt(23, 20000, 0, 0, 0),
@@ -270,7 +270,7 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 0, 0, 0),
 					sampleAt(10, 40000, 0, 0, 0),
 				},
@@ -291,10 +291,10 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			series: []procMetricSeries{
 				// Three one-shot commands, each observed once, long before the
 				// long-lived process starts reporting rates.
-				{Key: "c1", StartedAt: metricsBase, Samples: []processobs.MetricSample{sampleAt(0, 7, 9*mb, 0, 0)}},
-				{Key: "c2", StartedAt: metricsBase, Samples: []processobs.MetricSample{sampleAt(10, 7, 9*mb, 0, 0)}},
-				{Key: "c3", StartedAt: metricsBase, Samples: []processobs.MetricSample{sampleAt(20, 7, 9*mb, 0, 0)}},
-				{Key: "long", StartedAt: metricsBase, Samples: []processobs.MetricSample{
+				{Key: "c1", StartedAt: metricsBase, Samples: []procmodel.MetricSample{sampleAt(0, 7, 9*mb, 0, 0)}},
+				{Key: "c2", StartedAt: metricsBase, Samples: []procmodel.MetricSample{sampleAt(10, 7, 9*mb, 0, 0)}},
+				{Key: "c3", StartedAt: metricsBase, Samples: []procmodel.MetricSample{sampleAt(20, 7, 9*mb, 0, 0)}},
+				{Key: "long", StartedAt: metricsBase, Samples: []procmodel.MetricSample{
 					sampleAt(30, 0, 100*mb, 0, 0),
 					sampleAt(40, 5000, 100*mb, 0, 0),
 				}},
@@ -312,8 +312,8 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			// all there is and is kept in full.
 			name: "gauge-only span is kept when no rate exists",
 			series: []procMetricSeries{
-				{Key: "c1", StartedAt: metricsBase, Samples: []processobs.MetricSample{sampleAt(0, 7, 9*mb, 0, 0)}},
-				{Key: "c2", StartedAt: metricsBase, Samples: []processobs.MetricSample{sampleAt(10, 7, 9*mb, 0, 0)}},
+				{Key: "c1", StartedAt: metricsBase, Samples: []procmodel.MetricSample{sampleAt(0, 7, 9*mb, 0, 0)}},
+				{Key: "c2", StartedAt: metricsBase, Samples: []procmodel.MetricSample{sampleAt(10, 7, 9*mb, 0, 0)}},
 			},
 			bucket: 10 * time.Second,
 			want: []wantPoint{
@@ -332,7 +332,7 @@ func TestAggregateProcessMetrics(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 0, 0, 0),
 					sampleAt(600, 300000, 0, 0, 0),
 				},
@@ -375,7 +375,7 @@ func TestAggregateProcessMetricsNetworkAbsent(t *testing.T) {
 	got := aggregateProcessMetrics([]procMetricSeries{{
 		Key:       "p1",
 		StartedAt: metricsBase,
-		Samples: []processobs.MetricSample{
+		Samples: []procmodel.MetricSample{
 			sampleAt(0, 0, 1024, 0, 0),
 			sampleAt(10, 1000, 1024, 0, 0),
 		},
@@ -405,8 +405,8 @@ func TestAggregateProcessMetricsNetworkAbsent(t *testing.T) {
 // aggregateProcessMetrics) would trim the leading buckets that have gauge
 // coverage but no rate of ANY kind yet, and the test would be asserting that
 // trim instead of the network-specific per-pair gate this test targets.
-func netSampleAt(offsetSec int, netRx, netTx int64, measured bool) processobs.MetricSample {
-	return processobs.MetricSample{
+func netSampleAt(offsetSec int, netRx, netTx int64, measured bool) procmodel.MetricSample {
+	return procmodel.MetricSample{
 		T:           metricsBase.Add(time.Duration(offsetSec) * time.Second),
 		CPUMs:       int64(offsetSec) * 100,
 		WorkingSet:  1024,
@@ -424,24 +424,24 @@ func netSampleAt(offsetSec int, netRx, netTx int64, measured bool) processobs.Me
 func TestSampleNetworkReadFuncs(t *testing.T) {
 	tests := []struct {
 		name   string
-		sample processobs.MetricSample
+		sample procmodel.MetricSample
 		wantRx int64
 		wantTx int64
 		wantOK bool
 	}{
 		{
 			name:   "measured with traffic",
-			sample: processobs.MetricSample{NetRxBytes: 1000, NetTxBytes: 500, NetMeasured: true},
+			sample: procmodel.MetricSample{NetRxBytes: 1000, NetTxBytes: 500, NetMeasured: true},
 			wantRx: 1000, wantTx: 500, wantOK: true,
 		},
 		{
 			name:   "measured and genuinely idle",
-			sample: processobs.MetricSample{NetRxBytes: 0, NetTxBytes: 0, NetMeasured: true},
+			sample: procmodel.MetricSample{NetRxBytes: 0, NetTxBytes: 0, NetMeasured: true},
 			wantRx: 0, wantTx: 0, wantOK: true,
 		},
 		{
-			name:   "unmeasured — a nonzero value is never trusted",
-			sample: processobs.MetricSample{NetRxBytes: 4096, NetTxBytes: 2048, NetMeasured: false},
+			name:   "unmeasured - a nonzero value is never trusted",
+			sample: procmodel.MetricSample{NetRxBytes: 4096, NetTxBytes: 2048, NetMeasured: false},
 			wantRx: 4096, wantTx: 2048, wantOK: false,
 		},
 	}
@@ -488,7 +488,7 @@ func TestAggregateProcessMetricsNetwork(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					netSampleAt(0, 0, 0, true),
 					netSampleAt(10, 10_000, 5_000, true),  // Δ10000/10s rx, Δ5000/10s tx
 					netSampleAt(20, 30_000, 20_000, true), // Δ20000/10s rx, Δ15000/10s tx
@@ -515,7 +515,7 @@ func TestAggregateProcessMetricsNetwork(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					netSampleAt(0, 0, 0, false),
 					netSampleAt(10, 0, 0, false),
 					netSampleAt(20, 0, 0, false),
@@ -525,14 +525,14 @@ func TestAggregateProcessMetricsNetwork(t *testing.T) {
 			check: func(t *testing.T, got metricsAggregate) {
 				t.Helper()
 				if !got.Series.RSS {
-					t.Error("series.rss = false, want true — RSS is measured even though network is not")
+					t.Error("series.rss = false, want true - RSS is measured even though network is not")
 				}
 				if len(got.Points) != 3 {
 					t.Fatalf("points = %d, want 3 (gauge coverage keeps the grid populated)", len(got.Points))
 				}
 				for i, p := range got.Points {
 					if p.NetRxBps != nil || p.NetTxBps != nil {
-						t.Errorf("point[%d] net = (%v, %v), want nil/nil — every sample is unmeasured", i, p.NetRxBps, p.NetTxBps)
+						t.Errorf("point[%d] net = (%v, %v), want nil/nil - every sample is unmeasured", i, p.NetRxBps, p.NetTxBps)
 					}
 				}
 			},
@@ -542,7 +542,7 @@ func TestAggregateProcessMetricsNetwork(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					netSampleAt(0, 0, 0, false),          // unmeasured baseline
 					netSampleAt(10, 0, 0, false),         // still unmeasured — probes not attached yet
 					netSampleAt(20, 5_000, 2_000, true),  // probes attach here
@@ -598,7 +598,7 @@ func TestAggregateProcessMetricsWindow(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase,
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 1, 0, 0), sampleAt(15, 1, 1, 0, 0), sampleAt(30, 2, 1, 0, 0),
 				},
 			}},
@@ -609,7 +609,7 @@ func TestAggregateProcessMetricsWindow(t *testing.T) {
 			series: []procMetricSeries{{
 				Key:       "p1",
 				StartedAt: metricsBase.Add(-30 * time.Minute),
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 1, 0, 0), sampleAt(15, 1, 1, 0, 0), sampleAt(30, 2, 1, 0, 0),
 				},
 			}},
@@ -619,7 +619,7 @@ func TestAggregateProcessMetricsWindow(t *testing.T) {
 			name: "unknown process start cannot prove truncation",
 			series: []procMetricSeries{{
 				Key: "p1",
-				Samples: []processobs.MetricSample{
+				Samples: []procmodel.MetricSample{
 					sampleAt(0, 0, 1, 0, 0), sampleAt(15, 1, 1, 0, 0),
 				},
 			}},
@@ -646,7 +646,7 @@ func TestAggregateProcessMetricsWindow(t *testing.T) {
 // fine ?bucket= over a long session returns the most RECENT metricsMaxPoints
 // buckets rather than an unbounded payload, and from/to report that honestly.
 func TestAggregateProcessMetricsBoundedPoints(t *testing.T) {
-	var samples []processobs.MetricSample
+	var samples []procmodel.MetricSample
 	for i := 0; i <= 600; i++ { // 600 samples, 1s apart, 1ms of CPU each
 		samples = append(samples, sampleAt(i, int64(i), 4096, 0, 0))
 	}
@@ -718,21 +718,21 @@ func TestMedianSampleInterval(t *testing.T) {
 		{name: "no samples", want: 0},
 		{
 			name:   "single sample is not an interval",
-			series: []procMetricSeries{{Samples: []processobs.MetricSample{sampleAt(0, 0, 0, 0, 0)}}},
+			series: []procMetricSeries{{Samples: []procmodel.MetricSample{sampleAt(0, 0, 0, 0, 0)}}},
 			want:   0,
 		},
 		{
 			name: "median across two unaligned processes",
 			series: []procMetricSeries{
-				{Samples: []processobs.MetricSample{sampleAt(0, 0, 0, 0, 0), sampleAt(10, 0, 0, 0, 0), sampleAt(20, 0, 0, 0, 0)}},
-				{Samples: []processobs.MetricSample{sampleAt(3, 0, 0, 0, 0), sampleAt(15, 0, 0, 0, 0)}},
+				{Samples: []procmodel.MetricSample{sampleAt(0, 0, 0, 0, 0), sampleAt(10, 0, 0, 0, 0), sampleAt(20, 0, 0, 0, 0)}},
+				{Samples: []procmodel.MetricSample{sampleAt(3, 0, 0, 0, 0), sampleAt(15, 0, 0, 0, 0)}},
 			},
 			want: 10 * time.Second,
 		},
 		{
 			name: "backwards timestamps are ignored",
 			series: []procMetricSeries{
-				{Samples: []processobs.MetricSample{sampleAt(0, 0, 0, 0, 0), sampleAt(0, 0, 0, 0, 0), sampleAt(5, 0, 0, 0, 0)}},
+				{Samples: []procmodel.MetricSample{sampleAt(0, 0, 0, 0, 0), sampleAt(0, 0, 0, 0, 0), sampleAt(5, 0, 0, 0, 0)}},
 			},
 			want: 5 * time.Second,
 		},
@@ -788,10 +788,10 @@ func TestHandleSessionMetrics(t *testing.T) {
 	st := store.New(s.db())
 
 	base := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Second)
-	ring := func(offsets []int, cpuStep, wsBytes int64) []processobs.MetricSample {
-		out := make([]processobs.MetricSample, 0, len(offsets))
+	ring := func(offsets []int, cpuStep, wsBytes int64) []procmodel.MetricSample {
+		out := make([]procmodel.MetricSample, 0, len(offsets))
 		for i, off := range offsets {
-			out = append(out, processobs.MetricSample{
+			out = append(out, procmodel.MetricSample{
 				T:          base.Add(time.Duration(off) * time.Second),
 				CPUMs:      int64(i) * cpuStep,
 				WorkingSet: wsBytes,
@@ -804,7 +804,7 @@ func TestHandleSessionMetrics(t *testing.T) {
 	r1.MetricSamples = ring([]int{0, 10, 20, 30}, 5000, 100<<20) // 50% of one core
 	r2 := dashProcRun("m_b", "m_a", "sA", 401, "node", "node b.js", base)
 	r2.MetricSamples = ring([]int{3, 13, 23}, 10000, 50<<20) // 100%, unaligned phase
-	if _, err := st.PersistRuns(ctx, []processobs.ProcessRun{r1, r2}); err != nil {
+	if _, err := st.PersistRuns(ctx, []procmodel.ProcessRun{r1, r2}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -812,11 +812,11 @@ func TestHandleSessionMetrics(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/session/sA/metrics?bucket=10s", nil)
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET metrics: %d — %s", rr.Code, rr.Body.String())
+		t.Fatalf("GET metrics: %d - %s", rr.Code, rr.Body.String())
 	}
 	var resp SessionMetricsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — %s", err, rr.Body.String())
+		t.Fatalf("decode: %v - %s", err, rr.Body.String())
 	}
 	if resp.SessionID != "sA" {
 		t.Errorf("session_id = %q, want sA", resp.SessionID)
@@ -834,7 +834,7 @@ func TestHandleSessionMetrics(t *testing.T) {
 		t.Errorf("series = %+v, want cpu/rss/disk all measured", resp.Series)
 	}
 	if resp.Series.Network {
-		t.Error("series.network is true — this fixture's rings never set NetMeasured")
+		t.Error("series.network is true - this fixture's rings never set NetMeasured")
 	}
 	if resp.Reason != "" {
 		t.Errorf("reason = %q, want empty (points were returned)", resp.Reason)
@@ -874,17 +874,17 @@ func TestHandleSessionMetricsEmpty(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/session/sA/metrics", nil)
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET metrics: %d — %s", rr.Code, rr.Body.String())
+		t.Fatalf("GET metrics: %d - %s", rr.Code, rr.Body.String())
 	}
 	var resp SessionMetricsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — %s", err, rr.Body.String())
+		t.Fatalf("decode: %v - %s", err, rr.Body.String())
 	}
 	if len(resp.Points) != 0 {
 		t.Errorf("points = %d, want 0", len(resp.Points))
 	}
 	if resp.Reason == "" {
-		t.Error("reason is empty — an empty series must explain itself")
+		t.Error("reason is empty - an empty series must explain itself")
 	}
 	if !strings.Contains(rr.Body.String(), `"points":[]`) {
 		t.Errorf("points serialized as null, want []: %s", rr.Body.String())

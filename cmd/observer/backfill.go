@@ -18,12 +18,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/adapter/antigravity"
-	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
-	"github.com/marmutapp/superbased-observer/internal/adapter/codex"
-	"github.com/marmutapp/superbased-observer/internal/adapter/cowork"
-	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
-	"github.com/marmutapp/superbased-observer/internal/adapter/opencode"
+	"github.com/marmutapp/superbased-observer/internal/adapter"
+	adapterdefaults "github.com/marmutapp/superbased-observer/internal/adapter/defaults"
 	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
@@ -31,7 +27,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/platform/sqlitedsn"
-	"github.com/marmutapp/superbased-observer/internal/scrub"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/watcher"
 )
@@ -95,11 +90,13 @@ func newBackfillCmd() *cobra.Command {
 		claudecodeProjectRoot  bool
 		antigravityProjectRoot bool
 		cursorModel            bool
+		sessionModels          bool
 		copilotMessageID       bool
 		piMessageID            bool
 		claudecodeUserPrompts  bool
 		claudecodeAPIErrors    bool
 		cursorUserPrompts      bool
+		cursorHookUsage        bool
 		cursorSubagents        bool
 		coworkRescan           bool
 		coworkProjectRoot      bool
@@ -111,12 +108,34 @@ func newBackfillCmd() *cobra.Command {
 		hermesRescan           bool
 		clinecliRescan         bool
 		cacheRescan            bool
+		content                bool
+		zedRescan              bool
+		crushRescan            bool
+		qwenCodeRescan         bool
+		tasksRescan            bool
 		codexForkDedup         bool
-		apply                  bool
-		all                    bool
-		dryRun                 bool
-		jsonOut                bool
-		limit                  int
+
+		reasoningConverge        bool
+		reasoningConvergeDiscard bool
+
+		codexToolInput bool
+
+		locBackfill bool
+		locSince    string
+		locRescan   bool
+		locDryRun   bool
+		locLimit    int
+		locSessions []string
+
+		commitsBackfill bool
+		commitsSince    string
+		commitsProject  int64
+
+		apply   bool
+		all     bool
+		dryRun  bool
+		jsonOut bool
+		limit   int
 	)
 	cmd := &cobra.Command{
 		Use:   "backfill",
@@ -127,10 +146,10 @@ the actions / token_usage / api_turns tables for rows that were
 ingested before a later migration or adapter parity fix.
 
 After upgrading the binary, run ` + "`observer backfill --all`" + ` once to bring
-historical data up to current. The command is idempotent — re-running
+historical data up to current. The command is idempotent - re-running
 is safe; matched rows that already carry the new value are no-ops.
 
-Flags are grouped below by lifespan — see
+Flags are grouped below by lifespan - see
 docs/backfill-flag-audit-2026-05-19.md for the full per-flag
 classification.
 
@@ -172,8 +191,35 @@ classification.
     --copilot-cli-rescan   (run after ` + "`copilot --log-level debug`" + `)
     --cache-rescan         (re-emit cache_segments / cache_entries /
                             cache_events through the Tier-2 cache
-                            engine — claude-code transcripts only
+                            engine - claude-code transcripts only
                             today; widens with §14.3 C21-C24)
+    --content              Re-walk EVERY adapter's transcripts through the
+                            adapter-side message-content producer
+                            (store.captureMessageContent) to backfill
+                            otel_content for sessions ingested before the
+                            producer shipped. Gated exactly like live
+                            capture - [org_client.share] full_content /
+                            admin_managed AND [ingest.otel]
+                            content_capture - and a no-op with an honest
+                            message naming the blocking key when either is
+                            off. Idempotent via otel_content's
+                            (content_hash, kind, request_id, tool_use_id)
+                            UNIQUE key. NOT included in --all's flag
+                            composition: --all's own top-level full rescan
+                            already re-derives content as a side effect of
+                            wireContentCapture being unconditional, so
+                            adding --content there would just re-walk every
+                            adapter a second time. Use --content standalone
+                            when you've just turned content sharing on and
+                            want ONLY the content backfill, without
+                            re-running every other --all pass.
+    --zed-rescan           (threads.db is a watermark store - a thread
+                            that predates the daemon first seeing its
+                            file is never re-read until its next turn;
+                            this forces every thread to re-emit)
+    --crush-rescan         (re-walk crush.db, then CORRECT stored crush
+                            token rows to the fixed parser's values -
+                            the upsert alone never lowers a count)
 
   ┌─ Historical adapter-parity passes ─────────────────────────────┐
   │  One-shot fixes for specific corpus gaps. Likely 0 rows on any │
@@ -202,7 +248,7 @@ classification.
     --cursor-subagents         Walk agent-transcripts/<sid>/subagents/
 
   ┌─ Destructive one-shot cleanups ────────────────────────────────┐
-  │  DRY-RUN BY DEFAULT — report only; pass --apply to mutate.     │
+  │  DRY-RUN BY DEFAULT - report only; pass --apply to mutate.     │
   │  NOT run by --all.                                             │
   └─────────────────────────────────────────────────────────────────┘
     --codex-fork-dedup   Purge duplicate codex token_usage rows a
@@ -211,6 +257,22 @@ classification.
                          Dry run reports matched rows / tokens /
                          sessions; --apply DELETEs them (idempotent)
                          and backfills session fork lineage.
+    --reasoning-converge Converge the B3 reasoning residue: carry each
+                         surviving reasoning task_complete row's text
+                         onto its successor's preceding_reasoning, then
+                         delete the row (migration 079's dependency
+                         protocol). Dry run reports per-tool counts and
+                         which rows it will NOT delete because their
+                         text would be destroyed; --apply mutates.
+    --codex-tool-input   Re-derive raw_tool_input for the codex-family
+                         rows genuinely MISSING one, by re-reading the
+                         rollout files. Grounded per action_type: the
+                         assistant_message / task_complete /
+                         turn_aborted / session_start rows legitimately
+                         have NO input and are reported in their own
+                         bucket, never written to. Joins on
+                         source_event_id = the record's call_id. Never
+                         overwrites, never invents; --apply mutates.
 
   ┌─ Convenience / utility ────────────────────────────────────────┐
   └─────────────────────────────────────────────────────────────────┘
@@ -249,11 +311,13 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				claudecodeProjectRoot = true
 				antigravityProjectRoot = true
 				cursorModel = true
+				sessionModels = true
 				copilotMessageID = true
 				piMessageID = true
 				claudecodeUserPrompts = true
 				claudecodeAPIErrors = true
 				cursorUserPrompts = true
+				cursorHookUsage = true
 				cursorSubagents = true
 				codexRescan = true
 				antigravityRescan = true
@@ -263,17 +327,44 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				hermesRescan = true
 				clinecliRescan = true
 				cacheRescan = true
+				zedRescan = true
+				crushRescan = true
+				qwenCodeRescan = true
+				tasksRescan = true
+				skipOmittedAdapterPasses([]backfillAllPass{
+					{&claudecodeUserPrompts, "--claudecode-user-prompts", models.ToolClaudeCode},
+					{&claudecodeAPIErrors, "--claudecode-api-errors", models.ToolClaudeCode},
+					{&cacheRescan, "--cache-rescan", models.ToolClaudeCode},
+					{&antigravityProjectRoot, "--antigravity-project-root", models.ToolAntigravity},
+					{&antigravityRescan, "--antigravity-rescan", models.ToolAntigravity},
+					{&antigravityCliRescan, "--antigravity-cli-rescan", models.ToolAntigravityCLI},
+					{&codexRescan, "--codex-rescan", models.ToolCodex},
+					{&cursorUserPrompts, "--cursor-user-prompts", models.ToolCursor},
+					{&cursorHookUsage, "--cursor-hook-usage", models.ToolCursor},
+					{&cursorSubagents, "--cursor-subagents", models.ToolCursor},
+					{&coworkProjectRoot, "--cowork-project-root", models.ToolCowork},
+					{&coworkRescan, "--cowork-rescan", models.ToolCowork},
+					{&opencodeTokens, "--opencode-tokens", models.ToolOpenCode},
+					{&geminiCliRescan, "--gemini-cli-rescan", models.ToolGeminiCLI},
+					{&copilotCliRescan, "--copilot-cli-rescan", models.ToolCopilotCLI},
+					{&hermesRescan, "--hermes-rescan", models.ToolHermes},
+					{&clinecliRescan, "--clinecli-rescan", models.ToolClineCLI},
+					{&zedRescan, "--zed-rescan", models.ToolZed},
+					{&crushRescan, "--crush-rescan", models.ToolCrush},
+					{&qwenCodeRescan, "--qwen-code-rescan", models.ToolQwenCode},
+				}, cmd.ErrOrStderr())
 			}
 			if !isSidechain && !cacheTier && !messageID &&
 				!opencodeMessageID && !opencodeParts && !opencodeTokens &&
 				!openclawActionTypes && !openclawModel && !openclawProjectRoot && !openclawReasoning && !openclawSessionID &&
-				!codexReasoning && !codexProjectRoot && !claudecodeProjectRoot && !antigravityProjectRoot && !cursorModel &&
+				!codexReasoning && !codexProjectRoot && !claudecodeProjectRoot && !antigravityProjectRoot && !cursorModel && !sessionModels &&
 				!copilotMessageID && !piMessageID &&
 				!claudecodeUserPrompts && !claudecodeAPIErrors &&
-				!cursorUserPrompts && !cursorSubagents && !coworkRescan && !coworkProjectRoot && !codexRescan &&
-				!antigravityRescan && !antigravityCliRescan && !geminiCliRescan && !copilotCliRescan && !hermesRescan && !clinecliRescan && !cacheRescan &&
-				!codexForkDedup {
-				return fmt.Errorf("nothing to backfill — pass one of the dimension flags or --all")
+				!cursorUserPrompts && !cursorSubagents && !cursorHookUsage && !coworkRescan && !coworkProjectRoot && !codexRescan &&
+				!antigravityRescan && !antigravityCliRescan && !geminiCliRescan && !copilotCliRescan && !hermesRescan && !clinecliRescan && !cacheRescan && !zedRescan && !crushRescan && !qwenCodeRescan &&
+				!content && !tasksRescan &&
+				!codexForkDedup && !reasoningConverge && !codexToolInput && !locBackfill && !commitsBackfill {
+				return fmt.Errorf("nothing to backfill - pass one of the dimension flags or --all")
 			}
 
 			// --dry-run: snapshot the live DB and re-point every
@@ -323,13 +414,23 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				CoworkProjectRoot      *CoworkProjectRootBackfill      `json:"cowork_project_root,omitempty"`
 				AntigravityProjectRoot *AntigravityProjectRootBackfill `json:"antigravity_project_root,omitempty"`
 				CursorModel            *CursorModelBackfill            `json:"cursor_model,omitempty"`
+				SessionModels          *SessionModelsBackfill          `json:"session_models,omitempty"`
 				CopilotMessageID       *MessageIDBackfill              `json:"copilot_message_id,omitempty"`
 				PiMessageID            *MessageIDBackfill              `json:"pi_message_id,omitempty"`
 				ClaudeCodeUserPrompts  *ClaudeCodeUserPromptsBackfill  `json:"claudecode_user_prompts,omitempty"`
 				ClaudeCodeAPIErrors    *ClaudeCodeAPIErrorsBackfill    `json:"claudecode_api_errors,omitempty"`
 				CursorUserPrompts      *CursorUserPromptsBackfill      `json:"cursor_user_prompts,omitempty"`
 				CursorSubagents        *CursorSubagentsBackfill        `json:"cursor_subagents,omitempty"`
+				CursorHookUsage        *CursorHookUsageBackfill        `json:"cursor_hook_usage,omitempty"`
 				CodexForkDedup         *CodexForkDedupBackfill         `json:"codex_fork_dedup,omitempty"`
+				ReasoningConverge      *ReasoningConvergeBackfill      `json:"reasoning_converge,omitempty"`
+				CodexToolInput         *ToolInputBackfill              `json:"codex_tool_input,omitempty"`
+				Content                *ContentRescanBackfill          `json:"content,omitempty"`
+				LOC                    *LOCBackfillReport              `json:"loc,omitempty"`
+				Tasks                  *store.TaskBackfillResult       `json:"tasks,omitempty"`
+				CrushTokens            *CrushTokenCorrectionReport     `json:"crush_tokens,omitempty"`
+				QwenCodeTokens         *TokenCorrectionReport          `json:"qwen_code_tokens,omitempty"`
+				Commits                *CommitsBackfillReport          `json:"commits,omitempty"`
 			}{}
 
 			// --all kicks a full rescan from offset 0 BEFORE the surgical
@@ -359,272 +460,42 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				}
 			}
 
-			// --cowork-rescan: fast cowork-only rescan path. Equivalent to
-			// `observer scan --force --adapter cowork` but discoverable via
-			// the dashboard's Backfill UI. Standalone or composable with
-			// --all (in which case the all-pass already covered cowork —
-			// running this is a no-op via the UNIQUE index).
-			if coworkRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "cowork")
+			// Per-adapter rescan catch-alls: scope the watcher to a
+			// single adapter (buildWatcherWithOverride's adapterFilter)
+			// and re-walk it from offset 0 via w.Rescan. Every one of
+			// these shares the identical shape — build, rescan, cleanup,
+			// report files/errors, land the (first-wins) result under
+			// summary.Rescan — so they're driven off one table instead
+			// of a growing copy-paste ladder (CLAUDE.md "Module
+			// Boundaries & Anti-Spaghetti Discipline" #5). Adding a new
+			// adapter's dedicated rescan flag is one row here (plus the
+			// cobra flag registration + optional --all wiring below);
+			// see rescan_flag_audit_test.go for the pin that keeps the
+			// per-flag stdout/error text byte-identical to the pre-
+			// refactor ladder.
+			rescanPasses := buildRescanPasses(
+				&coworkRescan, &codexRescan, &antigravityRescan, &antigravityCliRescan,
+				&geminiCliRescan, &copilotCliRescan, &hermesRescan, &clinecliRescan,
+				&cacheRescan, &zedRescan, &crushRescan, &qwenCodeRescan,
+			)
+			for _, p := range rescanPasses {
+				if !*p.enabled {
+					continue
+				}
+				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, p.adapter)
 				if err != nil {
-					return fmt.Errorf("--cowork-rescan: %w", err)
+					return fmt.Errorf("%s: %w", p.flag, err)
 				}
 				rescanRes, rescanErr := w.Rescan(cmd.Context())
 				wCleanup()
 				if rescanErr != nil {
-					return fmt.Errorf("--cowork-rescan: %w", rescanErr)
+					return fmt.Errorf("%s: %w", p.flag, rescanErr)
 				}
 				if summary.Rescan == nil {
 					summary.Rescan = &rescanRes
 				}
 				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"cowork rescan complete: files_processed=%d errors=%d (cowork audit.jsonl only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --codex-rescan: fast codex-only rescan path. Re-walks every
-			// codex rollout JSONL from offset 0, picking up v1.4.53
-			// adapter additions on historical rows:
-			//   - token_usage.web_search_requests populated from
-			//     event_msg/web_search_end counts
-			//   - new ActionRateLimit rows from token_count.rate_limits
-			//   - new codex.reasoning rows from response_item.reasoning
-			// Standalone or composable with --all; (source_file,
-			// source_event_id) UNIQUE keeps it idempotent.
-			if codexRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "codex")
-				if err != nil {
-					return fmt.Errorf("--codex-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--codex-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"codex rescan complete: files_processed=%d errors=%d (codex rollouts only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --antigravity-rescan: fast antigravity-only rescan path.
-			// Re-walks every .pb / .vscdb under the configured antigravity
-			// watch roots and re-ingests via the antigravity adapter. The
-			// adapter's own retry logic tries local decrypt first, then
-			// falls back to language_server gRPC when
-			// [observer.antigravity] network_recovery = "local". Surfaced
-			// via the dashboard Backfill UI as "antigravity (rescan +
-			// recover)".
-			if antigravityRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "antigravity")
-				if err != nil {
-					return fmt.Errorf("--antigravity-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--antigravity-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"antigravity rescan complete: files_processed=%d errors=%d (antigravity .pb / state.vscdb only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --antigravity-cli-rescan: fast antigravity-cli-only rescan path.
-			// Re-walks every .pb / .db under the configured antigravity-cli
-			// watch roots and re-ingests via the antigravity-cli adapter.
-			if antigravityCliRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "antigravity-cli")
-				if err != nil {
-					return fmt.Errorf("--antigravity-cli-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--antigravity-cli-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"antigravity-cli rescan complete: files_processed=%d errors=%d (antigravity-cli .pb / .db only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --gemini-cli-rescan: fast gemini-cli-only rescan path.
-			// Re-walks every JSON/JSONL under ~/.gemini/tmp/<hash>/chats/.
-			// gemini-cli has no surgical column backfills — its only
-			// retroactive path is a tree re-walk. Surfaced via the
-			// dashboard Backfill UI as "gemini-cli (rescan)".
-			if geminiCliRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "gemini-cli")
-				if err != nil {
-					return fmt.Errorf("--gemini-cli-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--gemini-cli-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"gemini-cli rescan complete: files_processed=%d errors=%d (~/.gemini/tmp only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --copilot-cli-rescan: fast copilot-cli-only rescan path.
-			// Re-walks every events.jsonl under ~/.copilot/session-state
-			// AND every process-*.log under ~/.copilot/logs (cross-mount
-			// aware). The log files are how Tier-1 token capture lands —
-			// re-running this after enabling `--log-level debug` retrofits
-			// accurate input/cache/reasoning tokens onto historical
-			// sessions. Surfaced via the dashboard Backfill UI as
-			// "copilot-cli (rescan)".
-			if copilotCliRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "copilot-cli")
-				if err != nil {
-					return fmt.Errorf("--copilot-cli-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--copilot-cli-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"copilot-cli rescan complete: files_processed=%d errors=%d (~/.copilot/{session-state,logs} only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --hermes-rescan: fast hermes-only rescan path. Re-walks
-			// every state.db under ~/.hermes (or %LOCALAPPDATA%\hermes
-			// on Windows native + cross-mount homes) from messages.id=0,
-			// re-emitting ToolEvents + TokenEvents for every assistant
-			// tool_call row. Idempotent via the (source_file,
-			// source_event_id) UNIQUE index — composite of the absolute
-			// state.db path + m<msg_id>:<call_id> keeps re-ingestion
-			// safe. Useful for importing sessions that pre-date the
-			// plugin install: the SQLite path captures everything
-			// historical that the hook path missed.
-			if hermesRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "hermes")
-				if err != nil {
-					return fmt.Errorf("--hermes-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--hermes-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"hermes rescan complete: files_processed=%d errors=%d (~/.hermes/state.db only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --clinecli-rescan: fast clinecli-only rescan path. Re-walks
-			// every sessions.db under ~/.cline/data/db/ (cross-mount aware)
-			// from updated_at='0', re-emitting session_start /
-			// session_end / per-message rows / token aggregates. Idempotent
-			// via the (source_file, source_event_id) UNIQUE index —
-			// SourceEventIDs are content-derivable so re-ingestion is safe.
-			// Useful for importing sessions that pre-date adapter install
-			// + for picking up the Phase 0 reality-check upgrades on
-			// historical data.
-			if clinecliRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "cline-cli")
-				if err != nil {
-					return fmt.Errorf("--clinecli-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--clinecli-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"cline-cli rescan complete: files_processed=%d errors=%d (~/.cline/data/db/sessions.db only)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
-				}
-			}
-
-			// --cache-rescan: full-pass through the claude-code
-			// transcripts with the Tier-2 cache observation engine
-			// wired (cmd/observer/proxy.go::buildProxy +
-			// store.SetCacheEngine). Re-emits cache_segments /
-			// cache_entries / cache_events for every assistant turn
-			// the proxy didn't already capture. Spec §12: order-
-			// sensitive within each file (chain dependency); files
-			// in mtime order; idempotent via
-			// CacheEventExistsForMessage (a turn already observed
-			// by Tier-1 skips on Tier-2). When other adapters land
-			// Tier-2 emitters (spec §14.3 C21–C24: codex, opencode,
-			// kilo, cline-cli), widen the adapter scope below to
-			// include them — the engine-side wiring is already
-			// shape-agnostic.
-			if cacheRescan {
-				w, wCleanup, err := buildWatcherWithOverride(cmd.Context(), configPath, "claude-code")
-				if err != nil {
-					return fmt.Errorf("--cache-rescan: %w", err)
-				}
-				rescanRes, rescanErr := w.Rescan(cmd.Context())
-				wCleanup()
-				if rescanErr != nil {
-					return fmt.Errorf("--cache-rescan: %w", rescanErr)
-				}
-				if summary.Rescan == nil {
-					summary.Rescan = &rescanRes
-				}
-				if !jsonOut {
-					fmt.Fprintf(
-						cmd.OutOrStdout(),
-						"cache rescan complete: files_processed=%d errors=%d (claude-code transcripts through the Tier-2 cache engine; idempotent via CacheEventExistsForMessage)\n",
-						rescanRes.FilesProcessed, rescanRes.Errors,
-					)
+					fmt.Fprint(cmd.OutOrStdout(), p.summaryLine(rescanRes))
 				}
 			}
 
@@ -633,6 +504,142 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				return err
 			}
 			defer cleanup()
+
+			// --tasks: re-derive task_items/task_transitions
+			// (docs/task-tracking.md) from actions rows already in the
+			// DB — a pure re-read of raw_tool_input/raw_tool_output,
+			// no adapter re-parse, no source-file walk (the "surgical
+			// column backfill" lane). Ignores [tasks].enabled — the
+			// operator explicitly asked for this pass. Idempotent:
+			// re-running applies the same upserts and INSERT OR IGNORE
+			// transitions, so a repeat run writes zero new rows.
+			// --crush-rescan, correcting half: the rescan row above
+			// inserted anything new; this makes already-stored crush
+			// token rows equal to the fixed parser's output (the store's
+			// MAX-monotone upsert can never lower them on its own). See
+			// backfill_crush.go.
+			if crushRescan {
+				ca, err := adapterForBackfill(models.ToolCrush, "--crush-rescan")
+				if err != nil {
+					return err
+				}
+				rep, err := runCrushTokenCorrection(cmd.Context(), store.New(database),
+					func(ctx context.Context, path string) (adapter.ParseResult, error) {
+						return ca.ParseSessionFile(ctx, path, 0)
+					})
+				if err != nil {
+					return fmt.Errorf("--crush-rescan: %w", err)
+				}
+				summary.CrushTokens = &rep
+				if !jsonOut {
+					fmt.Fprintf(
+						cmd.OutOrStdout(),
+						"crush token correction complete: files_checked=%d files_missing=%d errors=%d rows_examined=%d updated=%d deleted=%d (stored rows made equal to the fixed parse; idempotent)\n",
+						rep.FilesChecked, rep.FilesMissing, rep.Errors, rep.Examined, rep.Updated, rep.Deleted,
+					)
+				}
+			}
+
+			// --qwen-code-rescan, correcting half (T-542): the rescan row
+			// inserted anything new; this lowers the already-stored
+			// qwen-code output counts that held the turn's thoughts twice
+			// (the store's MAX-monotone upsert can never lower them).
+			if qwenCodeRescan {
+				qa, err := adapterForBackfill(models.ToolQwenCode, "--qwen-code-rescan")
+				if err != nil {
+					return err
+				}
+				rep, err := runTokenCorrection(cmd.Context(), store.New(database), models.ToolQwenCode,
+					func(ctx context.Context, path string) (adapter.ParseResult, error) {
+						return qa.ParseSessionFile(ctx, path, 0)
+					})
+				if err != nil {
+					return fmt.Errorf("--qwen-code-rescan: %w", err)
+				}
+				summary.QwenCodeTokens = &rep
+				if !jsonOut {
+					fmt.Fprintf(
+						cmd.OutOrStdout(),
+						"qwen-code token correction complete: files_checked=%d files_missing=%d errors=%d rows_examined=%d updated=%d deleted=%d (stored rows made equal to the fixed parse; idempotent)\n",
+						rep.FilesChecked, rep.FilesMissing, rep.Errors, rep.Examined, rep.Updated, rep.Deleted,
+					)
+				}
+			}
+
+			if tasksRescan {
+				res, err := store.New(database).BackfillTaskItems(cmd.Context(), limit)
+				if err != nil {
+					return fmt.Errorf("--tasks: %w", err)
+				}
+				summary.Tasks = &res
+				if !jsonOut {
+					fmt.Fprintf(
+						cmd.OutOrStdout(),
+						"tasks backfill complete: scanned %d todo_update/post_tool_batch action rows; wrote %d new transitions\n",
+						res.ActionsScanned, res.TransitionsWritten,
+					)
+				}
+			}
+
+			// --content: re-walk EVERY adapter's transcripts through the
+			// adapter-side message-content producer
+			// (store.captureMessageContent, wired unconditionally by
+			// buildWatcher via wireContentCapture) so historical
+			// sessions — ingested before the producer shipped
+			// (263a3cadc), or before this node turned content sharing
+			// on — get otel_content rows too.
+			//
+			// This reuses the SAME Rescan -> Ingest -> captureMessageContent
+			// chain --all's own top-level rescan already drives
+			// (CLAUDE.md #4: one owner, InsertOTelContent, reached
+			// through two feed paths — live watcher ingest and this
+			// rescan). No new store export was needed: Store.Ingest was
+			// already exported and the producer is already keyed to be
+			// idempotent on re-parse via otel_content's
+			// (content_hash, kind, request_id, tool_use_id) UNIQUE key,
+			// so this is a thin CLI composition, not a duplicated
+			// implementation.
+			//
+			// Gated exactly like live capture, checked BEFORE building a
+			// watcher: when the gate is off this is an honest no-op that
+			// names the exact blocking config key (never a silent
+			// "0 rows"), per the honest-disabled-copy convention.
+			if content {
+				gateCfg, gateErr := config.Load(config.LoadOptions{GlobalPath: configPath})
+				if gateErr != nil {
+					return fmt.Errorf("--content: %w", gateErr)
+				}
+				if reason := contentCaptureBlockReason(gateCfg); reason != "" {
+					summary.Content = &ContentRescanBackfill{Skipped: true, SkipReason: reason}
+					if !jsonOut {
+						fmt.Fprintf(cmd.OutOrStdout(), "content backfill skipped: %s\n", reason)
+					}
+				} else {
+					w, wCleanup, err := buildWatcher(cmd.Context(), configPath)
+					if err != nil {
+						return fmt.Errorf("--content: %w", err)
+					}
+					rescanRes, rescanErr := w.Rescan(cmd.Context())
+					wCleanup()
+					if rescanErr != nil {
+						return fmt.Errorf("--content: %w", rescanErr)
+					}
+					if summary.Rescan == nil {
+						summary.Rescan = &rescanRes
+					}
+					summary.Content = &ContentRescanBackfill{
+						FilesProcessed: rescanRes.FilesProcessed,
+						Errors:         rescanRes.Errors,
+					}
+					if !jsonOut {
+						fmt.Fprintf(
+							cmd.OutOrStdout(),
+							"content rescan complete: files_processed=%d errors=%d (every adapter's transcripts through the message-content producer; idempotent via otel_content's UNIQUE key)\n",
+							rescanRes.FilesProcessed, rescanRes.Errors,
+						)
+					}
+				}
+			}
 
 			if isSidechain {
 				res, err := backfillIsSidechain(cmd.Context(), database, claudeProjectsDir(), limit)
@@ -675,8 +682,8 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				if err != nil {
 					return err
 				}
-				cursorUsageRes, err := backfillCursorHookUsage(cmd.Context(), database, cursorLogsDir(), limit)
-				if err != nil {
+				cursorUsageRes, err := backfillCursorHookUsage(cmd.Context(), database, cursorHookLogRoots(), limit)
+				if err != nil && !errors.Is(err, errAdapterNotInBuild) {
 					return err
 				}
 				res.FilesScanned += codexRes.FilesScanned
@@ -685,10 +692,10 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				res.TokenUsageUpdated += codexRes.TokenUsageUpdated
 				res.ActionsUpdated += cursorRes.ActionsUpdated
 				res.FilesScanned += cursorUsageRes.FilesScanned
-				res.LinesExamined += cursorUsageRes.LinesExamined
-				res.TokenUsageUpdated += cursorUsageRes.TokenUsageUpdated
+				res.LinesExamined += cursorUsageRes.EventsReplayed
+				res.TokenUsageUpdated += cursorUsageRes.TokenRowsWritten
 				cursorTranscriptRes, err := backfillCursorTranscriptActions(cmd.Context(), database, cursorProjectsDir(), limit)
-				if err != nil {
+				if err != nil && !errors.Is(err, errAdapterNotInBuild) {
 					return err
 				}
 				res.FilesScanned += cursorTranscriptRes.FilesScanned
@@ -860,8 +867,15 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 				}
 			}
 			if coworkProjectRoot {
-				ag := cowork.New()
-				res, err := backfillCoworkProjectRoot(cmd.Context(), database, ag.WatchPaths(), limit)
+				ag, err := adapterForBackfill(models.ToolCowork, "--cowork-project-root")
+				if err != nil {
+					return err
+				}
+				pr, ok := ag.(adapter.ProjectReattributor)
+				if !ok {
+					return fmt.Errorf("--cowork-project-root: the %s adapter cannot re-derive project attribution", models.ToolCowork)
+				}
+				res, err := backfillCoworkProjectRoot(cmd.Context(), database, ag.WatchPaths(), limit, pr.ProjectAttribution)
 				if err != nil {
 					return err
 				}
@@ -906,6 +920,20 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 					fmt.Fprintf(
 						cmd.OutOrStdout(),
 						"cursor-model backfill complete: %d cursor session(s) had model lifted from matching token_usage\n",
+						res.SessionsUpdated,
+					)
+				}
+			}
+			if sessionModels {
+				res, err := backfillSessionModels(cmd.Context(), database)
+				if err != nil {
+					return err
+				}
+				summary.SessionModels = &res
+				if !jsonOut {
+					fmt.Fprintf(
+						cmd.OutOrStdout(),
+						"session-models backfill complete: %d session(s) across all adapters had model rolled up from token_usage\n",
 						res.SessionsUpdated,
 					)
 				}
@@ -980,6 +1008,26 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 					)
 				}
 			}
+			if cursorHookUsage {
+				res, err := backfillCursorHookUsage(cmd.Context(), database, cursorHookLogRoots(), limit)
+				if err != nil {
+					return err
+				}
+				summary.CursorHookUsage = &res
+				if !jsonOut {
+					fmt.Fprintf(
+						cmd.OutOrStdout(),
+						"cursor hook-usage backfill complete: scanned %d hooks logs, replayed %d events; upserted %d token_usage rows (re-runs re-touch the same keys), inserted %d new action rows, applied %d outcome updates; removed %d proven mislabelled-stop restatement token rows\n",
+						res.FilesScanned, res.EventsReplayed, res.TokenRowsWritten, res.ActionsInserted, res.OutcomesApplied, res.DuplicatesRemoved,
+					)
+					if res.ReplayWarnings > 0 || res.FilesFailed > 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "  %d replay warnings (skipped payloads / failed lookups), %d logs failed; first problems:\n", res.ReplayWarnings, res.FilesFailed)
+						for _, p := range res.Problems {
+							fmt.Fprintf(cmd.OutOrStdout(), "    - %s\n", p)
+						}
+					}
+				}
+			}
 			if cursorSubagents {
 				res, err := backfillCursorSubagents(cmd.Context(), database, cursorProjectsDir(), limit)
 				if err != nil {
@@ -1023,7 +1071,7 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 						)
 						fmt.Fprintf(
 							cmd.OutOrStdout(),
-							"no rows deleted (dry run) — re-run with --apply to delete:\n  observer backfill --codex-fork-dedup --apply\n",
+							"no rows deleted (dry run) - re-run with --apply to delete:\n  observer backfill --codex-fork-dedup --apply\n",
 						)
 					}
 					// Honest caveat (finding 6): local deletes are not
@@ -1033,9 +1081,66 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 					// cleans the node-local DB.
 					fmt.Fprintf(
 						cmd.OutOrStdout(),
-						"note: duplicate rows already pushed to an org server are NOT retracted — this cleans the local DB only.\n",
+						"note: duplicate rows already pushed to an org server are NOT retracted - this cleans the local DB only.\n",
 					)
 				}
+			}
+
+			if reasoningConverge {
+				var convergeOut io.Writer
+				if !jsonOut {
+					convergeOut = cmd.OutOrStdout()
+				}
+				res, err := backfillReasoningConverge(cmd.Context(), database, apply, reasoningConvergeDiscard, convergeOut)
+				if err != nil {
+					return err
+				}
+				summary.ReasoningConverge = &res
+			}
+
+			if codexToolInput {
+				var toolInputOut io.Writer
+				if !jsonOut {
+					toolInputOut = cmd.OutOrStdout()
+				}
+				res, err := backfillToolInput(cmd.Context(), database, apply, toolInputOut)
+				if err != nil {
+					return err
+				}
+				summary.CodexToolInput = &res
+			}
+
+			if locBackfill {
+				var locOut io.Writer
+				if !jsonOut {
+					locOut = cmd.OutOrStdout()
+				}
+				res, err := backfillLOC(cmd.Context(), database, locBackfillArgs{
+					Since:    locSince,
+					Rescan:   locRescan,
+					DryRun:   locDryRun,
+					Limit:    locLimit,
+					Sessions: locSessions,
+				}, locOut)
+				if err != nil {
+					return err
+				}
+				summary.LOC = &res
+			}
+
+			if commitsBackfill {
+				var commitsOut io.Writer
+				if !jsonOut {
+					commitsOut = cmd.OutOrStdout()
+				}
+				res, err := backfillCommits(cmd.Context(), database, commitsBackfillArgs{
+					Since:     commitsSince,
+					ProjectID: commitsProject,
+				}, commitsOut)
+				if err != nil {
+					return err
+				}
+				summary.Commits = &res
 			}
 
 			if jsonOut {
@@ -1046,6 +1151,15 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml")
+	cmd.Flags().BoolVar(&locBackfill, "loc", false, "Count lines of code (added / modified / deleted, comments and blanks separated) for every historical edit_file / write_file action, from the raw_tool_input the row already holds. Writes file_changes (migration 103) - counts and path HASHES only, never content. Idempotent: at the same classifier version a re-run rewrites nothing and does not even re-read rows it already counted; bumping internal/loc.Version and re-running replaces every row exactly once. Pages by keyset on actions.id in short read transactions, so it is safe on a multi-gigabyte database. NOT part of --all.")
+	cmd.Flags().StringVar(&locSince, "loc-since", "", "Restrict --loc to actions at or after this timestamp (RFC3339, or YYYY-MM-DD). Counts older than the org push window (the trailing 7 days) stay node-local - the node's own LOC surfaces render them, but session_loc / loc_days never ship them to an org server.")
+	cmd.Flags().BoolVar(&locRescan, "loc-rescan", false, "With --loc, re-read AND re-write actions that already have counts at the current classifier version (the default skips them, and would refuse the write even if it read them). Use after changing a language table or lexer rule without bumping the version. This is the ONE path that replaces a row at an equal version; every other writer keeps the strict version guard that makes a re-ingest a no-op.")
+	cmd.Flags().BoolVar(&locDryRun, "loc-dry-run", false, "With --loc, compute everything and write nothing. Distinct from the global --dry-run, which snapshots the whole database - impractical on a large one.")
+	cmd.Flags().IntVar(&locLimit, "loc-limit", 0, "With --loc, stop after this many actions (0 = no limit)")
+	cmd.Flags().StringSliceVar(&locSessions, "loc-session", nil, "With --loc, also print the per-session totals for these session ids (repeatable, or comma-separated)")
+	cmd.Flags().BoolVar(&commitsBackfill, "commits", false, "Full-history read-only `git log` scan of every known project (or just --commits-project), populating the Projects page's commit ledger (project_commits / project_commit_files, migration 127) immediately rather than waiting for the daemon-lifetime scanner's ticks. Idempotent: re-running re-parses and upserts, never duplicates. NOT part of --all.")
+	cmd.Flags().StringVar(&commitsSince, "commits-since", "", "Restrict --commits to commits at or after this point: a relative \"<N>d\" (e.g. 90d), an RFC3339 timestamp, or YYYY-MM-DD. Empty scans full history.")
+	cmd.Flags().Int64Var(&commitsProject, "commits-project", 0, "With --commits, scan only this project id (from `observer project list` / the projects.id column) instead of every known project.")
 	cmd.Flags().BoolVar(&isSidechain, "is-sidechain", false, "Backfill actions.is_sidechain from JSONL")
 	cmd.Flags().BoolVar(&cacheTier, "cache-tier", false, "Backfill cache_creation_1h_tokens from JSONL")
 	cmd.Flags().BoolVar(&messageID, "message-id", false, "Backfill message_id columns from JSONL (umbrella covering claudecode + codex + cursor + opencode)")
@@ -1062,29 +1176,106 @@ historical rows in sync with the latest schema and adapter behaviour.`,
 	cmd.Flags().BoolVar(&claudecodeProjectRoot, "claudecode-project-root", false, "Re-attribute claude-code action / token / session rows to the correct project when their cwd was a Windows-style path that previously misresolved to observer's own repo (v1.6.10 / audit B1)")
 	cmd.Flags().BoolVar(&antigravityProjectRoot, "antigravity-project-root", false, "Re-attribute antigravity action / session rows to the correct project + refresh session.model and session.started_at from the state.vscdb index entry. Also lifts per-turn token_usage rows + the actual model name (e.g. claude-sonnet-4-5) into the DB via the language_server's GetCascadeTrajectory endpoint when [observer.antigravity] network_recovery = \"local\" is set (best-effort).")
 	cmd.Flags().BoolVar(&cursorModel, "cursor-model", false, "Lift model from matching token_usage row onto cursor session rows whose model is empty")
+	cmd.Flags().BoolVar(&sessionModels, "session-models", false, "Adapter-agnostic sessions.model rollup: fill an EMPTY sessions.model from the newest model-bearing token_usage row of the same session (audit IDE-13 / class C8). The live ingest path already does this per batch; this repairs rows written before that existed - the codex / cursor / cline / cowork sessions whose adapters emit ToolEvents with no Model. Never overwrites a model an adapter already supplied; a session with no model-bearing token row is left untouched. Idempotent. Picked up by --all.")
 	cmd.Flags().BoolVar(&copilotMessageID, "copilot-message-id", false, "Backfill message_id on copilot rows by walking debug-log JSONL")
 	cmd.Flags().BoolVar(&piMessageID, "pi-message-id", false, "Backfill message_id on pi rows by walking session JSONL")
 	cmd.Flags().BoolVar(&claudecodeUserPrompts, "claudecode-user-prompts", false, "Insert missing user_prompt action rows for Claude Code sessions ingested before the adapter started emitting them")
 	cmd.Flags().BoolVar(&claudecodeAPIErrors, "claudecode-api-errors", false, "Insert api_error action rows for Claude Code system/api_error JSONL records (content-policy blocks, rate limits, etc.) ingested before v1.4.20 added capture")
-	cmd.Flags().BoolVar(&cursorUserPrompts, "cursor-user-prompts", false, "Insert user_prompt action rows for Cursor sessions by walking agent-transcripts JSONL — fills the gap for sessions before the beforeSubmitPrompt hook was installed, with the <user_query> wrapper stripped")
+	cmd.Flags().BoolVar(&cursorHookUsage, "cursor-hook-usage", false, "Replay Cursor's IDE hooks output-channel logs (<Cursor userData>/logs/*/window*/output_*/cursor.hooks*.log, every cross-mount home - so a WSL observer reads the Windows logs) through the live cursor hook's own builders: recovers per-request token usage (stop / afterAgentResponse) and every hook row the live receiver failed to persist (e.g. `insert deadline exceeded`, or a window whose hook registration pointed at a dead receiver). Rows share the live hook's (source_file, source_event_id) identity, so re-running is a no-op; timestamps come from the log. A mislabelled-stop restatement (a stop naming the NEXT request's generation with the previous request's exact usage) is removed only where the replayed log itself proves the pair - the previous generation's afterAgentResponse precedes it with byte-identical usage and its own generation's afterAgentResponse does not - or where that generation's own afterAgentResponse shows the stored row to be such a copy; counter equality alone never removes a row, and a squatter whose log has rotated out is left in place. Cursor keeps only its last ~10 IDE launches of logs - run promptly. Picked up by --all and --message-id.")
+	cmd.Flags().BoolVar(&cursorUserPrompts, "cursor-user-prompts", false, "Insert user_prompt action rows for Cursor sessions by walking agent-transcripts JSONL - fills the gap for sessions before the beforeSubmitPrompt hook was installed, with the <user_query> wrapper stripped")
 	cmd.Flags().BoolVar(&cursorSubagents, "cursor-subagents", false, "Walk Cursor agent-transcripts/<session>/subagents/<sub>.jsonl files and ingest as sidechain rows under the parent session (IsSidechain=true)")
-	cmd.Flags().BoolVar(&coworkRescan, "cowork-rescan", false, "Fast rescan of the Cowork audit.jsonl tree only — same effect as `observer scan --force --adapter cowork` but discoverable via the dashboard Backfill UI. Use when adding cowork to enabled_adapters mid-flight without rescanning every other adapter's tree.")
+	cmd.Flags().BoolVar(&coworkRescan, "cowork-rescan", false, "Fast rescan of the Cowork audit.jsonl tree only - same effect as `observer scan --force --adapter cowork` but discoverable via the dashboard Backfill UI. Use when adding cowork to enabled_adapters mid-flight without rescanning every other adapter's tree.")
 	cmd.Flags().BoolVar(&coworkProjectRoot, "cowork-project-root", false, "Re-attribute Cowork action / session rows to the correct project_id when their sidecar.userSelectedFolders was a Windows-style path that previously misresolved to observer's own repo (v1.4.54)")
-	cmd.Flags().BoolVar(&codexRescan, "codex-rescan", false, "Fast rescan of the Codex rollout tree only — re-walks every JSONL from offset 0 to pick up v1.4.53 adapter additions: token_usage.web_search_requests + ActionRateLimit rows from token_count.rate_limits + codex.reasoning rows from response_item.reasoning. Idempotent via the (source_file, source_event_id) UNIQUE index.")
-	cmd.Flags().BoolVar(&antigravityRescan, "antigravity-rescan", false, "Fast rescan of the Antigravity tree only — re-walks every .pb / state.vscdb under the configured watch roots and re-ingests via the antigravity adapter (local decrypt first, falls back to language_server gRPC when [observer.antigravity] network_recovery = \"local\"). Idempotent.")
-	cmd.Flags().BoolVar(&antigravityCliRescan, "antigravity-cli-rescan", false, "Fast rescan of the Antigravity CLI tree only — re-walks every .pb / .db under the configured watch roots and re-ingests via the antigravity-cli adapter. Idempotent.")
-	cmd.Flags().BoolVar(&geminiCliRescan, "gemini-cli-rescan", false, "Fast rescan of the Gemini CLI tree only — re-walks ~/.gemini/tmp/<hash>/chats/ JSON / JSONL. gemini-cli has no surgical column backfills; this is its only retroactive path. Idempotent.")
-	cmd.Flags().BoolVar(&hermesRescan, "hermes-rescan", false, "Fast rescan of the Hermes Agent tree only — re-walks every state.db under ~/.hermes (or %LOCALAPPDATA%\\hermes on Windows + cross-mount homes) from messages.id=0. Useful for importing sessions that predate `observer init --hermes` plugin install — the SQLite backfill catches what the hook path missed. Idempotent via the (source_file, source_event_id) UNIQUE index.")
-	cmd.Flags().BoolVar(&clinecliRescan, "clinecli-rescan", false, "Fast rescan of the Cline CLI tree only — re-walks every sessions.db under ~/.cline/data/db/ (cross-mount aware) from updated_at='0'. Re-reads each session's paired messages.json + re-emits session_start / session_end / user_prompt / assistant_text / tool_use / per-message metrics rows. Useful for importing sessions that pre-date adapter install + picking up Phase 0 reality-check upgrades (per-message metrics, modelInfo, tool_result structured shape) on historical data. Idempotent via the (source_file, source_event_id) UNIQUE index.")
-	cmd.Flags().BoolVar(&copilotCliRescan, "copilot-cli-rescan", false, "Fast rescan of the GitHub Copilot CLI tree only — re-walks events.jsonl under ~/.copilot/session-state AND process-*.log under ~/.copilot/logs (cross-mount aware). Run after enabling `copilot --log-level debug` to retrofit Tier-1 accurate input/cache/reasoning tokens onto historical sessions. Idempotent.")
-	cmd.Flags().BoolVar(&cacheRescan, "cache-rescan", false, "Re-walk claude-code transcripts through the Tier-2 cache observation engine to populate historical cache_segments / cache_entries / cache_events rows. Order-sensitive within each file (chain dependency); files in mtime order. Idempotent via CacheEventExistsForMessage — a turn already captured by the Tier-1 proxy path skips Tier-2 emission, so re-runs are no-ops and proxy-already-observed turns don't double-write. Use after enabling [cachetrack].enabled on a daemon that has historical claude-code traffic, or after upgrading to a build that closes a cachetrack bug (Fix B deep canonicalize / x-anthropic-billing-header exclusion / etc.) to retrofit corrected attribution onto past sessions. Picked up by --all.")
-	cmd.Flags().BoolVar(&codexForkDedup, "codex-fork-dedup", false, "Purge historical duplicate codex token_usage rows created when a fork / subagent spawn replayed its parent rollout's token_count telemetry into the child's rollout (~65% of codex input tokens in a pre-fix DB are these duplicates). Enumerates codex token_usage source_files, re-runs the fork-replay detector, and matches the replayed tk:<basename>:L<line> rows. DRY-RUN BY DEFAULT — reports matched rows / summed tokens (input/output/cache_read/reasoning/web_search/est_cost) / sessions touched and deletes nothing; pass --apply to delete. Uses a 2s safety margin (vs the strict-boundary ingest suppression) so a second-boundary or clock-regression edge case is never auto-deleted. Also backfills session lineage (forked_from_id / parent_thread_id / thread_source) onto pre-fix sessions. NOT part of --all (destructive). Idempotent — deletes by (source_file, source_event_id) key. CAVEATS: duplicate rows already pushed to an org server are NOT retracted (server ingest is INSERT OR IGNORE) — this cleans the local DB only; and any cache_events / cache_segments the replayed rows produced are NOT cascade-deleted (node-local cache tables are left as-is).")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Actually perform destructive deletes for --codex-fork-dedup (default is dry-run, which reports what WOULD be deleted and touches nothing).")
+	cmd.Flags().BoolVar(&codexRescan, "codex-rescan", false, "Fast rescan of the Codex rollout tree only - re-walks every JSONL from offset 0 to pick up v1.4.53 adapter additions: token_usage.web_search_requests + ActionRateLimit rows from token_count.rate_limits + codex.reasoning rows from response_item.reasoning. Idempotent via the (source_file, source_event_id) UNIQUE index.")
+	cmd.Flags().BoolVar(&antigravityRescan, "antigravity-rescan", false, "Fast rescan of the Antigravity tree only - re-walks every .pb / state.vscdb under the configured watch roots and re-ingests via the antigravity adapter (local decrypt first, falls back to language_server gRPC when [observer.antigravity] network_recovery = \"local\"). Idempotent.")
+	cmd.Flags().BoolVar(&antigravityCliRescan, "antigravity-cli-rescan", false, "Fast rescan of the Antigravity CLI tree only - re-walks every .pb / .db under the configured watch roots and re-ingests via the antigravity-cli adapter. Idempotent.")
+	cmd.Flags().BoolVar(&geminiCliRescan, "gemini-cli-rescan", false, "Fast rescan of the Gemini CLI tree only - re-walks ~/.gemini/tmp/<hash>/chats/ JSON / JSONL. gemini-cli has no surgical column backfills; this is its only retroactive path. Idempotent.")
+	cmd.Flags().BoolVar(&hermesRescan, "hermes-rescan", false, "Fast rescan of the Hermes Agent tree only - re-walks every state.db under ~/.hermes (or %LOCALAPPDATA%\\hermes on Windows + cross-mount homes) from messages.id=0. Useful for importing sessions that predate `observer init --hermes` plugin install - the SQLite backfill catches what the hook path missed. Idempotent via the (source_file, source_event_id) UNIQUE index.")
+	cmd.Flags().BoolVar(&clinecliRescan, "clinecli-rescan", false, "Fast rescan of the Cline CLI tree only - re-walks every sessions.db under ~/.cline/data/db/ (cross-mount aware) from updated_at='0'. Re-reads each session's paired messages.json + re-emits session_start / session_end / user_prompt / assistant_text / tool_use / per-message metrics rows. Useful for importing sessions that pre-date adapter install + picking up Phase 0 reality-check upgrades (per-message metrics, modelInfo, tool_result structured shape) on historical data. Idempotent via the (source_file, source_event_id) UNIQUE index.")
+	cmd.Flags().BoolVar(&copilotCliRescan, "copilot-cli-rescan", false, "Fast rescan of the GitHub Copilot CLI tree only - re-walks events.jsonl under ~/.copilot/session-state AND process-*.log under ~/.copilot/logs (cross-mount aware). Run after enabling `copilot --log-level debug` to retrofit Tier-1 accurate input/cache/reasoning tokens onto historical sessions. Idempotent.")
+	cmd.Flags().BoolVar(&cacheRescan, "cache-rescan", false, "Re-walk claude-code transcripts through the Tier-2 cache observation engine to populate historical cache_segments / cache_entries / cache_events rows. Order-sensitive within each file (chain dependency); files in mtime order. Idempotent via CacheEventExistsForMessage - a turn already captured by the Tier-1 proxy path skips Tier-2 emission, so re-runs are no-ops and proxy-already-observed turns don't double-write. Use after enabling [cachetrack].enabled on a daemon that has historical claude-code traffic, or after upgrading to a build that closes a cachetrack bug (Fix B deep canonicalize / x-anthropic-billing-header exclusion / etc.) to retrofit corrected attribution onto past sessions. Picked up by --all.")
+	cmd.Flags().BoolVar(&content, "content", false, "Re-walk EVERY adapter's transcripts through the adapter-side message-content producer (store.captureMessageContent) to populate historical otel_content rows - the data the org admin's Messages panel reads - for sessions ingested before the producer shipped (263a3cadc) or before this node turned content sharing on. Gated exactly like live capture: [org_client.share] full_content / admin_managed AND [ingest.otel] content_capture; a no-op with an honest message naming the blocking key when either is off. Idempotent via otel_content's (content_hash, kind, request_id, tool_use_id) UNIQUE key. NOT picked up by --all: --all's own top-level rescan already re-derives content as a side effect of wireContentCapture being unconditional, so run --content standalone after turning content sharing on, rather than re-running everything --all does.")
+	cmd.Flags().BoolVar(&zedRescan, "zed-rescan", false, "Fast rescan of the Zed native-agent tree only - re-walks every threads.db under the configured Zed watch roots from watermark 0, forcing every thread to re-emit regardless of its stored updated_at cursor. threads.db is a watermark store (migration 107-era surface capture): a thread that predates the daemon first observing its file is never re-read until its NEXT turn advances updated_at, so this is the only retroactive path for pre-existing Zed conversations. Idempotent via the (source_file, source_event_id) UNIQUE index - deterministic per-block SourceEventIDs make re-emitting an already-seen row a store-level no-op. Picked up by --all.")
+	cmd.Flags().BoolVar(&crushRescan, "crush-rescan", false, "Re-walk every Crush crush.db (the crush adapter only) from watermark 0, then CORRECT the token_usage rows already stored for it: each crush.db that holds token rows is re-parsed and the rows of the sessions it observed are made equal to the fixed parser's output - changed rows are updated in place (re-sent to the org), reliability included, and rows the parser no longer emits are deleted as a correction (org tombstone, not retention). Needed because the token upsert is MAX-monotone and never lowers a count or rewrites reliability: a multi-step session stored before 2026-09-27 keeps its last-step context snapshot (e.g. 8975/5) until this runs, when it becomes 0/0 counts marked reliability unknown with its model and Crush's own cost (zero included) kept. Crush rows only; idempotent. Picked up by --all.")
+	cmd.Flags().BoolVar(&qwenCodeRescan, "qwen-code-rescan", false, "Re-walk every Qwen Code chat transcript (the qwen-code adapter only) from offset 0, then CORRECT the qwen-code token_usage rows already stored: each transcript holding token rows is re-parsed and the rows of the sessions it observed are made equal to the fixed parser's output (changed rows updated in place and re-sent to the org). Needed because the token upsert is MAX-monotone and never lowers a count: a turn served through Qwen's OpenAI-compatible generator stored its thoughts both inside output_token_count and as reasoning (T-542), so its output was over-counted by the reasoning tokens until this runs. Qwen Code rows only; idempotent. Picked up by --all.")
+	cmd.Flags().BoolVar(&tasksRescan, "tasks", false, "Re-derive task_items / task_transitions (docs/task-tracking.md) from todo_update / task_complete / post_tool_batch action rows already in the DB. No adapter re-parse, no source-file walk - a pure re-read of raw_tool_input / raw_tool_output. Ignores [tasks].enabled. Idempotent. Use after enabling [tasks].enabled on a daemon with historical task-tool traffic, or after upgrading to a build with wider decoder coverage (e.g. the gemini-cli write_todos fix). Picked up by --all.")
+	cmd.Flags().BoolVar(&codexForkDedup, "codex-fork-dedup", false, "Purge historical duplicate codex token_usage rows created when a fork / subagent spawn replayed its parent rollout's token_count telemetry into the child's rollout (~65% of codex input tokens in a pre-fix DB are these duplicates). Enumerates codex token_usage source_files, re-runs the fork-replay detector, and matches the replayed tk:<basename>:L<line> rows. DRY-RUN BY DEFAULT - reports matched rows / summed tokens (input/output/cache_read/reasoning/web_search/est_cost) / sessions touched and deletes nothing; pass --apply to delete. Uses a 2s safety margin (vs the strict-boundary ingest suppression) so a second-boundary or clock-regression edge case is never auto-deleted. Also backfills session lineage (forked_from_id / parent_thread_id / thread_source) onto pre-fix sessions. NOT part of --all (destructive). Idempotent - deletes by (source_file, source_event_id) key. CAVEATS: duplicate rows already pushed to an org server are NOT retracted (server ingest is INSERT OR IGNORE) - this cleans the local DB only; and any cache_events / cache_segments the replayed rows produced are NOT cascade-deleted (node-local cache tables are left as-is).")
+	cmd.Flags().BoolVar(&reasoningConverge, "reasoning-converge", false, "Converge the B3 reasoning residue (docs/plans/b3-reasoning-convergence-plan-2026-07-31.md): the content-bearing `*.reasoning` / `cursor.thinking` task_complete rows migration 079 deliberately kept because deleting them would be lossy. Carries each row's full text onto its successor's preceding_reasoning under B3's own semantics (consumed-once / last-wins / turn-boundary-discarded / never crossing a session id / never overwriting a populated successor), then deletes the row through migration 079's dependency protocol (action_excerpts + failure_context deleted, file_state / retrieval_signals / guard_events / process_runs / process_events references NULLed). DB-only - the text already lives in the rows (target = the 200-char preview, raw_tool_output = the full body), so no source file is re-parsed. DRY-RUN BY DEFAULT; pass --apply to mutate. One transaction, so a mid-run failure can never leave a row deleted with its text uncarried. NOT part of --all (destructive). Idempotent. A row is deleted only when its bytes provably survive - see --reasoning-converge-discard-unresolved.")
+	cmd.Flags().BoolVar(&reasoningConvergeDiscard, "reasoning-converge-discard-unresolved", false, "Widen --reasoning-converge's delete to every row B3's semantics account for, including the ones whose text B3 sends nowhere (superseded by last-wins, discarded at a turn boundary, no successor in the session, or a successor whose preceding_reasoning already holds DIFFERENT text). That is the strict reading of B3 and it DESTROYS reasoning text that exists nowhere else - the dry run reports exactly how many rows and bytes. Rows whose raw_tool_output diverges from target are never deleted under either setting.")
+	cmd.Flags().BoolVar(&codexToolInput, "codex-tool-input", false, "Re-derive raw_tool_input for the codex-family rows that are genuinely MISSING one, by re-reading the rollout files the rows came from. The candidate set is grounded per action_type, not assumed: four of the six codex action types with an empty raw_tool_input (assistant_message / task_complete / turn_aborted / session_start) come from emit sites that assign no input because the event HAS none - empty is correct there and this pass never writes to them, reporting them in their own named bucket. Only edit_file (patch_apply_end.changes, which buildPatchApplyStandaloneEvent drops) and web_search are recoverable. Rows join to source records on source_event_id = the record's own call_id - never on ordinal position or timestamp. Never overwrites a populated raw_tool_input; a missing file, an absent record or an empty derived value all stay UNRESOLVED rather than gaining a fabricated value. DRY-RUN BY DEFAULT; pass --apply to mutate. One transaction. NOT part of --all. Idempotent.")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Actually perform destructive deletes for --codex-fork-dedup and --reasoning-converge, and the writes for --codex-tool-input (default is dry-run, which reports what WOULD change and touches nothing).")
 	cmd.Flags().BoolVar(&all, "all", false, "Run every supported backfill in one invocation (recommended after upgrading)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Snapshot the live DB via VACUUM INTO and run the requested backfills against the snapshot instead of the live DB. Reports what WOULD update; live DB untouched. Snapshot is deleted on exit. See docs/backfill-flag-audit-2026-05-19.md.")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Stop after N source files per JSONL-walking pass (0 = all)")
 	return cmd
+}
+
+// rescanPass describes one `--<adapter>-rescan` catch-all: scope the
+// watcher to a single adapter (buildWatcherWithOverride's
+// adapterFilter) and re-walk it from offset 0 via watcher.Rescan. See
+// the loop in newBackfillCmd's RunE for how these are driven.
+type rescanPass struct {
+	// enabled is the address of the flag var this pass is gated on.
+	enabled *bool
+	// flag is the exact `--flag-name` used as the error-wrap prefix on
+	// both the buildWatcherWithOverride and Rescan failure paths.
+	flag string
+	// adapter is the adapterFilter passed to buildWatcherWithOverride
+	// — narrows watcher.Options.Allow to this one adapter name.
+	adapter string
+	// label is the leading word(s) of the stdout summary line, e.g.
+	// "codex rescan complete: ...".
+	label string
+	// note is the parenthetical at the end of the stdout summary line.
+	note string
+}
+
+// summaryLine renders the exact stdout line this pass prints on success:
+// "<label> rescan complete: files_processed=<n> errors=<n> (<note>)\n".
+// Pulled out of the RunE loop below so the format is production code a
+// test can call directly (rescan_flag_audit_test.go), rather than a test
+// re-implementing the same fmt.Sprintf and silently drifting from it.
+func (p rescanPass) summaryLine(res watcher.ScanResult) string {
+	return fmt.Sprintf(
+		"%s rescan complete: files_processed=%d errors=%d (%s)\n",
+		p.label, res.FilesProcessed, res.Errors, p.note,
+	)
+}
+
+// buildRescanPasses returns the ordered table of per-adapter rescan
+// passes, one row per `--<adapter>-rescan` flag, taking the address
+// of each flag var so the table stays a thin view over
+// newBackfillCmd's cobra-owned bools. Pulled into its own function
+// (rather than a literal inlined in RunE) so a table-driven test can
+// assert the flag/adapter/label/note strings directly — the stdout
+// line + error-wrap prefix are a de facto contract (dashboard
+// job-output display, docs examples quote them verbatim), so a table
+// edit here should be exactly as reviewable as the string literals it
+// replaced. Order matters only for which pass's ScanResult lands in
+// the shared, first-wins `summary.Rescan` field when multiple flags
+// (e.g. via --all) run together — this preserves the pre-refactor
+// order exactly, with --zed-rescan appended last (a new flag, so it
+// can't disturb any existing combination's summary.Rescan value).
+func buildRescanPasses(
+	coworkRescan, codexRescan, antigravityRescan, antigravityCliRescan,
+	geminiCliRescan, copilotCliRescan, hermesRescan, clinecliRescan,
+	cacheRescan, zedRescan, crushRescan, qwenCodeRescan *bool,
+) []rescanPass {
+	return []rescanPass{
+		{coworkRescan, "--cowork-rescan", "cowork", "cowork", "cowork audit.jsonl only"},
+		{codexRescan, "--codex-rescan", "codex", "codex", "codex rollouts only"},
+		{antigravityRescan, "--antigravity-rescan", "antigravity", "antigravity", "antigravity .pb / state.vscdb only"},
+		{antigravityCliRescan, "--antigravity-cli-rescan", "antigravity-cli", "antigravity-cli", "antigravity-cli .pb / .db only"},
+		{geminiCliRescan, "--gemini-cli-rescan", "gemini-cli", "gemini-cli", "~/.gemini/tmp only"},
+		{copilotCliRescan, "--copilot-cli-rescan", "copilot-cli", "copilot-cli", "~/.copilot/{session-state,logs} only"},
+		{hermesRescan, "--hermes-rescan", "hermes", "hermes", "~/.hermes/state.db only"},
+		{clinecliRescan, "--clinecli-rescan", "cline-cli", "cline-cli", "~/.cline/data/db/sessions.db only"},
+		{cacheRescan, "--cache-rescan", "claude-code", "cache", "claude-code transcripts through the Tier-2 cache engine; idempotent via CacheEventExistsForMessage"},
+		{zedRescan, "--zed-rescan", "zed", "zed", "threads.db only; watermark reset (fromOffset=0) re-reads every thread regardless of updated_at"},
+		{crushRescan, "--crush-rescan", "crush", "crush", "crush.db only; followed by the token-row correction pass"},
+		{qwenCodeRescan, "--qwen-code-rescan", "qwen-code", "qwen-code", "~/.qwen/projects only; followed by the token-row correction pass"},
+	}
 }
 
 // BackfillResult is the per-run summary returned to the caller.
@@ -1110,6 +1301,22 @@ type MessageIDBackfill struct {
 	LinesExamined     int `json:"lines_examined"`
 	ActionsUpdated    int `json:"actions_updated"`
 	TokenUsageUpdated int `json:"token_usage_updated"`
+}
+
+// ContentRescanBackfill summarises the --content pass: a full-adapter
+// Rescan wired through the same message-content producer live capture
+// uses (store.captureMessageContent), so its shape mirrors
+// watcher.ScanResult rather than a surgical column-update count.
+//
+// Skipped is true when the node's content-capture posture is off; when
+// it is, SkipReason names the exact blocking config key
+// (contentCaptureBlockReason) instead of leaving the operator to guess
+// why zero rows landed.
+type ContentRescanBackfill struct {
+	Skipped        bool   `json:"skipped"`
+	SkipReason     string `json:"skip_reason,omitempty"`
+	FilesProcessed int    `json:"files_processed,omitempty"`
+	Errors         int    `json:"errors,omitempty"`
 }
 
 // claudeProjectsDir returns the location Claude Code writes its session
@@ -1182,7 +1389,7 @@ func backfillIsSidechain(ctx context.Context, db *sql.DB, projectsDir string, fi
 			return filepath.SkipAll
 		}
 		res.FilesScanned++
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // G122: walks the operator's own transcript tree read only
 		if err != nil {
 			return nil
 		}
@@ -1293,7 +1500,7 @@ func backfillCacheTier(ctx context.Context, db *sql.DB, projectsDir string, file
 		}
 		res.FilesScanned++
 
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // G122: walks the operator's own transcript tree read only
 		if err != nil {
 			return nil
 		}
@@ -1447,7 +1654,7 @@ func backfillMessageID(ctx context.Context, db *sql.DB, projectsDir string, file
 		}
 		res.FilesScanned++
 
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // G122: walks the operator's own transcript tree read only
 		if err != nil {
 			return nil
 		}
@@ -1576,7 +1783,7 @@ func backfillCodexMessageID(ctx context.Context, db *sql.DB, sessionsDir string,
 		}
 		res.FilesScanned++
 
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // G122: walks the operator's own transcript tree read only
 		if err != nil {
 			return nil
 		}
@@ -1976,6 +2183,34 @@ type CursorModelBackfill struct {
 	SessionsUpdated int `json:"sessions_updated"`
 }
 
+// SessionModelsBackfill summarises the --session-models pass.
+type SessionModelsBackfill struct {
+	SessionsUpdated int `json:"sessions_updated"`
+}
+
+// backfillSessionModels runs the ADAPTER-AGNOSTIC sessions.model rollup
+// (store.BackfillSessionModels — IDE-13 / plan class C8) over every
+// session in the DB: an empty sessions.model is filled from the newest
+// model-bearing token_usage row of that session.
+//
+// This is the retroactive half of the rollup the live ingest path
+// already performs (store.rollupSessionModels, run after each token
+// batch). It repairs rows written BEFORE that rollup existed — the
+// codex / cursor / cline / cowork sessions whose adapters emit
+// ToolEvents with no Model, leaving sessions.model empty while
+// token_usage.model resolved perfectly one table over.
+//
+// Distinct from --cursor-model, which is the cursor-only precursor of
+// the same repair; running both is harmless (each only ever fills an
+// EMPTY model, so whichever runs first wins and the other is a no-op).
+func backfillSessionModels(ctx context.Context, db *sql.DB) (SessionModelsBackfill, error) {
+	n, err := store.New(db).BackfillSessionModels(ctx)
+	if err != nil {
+		return SessionModelsBackfill{}, fmt.Errorf("backfill session models: %w", err)
+	}
+	return SessionModelsBackfill{SessionsUpdated: int(n)}, nil
+}
+
 // backfillCursorModel populates the model column on cursor session
 // rows from the matching token_usage row. Pre-parity-pass the cursor
 // hook decoded rawHookPayload.Model into the struct but never assigned
@@ -2051,54 +2286,36 @@ func backfillCursorMessageID(ctx context.Context, db *sql.DB) (MessageIDBackfill
 	return res, nil
 }
 
-func backfillCursorHookUsage(ctx context.Context, db *sql.DB, logsDir string, fileLimit int) (MessageIDBackfill, error) {
-	res := MessageIDBackfill{}
-	st := store.New(db)
+// CursorHookUsageBackfill summarises the --cursor-hook-usage pass.
+type CursorHookUsageBackfill struct {
+	FilesScanned     int `json:"files_scanned"`
+	EventsReplayed   int `json:"events_replayed"`
+	ActionsInserted  int `json:"actions_inserted"`
+	TokenRowsWritten int `json:"token_rows_written"`
+	OutcomesApplied  int `json:"outcomes_applied"`
+	// DuplicatesRemoved counts stored token rows removed as PROVEN
+	// mislabelled-stop restatements (store.IngestResult.
+	// TokenRestatementsRemoved); never a counter-equality sweep.
+	DuplicatesRemoved int64 `json:"duplicates_removed"`
+	// ReplayWarnings counts content-safe replay warnings: hook payloads
+	// the replay could not use (undecodable, over the block cap,
+	// rejected by a builder) and failed cross-path lookups. The first
+	// few are kept in Problems.
+	ReplayWarnings int `json:"replay_warnings"`
+	// FilesFailed counts logs that could not be walked, opened or parsed.
+	FilesFailed int `json:"files_failed"`
+	// Problems holds up to cursorHookProblemSample content-safe
+	// warnings/errors so a skip is never silent.
+	Problems []string `json:"problems,omitempty"`
+}
 
-	walkErr := filepath.WalkDir(logsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if !strings.HasPrefix(filepath.Base(path), "cursor.hooks.") || filepath.Ext(path) != ".log" {
-			return nil
-		}
-		if fileLimit > 0 && res.FilesScanned >= fileLimit {
-			return fs.SkipAll
-		}
-		res.FilesScanned++
+// cursorHookProblemSample bounds CursorHookUsageBackfill.Problems.
+const cursorHookProblemSample = 10
 
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		for _, block := range extractCursorHookInputs(string(body)) {
-			res.LinesExamined++
-			tk, ok, err := cursor.BuildStopTokenEvent([]byte(block))
-			if err != nil || !ok {
-				continue
-			}
-			if tk.ProjectRoot == "" || tk.SessionID == "" {
-				continue
-			}
-			n, err := st.InsertTokenEvents(ctx, []models.TokenEvent{tk})
-			if err != nil {
-				return err
-			}
-			res.TokenUsageUpdated += n
-			if tk.Model != "" {
-				if _, err := db.ExecContext(ctx,
-					`UPDATE sessions SET model = COALESCE(NULLIF(model, ''), ?) WHERE id = ?`,
-					tk.Model, tk.SessionID); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-	if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
-		return res, fmt.Errorf("backfill cursor hook usage: walk: %w", walkErr)
+func (r *CursorHookUsageBackfill) problem(msg string) {
+	if len(r.Problems) < cursorHookProblemSample {
+		r.Problems = append(r.Problems, msg)
 	}
-	return res, nil
 }
 
 // OpenCodePartsBackfill summarises the --opencode-parts pass.
@@ -2179,8 +2396,11 @@ func backfillOpenCodeParts(ctx context.Context, db *sql.DB) (OpenCodePartsBackfi
 	}
 	defer lookupAction.Close()
 
+	// Probe the FTS5 shadow table's c0 (action_id) through migration 147's
+	// index; the same predicate on the virtual table scans every excerpt
+	// per action (T-412).
 	excerptExists, err := db.PrepareContext(ctx, `
-		SELECT 1 FROM action_excerpts WHERE action_id = ? LIMIT 1`)
+		SELECT 1 FROM action_excerpts_content WHERE c0 = ? LIMIT 1`)
 	if err != nil {
 		return res, fmt.Errorf("backfill opencode-parts: prepare excerpt check: %w", err)
 	}
@@ -2595,6 +2815,12 @@ func backfillOpenClawSessionID(ctx context.Context, db *sql.DB, agentsDirs []str
 				if r, err := deleteSession.ExecContext(ctx, legacy); err == nil {
 					if n, _ := r.RowsAffected(); n > 0 {
 						res.SessionsDeleted += int(n)
+						// The deleted session may have held the top rowid:
+						// bring the org push cursor down before a new
+						// session can reuse it (T-373).
+						if cerr := store.ClampSessionPushCursor(ctx, db); cerr != nil {
+							return fmt.Errorf("backfill openclaw-session-id: %w", cerr)
+						}
 					}
 				}
 			}
@@ -2649,11 +2875,11 @@ func backfillOpenClawProjectRoot(ctx context.Context, db *sql.DB, agentsDirs []s
 				return nil
 			}
 			for key, entry := range idx {
-				projectRoot := resolveOpenClawProjectRootForBackfill(strings.TrimSpace(entry.SystemPromptReport.WorkspaceDir))
+				projectRoot, remote := resolveOpenClawProjectRootForBackfill(strings.TrimSpace(entry.SystemPromptReport.WorkspaceDir))
 				if projectRoot == "" {
 					continue
 				}
-				pid, err := st.UpsertProject(ctx, projectRoot, "")
+				pid, err := st.UpsertProject(ctx, projectRoot, remote)
 				if err != nil {
 					continue
 				}
@@ -2712,18 +2938,23 @@ func canonicalOpenClawBackfillSessionID(entry openclawBackfillIndexEntry, key st
 	)
 }
 
-func resolveOpenClawProjectRootForBackfill(cwd string) string {
+// resolveOpenClawProjectRootForBackfill mirrors
+// openclaw.Adapter.resolveProjectRoot (B3): it returns the resolved
+// project root plus its normalized git remote so backfill-driven
+// reattribution converges on the same (root, remote) pair the live
+// parser would have written.
+func resolveOpenClawProjectRootForBackfill(cwd string) (string, string) {
 	if cwd == "" {
-		return ""
+		return "", ""
 	}
 	translated := crossmount.TranslateForeignPath(cwd)
 	if _, err := os.Stat(translated); err == nil {
 		if info, err := git.Resolve(translated); err == nil && info.IsGit {
-			return info.Root
+			return info.Root, git.NormalizeRemote(info.Remote)
 		}
-		return translated
+		return translated, ""
 	}
-	return cwd
+	return cwd, ""
 }
 
 func uniqueNonEmptyStrings(values ...string) []string {
@@ -2878,7 +3109,10 @@ func backfillCodexProjectRoot(ctx context.Context, db *sql.DB, sessionsDirs []st
 			if newRoot == "" {
 				return nil
 			}
-			pid, err := st.UpsertProject(ctx, newRoot, "")
+			// git.Resolve succeeded above (gerr checked), so info.Remote
+			// reflects this cwd's "origin" remote when it has one; B3
+			// normalizes it the same way the live codex parser does.
+			pid, err := st.UpsertProject(ctx, newRoot, git.NormalizeRemote(info.Remote))
 			if err != nil {
 				return nil
 			}
@@ -2905,11 +3139,6 @@ func backfillCodexProjectRoot(ctx context.Context, db *sql.DB, sessionsDirs []st
 	return res, nil
 }
 
-// codexForkDedupDeleteBatch bounds how many source_event_ids one DELETE
-// transaction carries so a huge forked file can't build an unbounded
-// IN(...) list or hold one long-running write lock.
-const codexForkDedupDeleteBatch = 500
-
 // lastPathSegment returns the final path segment of p, treating BOTH
 // '/' and '\\' as separators regardless of the host OS. Unlike
 // filepath.Base (which honors only the runtime's own separator), this
@@ -2925,230 +3154,10 @@ func lastPathSegment(p string) string {
 	return p
 }
 
-// backfillCodexForkDedup purges historical duplicate codex token_usage
-// rows that a fork / subagent spawn created by replaying its parent
-// rollout's token_count telemetry into the child's rollout file. The
-// ingest fix (codex.ReplayedTokenLines) now suppresses these at parse
-// time; this pass cleans up rows inserted before the fix shipped.
-//
-// It enumerates the DISTINCT source_file of codex token_usage rows,
-// re-runs codex.ReplayedTokenLines over each file still on disk, and
-// matches the replayed lines' synthetic source_event_ids
-// ("tk:<basename>:L<line>") against the stored rows. DRY-RUN BY DEFAULT
-// (apply=false): it only tallies matched rows / summed tokens / touched
-// sessions and deletes nothing. With apply=true it DELETEs the matched
-// rows in bounded transactions. Deletion is keyed by (source_file,
-// source_event_id) so a second --apply is a natural no-op.
-//
-// As a cheap bonus it captures each file's session lineage
-// (forked_from_id / parent_thread_id / thread_source) via
-// codex.ScanForkLineage and persists it with Store.SetSessionLineage so
-// pre-fix sessions gain the lineage the ingest path now records. Lineage
-// is only written on apply; the dry run reports what it would set.
-//
-// Foreign-OS paths (a Windows-captured rollout read from a WSL2
-// observer) are handled the way the sibling project-root backfills do:
-// when the stored source_file no longer stats, a
-// crossmount.TranslateForeignPath fallback is attempted before treating
-// the file as missing. out receives per-file notes when non-nil (the
-// caller passes nil under --json).
-func backfillCodexForkDedup(ctx context.Context, database *sql.DB, apply bool, fileLimit int, out io.Writer) (CodexForkDedupBackfill, error) {
-	res := CodexForkDedupBackfill{Applied: apply}
-	st := store.New(database)
-
-	rows, err := database.QueryContext(ctx, `
-		SELECT DISTINCT source_file FROM token_usage
-		 WHERE tool = 'codex'
-		   AND source_file IS NOT NULL
-		   AND source_file != ''
-		 ORDER BY source_file`)
-	if err != nil {
-		return res, fmt.Errorf("backfill codex-fork-dedup: list source_files: %w", err)
-	}
-	var files []string
-	for rows.Next() {
-		var f string
-		if err := rows.Scan(&f); err != nil {
-			rows.Close()
-			return res, fmt.Errorf("backfill codex-fork-dedup: scan source_file: %w", err)
-		}
-		files = append(files, f)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return res, fmt.Errorf("backfill codex-fork-dedup: iterate source_files: %w", err)
-	}
-
-	sessionsSeen := map[string]bool{}
-
-	for _, sourceFile := range files {
-		if fileLimit > 0 && res.FilesScanned >= fileLimit {
-			break
-		}
-
-		// Resolve the on-disk path: prefer the stored path; fall back
-		// to a crossmount translation for foreign-OS (Windows) paths
-		// captured before the observer moved to WSL, mirroring the
-		// sibling project-root backfills.
-		diskPath := sourceFile
-		if _, statErr := os.Stat(diskPath); statErr != nil {
-			if translated := crossmount.TranslateForeignPath(sourceFile); translated != sourceFile {
-				if _, statErr2 := os.Stat(translated); statErr2 == nil {
-					diskPath = translated
-				}
-			}
-		}
-
-		f, openErr := os.Open(diskPath)
-		if openErr != nil {
-			res.FilesMissing++
-			if out != nil {
-				fmt.Fprintf(out, "  skip %s (rollout no longer on disk)\n", sourceFile)
-			}
-			continue
-		}
-		res.FilesScanned++
-
-		replayed, scanErr := codex.ReplayedTokenLines(f)
-		f.Close()
-		if scanErr != nil {
-			if out != nil {
-				fmt.Fprintf(out, "  warn %s: scan failed: %v\n", sourceFile, scanErr)
-			}
-			continue
-		}
-
-		// Bonus: retrofit the owning session's fork lineage. Cheap
-		// second read of a small header; independent of the delete set.
-		if lf, lopenErr := os.Open(diskPath); lopenErr == nil {
-			lin, ok, lerr := codex.ScanForkLineage(lf)
-			lf.Close()
-			hasLineage := ok && lin.SessionID != "" &&
-				(lin.ForkedFromID != "" || lin.ParentThreadID != "" || lin.ThreadSource != "")
-			if lerr == nil && hasLineage {
-				if apply {
-					// Count only when the UPDATE actually changed a row —
-					// a re-run over an already-stamped session returns
-					// changed=false, so the counter stays honest.
-					if changed, serr := st.SetSessionLineage(ctx, models.SessionLineage{
-						SessionID:      lin.SessionID,
-						ForkedFromID:   lin.ForkedFromID,
-						ParentThreadID: lin.ParentThreadID,
-						ThreadSource:   lin.ThreadSource,
-					}); serr == nil && changed {
-						res.LineageBackfilled++
-					}
-				} else {
-					// Dry-run: count only what an --apply UPDATE would
-					// actually change — the session must EXIST and at
-					// least one supplied marker must differ from what's
-					// stored (mirrors SetSessionLineage's WHERE guard).
-					var curFork, curParent, curSource string
-					qerr := database.QueryRowContext(ctx,
-						`SELECT IFNULL(forked_from_id, ''), IFNULL(parent_thread_id, ''), IFNULL(thread_source, '')
-						   FROM sessions WHERE id = ?`, lin.SessionID).
-						Scan(&curFork, &curParent, &curSource)
-					switch {
-					case errors.Is(qerr, sql.ErrNoRows):
-						// Session never ingested — nothing to backfill.
-					case qerr != nil:
-						return res, fmt.Errorf("backfill codex-fork-dedup: check lineage for %s: %w", lin.SessionID, qerr)
-					case (lin.ForkedFromID != "" && lin.ForkedFromID != curFork) ||
-						(lin.ParentThreadID != "" && lin.ParentThreadID != curParent) ||
-						(lin.ThreadSource != "" && lin.ThreadSource != curSource):
-						res.LineageBackfilled++
-					}
-				}
-			}
-		}
-
-		if len(replayed) == 0 {
-			continue
-		}
-
-		// Build the replayed source_event_id set the adapter would have
-		// written for these lines. Use a separator-aware basename: the
-		// adapter builds the id with filepath.Base at PARSE time on the
-		// capturing host, so a Windows-captured rollout carries a
-		// backslash-separated path in source_file. filepath.Base on a
-		// Linux observer would return the whole "C:\\...\\rollout.jsonl"
-		// string and never match "tk:rollout.jsonl:L<n>". lastPathSegment
-		// strips after the last '/' OR '\\' regardless of host OS.
-		base := lastPathSegment(sourceFile)
-		wantIDs := make(map[string]bool, len(replayed))
-		for ln := range replayed {
-			wantIDs[fmt.Sprintf("tk:%s:L%d", base, ln)] = true
-		}
-
-		urows, qerr := database.QueryContext(ctx, `
-			SELECT session_id, source_event_id,
-			       COALESCE(input_tokens, 0), COALESCE(output_tokens, 0), COALESCE(cache_read_tokens, 0),
-			       COALESCE(reasoning_tokens, 0), COALESCE(web_search_requests, 0), COALESCE(estimated_cost_usd, 0)
-			  FROM token_usage
-			 WHERE tool = 'codex' AND source_file = ?`, sourceFile)
-		if qerr != nil {
-			return res, fmt.Errorf("backfill codex-fork-dedup: select rows for %s: %w", sourceFile, qerr)
-		}
-		var matchedIDs []string
-		var fileMatched int
-		var fileInput, fileOutput, fileCacheRead, fileReasoning, fileWebSearch int64
-		var fileCost float64
-		fileSessions := map[string]bool{}
-		for urows.Next() {
-			var sid, eid string
-			var in, outp, cr, reason, web int64
-			var cost float64
-			if err := urows.Scan(&sid, &eid, &in, &outp, &cr, &reason, &web, &cost); err != nil {
-				urows.Close()
-				return res, fmt.Errorf("backfill codex-fork-dedup: scan row: %w", err)
-			}
-			if !wantIDs[eid] {
-				continue
-			}
-			matchedIDs = append(matchedIDs, eid)
-			fileMatched++
-			fileInput += in
-			fileOutput += outp
-			fileCacheRead += cr
-			fileReasoning += reason
-			fileWebSearch += web
-			fileCost += cost
-			fileSessions[sid] = true
-			sessionsSeen[sid] = true
-		}
-		urows.Close()
-		if err := urows.Err(); err != nil {
-			return res, fmt.Errorf("backfill codex-fork-dedup: iterate rows: %w", err)
-		}
-
-		res.RowsMatched += fileMatched
-		res.InputTokens += fileInput
-		res.OutputTokens += fileOutput
-		res.CacheReadTokens += fileCacheRead
-		res.ReasoningTokens += fileReasoning
-		res.WebSearchRequests += fileWebSearch
-		res.EstimatedCostUSD += fileCost
-
-		if fileMatched > 0 && out != nil {
-			fmt.Fprintf(
-				out,
-				"  %s: %d duplicate token row(s) (input=%d output=%d cache_read=%d reasoning=%d web_search=%d est_cost=$%.4f) across %d session(s)\n",
-				sourceFile, fileMatched, fileInput, fileOutput, fileCacheRead, fileReasoning, fileWebSearch, fileCost, len(fileSessions),
-			)
-		}
-
-		if apply && len(matchedIDs) > 0 {
-			deleted, derr := deleteCodexForkDedupRows(ctx, database, sourceFile, matchedIDs)
-			if derr != nil {
-				return res, derr
-			}
-			res.RowsDeleted += deleted
-		}
-	}
-
-	res.SessionsTouched = len(sessionsSeen)
-	return res, nil
-}
+// codexForkDedupDeleteBatch bounds how many source_event_ids one DELETE
+// transaction carries so a huge forked file can't build an unbounded
+// IN(...) list or hold one long-running write lock.
+const codexForkDedupDeleteBatch = 500
 
 // deleteCodexForkDedupRows deletes the given token_usage rows for one
 // source_file in bounded transactions, returning the total rows
@@ -3293,7 +3302,10 @@ func backfillClaudecodeProjectRoot(ctx context.Context, db *sql.DB, projectDirs 
 			if newRoot == "" {
 				return nil
 			}
-			pid, err := st.UpsertProject(ctx, newRoot, "")
+			// git.Resolve succeeded above (gerr checked), so info.Remote
+			// reflects this cwd's "origin" remote when it has one; B3
+			// normalizes it the same way the live claudecode parser does.
+			pid, err := st.UpsertProject(ctx, newRoot, git.NormalizeRemote(info.Remote))
 			if err != nil {
 				return nil
 			}
@@ -3371,9 +3383,10 @@ type CoworkProjectRootBackfill struct {
 //
 // Walks every supplied watch root, finds local_<id>/audit.jsonl
 // files, derives the (session_id, project_root) pair via
-// cowork.ProjectAttribution, upserts the project, then UPDATEs the
+// attribute (the cowork adapter's ProjectAttribution, handed in through
+// adapter.ProjectReattributor), upserts the project, then UPDATEs the
 // session row + all of its actions when project_id differs.
-func backfillCoworkProjectRoot(ctx context.Context, db *sql.DB, watchRoots []string, fileLimit int) (CoworkProjectRootBackfill, error) {
+func backfillCoworkProjectRoot(ctx context.Context, db *sql.DB, watchRoots []string, fileLimit int, attribute func(path string) (sessionID, projectRoot, remote string, ok bool)) (CoworkProjectRootBackfill, error) {
 	res := CoworkProjectRootBackfill{}
 	st := store.New(db)
 
@@ -3411,11 +3424,14 @@ func backfillCoworkProjectRoot(ctx context.Context, db *sql.DB, watchRoots []str
 			}
 			res.FilesScanned++
 
-			sessionID, newRoot, ok := cowork.ProjectAttribution(path)
+			sessionID, newRoot, remote, ok := attribute(path)
 			if !ok || sessionID == "" || newRoot == "" {
 				return nil
 			}
-			pid, err := st.UpsertProject(ctx, newRoot, "")
+			// remote is already normalized by the adapter's ProjectAttribution
+			// (it delegates to the same resolveProjectRoot the live
+			// parser uses).
+			pid, err := st.UpsertProject(ctx, newRoot, remote)
 			if err != nil {
 				return nil
 			}
@@ -3498,492 +3514,6 @@ type AntigravityProjectRootBackfill struct {
 	MarkdownPlannerRecovered int `json:"markdown_planner_recovered"`
 }
 
-// antigravityProjectRootBackfillDirs returns the set of antigravity
-// conversations directories to scan: every crossmount-resolved home's
-// `.gemini/antigravity/conversations`. Mirrors the codex helper so
-// the dispatcher and tests can compute / inject the same set.
-func antigravityProjectRootBackfillDirs() []string {
-	var homes []string
-	for _, h := range crossmount.AllHomes() {
-		homes = append(homes, h.Path)
-	}
-	return antigravity.ConversationsDirs(homes)
-}
-
-// backfillAntigravityProjectRoot re-attributes antigravity action /
-// session rows to the correct project, refreshes session.model +
-// session.started_at, AND lifts per-turn token rows + the actual
-// model name into the DB via the language_server's structured
-// trajectory endpoint (Path B, MVP scope).
-//
-// Targets data ingested before the statedb deep-parser fix landed
-// (every session pinned to project_id=[antigravity] with model=""
-// and started_at = recovery-run wall-clock) and before structured
-// recovery shipped (zero token_usage rows).
-//
-// Walks every .pb file under the supplied conversations directories.
-// For each file:
-//  1. Extract conversation UUID from filename, look up the index
-//     entry, resolve project root via antigravity.ResolveIndexEntry,
-//     upsert the project, and UPDATE the session + cascaded action
-//     rows when project_id differs.
-//  2. Best-effort: fetch GetCascadeTrajectory via the bridge,
-//     parse the structured trajectory for model + per-turn tokens
-//     + real conversation start time, INSERT token_usage rows, and
-//     prefer the structured model over the state.vscdb hint when
-//     refreshing session.model.
-//  3. Refresh session.model and session.started_at — only when
-//     the existing value is empty / placeholder, so a real value
-//     is never overwritten.
-//
-// The structured fetch is best-effort: ~85% hit rate on the user's
-// host (the bridge can only reach conversations loaded by a running
-// language_server). Misses are logged and skipped.
-func backfillAntigravityProjectRoot(ctx context.Context, db *sql.DB, conversationsDirs []string, fileLimit int) (AntigravityProjectRootBackfill, error) {
-	res := AntigravityProjectRootBackfill{}
-	st := store.New(db)
-
-	updateSessionPID, err := db.PrepareContext(ctx,
-		`UPDATE sessions SET project_id = ? WHERE id = ? AND project_id != ?`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare session pid: %w", err)
-	}
-	defer updateSessionPID.Close()
-
-	updateActionsPID, err := db.PrepareContext(ctx,
-		`UPDATE actions SET project_id = ? WHERE session_id = ? AND project_id != ?`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare actions pid: %w", err)
-	}
-	defer updateActionsPID.Close()
-
-	// session.model + session.started_at — refresh only when the
-	// existing value is empty / placeholder, so a real value is never
-	// overwritten by an older index snapshot.
-	refreshSessionMeta, err := db.PrepareContext(ctx,
-		`UPDATE sessions
-		    SET model      = COALESCE(NULLIF(?, ''), model),
-		        started_at = CASE WHEN ?<>'' THEN ? ELSE started_at END
-		  WHERE id = ?
-		    AND tool = 'antigravity'`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare session meta: %w", err)
-	}
-	defer refreshSessionMeta.Close()
-
-	// Refresh existing token_usage rows' timestamps. The first Path B
-	// release synthesised per-turn ts as StartedAt + i*1s; the parser
-	// now spreads them across [StartedAt, EndedAt] so the dashboard's
-	// chronological view spans the actual conversation duration.
-	updateTokenTimestamp, err := db.PrepareContext(ctx,
-		`UPDATE token_usage
-		    SET timestamp = ?
-		  WHERE source_file = ?
-		    AND source_event_id = ?
-		    AND timestamp != ?`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare token ts: %w", err)
-	}
-	defer updateTokenTimestamp.Close()
-
-	// Refresh existing token_usage rows' message_id. The original Path
-	// B commit (5af3771) used `antigravity-struct:<uuid>:turn:N`; the
-	// shared scheme adopted in the bug-fix session uses
-	// `antigravity:<uuid>:turn:N` so tokens and structured ToolEvents
-	// join on the dashboard. Token rows already in the DB carry the
-	// stale prefix and are orphaned from every joined row until this
-	// UPDATE runs. Keyed by (source_file, source_event_id) so re-runs
-	// are no-ops once corrected.
-	updateTokenMessageID, err := db.PrepareContext(ctx,
-		`UPDATE token_usage
-		    SET message_id = ?
-		  WHERE source_file = ?
-		    AND source_event_id = ?
-		    AND message_id != ?`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare token msg id: %w", err)
-	}
-	defer updateTokenMessageID.Close()
-
-	// Refresh existing structured action rows' message_id when
-	// ParseStructuredTrajectory's assignment scheme changes between
-	// observer versions (e.g. Option 1 flipped run_command from
-	// step-fraction to time-nearest-token). InsertActions' ON CONFLICT
-	// only refreshes duration_ms, so without this UPDATE existing rows
-	// keep stale ids and stay orphaned from the dashboard's per-turn
-	// grouping. Keyed on (source_file, source_event_id) so re-runs
-	// no-op once corrected.
-	updateActionMessageID, err := db.PrepareContext(ctx,
-		`UPDATE actions
-		    SET message_id = ?
-		  WHERE source_file = ?
-		    AND source_event_id = ?
-		    AND message_id != ?`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare action msg id: %w", err)
-	}
-	defer updateActionMessageID.Close()
-
-	// Realign markdown action timestamps onto the real conversation
-	// timeline. Pre-Path-B markdown recovery used the recovery
-	// wall-clock as the base ts (so all markdown rows clustered at
-	// the time observer last ran the recovery, sometimes 2+ months
-	// after the actual conversation). The realignment spreads them
-	// evenly across [StartedAt, EndedAt] in their original order.
-	selectMarkdownActions, err := db.PrepareContext(ctx,
-		`SELECT id, timestamp FROM actions
-		  WHERE session_id = ?
-		    AND tool = 'antigravity'
-		    AND raw_tool_name LIKE 'markdown.%'
-		  ORDER BY timestamp ASC, id ASC`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare select markdown actions: %w", err)
-	}
-	defer selectMarkdownActions.Close()
-	updateActionTimestamp, err := db.PrepareContext(ctx,
-		`UPDATE actions SET timestamp = ? WHERE id = ?`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare action ts: %w", err)
-	}
-	defer updateActionTimestamp.Close()
-
-	// Tier 1 dedup: when structured trajectory surfaces authoritative
-	// ToolEvents (artifact edits, file views), delete the markdown
-	// `*Edited file…*` / `*Viewed…*` inline-tool rows that recovered
-	// the same edits with less detail. Run only for sessions where
-	// structured emitted tools; markdown user/assistant text rows are
-	// untouched (assistant text only lives in markdown — see Tier 2
-	// probe notes in docs/handovers/antigravity-tier-1-2-3-handoff-2026-05-04.md).
-	deleteMarkdownInlineTools, err := db.PrepareContext(ctx,
-		`DELETE FROM actions
-		  WHERE session_id = ?
-		    AND tool = 'antigravity'
-		    AND raw_tool_name LIKE 'markdown.inline.%'`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare delete inline tools: %w", err)
-	}
-	defer deleteMarkdownInlineTools.Close()
-
-	// Tier 2 dedup: when structured surfaces user_prompt rows from
-	// 1.2.19.2, delete markdown.user_input rows for the same session.
-	// Markdown's user_input was synthesized from `### User Input`
-	// blocks in the converted trajectory; structured carries the same
-	// text with deterministic SourceEventIDs and real per-step ts.
-	deleteMarkdownUserInputs, err := db.PrepareContext(ctx,
-		`DELETE FROM actions
-		  WHERE session_id = ?
-		    AND tool = 'antigravity'
-		    AND raw_tool_name = 'markdown.user_input'`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare delete user inputs: %w", err)
-	}
-	defer deleteMarkdownUserInputs.Close()
-
-	// Tier 3 dedup: when structured surfaces assistant_text rows
-	// from 1.2.20.1, delete markdown.planner_response rows for the
-	// same session.
-	deleteMarkdownPlanner, err := db.PrepareContext(ctx,
-		`DELETE FROM actions
-		  WHERE session_id = ?
-		    AND tool = 'antigravity'
-		    AND raw_tool_name = 'markdown.planner_response'`)
-	if err != nil {
-		return res, fmt.Errorf("backfill antigravity-project-root: prepare delete planner: %w", err)
-	}
-	defer deleteMarkdownPlanner.Close()
-
-	scrubber := scrub.New()
-
-	for _, dir := range conversationsDirs {
-		walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if filepath.Ext(path) != ".pb" {
-				return nil
-			}
-			if fileLimit > 0 && res.FilesScanned >= fileLimit {
-				return filepath.SkipAll
-			}
-			res.FilesScanned++
-
-			entry, ok := antigravity.ResolveIndexEntry(path)
-			if !ok {
-				return nil
-			}
-			res.IndexHits++
-
-			sessionID := strings.TrimSuffix(filepath.Base(path), ".pb")
-
-			if entry.ProjectRoot != "" && entry.ProjectRoot != "[antigravity]" {
-				info, gerr := git.Resolve(entry.ProjectRoot)
-				newRoot := entry.ProjectRoot
-				if gerr == nil && info.Root != "" {
-					newRoot = info.Root
-				}
-				pid, err := st.UpsertProject(ctx, newRoot, "")
-				if err == nil {
-					if r, err := updateSessionPID.ExecContext(ctx, pid, sessionID, pid); err == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.SessionsReattributed += int(n)
-						}
-					}
-					if r, err := updateActionsPID.ExecContext(ctx, pid, sessionID, pid); err == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.ActionsUpdated += int(n)
-						}
-					}
-				}
-			}
-
-			// Best-effort structured-trajectory enrichment.
-			// Re-fetching via the bridge is ~250ms per conversation;
-			// for ~100 sessions the total is ~30s. Failure (no
-			// language_server has the conversation loaded) is the
-			// common case for the ~15% miss rate — log and continue.
-			modelHint := entry.ModelHint
-			startedAt := ""
-			if !entry.Created.IsZero() {
-				startedAt = entry.Created.UTC().Format(time.RFC3339Nano)
-			}
-			structured, sErr := antigravity.FetchStructuredTrajectory(ctx, sessionID, entry.ProjectRoot, path, 30*time.Second, scrubber)
-			if sErr != nil {
-				res.StructuredFetchFailed++
-			} else {
-				res.StructuredFetched++
-				if structured.Model != "" {
-					modelHint = structured.Model
-				}
-				if !structured.StartedAt.IsZero() {
-					startedAt = structured.StartedAt.UTC().Format(time.RFC3339Nano)
-				}
-				// Insert tokens + new structured tool events in one
-				// idempotent Ingest call. Existing rows are
-				// no-op'd via the (source_file, source_event_id)
-				// UNIQUE constraint.
-				if len(structured.TokenEvents) > 0 || len(structured.ToolEvents) > 0 {
-					ir, ierr := st.Ingest(ctx, structured.ToolEvents, structured.TokenEvents, store.IngestOptions{})
-					if ierr == nil {
-						res.StructuredTokensInserted += ir.TokensInserted
-						res.StructuredToolsInserted += ir.ActionsInserted
-					}
-				}
-				// Tier 1 dedup: now that authoritative structured tool
-				// events are in the DB, drop the legacy markdown.inline.*
-				// rows for this session. Idempotent — re-runs find no
-				// rows to delete.
-				if len(structured.ToolEvents) > 0 {
-					if r, derr := deleteMarkdownInlineTools.ExecContext(ctx, sessionID); derr == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.MarkdownInlineToolsDedup += int(n)
-						}
-					}
-				}
-				// Tier 2 dedup: when structured surfaces user_prompt
-				// rows from 1.2.19.2, drop the markdown.user_input
-				// rows for this session.
-				var sawUserPrompt bool
-				assistantTextCount := 0
-				for _, ev := range structured.ToolEvents {
-					switch ev.RawToolName {
-					case "structured.user_prompt":
-						sawUserPrompt = true
-					case "structured.assistant_text":
-						assistantTextCount++
-					}
-				}
-				if sawUserPrompt {
-					if r, derr := deleteMarkdownUserInputs.ExecContext(ctx, sessionID); derr == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.MarkdownInlineToolsDedup += int(n)
-						}
-					}
-				}
-				// Tier 3 dedup is coverage-conditional. Only suppress
-				// markdown.planner_response when structured carries
-				// the assistant text for at least the threshold
-				// fraction of LLM calls. Below threshold (gemini
-				// sessions; 803add5e is 3/130 = 2%), markdown carries
-				// the missing narrative and must stay.
-				coverage := 0.0
-				if len(structured.TokenEvents) > 0 {
-					coverage = float64(assistantTextCount) / float64(len(structured.TokenEvents))
-				}
-				if coverage >= antigravity.AssistantTextCoverageThreshold {
-					if r, derr := deleteMarkdownPlanner.ExecContext(ctx, sessionID); derr == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.MarkdownInlineToolsDedup += int(n)
-						}
-					}
-				} else if coverage < antigravity.AssistantTextCoverageThreshold {
-					// Recover markdown.planner_response rows that may
-					// have been deleted by a prior over-aggressive
-					// dedup pass. Re-fetch markdown via the bridge,
-					// extract planner-response-only events, and
-					// idempotently INSERT (UNIQUE on
-					// (source_file, source_event_id) collapses re-runs).
-					md, mdErr := antigravity.FetchMarkdownTrajectory(ctx, sessionID, 30*time.Second)
-					if mdErr == nil && md != "" {
-						baseTs := structured.StartedAt
-						if baseTs.IsZero() && !entry.Created.IsZero() {
-							baseTs = entry.Created
-						}
-						if baseTs.IsZero() {
-							baseTs = time.Now().UTC()
-						}
-						plannerEvents := antigravity.ParseMarkdownPlannerResponses(
-							path, sessionID, entry.ProjectRoot, baseTs, scrubber, md,
-						)
-						if len(plannerEvents) > 0 {
-							ir, ierr := st.Ingest(ctx, plannerEvents, nil, store.IngestOptions{})
-							if ierr == nil {
-								res.MarkdownPlannerRecovered += ir.ActionsInserted
-							}
-						}
-					}
-				}
-				// Refresh existing token_usage timestamps so old rows
-				// (synthesised at 1s-apart from StartedAt by the
-				// first Path B release) get the new spread values.
-				// Also refresh stale message_id prefixes so the
-				// dashboard's per-message join lines up structured
-				// ToolEvents under their owning token row.
-				for _, te := range structured.TokenEvents {
-					newTs := te.Timestamp.UTC().Format(time.RFC3339Nano)
-					if r, uerr := updateTokenTimestamp.ExecContext(ctx,
-						newTs, te.SourceFile, te.SourceEventID, newTs); uerr == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.TokenTimestampsRefreshed += int(n)
-						}
-					}
-					if r, uerr := updateTokenMessageID.ExecContext(ctx,
-						te.MessageID, te.SourceFile, te.SourceEventID, te.MessageID); uerr == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.TokenMessageIDsRefreshed += int(n)
-						}
-					}
-				}
-				// Refresh existing structured action rows whose
-				// MessageID assignment changed (e.g. Option 1 moved
-				// run_command from step-fraction to nearest-token).
-				for _, ev := range structured.ToolEvents {
-					if r, uerr := updateActionMessageID.ExecContext(ctx,
-						ev.MessageID, ev.SourceFile, ev.SourceEventID, ev.MessageID); uerr == nil {
-						if n, _ := r.RowsAffected(); n > 0 {
-							res.ActionMessageIDsRefreshed += int(n)
-						}
-					}
-				}
-				// Realign markdown actions if we know the real
-				// conversation window AND the existing rows look
-				// like recovery wall-clock (i.e. they're more than
-				// a minute off the structured StartedAt).
-				if !structured.StartedAt.IsZero() {
-					n, _ := realignMarkdownActions(ctx,
-						selectMarkdownActions, updateActionTimestamp,
-						sessionID, structured.StartedAt, structured.EndedAt)
-					res.MarkdownActionsRealigned += n
-				}
-			}
-
-			if modelHint != "" || startedAt != "" {
-				if r, err := refreshSessionMeta.ExecContext(ctx, modelHint, startedAt, startedAt, sessionID); err == nil {
-					if n, _ := r.RowsAffected(); n > 0 {
-						res.SessionsRefreshed += int(n)
-						if structured.Model != "" {
-							res.StructuredModelLifted += int(n)
-						}
-					}
-				}
-			}
-			return nil
-		})
-		if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
-			continue
-		}
-	}
-	return res, nil
-}
-
-// realignMarkdownActions spreads existing markdown-derived action
-// rows for a session evenly across [startedAt, endedAt]. Pre-Path-B
-// markdown recovery used the recovery wall-clock as the base ts, so
-// all markdown rows clustered at the time observer last ran the
-// recovery — sometimes months after the actual conversation. This
-// realignment puts them back on the real timeline.
-//
-// No-op when:
-//   - no markdown actions exist for the session,
-//   - the existing min(timestamp) is already within 60s of startedAt
-//     (already realigned on a prior run, idempotent),
-//   - endedAt is zero or doesn't exceed startedAt (no spread window).
-//
-// Returns the count of rows whose timestamp changed.
-func realignMarkdownActions(ctx context.Context,
-	selectStmt, updateStmt *sql.Stmt,
-	sessionID string, startedAt, endedAt time.Time,
-) (int, error) {
-	rows, err := selectStmt.QueryContext(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	type row struct {
-		id int64
-		ts time.Time
-	}
-	var batch []row
-	for rows.Next() {
-		var r row
-		var tsStr string
-		if err := rows.Scan(&r.id, &tsStr); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		if t, perr := time.Parse(time.RFC3339Nano, tsStr); perr == nil {
-			r.ts = t
-		} else if t, perr := time.Parse("2006-01-02T15:04:05Z", tsStr); perr == nil {
-			r.ts = t
-		}
-		batch = append(batch, r)
-	}
-	rows.Close()
-	if len(batch) == 0 {
-		return 0, nil
-	}
-	// Idempotency guard: if the earliest stored ts is already within
-	// 60s of startedAt, the realignment already ran. Skip.
-	if !batch[0].ts.IsZero() && batch[0].ts.Sub(startedAt).Abs() < time.Minute {
-		return 0, nil
-	}
-	// Determine the spread window. If endedAt is missing, fall back
-	// to a synthetic 1s-apart window starting at startedAt — still
-	// a huge improvement over the recovery wall-clock since at
-	// least the absolute time anchor is correct.
-	dur := time.Duration(0)
-	if !endedAt.IsZero() && endedAt.After(startedAt) {
-		dur = endedAt.Sub(startedAt)
-	}
-	updated := 0
-	for i, r := range batch {
-		var newTs time.Time
-		if dur > 0 && len(batch) > 1 {
-			off := time.Duration(int64(dur) * int64(i) / int64(len(batch)-1))
-			newTs = startedAt.Add(off)
-		} else {
-			newTs = startedAt.Add(time.Duration(i) * time.Second)
-		}
-		if !newTs.Equal(r.ts) {
-			if _, err := updateStmt.ExecContext(ctx, newTs.UTC().Format(time.RFC3339Nano), r.id); err == nil {
-				updated++
-			}
-		}
-	}
-	return updated, nil
-}
-
 // readCodexSessionMeta pulls the (session_id, cwd) pair from a codex
 // rollout's first session_meta record. Returns ok=false if the file
 // is unreadable or doesn't contain a session_meta line in its first
@@ -4058,7 +3588,7 @@ func backfillCodexReasoning(ctx context.Context, db *sql.DB, sessionsDir string,
 		}
 		res.FilesScanned++
 
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // G122: walks the operator's own transcript tree read only
 		if err != nil {
 			return nil
 		}
@@ -4225,7 +3755,7 @@ func backfillOpenClawReasoning(ctx context.Context, db *sql.DB, sessionsDir stri
 		}
 		res.FilesScanned++
 
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // G122: walks the operator's own transcript tree read only
 		if err != nil {
 			return nil
 		}
@@ -4317,7 +3847,10 @@ type ClaudeCodeUserPromptsBackfill struct {
 // index — already-present rows are no-ops.
 func backfillClaudeCodeUserPrompts(ctx context.Context, db *sql.DB, projectsDir string, fileLimit int) (ClaudeCodeUserPromptsBackfill, error) {
 	res := ClaudeCodeUserPromptsBackfill{}
-	a := claudecode.New()
+	a, err := adapterForBackfill(models.ToolClaudeCode, "--claudecode-user-prompts")
+	if err != nil {
+		return res, err
+	}
 	st := store.New(db)
 
 	walkErr := filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, err error) error {
@@ -4347,7 +3880,7 @@ func backfillClaudeCodeUserPrompts(ctx context.Context, db *sql.DB, projectsDir 
 			return nil
 		}
 		ingestRes, err := st.Ingest(ctx, userPrompts, nil, store.IngestOptions{
-			IsNativeTool: claudecode.IsNativeTool,
+			IsNativeTool: nativeToolOf(a),
 		})
 		if err != nil {
 			return fmt.Errorf("backfill claudecode-user-prompts: ingest: %w", err)
@@ -4377,7 +3910,10 @@ type ClaudeCodeAPIErrorsBackfill struct {
 // present rows are no-ops.
 func backfillClaudeCodeAPIErrors(ctx context.Context, db *sql.DB, projectsDir string, fileLimit int) (ClaudeCodeAPIErrorsBackfill, error) {
 	res := ClaudeCodeAPIErrorsBackfill{}
-	a := claudecode.New()
+	a, err := adapterForBackfill(models.ToolClaudeCode, "--claudecode-api-errors")
+	if err != nil {
+		return res, err
+	}
 	st := store.New(db)
 
 	walkErr := filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, err error) error {
@@ -4407,7 +3943,7 @@ func backfillClaudeCodeAPIErrors(ctx context.Context, db *sql.DB, projectsDir st
 			return nil
 		}
 		ingestRes, err := st.Ingest(ctx, apiErrors, nil, store.IngestOptions{
-			IsNativeTool: claudecode.IsNativeTool,
+			IsNativeTool: nativeToolOf(a),
 		})
 		if err != nil {
 			return fmt.Errorf("backfill claudecode-api-errors: ingest: %w", err)
@@ -4464,7 +4000,10 @@ func backfillOpenCodeTokens(ctx context.Context, db *sql.DB) (OpenCodeTokensBack
 	}
 	srcRows.Close()
 
-	a := opencode.New()
+	a, err := adapterForBackfill(models.ToolOpenCode, "--opencode-tokens")
+	if err != nil {
+		return res, err
+	}
 	st := store.New(db)
 
 	for _, dbPath := range dbPaths {
@@ -4767,29 +4306,6 @@ func backfillPiMessageID(ctx context.Context, db *sql.DB) (MessageIDBackfill, er
 	return res, nil
 }
 
-func extractCursorHookInputs(body string) []string {
-	lines := strings.Split(body, "\n")
-	var blocks []string
-	var cur []string
-	inInput := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case trimmed == "INPUT:":
-			inInput = true
-			cur = cur[:0]
-		case trimmed == "OUTPUT:":
-			if inInput && len(cur) > 0 {
-				blocks = append(blocks, strings.Join(cur, "\n"))
-			}
-			inInput = false
-		case inInput:
-			cur = append(cur, line)
-		}
-	}
-	return blocks
-}
-
 // CursorUserPromptsBackfill summarises the --cursor-user-prompts pass.
 type CursorUserPromptsBackfill struct {
 	FilesScanned    int `json:"files_scanned"`
@@ -4797,298 +4313,11 @@ type CursorUserPromptsBackfill struct {
 	ActionsInserted int `json:"actions_inserted"`
 }
 
-// backfillCursorUserPrompts walks every cursor agent-transcripts JSONL
-// file under projectsDir and ingests user_prompt action rows for the
-// turn-opening user lines. The cursor adapter's live path emits user
-// prompts via the beforeSubmitPrompt hook; this catches sessions that
-// pre-date the hook installation (or sessions where the hook fires for
-// some prompts but not others).
-//
-// Each user line's text is unwrapped via stripUserQueryWrapper so the
-// row carries the user-typed prompt rather than the
-// `<user_query>...</user_query>` envelope cursor's runtime injects.
-//
-// Idempotent via the (source_file, source_event_id) UNIQUE index —
-// re-running over a session that already has user_prompt rows is a
-// no-op. Skips subagents/*.jsonl explicitly; those are handled in
-// the parallel --cursor-subagents pass.
-func backfillCursorUserPrompts(ctx context.Context, db *sql.DB, projectsDir string, fileLimit int) (CursorUserPromptsBackfill, error) {
-	res := CursorUserPromptsBackfill{}
-	st := store.New(db)
-
-	type turnRef struct {
-		MessageID string
-		Timestamp string
-	}
-
-	walkErr := filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".jsonl" || strings.Contains(path, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
-			return nil
-		}
-		sessionID := filepath.Base(filepath.Dir(path))
-		if strings.TrimSuffix(filepath.Base(path), ".jsonl") != sessionID {
-			return nil
-		}
-		if !strings.Contains(path, string(filepath.Separator)+"agent-transcripts"+string(filepath.Separator)) {
-			return nil
-		}
-		if fileLimit > 0 && res.FilesScanned >= fileLimit {
-			return fs.SkipAll
-		}
-		res.FilesScanned++
-
-		var projectRoot string
-		_ = db.QueryRowContext(ctx, `
-			SELECT COALESCE(p.root_path, '')
-			  FROM sessions s
-			  LEFT JOIN projects p ON p.id = s.project_id
-			 WHERE s.id = ?`, sessionID).Scan(&projectRoot)
-		if projectRoot == "" {
-			return nil
-		}
-
-		rows, err := db.QueryContext(ctx, `
-			SELECT message_id, timestamp
-			  FROM token_usage
-			 WHERE tool = 'cursor' AND session_id = ? AND message_id IS NOT NULL AND message_id != ''
-			 ORDER BY timestamp ASC, id ASC`, sessionID)
-		if err != nil {
-			return err
-		}
-		var refs []turnRef
-		for rows.Next() {
-			var ref turnRef
-			if err := rows.Scan(&ref.MessageID, &ref.Timestamp); err != nil {
-				rows.Close()
-				return err
-			}
-			refs = append(refs, ref)
-		}
-		rows.Close()
-		if len(refs) == 0 {
-			return nil
-		}
-
-		turns, err := cursor.ParseTranscriptTurns(path)
-		if err != nil {
-			return nil
-		}
-		n := len(turns)
-		if len(refs) < n {
-			n = len(refs)
-		}
-		var events []models.ToolEvent
-		for i := 0; i < n; i++ {
-			ts, _ := time.Parse(time.RFC3339Nano, refs[i].Timestamp)
-			ev, ok := cursor.BuildTranscriptUserPromptEvent(turns[i], sessionID, projectRoot, refs[i].MessageID, path, ts, nil)
-			if !ok {
-				continue
-			}
-			events = append(events, ev)
-		}
-		res.UserEventsFound += len(events)
-		if len(events) == 0 {
-			return nil
-		}
-		ingestRes, err := st.Ingest(ctx, events, nil, store.IngestOptions{})
-		if err != nil {
-			return fmt.Errorf("backfill cursor-user-prompts: ingest: %w", err)
-		}
-		res.ActionsInserted += ingestRes.ActionsInserted
-		return nil
-	})
-	if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
-		return res, fmt.Errorf("backfill cursor-user-prompts: walk %s: %w", projectsDir, walkErr)
-	}
-	return res, nil
-}
-
 // CursorSubagentsBackfill summarises the --cursor-subagents pass.
 type CursorSubagentsBackfill struct {
 	FilesScanned    int `json:"files_scanned"`
 	EventsBuilt     int `json:"events_built"`
 	ActionsInserted int `json:"actions_inserted"`
-}
-
-// backfillCursorSubagents walks the
-// agent-transcripts/<parent_uuid>/subagents/<sub_uuid>.jsonl files
-// Cursor writes when the parent agent spawns a sub-agent. The current
-// cursor backfill explicitly skips these (the parent transcript only
-// records a `Subagent` tool_use; the sub-agent's actual work is
-// in the sub-file). This pass ingests those nested transcripts as
-// sidechain rows under the parent session (IsSidechain=true,
-// SessionID = parent_uuid), mirroring claudecode's isSidechain
-// semantics.
-//
-// Each sub-agent line is timestamped from the file's mtime (the
-// sub transcript carries no per-line timestamps). MessageID is
-// synthesized as "sub:<sub_uuid>:turn<N>" so rows from the same
-// sub-agent thread group together; SourceEventID prefixes ensure
-// idempotency on re-runs.
-func backfillCursorSubagents(ctx context.Context, db *sql.DB, projectsDir string, fileLimit int) (CursorSubagentsBackfill, error) {
-	res := CursorSubagentsBackfill{}
-	st := store.New(db)
-
-	walkErr := filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".jsonl" {
-			return nil
-		}
-		sep := string(filepath.Separator)
-		if !strings.Contains(path, sep+"subagents"+sep) || !strings.Contains(path, sep+"agent-transcripts"+sep) {
-			return nil
-		}
-		if fileLimit > 0 && res.FilesScanned >= fileLimit {
-			return fs.SkipAll
-		}
-		res.FilesScanned++
-
-		subUUID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-		// path = .../agent-transcripts/<parent_uuid>/subagents/<sub>.jsonl
-		// dir(path) = .../subagents
-		// dir(dir(path)) = .../<parent_uuid>
-		parentUUID := filepath.Base(filepath.Dir(filepath.Dir(path)))
-
-		var projectRoot string
-		_ = db.QueryRowContext(ctx, `
-			SELECT COALESCE(p.root_path, '')
-			  FROM sessions s
-			  LEFT JOIN projects p ON p.id = s.project_id
-			 WHERE s.id = ?`, parentUUID).Scan(&projectRoot)
-		if projectRoot == "" {
-			return nil
-		}
-
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			return nil
-		}
-		ts := info.ModTime().UTC()
-
-		turns, err := cursor.ParseTranscriptTurns(path)
-		if err != nil {
-			return nil
-		}
-
-		var events []models.ToolEvent
-		for i, turn := range turns {
-			generationID := fmt.Sprintf("sub:%s:turn%d", subUUID, i)
-			if ev, ok := cursor.BuildTranscriptUserPromptEvent(turn, parentUUID, projectRoot, generationID, path, ts, nil); ok {
-				ev.IsSidechain = true
-				events = append(events, ev)
-			}
-			toolEvs := cursor.BuildTranscriptToolEvents(turn, parentUUID, projectRoot, generationID, path, ts, nil)
-			for _, te := range toolEvs {
-				te.IsSidechain = true
-				events = append(events, te)
-			}
-		}
-		res.EventsBuilt += len(events)
-		if len(events) == 0 {
-			return nil
-		}
-		ingestRes, err := st.Ingest(ctx, events, nil, store.IngestOptions{})
-		if err != nil {
-			return fmt.Errorf("backfill cursor-subagents: ingest: %w", err)
-		}
-		res.ActionsInserted += ingestRes.ActionsInserted
-		return nil
-	})
-	if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
-		return res, fmt.Errorf("backfill cursor-subagents: walk %s: %w", projectsDir, walkErr)
-	}
-	return res, nil
-}
-
-func backfillCursorTranscriptActions(ctx context.Context, db *sql.DB, projectsDir string, fileLimit int) (MessageIDBackfill, error) {
-	res := MessageIDBackfill{}
-	st := store.New(db)
-
-	type turnRef struct {
-		MessageID string
-		Timestamp string
-	}
-
-	walkErr := filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".jsonl" || strings.Contains(path, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
-			return nil
-		}
-		sessionID := filepath.Base(filepath.Dir(path))
-		if strings.TrimSuffix(filepath.Base(path), ".jsonl") != sessionID {
-			return nil
-		}
-		if !strings.Contains(path, string(filepath.Separator)+"agent-transcripts"+string(filepath.Separator)) {
-			return nil
-		}
-		if fileLimit > 0 && res.FilesScanned >= fileLimit {
-			return fs.SkipAll
-		}
-		res.FilesScanned++
-
-		var projectRoot string
-		_ = db.QueryRowContext(ctx, `
-			SELECT COALESCE(p.root_path, '')
-			  FROM sessions s
-			  LEFT JOIN projects p ON p.id = s.project_id
-			 WHERE s.id = ?`, sessionID).Scan(&projectRoot)
-		if projectRoot == "" {
-			return nil
-		}
-
-		rows, err := db.QueryContext(ctx, `
-			SELECT message_id, timestamp
-			  FROM token_usage
-			 WHERE tool = 'cursor' AND session_id = ? AND message_id IS NOT NULL AND message_id != ''
-			 ORDER BY timestamp ASC, id ASC`, sessionID)
-		if err != nil {
-			return err
-		}
-		var refs []turnRef
-		for rows.Next() {
-			var ref turnRef
-			if err := rows.Scan(&ref.MessageID, &ref.Timestamp); err != nil {
-				rows.Close()
-				return err
-			}
-			refs = append(refs, ref)
-		}
-		rows.Close()
-		if len(refs) == 0 {
-			return nil
-		}
-
-		turns, err := cursor.ParseTranscriptTurns(path)
-		if err != nil {
-			return nil
-		}
-		n := len(turns)
-		if len(refs) < n {
-			n = len(refs)
-		}
-		for i := 0; i < n; i++ {
-			ts, _ := time.Parse(time.RFC3339Nano, refs[i].Timestamp)
-			events := cursor.BuildTranscriptToolEvents(turns[i], sessionID, projectRoot, refs[i].MessageID, path, ts, nil)
-			res.LinesExamined += len(events)
-			ingestRes, err := st.Ingest(ctx, events, nil, store.IngestOptions{})
-			if err != nil {
-				return err
-			}
-			res.ActionsUpdated += ingestRes.ActionsInserted
-		}
-		return nil
-	})
-	if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
-		return res, fmt.Errorf("backfill cursor transcript actions: walk: %w", walkErr)
-	}
-	return res, nil
 }
 
 // setupBackfillDryRun implements the `observer backfill --dry-run`
@@ -5124,7 +4353,7 @@ func setupBackfillDryRun(ctx context.Context, configPath string, out io.Writer) 
 	}
 	livePath := cfg.Observer.DBPath
 	if livePath == "" {
-		return "", nil, fmt.Errorf("config has no observer.db_path — cannot snapshot")
+		return "", nil, fmt.Errorf("config has no observer.db_path - cannot snapshot")
 	}
 
 	snapshotPath := filepath.Join(os.TempDir(),
@@ -5145,7 +4374,7 @@ func setupBackfillDryRun(ctx context.Context, configPath string, out io.Writer) 
 	}
 
 	fmt.Fprintln(out, "════════════════════════════════════════════════════════════════")
-	fmt.Fprintln(out, "  DRY RUN — live database is not modified")
+	fmt.Fprintln(out, "  DRY RUN - live database is not modified")
 	fmt.Fprintf(out, "  live DB:  %s\n", livePath)
 	fmt.Fprintf(out, "  snapshot: %s\n", snapshotPath)
 	fmt.Fprintln(out, "  the row counts reported below reflect what WOULD update")
@@ -5194,6 +4423,75 @@ func snapshotSQLiteDB(ctx context.Context, src, dst string) error {
 	// writers on the live DB don't see disruption.
 	if _, err := srcDB.ExecContext(ctx, "VACUUM INTO ?", dst); err != nil {
 		return fmt.Errorf("VACUUM INTO: %w", err)
+	}
+	return nil
+}
+
+// adapterForBackfill returns the adapter a single-tool backfill pass parses
+// with, through the adapter set instead of the adapter's package, so a build
+// that compiled the adapter out (L1, lane MP-ADP) still builds and the pass
+// refuses with a plain reason instead.
+func adapterForBackfill(tool, flag string) (adapter.Adapter, error) {
+	a, ok := adapterdefaults.ByTool(tool)
+	if !ok {
+		return nil, adapterPassNotInBuild(flag, tool)
+	}
+	return a, nil
+}
+
+// errAdapterNotInBuild marks a backfill pass refused because its adapter
+// was compiled out (lane MP-L1D, T-598). A composite run (--all,
+// --message-id) skips such a pass instead of failing on it.
+var errAdapterNotInBuild = errors.New("adapter not in this build")
+
+// adapterNotInBuildError is the refusal of a backfill pass whose adapter
+// this build does not contain; errors.Is matches errAdapterNotInBuild.
+type adapterNotInBuildError struct{ flag, tool string }
+
+func (e adapterNotInBuildError) Error() string {
+	return fmt.Sprintf("%s: the %s adapter is not in this build (observer components list)", e.flag, e.tool)
+}
+
+// Is reports errAdapterNotInBuild, so a composite run can skip the pass.
+func (e adapterNotInBuildError) Is(target error) bool { return target == errAdapterNotInBuild }
+
+// adapterPassNotInBuild is the refusal of a backfill pass whose adapter
+// this build does not contain.
+func adapterPassNotInBuild(flag, tool string) error {
+	return adapterNotInBuildError{flag: flag, tool: tool}
+}
+
+// adapterInBuild reports whether this binary contains tool's adapter.
+func adapterInBuild(tool string) bool {
+	_, ok := adapterdefaults.ByTool(tool)
+	return ok
+}
+
+// backfillAllPass is one adapter-owned pass --all switches on.
+type backfillAllPass struct {
+	on   *bool
+	flag string
+	tool string
+}
+
+// skipOmittedAdapterPasses switches off the --all passes whose adapter this
+// build compiled out, saying so on w, so a custom build's `observer backfill
+// --all` runs every pass it can instead of failing on the first refusal.
+// An explicitly named flag still refuses (adapterPassNotInBuild).
+func skipOmittedAdapterPasses(passes []backfillAllPass, w io.Writer) {
+	for _, p := range passes {
+		if *p.on && !adapterInBuild(p.tool) {
+			*p.on = false
+			fmt.Fprintf(w, "backfill --all: skipping %s (the %s adapter is not in this build)\n", p.flag, p.tool)
+		}
+	}
+}
+
+// nativeToolOf returns a's native-tool predicate (adapter.NativeToolClassifier)
+// for store.IngestOptions.IsNativeTool, or nil when a classifies none.
+func nativeToolOf(a adapter.Adapter) func(string) bool {
+	if nc, ok := a.(adapter.NativeToolClassifier); ok {
+		return nc.IsNativeTool
 	}
 	return nil
 }

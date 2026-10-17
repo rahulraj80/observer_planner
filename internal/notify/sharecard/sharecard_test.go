@@ -9,7 +9,7 @@ import (
 func sampleData() Data {
 	return Data{
 		PeriodKind:  "week",
-		PeriodLabel: "Jun 30 – Jul 6, 2026",
+		PeriodLabel: "Jun 30 - Jul 6, 2026",
 		TotalUSD:    1234.56,
 		TurnCount:   1204,
 		TopModels: []LineItem{
@@ -31,10 +31,10 @@ func sampleData() Data {
 func TestMarkdown_ContainsKeyFacts(t *testing.T) {
 	md := sampleData().Markdown()
 	for _, want := range []string{
-		"Jun 30 – Jul 6, 2026",
+		"Jun 30 - Jul 6, 2026",
 		"$1,234.56",
 		"1,204 turns",
-		"claude-opus-4-8 — $812.40",
+		"claude-opus-4-8 - $812.40",
 		"63% of input tokens",
 		"Tool mix:",
 		"claude-code, codex, cursor",

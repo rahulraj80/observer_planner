@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import clsx from "clsx";
+import { useLocation } from "react-router-dom";
 import {
   useFilters,
   windowLabel,
@@ -8,16 +8,21 @@ import {
   type Window,
 } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
-import type { ToolsResponse, ProjectsResponse } from "@/lib/types";
+import type { CostSummary, ToolsResponse, ProjectsResponse } from "@/lib/types";
 import { toolMeta } from "@/lib/tools";
+import { barNoteFilters, filterScopeFor, ignoredFiltersNote } from "@/lib/filterScope";
 import {
   ComboChip,
   type ComboOption,
   DateRangePopover,
+  Icon,
+  ModelFilterChip,
   ToolDot,
   Tooltip,
 } from "./primitives";
+import { SearchChip } from "@shared/primitives";
 import { HelpInd } from "./HelpInd";
+import { Box, Clock, Folder } from "lucide-react";
 
 const WINDOW_OPTIONS: ComboOption[] = [
   { value: "1h", label: "1 hr", searchable: "1 hr hour sub-day" },
@@ -37,112 +42,84 @@ export function FilterBar({
 }: {
   onOpenPalette: () => void;
 }) {
-  const { win, customRange, tool, setTool, project, setProject, query } =
+  const { win, customRange, tool, setTool, project, setProject, model, setModel, query } =
     useFilters();
+  // Route-aware: the window / tool / project chips show only where the page
+  // reads them (lib/filterScope.ts, tab-aware). The Model chip is the one
+  // overarching filter (D-323): always in the bar, disabled where the page
+  // cannot filter by model, and the note says so. Search opens the global
+  // palette, so it stays.
+  const { pathname, search } = useLocation();
+  const scope = filterScopeFor(pathname, search);
+  const ignored = barNoteFilters(scope, { tool, project, model });
 
   // /api/tools is the source of truth for which tools have data in
-  // the active window (mirrors the legacy dashboard's behaviour).
+  // the active window (mirrors the legacy dashboard's behaviour). Neither
+  // list is fetched on a page that does not show its picker.
   const tools = useApi<ToolsResponse>(
-    "/api/tools",
+    scope.tool ? "/api/tools" : null,
     { ...windowParams(win, customRange) },
     [win, customRange],
   );
-  const projects = useApi<ProjectsResponse>("/api/projects");
+  const projects = useApi<ProjectsResponse>(scope.project ? "/api/projects" : null);
+  // The models seen under the current selection (the per-model cost rollup
+  // for the window AND the chosen tool / project, never the model filter
+  // itself): the Model picker lists only what the rest of the bar leaves in
+  // view. A chosen model that falls outside a new tool / project selection
+  // stays chosen and is marked "no data in this selection" (ModelSelect).
+  const toolArg = scope.tool && tool !== "all" ? tool : undefined;
+  const projectArg = scope.project && project !== "all" ? project : undefined;
+  const models = useApi<CostSummary>(
+    scope.model ? "/api/models" : null,
+    { ...windowParams(win, customRange), tool: toolArg, project: projectArg },
+    [win, customRange, toolArg, projectArg],
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2 gap-y-2 border-b border-line-1 bg-bg-1 px-3 py-2 lg:h-[var(--filterbar-h)] lg:flex-nowrap lg:gap-3 lg:px-5 lg:py-0">
-      <WindowSelect />
+      {scope.window && <WindowSelect />}
 
-      <ToolSelect
-        value={tool}
-        onChange={setTool}
-        tools={tools.data?.tools ?? []}
+      {scope.tool && (
+        <ToolSelect
+          value={tool}
+          onChange={setTool}
+          tools={tools.data?.tools ?? []}
+        />
+      )}
+
+      {scope.project && (
+        <ProjectSelect
+          value={project}
+          onChange={setProject}
+          projects={projects.data?.rows ?? []}
+        />
+      )}
+
+      <ModelSelect
+        value={model}
+        onChange={setModel}
+        rows={models.data?.rows ?? []}
+        loaded={scope.model && models.data != null && !models.loading}
+        disabled={!scope.model}
       />
 
-      <ProjectSelect
-        value={project}
-        onChange={setProject}
-        projects={projects.data?.rows ?? []}
-      />
+      <SearchChip query={query} onOpen={onOpenPalette} />
 
-      <SearchTrigger query={query} onOpen={onOpenPalette} />
+      {/* A tool / project / model filter that is set but not read here is
+          still applied on the pages that read it; say so rather than hide it.
+          The always-present Model chip is named here whenever it is disabled. */}
+      {ignored.length > 0 && (
+        <span className="text-[11px] text-fg-3">{ignoredFiltersNote(ignored)}</span>
+      )}
 
       {/* Spacer pushes the loading note to the right on desktop; on
           mobile it would force an unwanted wrap break, so it's hidden
           below lg (the wrapped controls flow left-to-right instead). */}
       <div className="hidden flex-1 lg:block" />
       <span className="text-[11px] text-fg-3">
-        {tools.loading || projects.loading ? "loading filters…" : null}
+        {tools.loading || projects.loading || models.loading ? "loading filters…" : null}
       </span>
     </div>
-  );
-}
-
-// SearchTrigger — button-chip that opens the ⌘K palette. Mirrors
-// design/shell.jsx:168-172. When a global query is set, the chip
-// shows it (truncated) so the user has visible feedback that a
-// search is in effect. The ⌘K shortcut is wired in App.tsx so it
-// works from anywhere, not just FilterBar mount.
-function SearchTrigger({
-  query,
-  onOpen,
-}: {
-  query: string;
-  onOpen: () => void;
-}) {
-  const trimmed = query.trim();
-  return (
-    <Tooltip
-      content={
-        <>
-          Open command palette <kbd>⌘K</kbd> — search pages, sessions, actions
-        </>
-      }
-      maxWidth={320}
-    >
-    <button
-      type="button"
-      onClick={onOpen}
-      className={clsx(
-        "flex h-7 items-center gap-1.5 rounded-2 border bg-bg-2 px-2 text-[11px] transition-colors",
-        trimmed
-          ? "border-accent/50 text-fg-1"
-          : "border-line-2 text-fg-3 hover:bg-bg-3 hover:text-fg-1",
-      )}
-    >
-      <SearchIcon />
-      {trimmed ? (
-        <span className="max-w-[180px] truncate font-mono text-[11px] text-fg-0">
-          {trimmed}
-        </span>
-      ) : (
-        <span>Search anything…</span>
-      )}
-      <kbd className="ml-0.5 rounded-1 border border-line-3 bg-bg-3 px-1 py-px font-mono text-[9.5px] text-fg-3">
-        ⌘K
-      </kbd>
-    </button>
-    </Tooltip>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-      <circle
-        cx="7"
-        cy="7"
-        r="4.5"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-      <path
-        d="m10.5 10.5 3 3"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }
 
@@ -179,7 +156,7 @@ function WindowSelect() {
         value={win}
         onChange={onPick}
         options={WINDOW_OPTIONS}
-        icon={<ClockIcon />}
+        icon={<Icon icon={Clock} size={13} className="text-fg-3" />}
         popoverWidth={200}
         placeholder="Filter windows…"
         buttonValueRender={() => (
@@ -236,11 +213,13 @@ function ToolSelect({
       value={value}
       onChange={onChange}
       options={options}
-      icon={<ToolIcon />}
+      icon={<Icon icon={Box} size={13} className="text-fg-3" />}
       popoverWidth={300}
       placeholder="Filter tools…"
-      buttonValueRender={(sel) => {
-        if (value === "all" || !sel) {
+      // The chip shows the APPLIED filter, even before /api/tools answers (a
+      // filter restored from the URL is in force while the list loads).
+      buttonValueRender={() => {
+        if (value === "all") {
           return <b className="font-semibold text-fg-0">all</b>;
         }
         return (
@@ -291,11 +270,13 @@ function ProjectSelect({
       value={value}
       onChange={onChange}
       options={options}
-      icon={<FolderIcon />}
+      icon={<Icon icon={Folder} size={13} className="text-fg-3" />}
       popoverWidth={420}
       placeholder="Filter projects…"
-      buttonValueRender={(sel) => {
-        if (value === "all" || !sel) {
+      // Like the tool chip: the applied filter, even before /api/projects
+      // answers.
+      buttonValueRender={() => {
+        if (value === "all") {
           return <b className="font-semibold text-fg-0">all</b>;
         }
         return (
@@ -316,76 +297,31 @@ function ProjectSelect({
   );
 }
 
-function ClockIcon() {
+// ModelSelect is the Model chip: the shared ModelFilterChip (one control for
+// the node and org dashboards) plus this bar's help indicator.
+function ModelSelect({
+  value,
+  onChange,
+  rows,
+  loaded,
+  disabled,
+}: {
+  value: string;
+  onChange: (s: string) => void;
+  rows: { key: string; turn_count: number }[];
+  loaded: boolean;
+  disabled: boolean;
+}) {
   return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      className="text-fg-3"
-    >
-      <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M8 4.5V8l2.5 1.5"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ToolIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      className="text-fg-3"
-    >
-      <path
-        d="M8 1.5 2 5v6l6 3.5L14 11V5L8 1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M2 5l6 3.5m0 0L14 5M8 8.5V14.5"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      className="text-fg-3"
-    >
-      <path
-        d="M2 4.5A1 1 0 0 1 3 3.5h3.6l1.4 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4.5Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <div className="flex items-center gap-1" data-tour="model-filter">
+      <ModelFilterChip value={value} onChange={onChange} rows={rows} loaded={loaded} disabled={disabled} />
+      <HelpInd id="filter.model" />
+    </div>
   );
 }
 
 function shortenPath(p: string): string {
-  if (!p) return "—";
+  if (!p) return "-";
   const parts = p.split("/").filter(Boolean);
   if (parts.length <= 2) return p;
   return ".../" + parts.slice(-2).join("/");

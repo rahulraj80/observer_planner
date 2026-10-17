@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 )
@@ -29,7 +31,7 @@ func newGetFileFixture(t *testing.T, opts GetFileOptions) *getFileFixture {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -351,7 +353,7 @@ func TestGetFile_AuditWrittenOnSuccess(t *testing.T) {
 
 func TestGetFile_NotRegisteredWhenDisabled(t *testing.T) {
 	dir := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	s, _ := New(Options{
 		DB: database, ServerName: "test", ServerVersion: "0",

@@ -136,7 +136,7 @@ func DeadCode(g codeintel.Graph, onlyUnexported bool) []DeadSymbol {
 		}
 		reason := "no inbound CALLS edge"
 		if exported {
-			reason += " (exported — may be public API or an external entrypoint)"
+			reason += " (exported - may be public API or an external entrypoint)"
 		}
 		out = append(out, DeadSymbol{
 			ID: n.ID, Name: n.Name, FQN: n.FQN, Kind: n.Kind,

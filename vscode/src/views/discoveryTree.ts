@@ -87,7 +87,7 @@ export class DiscoveryTreeProvider implements vscode.TreeDataProvider<vscode.Tre
         return [makePlaceholder('Loading…')];
       case 'error':
         return [
-          makePlaceholder('Failed to load — check Output channel', {
+          makePlaceholder('Failed to load - check Output channel', {
             tooltip: this.status.message,
           }),
         ];

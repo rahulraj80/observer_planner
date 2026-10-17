@@ -18,7 +18,7 @@ import (
 func openForecastTestDB(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fc.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -345,11 +345,11 @@ func TestHandleSessionCacheForecast_RealisticDollarMagnitudes(t *testing.T) {
 	// which the fixture controls but the next reviewer might not).
 	const sanityCap = 10.0
 	if resp.SwitchCostUSD > sanityCap {
-		t.Errorf("SwitchCostUSD = %v exceeds sanity cap $%v — likely $/M units leaked into RatePair",
+		t.Errorf("SwitchCostUSD = %v exceeds sanity cap $%v - likely $/M units leaked into RatePair",
 			resp.SwitchCostUSD, sanityCap)
 	}
 	if resp.PerTurnBeforeUSD > sanityCap {
-		t.Errorf("PerTurnBeforeUSD = %v exceeds sanity cap $%v — units regression",
+		t.Errorf("PerTurnBeforeUSD = %v exceeds sanity cap $%v - units regression",
 			resp.PerTurnBeforeUSD, sanityCap)
 	}
 }

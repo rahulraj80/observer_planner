@@ -1,0 +1,26 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "currency": "VerifiedOfficial",
+    "enforcement": "VerifiedOfficial",
+    "enforcement.status": "VerifiedOfficial",
+    "interval": "VerifiedOfficial",
+    "object": "VerifiedOfficial",
+    "threshold_amount": "VerifiedOfficial"
+  },
+  "fixture_sha256": "1919066d14c0fa1ff812117c1e5b1b568a02f0cf0bb95320db2ce48f74566755",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/projects/{project_id}/spend_limit",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId Getprojectspendlimit.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_spend_limit"
+}

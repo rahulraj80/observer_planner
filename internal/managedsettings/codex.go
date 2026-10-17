@@ -116,7 +116,7 @@ func codexManagedConfig(opts CodexOptions, pkg string) string {
 	if opts.IncludeMCP {
 		b.WriteString("# Pin Observer's MCP server for in-session project-knowledge tools. The npx\n")
 		b.WriteString("# bootstrap self-installs the matching platform binary per node. NOTE: this\n")
-		b.WriteString("# pin delivers in-session TOOLS, NOT telemetry — see the README.\n")
+		b.WriteString("# pin delivers in-session TOOLS, NOT telemetry - see the README.\n")
 		b.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", CodexMCPServerName))
 		b.WriteString("command = \"npx\"\n")
 		b.WriteString(fmt.Sprintf("args = [\"-y\", %q, \"serve\"]\n\n", pkg))
@@ -129,7 +129,7 @@ func codexManagedConfig(opts CodexOptions, pkg string) string {
 		// TOML / a silently-wrong redirect, so the admin uncomments after
 		// confirming the shape against Codex's config-reference. THIS block (not
 		// the MCP pin) is what would deliver native per-turn telemetry.
-		b.WriteString("# (Rail A, optional — UNCOMMENT after confirming key nesting against Codex's\n")
+		b.WriteString("# (Rail A, optional - UNCOMMENT after confirming key nesting against Codex's\n")
 		b.WriteString("# config-reference) Redirect Codex's native OpenTelemetry to Observer's OTLP\n")
 		b.WriteString("# receiver. THIS is what delivers per-turn telemetry (the MCP pin above does not).\n")
 		b.WriteString("# [otel]\n")
@@ -147,25 +147,25 @@ func codexManagedConfig(opts CodexOptions, pkg string) string {
 // deliberately rather than relying on an invented key that silently no-ops.
 func codexRequirements(opts CodexOptions) string {
 	var b strings.Builder
-	b.WriteString("# Observer-managed Codex requirements (requirements.toml) — ENFORCED.\n")
+	b.WriteString("# Observer-managed Codex requirements (requirements.toml) - ENFORCED.\n")
 	b.WriteString("# When a user's config/profile/CLI conflicts with a rule here, Codex falls\n")
 	b.WriteString("# back to a compatible value and notifies the user. Deploy per the README\n")
 	b.WriteString("# (system path /etc/codex/requirements.toml or MDM requirements_toml_base64).\n\n")
 
 	if opts.EnforceManagedHooksOnly {
-		b.WriteString("# Run ONLY managed hooks; ignore user/project/session hooks. Strong — it\n")
+		b.WriteString("# Run ONLY managed hooks; ignore user/project/session hooks. Strong - it\n")
 		b.WriteString("# disables a user's own hooks. Enabled because --enforce-managed-hooks was set.\n")
 		b.WriteString("allow_managed_hooks_only = true\n\n")
 	} else {
 		b.WriteString("# Optional: run only managed hooks (ignore user/project/session hooks).\n")
-		b.WriteString("# Uncomment to enforce. Strong — it disables a user's own hooks.\n")
+		b.WriteString("# Uncomment to enforce. Strong - it disables a user's own hooks.\n")
 		b.WriteString("# allow_managed_hooks_only = true\n\n")
 	}
 
 	if opts.IncludeMCP {
 		b.WriteString("# Optional MCP allowlist enforcement: restrict which MCP servers users may\n")
 		b.WriteString("# enable. Codex's config-reference documents this enforcement, but the exact\n")
-		b.WriteString("# key was not pinned in Observer's Phase-0 research — CONFIRM the key name\n")
+		b.WriteString("# key was not pinned in Observer's Phase-0 research - CONFIRM the key name\n")
 		b.WriteString("# against the config-reference before relying on it. Until then,\n")
 		b.WriteString(fmt.Sprintf("# managed_config.toml's [mcp_servers.%s] ships the server as a DEFAULT pin.\n", CodexMCPServerName))
 		b.WriteString(fmt.Sprintf("# allowed_mcp_servers = [%q]\n", CodexMCPServerName))
@@ -179,10 +179,10 @@ func codexReadme(opts CodexOptions, pkg string) string {
 	var b strings.Builder
 	b.WriteString("# Observer managed-config for OpenAI Codex\n\n")
 	b.WriteString("Two artifacts, two layers of Codex's policy model:\n\n")
-	b.WriteString("- **managed_config.toml** — DEFAULTS the user may change in-session (Codex\n")
+	b.WriteString("- **managed_config.toml** - DEFAULTS the user may change in-session (Codex\n")
 	b.WriteString("  reapplies them next launch; they override even CLI `--config`). This is the\n")
 	b.WriteString("  artifact that wires Observer up.\n")
-	b.WriteString("- **requirements.toml** — ENFORCED rules. A conflicting user value falls back\n")
+	b.WriteString("- **requirements.toml** - ENFORCED rules. A conflicting user value falls back\n")
 	b.WriteString("  to a compatible one and the user is notified.\n\n")
 
 	if opts.IncludeMCP {
@@ -207,7 +207,7 @@ func codexReadme(opts CodexOptions, pkg string) string {
 	if strings.TrimSpace(opts.OTelEndpoint) != "" {
 		b.WriteString(fmt.Sprintf(
 			"An optional `[otel]` block redirects Codex's **native** OpenTelemetry to\n"+
-				"Observer's OTLP receiver (%s) — Rail A. VERIFY the exact `[otel]` key nesting\n"+
+				"Observer's OTLP receiver (%s) - Rail A. VERIFY the exact `[otel]` key nesting\n"+
 				"against Codex's config-reference before fleet deploy.\n\n",
 			opts.OTelEndpoint,
 		))
@@ -218,7 +218,7 @@ func codexReadme(opts CodexOptions, pkg string) string {
 	b.WriteString("  `/etc/codex/requirements.toml` and `managed_config.toml` next to the user's\n")
 	b.WriteString("  Codex config (or the system config dir). Verify Codex picks them up on launch.\n")
 	b.WriteString("- **Fleet (MDM):** push `requirements.toml` as the `requirements_toml_base64`\n")
-	b.WriteString("  value — base64 of the file (the CLI prints it with `--print-mdm-base64`).\n")
+	b.WriteString("  value - base64 of the file (the CLI prints it with `--print-mdm-base64`).\n")
 	b.WriteString("- **Precedence (highest→lowest):** cloud-managed requirements → MDM\n")
 	b.WriteString("  `requirements_toml_base64` → system `/etc/codex/requirements.toml`.\n")
 	return b.String()

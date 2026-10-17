@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useApi } from "@/lib/useApi";
-import { fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtUSD } from "@/lib/format";
+import { budgetBannerSentence } from "@/lib/costDisplayModel";
+import { budgetRequestLink } from "@/lib/requestEntry";
 import type { BudgetResponse, BudgetScope } from "@/lib/types";
 
-// BudgetBanner — slim strip under the TopBar when a monthly budget
+// BudgetBanner - slim strip under the TopBar when a monthly budget
 // crosses its 80% or 100% threshold (usability arc P6.3). ADVISORY
 // ONLY and says so: budgets never gate traffic. Each (month, scope,
-// level) crossing fires once — dismissing acknowledges that level for
+// level) crossing fires once - dismissing acknowledges that level for
 // that scope this month; crossing the next level fires again.
 const ACK_KEY = "sb_budget_ack";
 
@@ -57,14 +59,14 @@ export function BudgetBanner() {
   if (!firing) return null;
 
   const over = firing.threshold === "over100";
-  const label = firing.root ? shortRoot(firing.root) : "Monthly spend";
+  const label = firing.root ? shortRoot(firing.root) : costLabel("Monthly spend", "Monthly usage");
   const dismiss = () => {
     const next = acks();
     next[ackKey(data.month, firing, firing.threshold ?? "")] = true;
     try {
       localStorage.setItem(ACK_KEY, JSON.stringify(next));
     } catch {
-      // Storage unavailable — the banner stays; nothing breaks.
+      // Storage unavailable - the banner stays; nothing breaks.
     }
     bump((n) => n + 1);
   };
@@ -81,19 +83,22 @@ export function BudgetBanner() {
         Budget {over ? "exceeded" : "at " + Math.round(firing.pct) + "%"}
       </span>
       <span className="min-w-0 truncate">
-        {label} is at {fmtUSD(firing.mtd_usd)} of its{" "}
-        {fmtUSD(firing.budget_usd)} monthly budget
-        {firing.forecast_usd > firing.budget_usd
-          ? ` — on pace for ${fmtUSD(firing.forecast_usd)} by month end`
-          : ""}
-        . Advisory only — nothing is blocked.
+        {/* In the org's token-usage view the sentence reads in shares of the
+            cap (the Budgets tab's pace rule), never in dollar amounts. */}
+        {budgetBannerSentence(label, firing, dollarsShown() ? (n) => fmtUSD(n) : null)}
       </span>
       <div className="flex-1" />
       <Link
         to="/cost"
         className="shrink-0 text-[11px] font-medium text-accent hover:text-accent-strong"
       >
-        View costs →
+        {costLabel("View costs", "View usage")} →
+      </Link>
+      <Link
+        to={budgetRequestLink()}
+        className="shrink-0 text-[11px] font-medium text-accent hover:text-accent-strong"
+      >
+        Ask for more →
       </Link>
       <button
         type="button"

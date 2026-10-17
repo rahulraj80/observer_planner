@@ -55,7 +55,7 @@ func HookPayload(doc, docPath string, maxBytes int) string {
 func hookPointer(docPath string) string {
 	if docPath == "" {
 		return "\n\n[Handover truncated to fit the session-start budget. The full " +
-			"handover was written to disk — ask me to read the HANDOFF-*.md file " +
+			"handover was written to disk - ask me to read the HANDOFF-*.md file " +
 			"in this project before continuing.]\n"
 	}
 	return fmt.Sprintf("\n\n[Handover truncated to fit the session-start budget. Read the "+

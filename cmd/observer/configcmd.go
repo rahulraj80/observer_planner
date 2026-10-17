@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	adapterdefaults "github.com/marmutapp/superbased-observer/internal/adapter/defaults"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/config/migrate"
 )
@@ -25,14 +26,14 @@ func newConfigCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newConfigSetCmd())
 	cmd.AddCommand(newConfigMigrateCmd())
+	cmd.AddCommand(newConfigAdoptDefaultsCmd())
 	return cmd
 }
 
 // newConfigMigrateCmd exposes the config auto-migration rail
 // (internal/config/migrate) as an explicit command. It renames
-// deprecated keys (e.g. the decommissioned [compression.code_graph] /
-// [intelligence.code_graph] blocks) onto their new [codeintel] homes
-// in place, preserving comments and untouched sections, and stamps a
+// deprecated keys onto their new homes and drops removed ones in
+// place, preserving comments and untouched sections, and stamps a
 // [observer] config_version. The same migration runs automatically on
 // `observer start`; this command is for manual/CI runs and dry-runs.
 func newConfigMigrateCmd() *cobra.Command {
@@ -62,7 +63,7 @@ func newConfigMigrateCmd() *cobra.Command {
 			if dryRun {
 				body, err := os.ReadFile(resolvedPath)
 				if os.IsNotExist(err) {
-					fmt.Fprintf(out, "no config file at %s — nothing to migrate\n", resolvedPath)
+					fmt.Fprintf(out, "no config file at %s - nothing to migrate\n", resolvedPath)
 					return nil
 				}
 				if err != nil {
@@ -83,9 +84,9 @@ func newConfigMigrateCmd() *cobra.Command {
 			printMigrateReport(out, resolvedPath, res, false)
 			if res.Migrated {
 				if pokeReload() {
-					fmt.Fprintln(out, "daemon reloaded — new settings apply to new sessions now")
+					fmt.Fprintln(out, "daemon reloaded - new settings apply to new sessions now")
 				} else {
-					fmt.Fprintln(out, "no running daemon detected — applies on next start")
+					fmt.Fprintln(out, "no running daemon detected - applies on next start")
 				}
 			}
 			return nil
@@ -103,7 +104,7 @@ func printMigrateReport(out io.Writer, path string, res migrate.Result, dry bool
 		fmt.Fprintf(out, "skipped %s: %s\n", path, res.SkipReason)
 		return
 	case !res.Migrated:
-		fmt.Fprintf(out, "%s is already up to date (config_version %d) — no changes\n", path, res.FromVersion)
+		fmt.Fprintf(out, "%s is already up to date (config_version %d) - no changes\n", path, res.FromVersion)
 		return
 	}
 	verb := "migrated"
@@ -126,10 +127,137 @@ func printMigrateReport(out io.Writer, path string, res migrate.Result, dry bool
 	}
 }
 
+// newConfigAdoptDefaultsCmd exposes the Invariant #51 drift-hardening
+// fix (internal/config.AdoptEnabledAdapters) as an explicit command.
+// Config.Default() only seeds [observer.watch] enabled_adapters when
+// the key is absent from config.toml — an operator with an explicit
+// list carried over from a prior release silently never picks up
+// newly-registered default adapters, and their sessions from those
+// tools go uncaptured. This command appends exactly the missing names
+// to the operator's existing array, preserving order, formatting, and
+// comments.
+//
+// Unlike `config migrate`, dry-run is the DEFAULT here rather than
+// opt-in: this command edits a list the operator wrote by hand, so it
+// only touches disk when explicitly told to via --write.
+func newConfigAdoptDefaultsCmd() *cobra.Command {
+	var (
+		configPath string
+		write      bool
+	)
+	cmd := &cobra.Command{
+		Use:   "adopt-defaults",
+		Short: "Add newly-registered default adapters to an explicit enabled_adapters list",
+		Long: "Config.Default() only seeds [observer.watch] enabled_adapters when the\n" +
+			"key is absent from config.toml. If your config.toml carries an\n" +
+			"explicit list from a prior release, newly-added default adapters\n" +
+			"never run - sessions from those tools go uncaptured until you add\n" +
+			"them by hand. This command does that for you: it appends only the\n" +
+			"missing names, leaving your existing order, formatting, and comments\n" +
+			"untouched.\n\n" +
+			"  observer config adopt-defaults          # preview only, writes nothing\n" +
+			"  observer config adopt-defaults --write  # apply the append\n\n" +
+			"A backup is written to config.toml.bak before any change. A file with\n" +
+			"no explicit enabled_adapters key, or one that already lists every\n" +
+			"default, is reported as-is with nothing written.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedPath, err := config.ResolveGlobalPath(configPath)
+			if err != nil {
+				return fmt.Errorf("resolve config path: %w", err)
+			}
+			out := cmd.OutOrStdout()
+
+			defs := adapterdefaults.Adapters()
+			names := make([]string, len(defs))
+			for i, a := range defs {
+				names[i] = a.Name()
+			}
+
+			body, readErr := os.ReadFile(resolvedPath)
+			fileExists := !os.IsNotExist(readErr)
+			if readErr != nil && fileExists {
+				return fmt.Errorf("read %s: %w", resolvedPath, readErr)
+			}
+			if !fileExists {
+				fmt.Fprintf(out, "no config file at %s - nothing to adopt\n", resolvedPath)
+				return nil
+			}
+
+			if !write {
+				_, res, err := config.AdoptEnabledAdapters(string(body), names)
+				if err != nil {
+					return err
+				}
+				printAdoptReport(out, resolvedPath, res, true)
+				return nil
+			}
+
+			res, err := config.AdoptEnabledAdaptersFile(resolvedPath, names)
+			if err != nil {
+				return err
+			}
+			printAdoptReport(out, resolvedPath, res, false)
+			if res.Changed && !res.Skipped {
+				// enabled_adapters is read exactly once, at daemon
+				// startup (internal/watcher.Watcher's allow list is
+				// fixed in New() and never mutated afterward) — it is
+				// NOT part of the live /api/config/reload contract,
+				// which only re-reads [profiles] and compression
+				// parameters for new sessions. Poking reload is still
+				// worth doing for any OTHER key a concurrent edit may
+				// have touched, but this command must never claim the
+				// newly-added adapter(s) are being watched until a
+				// real restart happens — that was the exact
+				// misleading message this comment replaces.
+				pokeReload()
+				fmt.Fprintln(out, "config.toml updated. enabled_adapters is read at daemon start - restart the daemon (observer start) for the newly-added adapter(s) to begin watching; nothing captures from them until then.")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
+	cmd.Flags().BoolVar(&write, "write", false, "Apply the append (default: preview only, writes nothing)")
+	return cmd
+}
+
+// printAdoptReport renders an config.AdoptResult to the user, mirroring
+// printMigrateReport's style and honesty-first posture: every branch
+// describes exactly what is true of the file, never implies a change
+// that didn't happen.
+func printAdoptReport(out io.Writer, path string, res config.AdoptResult, dry bool) {
+	switch {
+	case !res.HadExplicitList:
+		fmt.Fprintf(out, "%s has no explicit enabled_adapters list - nothing to adopt (every default adapter already applies)\n", path)
+		return
+	case res.Skipped:
+		fmt.Fprintf(out, "skipped %s: %s\n", path, res.SkipReason)
+		return
+	case !res.Changed:
+		fmt.Fprintf(out, "%s already lists every default adapter (%d) - no changes\n", path, len(res.Existing))
+		return
+	}
+	verb := "added"
+	if dry {
+		verb = "would add"
+	}
+	fmt.Fprintf(out, "%s %d missing default adapter(s) to %s:\n", verb, len(res.Missing), path)
+	for _, m := range res.Missing {
+		fmt.Fprintf(out, "  • %s\n", m)
+	}
+	if dry {
+		fmt.Fprintln(out, "re-run with --write to apply")
+		return
+	}
+	fmt.Fprintf(out, "backup written to %s.bak\n", path)
+}
+
 func newConfigSetCmd() *cobra.Command {
 	var (
 		configPath  string
 		projectRoot string
+		dryRun      bool
+		yes         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "set <key> <value>",
@@ -142,18 +270,35 @@ func newConfigSetCmd() *cobra.Command {
 			"Without --project the key lands in the global config.toml (the same\n" +
 			"atomic write+backup path dashboard saves use) and a running daemon is\n" +
 			"poked so profile/assignment changes apply to NEW sessions immediately.\n" +
-			"With --project the key lands in <root>/.observer/config.toml — the\n" +
+			"With --project the key lands in <root>/.observer/config.toml - the\n" +
 			"repo-local override file, which accepts ONLY profiles.* and\n" +
 			"compression.* keys (it is world-authored; daemon-level keys are\n" +
 			"refused). Project-file edits need no poke: the daemon notices the\n" +
 			"file change on the next session.\n\n" +
-			"List values are comma-separated; booleans true/false.",
+			"List values are comma-separated; booleans true/false.\n\n" +
+			"Every global write runs the same sanity check the dashboard's Settings\n" +
+			"page runs (configschema.CheckKey): credentials are never written from\n" +
+			"here, keys another command owns are refused, a setting your\n" +
+			"organization pinned or hid on a managed machine is refused, and a\n" +
+			"sensitive setting needs --yes. --dry-run prints the diff (credentials\n" +
+			"masked) and writes nothing.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
 
 			if projectRoot != "" {
-				if err := config.UpdateProjectOverlay(projectRoot, key, value); err != nil {
+				// The project file is planned and applied through the one
+				// key-preserving owner the dashboard's per-project profile
+				// card also uses; the resolved master config is excluded so
+				// a --project pointing at it can never overwrite it.
+				master, _ := config.ResolveGlobalPath(configPath)
+				edit, err := config.PlanProjectOverlayEdit(config.ProjectOverlayEditRequest{
+					Root: projectRoot, Key: key, Value: value, ExcludeFile: master,
+				})
+				if err != nil {
+					return err
+				}
+				if err := config.ApplyProjectOverlayEdit(edit); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "set %s = %s in %s/%s\n",
@@ -170,28 +315,39 @@ func newConfigSetCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			if err := config.SetConfigKey(&cfg, key, value); err != nil {
+			gov, err := configSetGovernance(cmd.Context(), cfg)
+			if err != nil {
 				return err
 			}
-			// Validate the resulting config before persisting — a value
-			// that parses but violates an invariant (port range, mode
-			// names) must not land on disk.
-			if err := config.Validate(cfg); err != nil {
-				return fmt.Errorf("refusing to save: %w", err)
-			}
-			if err := config.WriteToml(resolvedPath, cfg); err != nil {
+			plan, err := planConfigSet(cfg, key, value, gov, yes || dryRun)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "set %s = %s (saved to %s)\n", key, value, resolvedPath)
+			for _, w := range plan.warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+w)
+			}
+			if dryRun {
+				return printConfigSetDryRun(cmd.OutOrStdout(), resolvedPath, plan)
+			}
+			if err := writeConfigSet(resolvedPath, plan); err != nil {
+				return err
+			}
+			shown := value
+			if plan.secretShaped {
+				shown = "(hidden)"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "set %s = %s (saved to %s)\n", key, shown, resolvedPath)
 			if pokeReload() {
-				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded — hot-reloadable settings apply to new sessions now")
+				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded - hot-reloadable settings apply to new sessions now")
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected on the dashboard port — applies on next start (or dashboard save)")
+				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected on the dashboard port - applies on next start (or dashboard save)")
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
 	cmd.Flags().StringVar(&projectRoot, "project", "", "Write to <root>/.observer/config.toml instead of the global config (profiles.* and compression.* keys only)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Run the checks and print the diff without writing")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Confirm a sensitive setting (one that changes what Observer captures, shares or exposes)")
 	return cmd
 }

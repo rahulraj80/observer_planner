@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -135,13 +136,49 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		return adapter.ParseResult{}, fmt.Errorf("gemini.ParseSessionFile: stat: %w", statErr)
 	}
 
+	var (
+		res adapter.ParseResult
+		err error
+	)
 	switch kind {
 	case classifyLegacyJSON:
-		return a.parseLegacy(ctx, path, fi, fromOffset)
+		res, err = a.parseLegacy(ctx, path, fi, fromOffset)
 	case classifyJSONL:
-		return a.parseJSONL(ctx, path, fi, fromOffset)
+		res, err = a.parseJSONL(ctx, path, fi, fromOffset)
+	default:
+		return adapter.ParseResult{}, errors.New("gemini.ParseSessionFile: unreachable")
 	}
-	return adapter.ParseResult{}, errors.New("gemini.ParseSessionFile: unreachable")
+	res.TokenEvents = collapseTokenRestatements(res.TokenEvents)
+	return res, err
+}
+
+// collapseTokenRestatements keeps ONE token event per (SourceFile,
+// SourceEventID) in a parse result: the position of the first, the values
+// of the last. Gemini CLI appends the SAME assistant message twice (once
+// when its text and thoughts land, again once its toolCalls resolve) and
+// a message_update line restates a message's usage, so one model call
+// used to come out of a parse as two or three token events (T-543). The
+// store's (source_file, source_event_id) upsert collapsed them on disk,
+// but every consumer of the parse result itself (the watcher's
+// budget-capture accounting, fold checks, scans) saw the call counted
+// twice. The later record is the complete restatement, so its counts win.
+func collapseTokenRestatements(evs []models.TokenEvent) []models.TokenEvent {
+	if len(evs) < 2 {
+		return evs
+	}
+	type key struct{ file, id string }
+	at := make(map[key]int, len(evs))
+	out := make([]models.TokenEvent, 0, len(evs))
+	for _, e := range evs {
+		k := key{e.SourceFile, e.SourceEventID}
+		if i, seen := at[k]; seen && e.SourceEventID != "" {
+			out[i] = e
+			continue
+		}
+		at[k] = len(out)
+		out = append(out, e)
+	}
+	return out
 }
 
 // projectHashFromPath extracts the <hash> segment from
@@ -165,11 +202,25 @@ func projectHashFromPath(path string) string {
 // fallback chain documented in the package doc:
 //
 //  1. tool-call cwd from any captured turn (caller passes via cwdHint).
-//  2. ~/.gemini/history/<hash>/.git/config workplace path (best-effort).
-//  3. synthetic key "[gemini-cli:<hash>]".
+//  2. the CLI's own `.project_root` sidecar, under either
+//     ~/.gemini/tmp/<key>/ or ~/.gemini/history/<key>/ (plain text = the
+//     real cwd; both written by the live CLI).
+//  3. ~/.gemini/projects.json, whose {root: key} map inverts to the same
+//     answer — used only when the sidecar is missing/unreadable, and
+//     skipped when two roots share a key (ambiguous).
+//  4. ~/.gemini/history/<key>/.git/config worktree path (best-effort).
+//  5. synthetic key "[gemini-cli:<key>]".
 //
-// Returns the chosen root; never empty.
-func resolveProjectRoot(sessionPath, cwdHint string) string {
+// Tiers 2+3 exist because the live session JSONL carries NO cwd at all,
+// so tier 1 never fires and every gemini session used to land on the
+// synthetic key — unjoinable to a real repo (WP-T6 finding G1,
+// secondary).
+//
+// Returns the chosen root; never empty. remote is the normalized git
+// "origin" remote when the winning tier ran git.Resolve (tiers 1-3);
+// tiers 4-5 never touch git.Resolve so remote is "" for those — an
+// honest gap rather than a fabricated value.
+func resolveProjectRoot(sessionPath, cwdHint string) (root, remote string, id git.Identity) {
 	// Normalize before resolving so a Windows-side Gemini CLI session
 	// (whose cwd is captured as `C:\…` or `file:///D:/…`) doesn't get
 	// fed to git.Resolve as a relative path. Without this, the
@@ -178,19 +229,121 @@ func resolveProjectRoot(sessionPath, cwdHint string) string {
 	// (memory [[feedback_foreign_path_git_resolve]]).
 	cwdHint = pathnorm.Normalize(cwdHint)
 	if cwdHint != "" {
-		if info, err := git.Resolve(cwdHint); err == nil {
-			return info.Root
+		if identity, err := git.ResolveIdentity(cwdHint, git.IdentityOptions{}); err == nil {
+			// identity.Remote is already NormalizeRemote'd.
+			return identity.Root, identity.Remote, identity
 		}
-		return cwdHint
+		return cwdHint, "", git.Identity{}
 	}
 	hash := projectHashFromPath(sessionPath)
 	if hash != "" {
-		if root := readShadowGitWorktree(sessionPath, hash); root != "" {
-			return root
+		if root, remote, id := readRecordedProjectRoot(sessionPath, hash); root != "" {
+			return root, remote, id
 		}
-		return "[gemini-cli:" + hash + "]"
+		if root := readShadowGitWorktree(sessionPath, hash); root != "" {
+			return root, "", git.Identity{}
+		}
+		return "[gemini-cli:" + hash + "]", "", git.Identity{}
 	}
-	return "[gemini-cli]"
+	return "[gemini-cli]", "", git.Identity{}
+}
+
+// readRecordedProjectRoot reads the project root the Gemini CLI itself
+// recorded for this project key, trying the `.project_root` sidecars
+// first and the projects.json reverse map second. Returns ("", "", zero)
+// when neither is present/usable.
+func readRecordedProjectRoot(sessionPath, key string) (root, remote string, id git.Identity) {
+	home := geminiHomeFromSessionPath(sessionPath)
+	if home == "" || key == "" {
+		return "", "", git.Identity{}
+	}
+	for _, sidecar := range []string{
+		filepath.Join(home, "tmp", key, ".project_root"),
+		filepath.Join(home, "history", key, ".project_root"),
+	} {
+		body, err := os.ReadFile(sidecar)
+		if err != nil {
+			continue
+		}
+		if root, remote, id := resolveRecordedRoot(string(body)); root != "" {
+			return root, remote, id
+		}
+	}
+	return resolveRecordedRoot(lookupProjectsJSON(filepath.Join(home, "projects.json"), key))
+}
+
+// lookupProjectsJSON inverts ~/.gemini/projects.json — which maps
+// {"<project root>": "<key>"} — back to the root for one key. Returns ""
+// when the file is missing/unparseable, when no entry matches, or when
+// TWO roots claim the same key: an ambiguous answer is worse than the
+// honest synthetic fallback.
+func lookupProjectsJSON(path, key string) string {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Projects map[string]string `json:"projects"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return ""
+	}
+	var match string
+	for root, name := range doc.Projects {
+		if name != key {
+			continue
+		}
+		if match != "" && match != root {
+			return ""
+		}
+		match = root
+	}
+	return match
+}
+
+// resolveRecordedRoot normalizes a root the CLI recorded on disk and,
+// when that path actually exists on this host, promotes it to its git
+// root. The stat gate comes BEFORE git.Resolve deliberately: resolving a
+// path that isn't mounted here (a Windows-side session read from WSL,
+// say) would walk up from a non-existent directory. A recorded-but-
+// unmounted root is still returned verbatim — it is real information,
+// unlike the synthetic key. remote is only populated when git.Resolve
+// actually ran.
+func resolveRecordedRoot(raw string) (root, remote string, id git.Identity) {
+	p := pathnorm.Normalize(strings.TrimSpace(raw))
+	if p == "" {
+		return "", "", git.Identity{}
+	}
+	if _, err := os.Stat(p); err != nil { //nolint:gosec // G703: stat of a project root the tool recorded locally, read only
+		return p, "", git.Identity{}
+	}
+	if identity, err := git.ResolveIdentity(p, git.IdentityOptions{}); err == nil {
+		// identity.Remote is already NormalizeRemote'd.
+		return identity.Root, identity.Remote, identity
+	}
+	return p, "", git.Identity{}
+}
+
+// geminiHomeFromSessionPath walks up from a session file to the
+// enclosing `.gemini` directory (handles cross-mount paths like
+// /mnt/c/Users/<u>/.gemini/...). Returns "" when the path isn't under
+// one.
+func geminiHomeFromSessionPath(sessionPath string) string {
+	cur := filepath.Dir(sessionPath)
+	for cur != "" && cur != filepath.Dir(cur) {
+		base := filepath.Base(cur)
+		if base == ".gemini" {
+			return cur
+		}
+		if base == "tmp" && filepath.Base(filepath.Dir(cur)) == ".gemini" {
+			return filepath.Dir(cur)
+		}
+		cur = filepath.Dir(cur)
+	}
+	if filepath.Base(cur) == ".gemini" {
+		return cur
+	}
+	return ""
 }
 
 // readShadowGitWorktree opens ~/.gemini/history/<hash>/.git/config and
@@ -198,21 +351,8 @@ func resolveProjectRoot(sessionPath, cwdHint string) string {
 // original project root. Returns the resolved path or "" if not
 // present / unparseable. Tolerates missing dirs and config files.
 func readShadowGitWorktree(sessionPath, hash string) string {
-	// Walk up from the session path to find the .gemini/ directory
-	// (handles cross-mount paths like /mnt/c/Users/.../.gemini/...).
-	cur := filepath.Dir(sessionPath)
-	for cur != "" && cur != filepath.Dir(cur) {
-		base := filepath.Base(cur)
-		if base == ".gemini" {
-			break
-		}
-		if base == "tmp" && filepath.Base(filepath.Dir(cur)) == ".gemini" {
-			cur = filepath.Dir(cur)
-			break
-		}
-		cur = filepath.Dir(cur)
-	}
-	if filepath.Base(cur) != ".gemini" {
+	cur := geminiHomeFromSessionPath(sessionPath)
+	if cur == "" {
 		return ""
 	}
 	configPath := filepath.Join(cur, "history", hash, ".git", "config")

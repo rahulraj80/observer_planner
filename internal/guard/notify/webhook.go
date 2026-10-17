@@ -46,7 +46,7 @@ func BuildWebhook(kind, routingKey string, a WebhookAlert) ([]byte, error) {
 		line += " on " + a.Tool
 	}
 	if a.Reason != "" {
-		line += " — " + a.Reason
+		line += " - " + a.Reason
 	}
 	switch kind {
 	case WebhookGeneric, "":

@@ -5,7 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 )
 
 // Live session view (usability arc P6.1 / review §8.2): the "now
@@ -62,6 +63,10 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	windowMin := intArg(r, "window_minutes", 15, 1, 240)
 	now := time.Now().UTC()
 	since := now.Add(-time.Duration(windowMin) * time.Minute).Format(time.RFC3339Nano)
+	// The global Model filter, session grain: an active session counts
+	// when it used the model (modelfilter.AndSessionsUsing; "" = none).
+	mPred, mArgs := modelfilter.AndSessionsUsing("s.id", modelParam(r))
+	activeArgs := append([]any{since, since, since}, mArgs...)
 
 	// ids_only=1 is the lightweight identity mode the Sessions page's watch
 	// badges poll: EVERY active session id in the window (bounded at 500, vs
@@ -71,12 +76,13 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("ids_only") == "1" {
 		ids := []string{}
 		if s.db() != nil {
+			//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
 			rows, err := s.db().QueryContext(r.Context(),
 				`SELECT s.id FROM sessions s
-				 WHERE EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
+				 WHERE (EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
 				    OR EXISTS (SELECT 1 FROM api_turns t WHERE t.session_id = s.id AND t.timestamp >= ?)
-				    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?)
-				 LIMIT 500`, since, since, since)
+				    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?))`+mPred+`
+				 LIMIT 500`, activeArgs...)
 			if err != nil {
 				writeErr(w, err)
 				return
@@ -111,11 +117,11 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 			        (SELECT COUNT(*) FROM actions a WHERE a.session_id = s.id) AS actions_total
 			 FROM sessions s
 			 LEFT JOIN projects p ON p.id = s.project_id
-			 WHERE EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
+			 WHERE (EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
 			    OR EXISTS (SELECT 1 FROM api_turns t WHERE t.session_id = s.id AND t.timestamp >= ?)
-			    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?)
+			    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?))`+mPred+`
 			 ORDER BY last_activity DESC
-			 LIMIT 8`, since, since, since)
+			 LIMIT 8`, activeArgs...)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -130,8 +136,23 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = rows.Err()
 
+		// One deduped spend load for every active session (the one session
+		// dedup rule, sessionmsg.DeriveVerdicts, applied by the cost engine),
+		// so a card's rollup agrees with the session detail header.
+		ids := make([]string, 0, len(active))
+		for _, ls := range active {
+			ids = append(ids, ls.SessionID)
+		}
+		bySession := map[string][]dashapi.SpendTurn{}
+		if len(ids) > 0 {
+			if turns, err := s.spendTurns(r.Context(), time.Time{}, time.Time{}, dashapi.SpendScope{}, ids); err == nil {
+				for _, t := range turns {
+					bySession[t.SessionID] = append(bySession[t.SessionID], t)
+				}
+			}
+		}
 		for i := range active {
-			s.attachLiveRollup(r, &active[i])
+			attachLiveRollup(&active[i], bySession[active[i].SessionID])
 			s.attachLiveRecent(r, &active[i])
 		}
 	}
@@ -143,73 +164,25 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// attachLiveRollup fills one session's lifetime token/cost/model
-// rollup. Same proxy-dedup as the cost engine surfaces (top-sessions,
-// headline): api_turns rows win; token_usage rows whose
-// source_event_id matches a proxy turn's request_id are skipped so
-// proxied traffic isn't double-counted.
-func (s *Server) attachLiveRollup(r *http.Request, ls *liveSession) {
-	rows, err := s.db().QueryContext(r.Context(),
-		`WITH proxy_turn_ids AS (
-			SELECT request_id FROM api_turns
-			 WHERE session_id = ? AND request_id IS NOT NULL AND request_id != ''
-		),
-		combined AS (
-			SELECT at.model, at.input_tokens, at.output_tokens, at.cache_read_tokens,
-			       at.cache_creation_tokens, at.cache_creation_1h_tokens,
-			       0 AS reasoning_tokens, at.web_search_requests, at.cost_usd
-			FROM api_turns at
-			WHERE at.session_id = ?
-			UNION ALL
-			SELECT tu.model, tu.input_tokens, tu.output_tokens, tu.cache_read_tokens,
-			       tu.cache_creation_tokens, tu.cache_creation_1h_tokens,
-			       tu.reasoning_tokens, tu.web_search_requests, tu.estimated_cost_usd
-			FROM token_usage tu
-			WHERE tu.session_id = ?
-			  AND (tu.source_event_id IS NULL OR tu.source_event_id = ''
-			       OR tu.source_event_id NOT IN (SELECT request_id FROM proxy_turn_ids))
-		)
-		SELECT COALESCE(model, ''),
-		       COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
-		       COALESCE(cache_read_tokens, 0), COALESCE(cache_creation_tokens, 0),
-		       COALESCE(cache_creation_1h_tokens, 0), COALESCE(reasoning_tokens, 0),
-		       COALESCE(web_search_requests, 0), COALESCE(cost_usd, 0)
-		FROM combined`,
-		ls.SessionID, ls.SessionID, ls.SessionID)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
+// attachLiveRollup fills one session's lifetime token/cost/model rollup
+// from its deduped spend rows (spendTurns), the substrate the session
+// detail header and the Sessions list also sum.
+func attachLiveRollup(ls *liveSession, turns []dashapi.SpendTurn) {
 	models := map[string]bool{}
-	for rows.Next() {
-		var (
-			model  string
-			bundle cost.TokenBundle
-			rec    float64
-		)
-		if rows.Scan(&model, &bundle.Input, &bundle.Output,
-			&bundle.CacheRead, &bundle.CacheCreation, &bundle.CacheCreation1h,
-			&bundle.Reasoning, &bundle.WebSearchRequests, &rec) != nil {
-			continue
-		}
+	for _, t := range turns {
+		bundle := t.Bundle
 		ls.Turns++
 		ls.Tokens.Input += bundle.Input
 		ls.Tokens.Output += bundle.Output
 		ls.Tokens.CacheRead += bundle.CacheRead
 		ls.Tokens.CacheWrite += bundle.CacheCreation + bundle.CacheCreation1h
-		if model != "" {
-			models[model] = true
+		if t.Model != "" {
+			models[t.Model] = true
 		}
-		switch {
-		case rec > 0:
-			ls.CostUSD += rec
-		case s.opts.CostEngine != nil:
-			if p, ok := s.opts.CostEngine.Lookup(model); ok {
-				ls.CostUSD += cost.Compute(p, bundle)
-			}
-		}
+		// The engine's price: recorded cost wins; otherwise the rate in
+		// force on the row's own timestamp.
+		ls.CostUSD += t.CostUSD
 	}
-	_ = rows.Err()
 	for m := range models {
 		ls.Models = append(ls.Models, m)
 	}

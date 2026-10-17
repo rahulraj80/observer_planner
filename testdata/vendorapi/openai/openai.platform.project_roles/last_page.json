@@ -1,0 +1,19 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "role",
+      "id": "role_01J1F8PROJ",
+      "name": "API Project Key Manager",
+      "description": "Allows managing API keys for the project",
+      "permissions": [
+        "api.organization.projects.api_keys.read",
+        "api.organization.projects.api_keys.write"
+      ],
+      "resource_type": "api.project",
+      "predefined_role": false
+    }
+  ],
+  "has_more": false,
+  "next": null
+}

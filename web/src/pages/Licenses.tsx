@@ -7,6 +7,7 @@ import {
 } from "@/components/primitives";
 import { useApi } from "@/lib/useApi";
 import { fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
+import { navIcon } from "@/lib/nav";
 
 interface LicenseUsageRow {
   license_id: string;
@@ -104,7 +105,7 @@ function LicensesContent({
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
+      <PageHeader icon={navIcon("licenses")}
         title="Licenses & Plans"
         sub="Your license inventory, utilization, and break-even analysis. Configure licenses in [licenses] config."
         right={
@@ -243,7 +244,7 @@ function LicensesContent({
                     <td className="px-3 py-2 text-right text-fg-2">{fmtCompact(i.output_tokens)}</td>
                     <td className="px-3 py-2 text-right text-fg-2">{fmtCompact(i.cache_read_tokens)} / {fmtCompact(i.cache_creation_tokens)}</td>
                     <td className="px-3 py-2 text-right text-fg-2">
-                      {i.quota_monthly_tokens ? fmtCompact(i.quota_monthly_tokens) : "—"}
+                      {i.quota_monthly_tokens ? fmtCompact(i.quota_monthly_tokens) : " - "}
                     </td>
                   </tr>
                 ))}
@@ -265,7 +266,7 @@ export function LicensesPage() {
   if (licenseUsage.error) {
     return (
       <div className="p-6">
-        <PageHeader
+        <PageHeader icon={navIcon("licenses")}
           title="Licenses & Plans"
           sub="Your license inventory, utilization, and break-even analysis."
         />
@@ -279,7 +280,7 @@ export function LicensesPage() {
   if (!licenseUsage.data) {
     return (
       <div className="p-6">
-        <PageHeader
+        <PageHeader icon={navIcon("licenses")}
           title="Licenses & Plans"
           sub="Your license inventory, utilization, and break-even analysis."
         />

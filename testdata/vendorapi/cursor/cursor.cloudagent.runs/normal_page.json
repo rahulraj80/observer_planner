@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "id": "run-00000000-0000-0000-0000-000000000002",
+      "agentId": "bc-00000000-0000-0000-0000-000000000001",
+      "status": "RUNNING",
+      "createdAt": "2026-04-13T18:50:00.000Z",
+      "updatedAt": "2026-04-13T18:51:00.000Z",
+      "git": {
+        "branches": [
+          {
+            "repoUrl": "github.com/your-org/your-repo",
+            "branch": "cursor/add-readme-a1b2"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -12,7 +12,6 @@
 // The golden artifacts (golden/contract.json, sample_batch*.json.gz) are
 // byte-identical in both repos and pinned by verify-telemetry-contract
 // (Makefile) + TestGolden* below.
-//
 package contract
 
 import (
@@ -68,17 +67,18 @@ type Event struct {
 }
 
 // Consent tiers (plan §D2):
-//   off        — nothing collected, staged, or sent.
-//   baseline   — Point-2 per-prompt-cycle (prompt_cycle) plus the content-free
-//                lifecycle / tool / error / token counters. On by default in both
-//                observer builds for new installs.
-//   enrichment — opt-in prompts + session history for task identification / quality
-//                inputs, scoped to functionalities. Placeholder tier constant now;
-//                event set defined in the enrichment work. Never on by default.
-//   error      — error classes + batch meta only.
-//   usage      — legacy alias for baseline during the deprecation window (one
-//                release). EffectiveTier normalizes it to baseline.
-//   deep       — baseline + deep diagnostics (own consent receipt).
+//
+//	off        — nothing collected, staged, or sent.
+//	baseline   — Point-2 per-prompt-cycle (prompt_cycle) plus the content-free
+//	             lifecycle / tool / error / token counters. On by default in both
+//	             observer builds for new installs.
+//	enrichment — opt-in prompts + session history for task identification / quality
+//	             inputs, scoped to functionalities. Placeholder tier constant now;
+//	             event set defined in the enrichment work. Never on by default.
+//	error      — error classes + batch meta only.
+//	usage      — legacy alias for baseline during the deprecation window (one
+//	             release). EffectiveTier normalizes it to baseline.
+//	deep       — baseline + deep diagnostics (own consent receipt).
 const (
 	TierOff        = "off"
 	TierBaseline   = "baseline"

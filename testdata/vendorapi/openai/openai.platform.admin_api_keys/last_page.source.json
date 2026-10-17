@@ -1,0 +1,43 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].expires_at": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].last_used_at": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "data[].owner": "VerifiedOfficial",
+    "data[].owner.created_at": "VerifiedOfficial",
+    "data[].owner.id": "VerifiedOfficial",
+    "data[].owner.name": "VerifiedOfficial",
+    "data[].owner.object": "VerifiedOfficial",
+    "data[].owner.role": "VerifiedOfficial",
+    "data[].owner.type": "VerifiedOfficial",
+    "data[].redacted_value": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "last_id": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "13f4e7179d260886fb91390523ae0781706468066516750f8bad907a87e48249",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/admin_api_keys",
+    "query": {
+      "after": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId admin-api-keys-list. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.admin_api_keys"
+}

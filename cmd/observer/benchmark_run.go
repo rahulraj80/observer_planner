@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
@@ -131,7 +133,7 @@ func (r *benchmarkRunner) Run(ctx context.Context, spec benchmark.Spec, opts Run
 	if len(est.unpricedModels) > 0 {
 		fmt.Fprintf(r.out, "estimated matrix cost: ~$%.2f + UNKNOWN (budget cap $%.2f)\n", est.total, spec.Budget.MaxTotalUSD)
 		for _, m := range est.unpricedModels {
-			fmt.Fprintf(r.out, "  model %q: unknown — cannot estimate (no billed history)\n", m)
+			fmt.Fprintf(r.out, "  model %q: unknown - cannot estimate (no billed history)\n", m)
 		}
 	} else {
 		fmt.Fprintf(r.out, "estimated matrix cost: ~$%.2f (budget cap $%.2f)\n", est.total, spec.Budget.MaxTotalUSD)
@@ -139,18 +141,18 @@ func (r *benchmarkRunner) Run(ctx context.Context, spec benchmark.Spec, opts Run
 
 	if opts.DryRun {
 		if len(est.unpricedModels) > 0 {
-			fmt.Fprintln(r.out, "WARNING: one or more models have an UNKNOWN price — a real run needs --allow-unpriced.")
+			fmt.Fprintln(r.out, "WARNING: one or more models have an UNKNOWN price - a real run needs --allow-unpriced.")
 		}
-		fmt.Fprintln(r.out, "DRY RUN — no sessions launched, nothing spent, nothing persisted.")
+		fmt.Fprintln(r.out, "DRY RUN - no sessions launched, nothing spent, nothing persisted.")
 		fmt.Fprintln(r.out, "Re-run with --confirm-spend to execute (this spends real API budget).")
 		return "", nil
 	}
 	if spec.Budget.RequireConfirm && !opts.Confirmed {
-		return "", fmt.Errorf("benchmark: spec requires spend confirmation — re-run with --confirm-spend")
+		return "", fmt.Errorf("benchmark: spec requires spend confirmation - re-run with --confirm-spend")
 	}
 	// #5: never spend on an unknown-price cell behind a false $0 estimate.
 	if len(est.unpricedModels) > 0 && !opts.AllowUnpriced {
-		return "", fmt.Errorf("benchmark: refusing to spend — no billed-history price for %v (the dry-run estimate cannot bound their cost); re-run with --allow-unpriced to override", est.unpricedModels)
+		return "", fmt.Errorf("benchmark: refusing to spend - no billed-history price for %v (the dry-run estimate cannot bound their cost); re-run with --allow-unpriced to override", est.unpricedModels)
 	}
 
 	runID := fmt.Sprintf("bench-%s-%d", sanitizeID(spec.Name), r.now().UnixNano())
@@ -233,7 +235,7 @@ func (r *benchmarkRunner) runCell(ctx context.Context, runID string, spec benchm
 	for attemptNo := 0; ; attemptNo++ {
 		out = r.executeCell(ctx, runID, spec, cell, opts, man, attemptNo)
 		if out.status.IsInfraFailure() && attemptNo < retries {
-			fmt.Fprintf(r.out, "  [%s/%s/#%d] infra failure (%s) — retry %d/%d\n",
+			fmt.Fprintf(r.out, "  [%s/%s/#%d] infra failure (%s) - retry %d/%d\n",
 				cell.Task.ID, cell.Config.ID, cell.RepeatIdx, out.status, attemptNo+1, retries)
 			continue
 		}

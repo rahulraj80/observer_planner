@@ -258,7 +258,7 @@ func RenderMarkdown(in Input, now time.Time) string {
 				oneLine(r.CommandSummary), defaultIf(r.ErrorCategory, "uncategorized"),
 				r.FailureCount, r.RecoveryCount)
 			if len(r.EditedFiles) > 0 {
-				fmt.Fprintf(&b, " — previously fixed by editing: %s",
+				fmt.Fprintf(&b, " - previously fixed by editing: %s",
 					strings.Join(quoteBacks(r.EditedFiles), ", "))
 			}
 			fmt.Fprintln(&b)
@@ -270,7 +270,7 @@ func RenderMarkdown(in Input, now time.Time) string {
 // RenderCursorRules produces a compact .cursorrules body.
 func RenderCursorRules(in Input, now time.Time) string {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "# sbso:suggest — generated %s\n",
+	fmt.Fprintf(&b, "# sbso:suggest - generated %s\n",
 		now.UTC().Format("2006-01-02"))
 	for _, r := range in.HotFiles {
 		fmt.Fprintf(&b, "- Hot file: %s (%s)\n", r.Key, r.Detail)
@@ -351,7 +351,7 @@ func section(b *bytes.Buffer, title string, rows []patternRow, render func(patte
 func markdownBullet(r patternRow) string {
 	line := fmt.Sprintf("- `%s`", r.Key)
 	if r.Detail != "" {
-		line += " — " + r.Detail
+		line += " - " + r.Detail
 	}
 	return line
 }

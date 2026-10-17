@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "end_cursor": "VerifiedOfficial",
+    "has_next_page": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].created_at": "Inferred",
+    "items[].max_cycle_acu_limit": "VerifiedOfficial",
+    "items[].max_session_acu_limit": "VerifiedOfficial",
+    "items[].name": "VerifiedOfficial",
+    "items[].org_id": "VerifiedOfficial",
+    "items[].updated_at": "Inferred",
+    "total": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c27cec3bc7b0ebfeba0ab2e6b90b00d6676ae6c59704bc7260823fc03954971b",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/organizations",
+    "query": {
+      "first": "200"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from PaginatedResponse[OrganizationResponse] / OrganizationResponse (placeholder values). created_at and updated_at are integers in the schema; Unix seconds is Inferred. A null ACU limit means no limit is set (nullable in the schema).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.organizations"
+}

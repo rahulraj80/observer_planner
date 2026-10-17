@@ -1,21 +1,21 @@
 package modelvalue
 
 import (
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
-// AssembleSimTurns converts loaded Facts into routing.SimTurn inputs for
+// AssembleSimTurns converts loaded Facts into routingcore.SimTurn inputs for
 // counterfactual replay (§R18.1), using the exact same per-turn input
 // assembly the Model Value Report classifies with — one assembly path,
 // two consumers. Each SimTurn carries the turn's realized token bundle
 // as ObservedUsage so the engine's dollar math is replay-exact.
-func AssembleSimTurns(f *Facts, opts Options) []routing.SimTurn {
+func AssembleSimTurns(f *Facts, opts Options) []routingcore.SimTurn {
 	turns, actionsBySession := indexFacts(f)
 	window := opts.recentWindow()
-	out := make([]routing.SimTurn, 0, len(turns))
+	out := make([]routingcore.SimTurn, 0, len(turns))
 	for _, row := range turns {
 		in, _ := assembleInput(row, actionsBySession[row.SessionID], window)
-		in.ObservedUsage = &routing.PromptUsage{
+		in.ObservedUsage = &routingcore.PromptUsage{
 			Input:             row.Input,
 			Output:            row.Output,
 			CacheRead:         row.CacheRead,
@@ -25,7 +25,7 @@ func AssembleSimTurns(f *Facts, opts Options) []routing.SimTurn {
 			WebSearchRequests: row.WebSearchRequests,
 			Fast:              row.Fast,
 		}
-		out = append(out, routing.SimTurn{
+		out = append(out, routingcore.SimTurn{
 			SessionID: row.SessionID,
 			Timestamp: row.Timestamp,
 			In:        in,
@@ -39,13 +39,13 @@ func AssembleSimTurns(f *Facts, opts Options) []routing.SimTurn {
 // no filter. Classification runs the same table the replay itself
 // uses, so the filtered set is exactly the subset the report would
 // label with that kind.
-func FilterSimTurnsByKind(turns []routing.SimTurn, kind routing.TurnKind) []routing.SimTurn {
+func FilterSimTurnsByKind(turns []routingcore.SimTurn, kind routingcore.TurnKind) []routingcore.SimTurn {
 	if kind == "" {
 		return turns
 	}
-	out := make([]routing.SimTurn, 0, len(turns))
+	out := make([]routingcore.SimTurn, 0, len(turns))
 	for _, t := range turns {
-		if routing.ClassifyTurnKind(t.In).Kind == kind {
+		if routingcore.ClassifyTurnKind(t.In).Kind == kind {
 			out = append(out, t)
 		}
 	}
@@ -57,13 +57,13 @@ func FilterSimTurnsByKind(turns []routing.SimTurn, kind routing.TurnKind) []rout
 // the parity verdict graded against the group's baseline. Per-project
 // deltas are deliberately not folded in — the global cells carry the
 // volume, and a per-project override layer is a P2 calibration concern.
-func (r Report) EvidenceByKindTier() map[routing.EvidenceKey]string {
-	out := map[routing.EvidenceKey]string{}
+func (r Report) EvidenceByKindTier() map[routingcore.EvidenceKey]string {
+	out := map[routingcore.EvidenceKey]string{}
 	for _, d := range r.Deltas {
 		if d.ProjectID != 0 {
 			continue // global group only (see doc comment)
 		}
-		key := routing.EvidenceKey{Kind: d.TurnKind, Tier: d.CandidateTier}
+		key := routingcore.EvidenceKey{Kind: d.TurnKind, Tier: d.CandidateTier}
 		// Keep the most cautious verdict when multiple candidate models
 		// share a tier: a worse/insufficient grading must not be masked
 		// by a parity sibling.

@@ -23,6 +23,10 @@ const (
 	// SourceCCOTel is Claude Code's native OTel (exact tokens, no proxy-only
 	// fields). Written by the native-console ingest receiver.
 	SourceCCOTel = "cc_otel"
+	// SourceNativeOTel is any other AI tool's own native OTel export, mapped
+	// by the vendor-agnostic table in internal/otlpvendor (T-475). Exact
+	// tokens from the tool itself, so it ranks like Claude Code's.
+	SourceNativeOTel = "native_otel"
 	// SourceJSONL is a JSONL usage envelope (approximate). api_turns is not
 	// written from the JSONL path today; reserved for completeness.
 	SourceJSONL = "jsonl"
@@ -34,6 +38,18 @@ const (
 	// is removed they are simply unused strings; no edit is needed.
 	SourceObsSDK  = "sdk_otlp"
 	SourceObsOTLP = "otlp_trace"
+	// SourceProxyTurn mirrors internal/obs/span.SourceProxyTurn (the gateway
+	// rail, cmd/observer/obs_wire.go): a chat.completions span synthesized
+	// FROM an already-priced api_turns row. obsTurnSink.ReconcileLLMSpan
+	// gates on this source and never reconciles it back into api_turns (the
+	// row already exists — reconciling would be the span writing back into
+	// itself), so this value should never actually appear in api_turns.source
+	// today. The row exists as defense-in-depth per CLAUDE.md module rule
+	// #3/#5 (table-driven, not an implicit default): if that guard is ever
+	// removed or a new path writes this source, it must rank Exact — a
+	// proxy-priced turn is exact, not an SDK estimate — never silently fall
+	// through to Approx via `default`.
+	SourceProxyTurn = "proxy_turn"
 )
 
 // fidelityForSource maps a persisted source tag to its merge fidelity. An
@@ -41,10 +57,12 @@ const (
 // api_turns), so legacy rows keep top rank without a backfill.
 func fidelityForSource(source string) turnmerge.Fidelity {
 	switch source {
-	case SourceCCOTel:
+	case SourceCCOTel, SourceNativeOTel:
 		return turnmerge.FidelityNativeExact
 	case SourceJSONL, SourceObsSDK, SourceObsOTLP:
 		return turnmerge.FidelityApprox
+	case SourceProxyTurn:
+		return turnmerge.FidelityProxyExact
 	default: // "" (legacy) and SourceProxy
 		return turnmerge.FidelityProxyExact
 	}
@@ -108,7 +126,7 @@ func (s *Store) UpsertTurnByRequestID(ctx context.Context, t models.APITurn) (tu
 		}
 		return res.Action, id, nil
 	case turnmerge.ActionUpdate:
-		if err := s.updateMergeTurn(ctx, existing.id, res.Turn); err != nil {
+		if err := s.updateMergeTurnSource(ctx, existing.id, res.Turn, mergedSource(res.Turn.Fidelity, existing.source, t.Source)); err != nil {
 			return res.Action, existing.id, fmt.Errorf("store.UpsertTurnByRequestID: %w", err)
 		}
 		return res.Action, existing.id, nil
@@ -178,6 +196,12 @@ func (s *Store) loadMergeTurn(ctx context.Context, requestID string) (*mergeTurn
 // the existing row, stamping the source that corresponds to the merged
 // fidelity so a later read resolves the same rank.
 func (s *Store) updateMergeTurn(ctx context.Context, id int64, merged turnmerge.Turn) error {
+	return s.updateMergeTurnSource(ctx, id, merged, sourceForFidelity(merged.Fidelity))
+}
+
+// updateMergeTurnSource is updateMergeTurn persisting an explicit source tag
+// (mergedSource), so a merged native_otel row keeps its own tag.
+func (s *Store) updateMergeTurnSource(ctx context.Context, id int64, merged turnmerge.Turn, source string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE api_turns SET
 		    input_tokens = ?, output_tokens = ?,
@@ -192,12 +216,29 @@ func (s *Store) updateMergeTurn(ctx context.Context, id int64, merged turnmerge.
 		merged.CacheCreation1hTokens, merged.WebSearchRequests,
 		merged.CostUSD,
 		merged.TimeToFirstTokenMS, merged.TotalResponseMS,
-		nullableString(merged.StopReason), sourceForFidelity(merged.Fidelity),
+		nullableString(merged.StopReason), source,
 		id)
 	if err != nil {
 		return fmt.Errorf("updateMergeTurn: %w", err)
 	}
 	return nil
+}
+
+// preservedSources are the source tags a merged row keeps verbatim when the
+// merge kept that tag's fidelity. Every other tag maps through
+// sourceForFidelity exactly as before T-475. native_otel needs it because it
+// shares the native-exact fidelity with cc_otel: mapping it back would
+// relabel any other tool's native turn as Claude Code's.
+var preservedSources = map[string]bool{SourceNativeOTel: true}
+
+// mergedSource names the source a merged row persists with.
+func mergedSource(merged turnmerge.Fidelity, existing, incoming string) string {
+	for _, src := range []string{existing, incoming} {
+		if preservedSources[src] && fidelityForSource(src) == merged {
+			return src
+		}
+	}
+	return sourceForFidelity(merged)
 }
 
 // sourceForFidelity is the inverse of fidelityForSource for persisting a merged

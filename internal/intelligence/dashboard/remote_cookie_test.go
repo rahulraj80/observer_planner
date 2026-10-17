@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -86,19 +88,19 @@ func TestPairCookieIsPersistent(t *testing.T) {
 				t.Fatal("no session cookie set on pair")
 			}
 			if ck.MaxAge <= 0 {
-				t.Fatalf("Max-Age = %d — a cookie with no positive Max-Age is a BROWSER-SESSION cookie and is dropped by mobile browsers within the hour (the bug)", ck.MaxAge)
+				t.Fatalf("Max-Age = %d - a cookie with no positive Max-Age is a BROWSER-SESSION cookie and is dropped by mobile browsers within the hour (the bug)", ck.MaxAge)
 			}
 			if ck.MaxAge != tc.wantMaxAge {
 				t.Errorf("Max-Age = %d, want %d (the session store's own absolute TTL)", ck.MaxAge, tc.wantMaxAge)
 			}
 			if !ck.HttpOnly {
-				t.Error("HttpOnly lost — security regression")
+				t.Error("HttpOnly lost - security regression")
 			}
 			if !ck.Secure {
-				t.Error("Secure lost — security regression")
+				t.Error("Secure lost - security regression")
 			}
 			if ck.SameSite != http.SameSiteStrictMode {
-				t.Errorf("SameSite = %v, want Strict — security regression", ck.SameSite)
+				t.Errorf("SameSite = %v, want Strict - security regression", ck.SameSite)
 			}
 			if ck.Path != "/" {
 				t.Errorf("Path = %q, want /", ck.Path)
@@ -122,7 +124,7 @@ func TestPairCookieMaxAgeMatchesSessionLifetime(t *testing.T) {
 		t.Fatal("no session cookie")
 	}
 	if want := int(c.sessions.TTL().Seconds()); ck.MaxAge != want {
-		t.Errorf("Max-Age %d != session TTL %d — the cookie must never expire before the session it carries", ck.MaxAge, want)
+		t.Errorf("Max-Age %d != session TTL %d - the cookie must never expire before the session it carries", ck.MaxAge, want)
 	}
 }
 

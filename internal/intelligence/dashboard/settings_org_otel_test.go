@@ -35,7 +35,7 @@ push_interval_seconds = 900
 	if err := os.WriteFile(cfgPath, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ push_interval_seconds = 900
 		`"Scope":{"ProjectRootAllowlist":["/work/repo"],"ProjectRootDenylist":[]}}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/org", strings.NewReader(orgBody)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/org", strings.NewReader(orgBody))))
 	if rr.Code != 200 {
 		t.Fatalf("PUT org: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -63,7 +63,7 @@ push_interval_seconds = 900
 		`"PollIntervalSeconds":5,"EmitPromptContent":false,"EmitUserEmail":true}`
 	rr = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/otel", strings.NewReader(otelBody)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/otel", strings.NewReader(otelBody))))
 	if rr.Code != 200 {
 		t.Fatalf("PUT otel: %d body=%s", rr.Code, rr.Body.String())
 	}

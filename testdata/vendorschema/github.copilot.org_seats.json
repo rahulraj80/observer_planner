@@ -1,0 +1,487 @@
+{
+ "checked_on": "2026-10-07",
+ "name": "github.copilot.org_seats",
+ "note": "Fully dereferenced response schema (descriptions and examples stripped) for schema-random property tests. Nothing here was observed from a vendor response.",
+ "pointer": "#/paths/~1orgs~1{org}~1copilot~1billing~1seats/get/responses/200",
+ "schema": {
+  "properties": {
+   "seats": {
+    "items": {
+     "additionalProperties": false,
+     "properties": {
+      "assignee": {
+       "nullable": true,
+       "properties": {
+        "avatar_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "email": {
+         "nullable": true,
+         "type": "string"
+        },
+        "events_url": {
+         "type": "string"
+        },
+        "followers_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "following_url": {
+         "type": "string"
+        },
+        "gists_url": {
+         "type": "string"
+        },
+        "gravatar_id": {
+         "nullable": true,
+         "type": "string"
+        },
+        "html_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "id": {
+         "format": "int64",
+         "type": "integer"
+        },
+        "login": {
+         "type": "string"
+        },
+        "name": {
+         "nullable": true,
+         "type": "string"
+        },
+        "node_id": {
+         "type": "string"
+        },
+        "organizations_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "received_events_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "repos_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "site_admin": {
+         "type": "boolean"
+        },
+        "starred_at": {
+         "type": "string"
+        },
+        "starred_url": {
+         "type": "string"
+        },
+        "subscriptions_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "type": {
+         "type": "string"
+        },
+        "url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "user_view_type": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "avatar_url",
+        "events_url",
+        "followers_url",
+        "following_url",
+        "gists_url",
+        "gravatar_id",
+        "html_url",
+        "id",
+        "node_id",
+        "login",
+        "organizations_url",
+        "received_events_url",
+        "repos_url",
+        "site_admin",
+        "starred_url",
+        "subscriptions_url",
+        "type",
+        "url"
+       ],
+       "type": "object"
+      },
+      "assigning_team": {
+       "nullable": true,
+       "oneOf": [
+        {
+         "properties": {
+          "access_source": {
+           "enum": [
+            "direct",
+            "organization",
+            "enterprise"
+           ],
+           "type": "string"
+          },
+          "description": {
+           "nullable": true,
+           "type": "string"
+          },
+          "enterprise_id": {
+           "type": "integer"
+          },
+          "html_url": {
+           "format": "uri",
+           "type": "string"
+          },
+          "id": {
+           "type": "integer"
+          },
+          "members_url": {
+           "type": "string"
+          },
+          "name": {
+           "type": "string"
+          },
+          "node_id": {
+           "type": "string"
+          },
+          "notification_setting": {
+           "type": "string"
+          },
+          "organization_id": {
+           "type": "integer"
+          },
+          "parent": {
+           "nullable": true,
+           "properties": {
+            "description": {
+             "nullable": true,
+             "type": "string"
+            },
+            "enterprise_id": {
+             "type": "integer"
+            },
+            "html_url": {
+             "format": "uri",
+             "type": "string"
+            },
+            "id": {
+             "type": "integer"
+            },
+            "ldap_dn": {
+             "type": "string"
+            },
+            "members_url": {
+             "type": "string"
+            },
+            "name": {
+             "type": "string"
+            },
+            "node_id": {
+             "type": "string"
+            },
+            "notification_setting": {
+             "type": "string"
+            },
+            "organization_id": {
+             "type": "integer"
+            },
+            "permission": {
+             "type": "string"
+            },
+            "privacy": {
+             "type": "string"
+            },
+            "repositories_url": {
+             "format": "uri",
+             "type": "string"
+            },
+            "slug": {
+             "type": "string"
+            },
+            "type": {
+             "enum": [
+              "enterprise",
+              "organization"
+             ],
+             "type": "string"
+            },
+            "url": {
+             "format": "uri",
+             "type": "string"
+            }
+           },
+           "required": [
+            "id",
+            "node_id",
+            "url",
+            "members_url",
+            "name",
+            "description",
+            "permission",
+            "html_url",
+            "repositories_url",
+            "slug",
+            "type"
+           ],
+           "type": "object"
+          },
+          "permission": {
+           "type": "string"
+          },
+          "permissions": {
+           "properties": {
+            "admin": {
+             "type": "boolean"
+            },
+            "maintain": {
+             "type": "boolean"
+            },
+            "pull": {
+             "type": "boolean"
+            },
+            "push": {
+             "type": "boolean"
+            },
+            "triage": {
+             "type": "boolean"
+            }
+           },
+           "required": [
+            "pull",
+            "triage",
+            "push",
+            "maintain",
+            "admin"
+           ],
+           "type": "object"
+          },
+          "privacy": {
+           "type": "string"
+          },
+          "repositories_url": {
+           "format": "uri",
+           "type": "string"
+          },
+          "slug": {
+           "type": "string"
+          },
+          "type": {
+           "enum": [
+            "enterprise",
+            "organization"
+           ],
+           "type": "string"
+          },
+          "url": {
+           "format": "uri",
+           "type": "string"
+          }
+         },
+         "required": [
+          "id",
+          "node_id",
+          "url",
+          "members_url",
+          "name",
+          "description",
+          "permission",
+          "html_url",
+          "repositories_url",
+          "slug",
+          "parent",
+          "type"
+         ],
+         "type": "object"
+        },
+        {
+         "properties": {
+          "created_at": {
+           "format": "date-time",
+           "type": "string"
+          },
+          "description": {
+           "type": "string"
+          },
+          "group_id": {
+           "nullable": true,
+           "type": "string"
+          },
+          "group_name": {
+           "nullable": true,
+           "type": "string"
+          },
+          "html_url": {
+           "format": "uri",
+           "type": "string"
+          },
+          "id": {
+           "format": "int64",
+           "type": "integer"
+          },
+          "members_url": {
+           "type": "string"
+          },
+          "name": {
+           "type": "string"
+          },
+          "notification_setting": {
+           "enum": [
+            "notifications_enabled",
+            "notifications_disabled"
+           ],
+           "type": "string"
+          },
+          "organization_selection_type": {
+           "type": "string"
+          },
+          "slug": {
+           "type": "string"
+          },
+          "sync_to_organizations": {
+           "type": "string"
+          },
+          "updated_at": {
+           "format": "date-time",
+           "type": "string"
+          },
+          "url": {
+           "format": "uri",
+           "type": "string"
+          }
+         },
+         "required": [
+          "id",
+          "url",
+          "members_url",
+          "name",
+          "html_url",
+          "slug",
+          "created_at",
+          "updated_at",
+          "group_id"
+         ],
+         "type": "object"
+        }
+       ]
+      },
+      "created_at": {
+       "format": "date-time",
+       "type": "string"
+      },
+      "last_activity_at": {
+       "format": "date-time",
+       "nullable": true,
+       "type": "string"
+      },
+      "last_activity_editor": {
+       "nullable": true,
+       "type": "string"
+      },
+      "last_authenticated_at": {
+       "format": "date-time",
+       "nullable": true,
+       "type": "string"
+      },
+      "organization": {
+       "nullable": true,
+       "properties": {
+        "avatar_url": {
+         "type": "string"
+        },
+        "description": {
+         "nullable": true,
+         "type": "string"
+        },
+        "events_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "hooks_url": {
+         "type": "string"
+        },
+        "id": {
+         "type": "integer"
+        },
+        "issues_url": {
+         "type": "string"
+        },
+        "login": {
+         "type": "string"
+        },
+        "members_url": {
+         "type": "string"
+        },
+        "node_id": {
+         "type": "string"
+        },
+        "public_members_url": {
+         "type": "string"
+        },
+        "repos_url": {
+         "format": "uri",
+         "type": "string"
+        },
+        "url": {
+         "format": "uri",
+         "type": "string"
+        }
+       },
+       "required": [
+        "login",
+        "url",
+        "id",
+        "node_id",
+        "repos_url",
+        "events_url",
+        "hooks_url",
+        "issues_url",
+        "members_url",
+        "public_members_url",
+        "avatar_url",
+        "description"
+       ],
+       "type": "object"
+      },
+      "pending_cancellation_date": {
+       "format": "date",
+       "nullable": true,
+       "type": "string"
+      },
+      "plan_type": {
+       "enum": [
+        "business",
+        "enterprise",
+        "unknown"
+       ],
+       "type": "string"
+      },
+      "updated_at": {
+       "deprecated": true,
+       "format": "date-time",
+       "type": "string"
+      }
+     },
+     "required": [
+      "created_at"
+     ],
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "total_seats": {
+    "type": "integer"
+   }
+  },
+  "type": "object"
+ },
+ "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+ "source_kind": "openapi_spec",
+ "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+ "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+ "status": "synthetic, awaiting live validation"
+}

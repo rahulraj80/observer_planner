@@ -1,47 +1,118 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
-import { ChartShell, PageHeader, Pill, SlideOver, StatCard, Tooltip } from "@/components/primitives";
+import {
+  Button,
+  Card,
+  ChartShell,
+  ConfirmButton,
+  EntityMultiPicker,
+  ErrorState,
+  Icon,
+  InlineLoading,
+  Input,
+  PageHeader,
+  Pill,
+  ReadOnlyBanner,
+  Select,
+  SectionRail,
+  SettingRow,
+  SinglePicker,
+  SlideOver,
+  Table,
+  Textarea,
+  Tooltip,
+  SuccessCheck,
+  type SectionRailGroup,
+} from "@/components/primitives";
 import { HelpInd } from "@/components/HelpInd";
-import { BUILTIN_PROFILE_NAMES, SECTION_SPECS } from "./settings/sectionSpecs";
+import { CommandJobButton } from "@/components/CommandJobButton";
+import { Summary } from "@/components/Summary";
+import type { Tone } from "@shared/lib/tone";
+import { BUILTIN_PROFILE_NAMES, COMPRESS_TYPES, SECTION_SPECS, type SectionSpec } from "./settings/sectionSpecs";
+import { joinList, keepSelected, splitList } from "@/lib/pickerOptions";
+import { usePricedModels } from "@/lib/usePickerSources";
 import { StructuredConfigSection } from "./settings/StructuredConfigSection";
+import { SchemaSection } from "./settings/SchemaSection";
 import { AntigravityHelperCard } from "./settings/AntigravityHelperCard";
 import { ETWCapturerCard } from "./settings/ETWCapturerCard";
+import { ShellWrapCard } from "./settings/ShellWrapCard";
+import { CodeIntelCard } from "./settings/CodeIntelCard";
+import { ToolProfilesCard } from "./settings/ToolProfilesCard";
+import { ProjectProfilesCard } from "./settings/ProjectProfilesCard";
+import { RepriceCard } from "./settings/RepriceCard";
 import { LLMConnectionsCard } from "./settings/LLMConnectionsCard";
 import { ConnectedToolsSection } from "./settings/ConnectedToolsSection";
+import { CloudIntelligenceSection } from "./settings/CloudIntelligenceSection";
+import { OrgIntelSection } from "./settings/OrgIntelSection";
+import { OrgDigestsCard } from "@/components/OrgDigestsCard";
 import { EnrolmentSection } from "./settings/EnrolmentSection";
 import { HealthSection } from "./settings/HealthSection";
 import { StorageSection } from "./settings/StorageSection";
 import { ChartState } from "@/components/ChartState";
 import { CommunityLinksMini } from "@/components/CommunityCard";
+import { useComponentState } from "@/lib/useComponents";
+import { absentSettingsSections } from "@/lib/componentState";
 import {
-  BoltIcon,
-  CalendarIcon,
-  ClockIcon,
-  CoinsIcon,
-  CompassIcon,
-  CompressIcon,
-  DatabaseIcon,
-  DropletIcon,
-  EyeIcon,
-  LayersIcon,
-  LightningIcon,
-  SearchIcon,
-  ShieldIcon,
-  SparklesIcon,
-  WrenchIcon,
-} from "@/components/icons";
+  ArrowRightLeft,
+  Boxes,
+  BrainCircuit,
+  Cable,
+  CalendarClock,
+  Clock,
+  Cloud,
+  CloudCog,
+  Coins,
+  Cpu,
+  DatabaseBackup,
+  DatabaseZap,
+  Eye,
+  FolderSearch,
+  Gauge,
+  Globe,
+  HardDrive,
+  KeyRound,
+  Lightbulb,
+  ListTodo,
+  Lock,
+  Minimize2,
+  MonitorCog,
+  Orbit,
+  Plug,
+  Plus,
+  ScanEye,
+  Share2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Split,
+  SquareTerminal,
+  Stethoscope,
+  Table2,
+  Telescope,
+  Trash2,
+  TriangleAlert,
+  Users,
+  Webhook,
+  Zap,
+  type LucideIcon,
+  Sparkles,
+} from "lucide-react";
 
-// TomlView is only used by the read-only config viewers below.
-// Lazy-import so the hand-rolled lexer + serializer ships in its
-// own chunk and Settings's first paint stays slim.
-const TomlView = lazy(() =>
-  import("@/components/TomlView").then((m) => ({ default: m.TomlView })),
-);
-import { fetchJSON } from "@/lib/api";
+import { fetchJSON, localConfirmHeaders } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { markRestartPending } from "@/lib/restartPending";
 import { useApi } from "@/lib/useApi";
-import { fmtInt, fmtUSD } from "@/lib/format";
+import { useConfigSchema, type ConfigSchemaDescriptor } from "@/lib/configSchema";
+import {
+  isSettingsHidden,
+  isSettingsReadOnly,
+  governedOrgLabel,
+  useGovernance,
+  useGovernanceVisibility,
+  type Governance,
+} from "@/lib/governance";
+import { settingsOfferedWhileUnresolved } from "@/lib/visibility";
+import { fmtDateTime, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   BackfillJob,
   BackfillJobsListResponse,
@@ -49,13 +120,20 @@ import type {
   BackfillStatusResponse,
   ConfigResponse,
   CostPricing,
+  DatedCostPricing,
   MCPValueResponse,
   ModelPricing,
+  PeakRates,
+  PeakSchedule,
   PricingDefaultsResponse,
   ProfileShowResponse,
   ToolsStatusResponse,
 } from "@/lib/types";
 import { costPricingToConfig } from "@/lib/types";
+import type { VocabTable } from "@shared/lib/vocabEntry";
+import { VocabPill } from "@shared/lib/vocabPill";
+import { JOB_STATUS } from "@shared/lib/sessionVocab";
+import { navIcon } from "@/lib/nav";
 
 type SectionId =
   | "pricing"
@@ -64,6 +142,8 @@ type SectionId =
   | "health"
   | "storage"
   | "enrolment"
+  | "cloud"
+  | "intel"
   | "observer"
   | "watcher"
   | "freshness"
@@ -76,6 +156,7 @@ type SectionId =
   | "intelligence"
   | "advisor"
   | "cachetrack"
+  | "tasks"
   | "observability"
   | "secrets"
   | "mcp"
@@ -106,10 +187,12 @@ type SectionDef = {
   // soft = consumed lazily by the next job, no restart needed.
   // restart = daemon must restart to bind the new value.
   status: "hot" | "soft" | "restart";
-  // Inline glyph rendered in the SectionNav row + page header to
-  // match design/page-settings.jsx — every section carries a single
-  // identifying icon so the nav reads at a glance.
-  icon: ReactNode;
+  // The section's lucide glyph, rendered through <Icon> in the SettingsRail
+  // row. Every section carries its OWN icon (no two share one, pinned by
+  // lib/settingsIcons.test.ts) so the nav reads at a glance; where a
+  // section configures a page that has a nav entry (Compression, Routing,
+  // Cache, Suggestions) it reuses that page's nav glyph.
+  icon: LucideIcon;
   about: {
     summary: string;
     whenModified: string;
@@ -123,14 +206,14 @@ const SECTIONS: SectionDef[] = [
     label: "Pricing",
     group: "edit",
     status: "hot",
-    icon: <CoinsIcon size={13} />,
+    icon: Coins,
     about: {
       summary:
         "Per-model pricing overrides. The cost engine ships with baked-in defaults for every common Anthropic / OpenAI / xAI model; overrides let you correct a contract rate or add a new SKU before observer's defaults catch up.",
       whenModified:
-        "Custom contract rates, or a new SKU lands before observer's defaults catch up. Hot-reloaded — no restart needed.",
+        "Custom contract rates, or a new SKU lands before observer's defaults catch up. Hot-reloaded - no restart needed.",
       behavior:
-        "Save writes ~/.observer/config.toml + a .bak of the prior version. The cost engine swaps the active pricing table atomically on save — no restart, no daemon bounce.",
+        "Save writes ~/.observer/config.toml + a .bak of the prior version. The cost engine swaps the active pricing table atomically on save - no restart, no daemon bounce.",
     },
   },
   {
@@ -138,7 +221,7 @@ const SECTIONS: SectionDef[] = [
     label: "Backfill",
     group: "edit",
     status: "soft",
-    icon: <DatabaseIcon size={13} />,
+    icon: DatabaseBackup,
     about: {
       summary:
         "Run schema-fill jobs against your DB. Useful after a schema upgrade or when a new derived column lands and needs back-population.",
@@ -153,12 +236,12 @@ const SECTIONS: SectionDef[] = [
     label: "Connected tools",
     group: "edit",
     status: "soft",
-    icon: <CompassIcon size={13} />,
+    icon: Cable,
     about: {
       summary:
-        "Per-tool integration matrix: every AI tool observer supports, with live detected / capturing / hooks / MCP / proxied state. All probes are read-only — nothing on this panel writes AI-client config.",
+        "Per-tool integration matrix: every AI tool observer supports, with live detected / capturing / hooks / MCP / proxied state. All probes are read-only - nothing on this panel writes AI-client config.",
       whenModified:
-        "Checking why a tool isn't showing data, after installing a new AI tool, or before/after running `observer init`.",
+        "Checking why a tool isn't showing data, after installing a new AI tool, or before and after running Set up.",
       behavior:
         "Pure reads, computed per request: directory probes for detection, dry-run registry probes for hooks/MCP, routing-config reads for the proxy column. Refresh re-probes immediately.",
     },
@@ -168,14 +251,14 @@ const SECTIONS: SectionDef[] = [
     label: "Health",
     group: "edit",
     status: "soft",
-    icon: <BoltIcon size={13} />,
+    icon: Stethoscope,
     about: {
       summary:
-        "The `observer doctor` checks in the dashboard — database integrity, hook checksums and binary paths, MCP registrations, pidbridge, concurrent daemons, codex hook trust, proxy routing gap, org enrolment — plus the recent-failures card (failed commands grouped, recovered vs not, session deep-links).",
+        "The `observer doctor` checks in the dashboard - database integrity, hook checksums and binary paths, MCP registrations, pidbridge, concurrent daemons, codex hook trust, proxy routing gap, org enrolment - plus the recent-failures card (failed commands grouped, recovered vs not, session deep-links).",
       whenModified:
-        "Something looks off — missing capture, a tool that stopped reporting, a command that keeps failing, after an upgrade or a machine migration.",
+        "Something looks off - missing capture, a tool that stopped reporting, a command that keeps failing, after an upgrade or a machine migration.",
       behavior:
-        "Read-only. Checks run when the section opens and on Re-run — not on a poll loop (the DB integrity check is not free on a large database). The failures card reads the local failure_context table.",
+        "Read-only. Checks run when the section opens and on Re-run - not on a poll loop (the DB integrity check is not free on a large database). The failures card reads the local failure_context table.",
     },
   },
   {
@@ -183,14 +266,14 @@ const SECTIONS: SectionDef[] = [
     label: "Storage",
     group: "edit",
     status: "soft",
-    icon: <DatabaseIcon size={13} />,
+    icon: HardDrive,
     about: {
       summary:
-        "Where the database's bytes live: per-table size breakdown (indexes and FTS shadow tables folded into their owners), vacuum, and one-click backup with restore instructions. Backups are consistent snapshots written next to the live DB via VACUUM INTO — capture keeps running while one is taken.",
+        "Where the database's bytes live: per-table size breakdown (indexes and FTS shadow tables folded into their owners), vacuum, and one-click backup with restore instructions. Backups are consistent snapshots written next to the live DB via VACUUM INTO - capture keeps running while one is taken.",
       whenModified:
         "The DB feels large and you want to see why; before an upgrade or machine move (take a backup); after a big retention prune (vacuum returns the freed pages to the OS).",
       behavior:
-        "The size report walks every page on demand — opened or refreshed explicitly, never polled. Vacuum and backup run as `observer db vacuum` / `observer db backup` subprocesses through the shared job runner with streamed output; the CLI commands are the identical code path.",
+        "The size report walks every page on demand - opened or refreshed explicitly, never polled. Vacuum and backup run as `observer db vacuum` / `observer db backup` subprocesses through the shared job runner with streamed output; the CLI commands are the identical code path.",
     },
   },
   {
@@ -198,14 +281,44 @@ const SECTIONS: SectionDef[] = [
     label: "Enrolment",
     group: "edit",
     status: "soft",
-    icon: <OrgSectionIcon />,
+    icon: Users,
     about: {
       summary:
-        "Teams & Org Visibility. When enrolled, this agent shares content-free activity rollups (counts, costs, timings, paths — never prompt text or tool output) with your organisation's SuperBased server. View exactly what was last shared, or unenrol.",
+        "Teams & Org Visibility. Enrol this machine in your organization's SuperBased server (enrolment code, link, or sign-in with your organization account), accept or decline the organization's governance request, see what is shared and push now, or leave. An individual enrolment shares counts, costs, timings and hashes unless you opt in to more; an organization-managed enrolment shares full content.",
       whenModified:
-        "Joining or leaving an organisation. Enrol with `observer enroll <org-url> <token>`; unenrol from here or with `observer unenroll`.",
+        "Joining, re-joining or leaving an organization. Everything here is also available from the CLI (`observer enroll`, `observer org status`, `observer org push-status`, `observer org push-now`, `observer org backfill`, `observer org resync`, `observer org grant show`, `observer unenroll`) and runs the same code.",
       behavior:
-        "Unenrol deletes the local enrolment + keychain credentials immediately; a running daemon's push loop stops within one interval. Nothing already shared with the server is deleted.",
+        "Enrolling checks the server is reachable before the one-time code is spent, writes the default [org_client] block to config.toml, and stores the credential in the OS keychain (or a 0600 file). A daemon that started before enrolment needs a restart to run its push loop; Push now works either way. Leaving deletes the local enrolment + credentials immediately; nothing already shared with the server is deleted.",
+    },
+  },
+  {
+    id: "cloud",
+    label: "Cloud Intelligence",
+    group: "edit",
+    status: "soft",
+    icon: Cloud,
+    about: {
+      summary:
+        "Optional signed-in personal enrichment (Signed-in Free). The Cloud account card at the top is where you sign in and out - the daemon itself never touches the network: Sign in runs the same consent-gated `observer cloud login` you would type, as a subprocess, and the credential stays in the local keychain. The card also carries the two egress preferences (auto-sync, auto-enrich). Below it: consent receipts, the send outbox by state, and any synced enrichment results. Deployment knobs (client id, base URL, callback port) live under an Advanced fold - most people never touch them.",
+      whenModified:
+        "Signing in for the first time, turning auto-sync or auto-enrich on, checking what's queued for the next `observer cloud sync`, why a job is awaiting reconfirmation, or whether results have been pulled. The Advanced fold is only for staging or self-hosting - pointing the node at a different hosted base URL or WorkOS client.",
+      behavior:
+        "Every local Observer feature works fully without this. Nothing is wired into the watcher or proxy - only an `observer cloud` command touches the network - typed, launched by a button here (Sign in, Sync now, Grant, Revoke, Delete account) or on a session card (Preview, Confirm and enrich, Sync now), or the scheduled `cloud sync` when you turn auto-sync on. Settings edits take effect on the next cloud command; turning auto-sync on/off needs a daemon restart to change the schedule.",
+    },
+  },
+  {
+    id: "intel",
+    label: "Org enrichment",
+    group: "edit",
+    status: "hot",
+    icon: CloudCog,
+    about: {
+      summary:
+        "Cloud Intelligence run by the organization this machine is enrolled with, on the organization's own server and model: whether it is on, which provider and model, what evidence it sees, and your consent. On an organization-managed machine this is a notice; on an individual enrolment nothing is sent until you accept.",
+      whenModified:
+        "Reviewing what your organization runs, accepting its terms (or new terms after it widened them), or withdrawing. The same actions are `observer intel status`, `observer intel accept` and `observer intel disable`.",
+      behavior:
+        "Accept records exactly the terms shown (their digest is checked, so a text that changed since it was shown is refused), turns `[intelligence].org_enrichment` on and tells the organization's server. Withdraw records the withdrawal, turns the key off and removes results cached under the old consent. When the organization requires this consent, the alternative is leaving the organization (Settings, Enrolment). Takes effect on the next sync, no restart.",
     },
   },
   {
@@ -213,12 +326,12 @@ const SECTIONS: SectionDef[] = [
     label: "Intelligence",
     group: "edit",
     status: "restart",
-    icon: <SparklesIcon size={13} />,
+    icon: BrainCircuit,
     about: {
       summary:
-        "Summary model, monthly budget cap, code-graph integration. These power the Analysis tab's headline KPIs and the MCP `get_session_summary` tool.",
+        "Summary model, monthly budget cap, and code intelligence (the in-process code index, [codeintel]), which is off by default and turned on with one click in its card. These power the Analysis tab's headline KPIs and the MCP `get_session_summary` tool; code intelligence powers the MCP symbol tools and code-aware compression.",
       whenModified:
-        "Switching to a cheaper Haiku for summaries, raising/lowering the budget cap, or enabling/disabling the code-graph backend.",
+        "Switching to a cheaper Haiku for summaries, raising/lowering the budget cap, or turning code intelligence on or off (codeintel.enabled).",
       behavior:
         "Save writes config.toml; consumers bind the value at daemon startup, so a `observer serve` restart is required for the new value to take effect.",
     },
@@ -228,11 +341,11 @@ const SECTIONS: SectionDef[] = [
     label: "Observer",
     group: "config",
     status: "restart",
-    icon: <EyeIcon size={13} />,
+    icon: Eye,
     about: {
-      summary: "Top-level observer settings: watch paths, freshness, retention, hooks, antigravity. Read-only view; edit the source TOML to change.",
+      summary: "Top-level observer settings (db path, log level) plus every [observer] key the sub-sections do not own, rendered from the config schema.",
       whenModified: "Adding/removing a watched root, tweaking retention, etc.",
-      behavior: "Restart required — consumers bind at startup.",
+      behavior: "Restart required - consumers bind at startup.",
     },
   },
   {
@@ -240,9 +353,9 @@ const SECTIONS: SectionDef[] = [
     label: "Watcher",
     group: "config",
     status: "restart",
-    icon: <SearchIcon size={13} />,
+    icon: FolderSearch,
     about: {
-      summary: "Filesystem watcher — watch_paths, ignore_globs. Defines what observer scans for new session files.",
+      summary: "Filesystem watcher - watch_paths, ignore_globs. Defines what observer scans for new session files.",
       whenModified: "Onboarding a new AI client, or moving session files to a non-default location.",
       behavior: "Restart required.",
     },
@@ -252,9 +365,9 @@ const SECTIONS: SectionDef[] = [
     label: "Freshness",
     group: "config",
     status: "restart",
-    icon: <ClockIcon size={13} />,
+    icon: Clock,
     about: {
-      summary: "Freshness classifier — how observer scores whether a file read is stale vs fresh.",
+      summary: "Freshness classifier - how observer scores whether a file read is stale vs fresh.",
       whenModified: "Tuning the staleness threshold or hashing rules.",
       behavior: "Restart required.",
     },
@@ -264,7 +377,7 @@ const SECTIONS: SectionDef[] = [
     label: "Retention",
     group: "config",
     status: "restart",
-    icon: <CalendarIcon size={13} />,
+    icon: CalendarClock,
     about: {
       summary: "How long observer keeps each table's data. Trims the DB on schedule.",
       whenModified: "Disk pressure or compliance retention windows.",
@@ -276,7 +389,7 @@ const SECTIONS: SectionDef[] = [
     label: "Hooks",
     group: "config",
     status: "restart",
-    icon: <BoltIcon size={13} />,
+    icon: Webhook,
     about: {
       summary: "Per-tool hook configuration (Claude Code, Codex, Cursor, etc).",
       whenModified: "Adding a new tool integration or fixing a broken envelope.",
@@ -288,11 +401,11 @@ const SECTIONS: SectionDef[] = [
     label: "Proxy",
     group: "config",
     status: "restart",
-    icon: <CompassIcon size={13} />,
+    icon: ArrowRightLeft,
     about: {
       summary: "API proxy port + compression knobs.",
       whenModified: "Changing the proxy port or compression toggles.",
-      behavior: "Restart required — proxy is bound at startup.",
+      behavior: "Restart required - proxy is bound at startup.",
     },
   },
   {
@@ -300,12 +413,12 @@ const SECTIONS: SectionDef[] = [
     label: "Dashboard",
     group: "config",
     status: "restart",
-    icon: <CompassIcon size={13} />,
+    icon: MonitorCog,
     about: {
       summary: "Durable dashboard listen address.",
       whenModified: "Setting a fixed host:port for the dashboard listener.",
       behavior:
-        "Restart required — the dashboard listener binds at daemon start. Precedence: --dashboard-addr flag > OBSERVER_DASHBOARD_ADDR env > this config value > default 127.0.0.1:8081.",
+        "Restart required - the dashboard listener binds at daemon start. Precedence: --dashboard-addr flag > OBSERVER_DASHBOARD_ADDR env > this config value > default 127.0.0.1:8081.",
     },
   },
   {
@@ -313,9 +426,9 @@ const SECTIONS: SectionDef[] = [
     label: "Compression",
     group: "config",
     status: "restart",
-    icon: <CompressIcon size={13} />,
+    icon: Minimize2,
     about: {
-      summary: "Per-mechanism compression configuration — drop / dedup / stash thresholds.",
+      summary: "Per-mechanism compression configuration - drop / dedup / stash thresholds.",
       whenModified: "Tuning the compression pipeline.",
       behavior: "Restart required.",
     },
@@ -325,14 +438,14 @@ const SECTIONS: SectionDef[] = [
     label: "Profiles",
     group: "config",
     status: "hot",
-    icon: <WrenchIcon size={13} />,
+    icon: SlidersHorizontal,
     about: {
       summary:
-        "Which compression profile each traffic class runs. Profiles are named parameter sets (the embedded recipes + `default` = master config) resolved per request at the proxy, so Claude Code and codex each get their tuned parameters from one daemon. The master compression switch stays the only on/off gate — profiles never enable compression.",
+        "Which compression profile each traffic class runs. Profiles are named parameter sets (the embedded recipes + `default` = master config) resolved per request at the proxy, so Claude Code and codex each get their tuned parameters from one daemon. The master compression switch stays the only on/off gate - profiles never enable compression.",
       whenModified:
         "Pointing OpenAI traffic at codex-variant for a *-codex reasoning model, trying a different tuning, or pinning everything to your master parameters.",
       behavior:
-        "Hot for new sessions: saving re-points the proxy's profile router immediately — the next session resolves the new assignment. Sessions already in flight keep the parameters they started with (deliberate: mid-session parameter flips would break rolling summaries and cache alignment). No restart, no banner.",
+        "Hot for new sessions: saving re-points the proxy's profile router immediately - the next session resolves the new assignment. Sessions already in flight keep the parameters they started with (deliberate: mid-session parameter flips would break rolling summaries and cache alignment). No restart, no banner.",
     },
   },
   {
@@ -340,14 +453,14 @@ const SECTIONS: SectionDef[] = [
     label: "Org sharing",
     group: "config",
     status: "restart",
-    icon: <EyeIcon size={13} />,
+    icon: Share2,
     about: {
       summary:
-        "What this node shares with an org server when enrolled: share mode (metadata-only by default — hashes and counts, never raw content), per-action target exceptions, project scope lists, push cadence. All of it is node-side opt-in; the org admin cannot flip any of it remotely.",
+        "What this node shares with an org server when enrolled: share mode (metadata-only by default - hashes and counts, never raw content), per-action target exceptions, project scope lists, push cadence. On an individual node, raw-content sharing (full_content/admin_managed) is node opt-in only, never server-forced; on an organization-managed node, full content ships by the organization's enrolment grant. The reporting-tier shares (e.g. routing_summary, obs.summary) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
       whenModified:
-        "Opting into (or out of) full-content sharing, scoping which projects push, or tuning push cadence. Enrolment itself stays with `observer enroll` / the Enrolment section.",
+        "Opting into (or out of) full-content sharing, scoping which projects push, or tuning push cadence. Enrolment itself lives in the Enrolment section.",
       behavior:
-        "Saves write this node's config.toml only — the enrolment identity (server URL, keychain) is deliberately untouchable from here. The push loop binds config at daemon start: restart to apply.",
+        "Saves write this node's config.toml only - the enrolment identity (server URL, keychain) is deliberately untouchable from here. The push loop binds config at daemon start: restart to apply.",
     },
   },
   {
@@ -355,14 +468,14 @@ const SECTIONS: SectionDef[] = [
     label: "Guard",
     group: "config",
     status: "restart",
-    icon: <ShieldIcon size={13} />,
+    icon: ShieldCheck,
     about: {
       summary:
-        "The security guard layer — posture (enabled / observe vs enforce / strict), rule disables, boundary allowlists, taint tracking, proxy egress + response scans, MCP pinning, budget limits, alerts, and native-dialect compilation. Cloud features ([guard.cloud] — LLM judge, reputation, webhooks) are deliberately NOT editable here: network egress stays a hand-written config decision.",
+        "The security guard layer - posture (enabled / observe vs enforce / strict), rule disables, boundary allowlists, taint tracking, proxy egress + response scans, MCP pinning, budget limits, alerts, and native-dialect compilation. Cloud features ([guard.cloud] - LLM judge, reputation, webhooks) are deliberately NOT editable here: network egress stays a hand-written config decision.",
       whenModified:
         "Silencing a noisy rule (rules.disable), tuning the egress action, moving observe → enforce (the Security page's mode control shows the evidence first), or setting session/daily budget limits.",
       behavior:
-        "Restart required — the policy engine and proxy seams bind config at startup. Saves write config.toml + .bak; the boundary allowlists treat an empty list as 'keep engine defaults' (explicit 'none' is a config-file edit).",
+        "Restart required - the policy engine and proxy seams bind config at startup. Saves write config.toml + .bak; the boundary allowlists treat an empty list as 'keep engine defaults' (explicit 'none' is a config-file edit).",
     },
   },
   {
@@ -370,14 +483,14 @@ const SECTIONS: SectionDef[] = [
     label: "Routing",
     group: "config",
     status: "restart",
-    icon: <CompassIcon size={13} />,
+    icon: Split,
     about: {
       summary:
-        "Model routing — the opt-in layer that picks (advise) or rewrites (enforce) the model per turn based on a policy template, with session stickiness, outcome calibration, and subscription-window headroom. Custom [[routing.rules]], tier overrides, budget scopes, privacy rules, key pools, and local upstreams are deliberately NOT editable here: complex shapes and secrets stay hand-written config decisions, preserved on every save.",
+        "Model routing - the opt-in layer that picks (advise) or rewrites (enforce) the model per turn based on a policy template, with session stickiness, outcome calibration, and subscription-window headroom. Custom [[routing.rules]], tier overrides, budget scopes, privacy rules, key pools, and local upstreams are deliberately NOT editable here: complex shapes and secrets stay hand-written config decisions, preserved on every save.",
       whenModified:
         "Enabling routing for the first time (the Routing page's preview shows the value first), switching policy templates, tuning switch stickiness, or moving advise → enforce (the Shadow card's promote control shows the readiness evidence first).",
       behavior:
-        "Restart required — the proxy's router binds config at startup. Saves write config.toml + .bak. Mode and policy validate at save against the closed vocabularies, so a bad value can never reach the file.",
+        "Restart required - the proxy's router binds config at startup. Saves write config.toml + .bak. Mode and policy validate at save against the closed vocabularies, so a bad value can never reach the file.",
     },
   },
   {
@@ -385,10 +498,10 @@ const SECTIONS: SectionDef[] = [
     label: "OTel export",
     group: "config",
     status: "restart",
-    icon: <LightningIcon size={13} />,
+    icon: Telescope,
     about: {
       summary:
-        "Agent-side OpenTelemetry exporter — one gen_ai.client span per proxied API turn to your own OTLP/HTTP collector. Disabled by default; prompt content and user email are separate, off-by-default opt-ins.",
+        "Agent-side OpenTelemetry exporter - one gen_ai.client span per proxied API turn to your own OTLP/HTTP collector. Disabled by default; prompt content and user email are separate, off-by-default opt-ins.",
       whenModified:
         "Wiring observer spans into an existing observability stack (Grafana, Honeycomb, Jaeger…).",
       behavior:
@@ -400,14 +513,14 @@ const SECTIONS: SectionDef[] = [
     label: "MCP tools",
     group: "config",
     status: "soft",
-    icon: <SearchIcon size={13} />,
+    icon: Plug,
     about: {
       summary:
-        "The on-demand MCP retrieval tools (get_file / get_symbols / get_relations / retrieve_stashed), their shared audit log, and the value meter — what the tools actually got called vs their ~1,900-token-per-turn schema overhead.",
+        "The on-demand MCP retrieval tools (get_file / get_symbols / get_relations / retrieve_stashed), their shared audit log, and the value meter - what the tools actually got called vs their ~1,900-token-per-turn schema overhead.",
       whenModified:
         "Tightening the file-retrieval allow/deny lists, disabling individual tools, or deciding whether MCP registration is worth the per-turn tax (the meter below answers that with your own numbers).",
       behavior:
-        "Soft: each AI session spawns a fresh observer MCP server that reads config at start, so saves bind on the next session — no daemon restart, no banner. Running MCP sessions keep the config they spawned with.",
+        "Soft: each AI session spawns a fresh observer MCP server that reads config at start, so saves bind on the next session - no daemon restart, no banner. Running MCP sessions keep the config they spawned with.",
     },
   },
   {
@@ -415,14 +528,14 @@ const SECTIONS: SectionDef[] = [
     label: "Advisor",
     group: "config",
     status: "restart",
-    icon: <LightningIcon size={13} />,
+    icon: Lightbulb,
     about: {
       summary:
-        "The suggestions engine — evidence window, confidence/savings visibility floors, and the opt-in session-start digest that injects top advisories into Claude Code.",
+        "The suggestions engine - evidence window, confidence/savings visibility floors, and the opt-in session-start digest that injects top advisories into Claude Code.",
       whenModified:
         "Tuning how chatty the Suggestions tab is, or enabling the session-start digest (default off).",
       behavior:
-        "Restart required — the daemon's digest refresher and the /api/suggestions floors bind at startup.",
+        "Restart required - the daemon's digest refresher and the /api/suggestions floors bind at startup.",
     },
   },
   {
@@ -430,14 +543,29 @@ const SECTIONS: SectionDef[] = [
     label: "Cache tracking",
     group: "config",
     status: "restart",
-    icon: <LayersIcon size={13} />,
+    icon: DatabaseZap,
     about: {
       summary:
-        "Anthropic prompt-cache observation + forecasting — the Cache tab's data source. Hash-only and node-local; cache rows never leave this machine.",
+        "Anthropic prompt-cache observation + forecasting - the Cache tab's data source. Hash-only and node-local; cache rows never leave this machine.",
       whenModified:
         "Disabling the engine, bounding tracked sessions, tuning cache-row retention, or enabling the calibrate-log diagnostic sidecar.",
       behavior:
-        "Restart required — the proxy constructs the engine at startup. Retrofit historical sessions with Backfill → cache-rescan.",
+        "Restart required - the proxy constructs the engine at startup. Retrofit historical sessions with Backfill → cache-rescan.",
+    },
+  },
+  {
+    id: "tasks",
+    label: "Task tracking",
+    group: "config",
+    status: "restart",
+    icon: ListTodo,
+    about: {
+      summary:
+        "Session-level todo/plan checklist tracking - decodes TaskCreate/TodoWrite/update_plan/manage_todo_list and similar tool calls already captured into a per-task lifecycle + cost report (the session detail Tasks tab, and Analysis's Tasks section).",
+      whenModified:
+        "Disabling the engine, switching how whole-list-rewrite tools are matched across snapshots, changing how concurrent in-progress tasks are attributed, folding sub-agent usage into the parent's open task, backfilling on start, or bounding retention.",
+      behavior:
+        "Restart required - SetTasksEnabled/SetTasksOptions bind once at daemon startup, same as every section except pricing/profiles. Retrofit historical sessions with `observer backfill --tasks` (also in the Backfill panel below).",
     },
   },
   {
@@ -446,14 +574,14 @@ const SECTIONS: SectionDef[] = [
     group: "config",
     plane: "admin",
     status: "restart",
-    icon: <EyeIcon size={13} />,
+    icon: ScanEye,
     about: {
       summary:
-        "Generalized observability (admin plane) — the OTLP /v1/traces receiver, trajectory capture, and the eval plane for an admin/org-hosted LLM app whose END-USER requests route through SuperBased. This is NOT your own coding-agent usage (every other section is); the captured traces + evals are viewed on the admin/org dashboard, not this node dashboard. Opt-in and node-local: trace data never leaves this machine unless you opt into an obs share tier under Org sharing.",
+        "Generalized observability (admin plane) - the OTLP /v1/traces receiver, trajectory capture, and the eval plane for an admin/org-hosted LLM app whose END-USER requests route through SuperBased. This is NOT your own coding-agent usage (every other section is); the captured traces + evals are viewed on the admin/org dashboard, not this node dashboard. Opt-in and node-local: trace data never leaves this machine unless you opt into an obs share tier under Org sharing.",
       whenModified:
         "Turning the subsystem on or off. The judge model + online-sampling eval knobs ([observability.eval]) stay hand-edited config decisions.",
       behavior:
-        "Restart required — the OTLP receiver and obs_* schema bind at `observer start`. The receiver is SHARED: it also binds whenever [ingest.otel] is enabled (for logs), so turning this toggle off does not stop the receiver if [ingest.otel] is on. Saves write config.toml + .bak.",
+        "Restart required - the OTLP receiver and obs_* schema bind at `observer start`. The receiver is SHARED: it also binds whenever [ingest.otel] is enabled (for logs), so turning this toggle off does not stop the receiver if [ingest.otel] is on. Saves write config.toml + .bak.",
     },
   },
   {
@@ -461,13 +589,13 @@ const SECTIONS: SectionDef[] = [
     label: "Secrets scrubbing",
     group: "config",
     status: "restart",
-    icon: <DropletIcon size={13} />,
+    icon: KeyRound,
     about: {
       summary:
         "Regex scrubbing applied to captured tool output before anything is stored. Built-in patterns cover common API-key and token shapes; extra patterns append your own.",
       whenModified:
         "Adding org-specific credential shapes (internal token prefixes, hostnames) to the redaction set.",
-      behavior: "Restart required — the scrubber is built at daemon startup.",
+      behavior: "Restart required - the scrubber is built at daemon startup.",
     },
   },
   {
@@ -475,9 +603,9 @@ const SECTIONS: SectionDef[] = [
     label: "Antigravity",
     group: "config",
     status: "restart",
-    icon: <AntigravitySectionIcon />,
+    icon: Orbit,
     about: {
-      summary: "Antigravity (Google) adapter config — bridge ports, decrypt keys, etc.",
+      summary: "Antigravity (Google) adapter config - bridge ports, decrypt keys, etc.",
       whenModified: "Onboarding the Antigravity adapter.",
       behavior: "Restart required.",
     },
@@ -487,13 +615,13 @@ const SECTIONS: SectionDef[] = [
     label: "Process capture",
     group: "config",
     status: "restart",
-    icon: <LayersIcon size={13} />,
+    icon: Cpu,
     about: {
       summary:
-        "OS-level process observability — capture toggle, backend, and the poll rate that controls how often the process table is sampled.",
+        "OS-level process observability - capture toggle, backend, and the poll rate that controls how often the process table is sampled.",
       whenModified:
         "Turning process capture on/off, or tuning the poll rate (lower = fresher capture + more CPU; higher = cheaper but misses short-lived commands).",
-      behavior: "Restart required — the backend binds at daemon startup.",
+      behavior: "Restart required - the backend binds at daemon startup.",
     },
   },
   {
@@ -501,14 +629,14 @@ const SECTIONS: SectionDef[] = [
     label: "Browser capture",
     group: "config",
     status: "restart",
-    icon: <EyeIcon size={13} />,
+    icon: Globe,
     about: {
       summary:
-        "Browser-chat capture granularity ceiling — the daemon-side clamp on how much of a captured ChatGPT/Claude.ai/Perplexity/Gemini/Copilot web turn is stored (usage_only / redacted / full).",
+        "Browser-chat capture granularity ceiling - the daemon-side clamp on how much of a captured ChatGPT/Claude.ai/Perplexity/Gemini/Copilot web turn is stored (usage_only / redacted / full).",
       whenModified:
         "Tightening what browser-captured chats store: drop to usage_only to keep prompt/response text out of the DB while still tracking tokens and cost, or raise to full to keep the on-screen text.",
       behavior:
-        "Restart required — the granularity ceiling is read when the browser-ingest listener starts. The extension must also be set at or above the level you want (effective = min(extension, ceiling)).",
+        "Restart required - the granularity ceiling is read when the browser-ingest listener starts. The extension must also be set at or above the level you want (effective = min(extension, ceiling)).",
     },
   },
   {
@@ -516,10 +644,10 @@ const SECTIONS: SectionDef[] = [
     label: "Session attach",
     group: "config",
     status: "restart",
-    icon: <LayersIcon size={13} />,
+    icon: SquareTerminal,
     about: {
       summary:
-        "Session attach ([terminal.attach]) — serve the owner-only attach socket so `observer <tool> --attach` sessions become joinable from the dashboard, route attach sessions through the observer proxy, and control whether the launchers attach by default.",
+        "Session attach ([terminal.attach]) - serve the owner-only attach socket so `observer <tool> --attach` sessions become joinable from the dashboard, route attach sessions through the observer proxy, and control whether the launchers attach by default.",
       whenModified:
         "Turning the attach socket on/off, changing whether attach sessions route through the proxy by default, or toggling whether `observer claude`/`observer codex` attach by default (opt out per-launch with --no-attach).",
       behavior:
@@ -531,17 +659,26 @@ const SECTIONS: SectionDef[] = [
     label: "LLM analysis",
     group: "config",
     status: "restart",
-    icon: <SparklesIcon size={13} />,
+    icon: Sparkles,
     about: {
       summary:
-        "Optional LLM analysis connections for the daily briefing — the narrative upgrade and grounded Q&A. Each connection is one endpoint (anthropic / OpenAI-compatible / local); keys are saved to the OS keychain, so config.toml holds only the label.",
+        "Optional LLM analysis connections for the daily briefing - the narrative upgrade and grounded Q&A. Each connection is one endpoint (anthropic / OpenAI-compatible / local); keys are saved to the OS keychain, so config.toml holds only the label.",
       whenModified:
         "Pointing analysis at a new endpoint (Ollama, OpenRouter, a provider), editing a base_url or default model, or saving an API key from the browser.",
       behavior:
-        "Restart required — the briefing runner binds connections at daemon start. Save writes config.toml + .bak. Keys go to the OS keychain (0600 file fallback), never into config.toml; the Test button probes reachability + model list.",
+        "Restart required - the briefing runner binds connections at daemon start. Save writes config.toml + .bak. Keys go to the OS keychain (0600 file fallback), never into config.toml; the Test button probes reachability + model list.",
     },
   },
 ];
+
+/**
+ * sectionIcon returns a Settings section's glyph from the SECTIONS table, so
+ * a section's card title and its rail row show the same icon and
+ * cannot drift.
+ */
+function sectionIcon(id: SectionId): LucideIcon | undefined {
+  return SECTIONS.find((s) => s.id === id)?.icon;
+}
 
 const STATUS_LABEL: Record<SectionDef["status"], string> = {
   hot: "hot",
@@ -549,54 +686,15 @@ const STATUS_LABEL: Record<SectionDef["status"], string> = {
   restart: "restart",
 };
 
-const STATUS_CLASS: Record<SectionDef["status"], string> = {
-  hot: "border-success/40 bg-success-soft text-success",
-  soft: "border-line-3 bg-bg-3 text-fg-2",
-  restart: "border-danger/40 bg-danger-soft text-danger",
+// STATUS_TONE: each section's reload behaviour as a Pill tone.
+const STATUS_TONE: Readonly<Record<SectionDef["status"], Tone>> = {
+  hot: "success",
+  soft: "neutral",
+  restart: "danger",
 };
 
 function sectionAt(id: SectionId): SectionDef {
   return SECTIONS.find((s) => s.id === id)!;
-}
-
-// Small inline glyph for the Antigravity section — mirrors the
-// per-tool antigravity ToolGlyph (upward triangle floating above a
-// baseline) at the section-nav size. Sized to match the other 13px
-// icon set rather than reach into ToolGlyph + its tinted frame.
-function AntigravitySectionIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      fill="none"
-      aria-hidden
-    >
-      <path d="M12 5 L18 14 L6 14 Z" fill="currentColor" stroke="none" />
-      <line
-        x1="5"
-        y1="18"
-        x2="19"
-        y2="18"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        opacity="0.5"
-      />
-    </svg>
-  );
-}
-
-// Small inline glyph for the Enrolment (Teams) section — two stacked
-// people, sized to match the 13px section-nav icon set.
-function OrgSectionIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" stroke="currentColor" fill="none" aria-hidden>
-      <circle cx="6" cy="5" r="2.2" strokeWidth="1.3" />
-      <path d="M2 13a4 4 0 0 1 8 0" strokeWidth="1.3" strokeLinecap="round" />
-      <path d="M10.5 3.2a2.2 2.2 0 0 1 0 3.6M11 9.2a4 4 0 0 1 3 3.8" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 export function SettingsPage() {
@@ -607,18 +705,43 @@ export function SettingsPage() {
   // source of truth, local state derives from it.
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("section");
-  const active: SectionId = SECTIONS.some((s) => s.id === requested)
+  // Governed nodes may have Settings sub-sections hidden or locked
+  // read-only by their organization. gov.data is {active: false, ...} on an
+  // ordinary solo node, and every isSettingsHidden/isSettingsReadOnly call
+  // below is a no-op in that case. Until the posture is KNOWN the rail fails
+  // closed (Sol A4-05): only the floor sections (Enrolment, Organization) are
+  // offered and the broad config read waits, so a slow or failing
+  // /api/governance never shows a section the organization hid.
+  const gov = useGovernance();
+  const { posture } = useGovernanceVisibility();
+  // A section whose component is not in this build (L1, T-681) edits config
+  // that is only ever reported, never obeyed, so the rail leaves it out.
+  const absent = new Set(absentSettingsSections(useComponentState().data?.view));
+  const visibleSections = SECTIONS.filter(
+    (s) =>
+      !absent.has(s.id) &&
+      (posture === "ready" ? !isSettingsHidden(gov.data, s.id) : settingsOfferedWhileUnresolved(s.id)),
+  );
+  const fallback = visibleSections[0]?.id ?? "pricing";
+  const active: SectionId = visibleSections.some((s) => s.id === requested)
     ? (requested as SectionId)
-    : "pricing";
+    : fallback;
   const setActive = (id: SectionId) => {
     setSearchParams(id === "pricing" ? {} : { section: id }, { replace: true });
   };
   const [helpOpen, setHelpOpen] = useState(true);
-  const config = useApi<ConfigResponse>("/api/config");
+  const config = useApi<ConfigResponse>(posture === "ready" ? "/api/config" : null);
+  // The daemon's config schema drives every schema-rendered section
+  // (owner-local route; null on a remote view, which the renderer says).
+  const schema = useConfigSchema();
   const def = sectionAt(active);
+  const readOnly = isSettingsReadOnly(gov.data, active);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // Below lg the page is one column that scrolls as a whole; at lg each
+    // column scrolls on its own. (A fixed-height single-column grid squeezed
+    // the overflow-auto section and help rows to a sliver under the rail.)
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:overflow-y-visible">
       <SettingsHeader
         configPath={config.data?.config_path ?? ""}
         helpOpen={helpOpen}
@@ -626,14 +749,33 @@ export function SettingsPage() {
       />
       <div
         className={clsx(
-          "grid min-h-0 flex-1 gap-0",
+          "grid flex-none gap-0 lg:min-h-0 lg:flex-1",
           helpOpen
             ? "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_300px]"
             : "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]",
         )}
       >
         <aside className="border-r border-line-1 bg-bg-1 p-4">
-          <SectionNav active={active} onChange={setActive} />
+          {/* Settings > Components (modular packaging plan 7.2) is its own
+              route, never a SECTIONS row: it is not a governed config
+              section, and every NotInstalled page links to it. */}
+          <Link
+            to="/settings/components"
+            data-testid="settings-components-link"
+            className="mb-4 flex items-center gap-2 rounded-2 border border-line-2 bg-bg-2 px-3 py-2 text-small text-fg-1 hover:bg-bg-3"
+          >
+            <Icon icon={Boxes} size={14} />
+            <span className="min-w-0 flex-1">
+              Components
+              <span className="block text-caption text-fg-3">What runs on this machine</span>
+            </span>
+          </Link>
+          <SettingsRail
+            active={active}
+            onChange={setActive}
+            sections={visibleSections}
+            gov={gov.data}
+          />
           {config.data && (
             <div className="mt-6 rounded-2 border border-line-1 bg-bg-2 px-3 py-2 text-[10.5px] text-fg-3">
               <div className="mb-0.5 font-semibold uppercase tracking-[0.06em] text-fg-3">
@@ -648,7 +790,7 @@ export function SettingsPage() {
                   tabIndex={config.data.config_path ? 0 : undefined}
                   className="cursor-help break-all font-mono text-fg-2 focus:outline-none"
                 >
-                  {config.data.config_path || "(no file — ephemeral)"}
+                  {config.data.config_path || "(no file - ephemeral)"}
                 </div>
               </Tooltip>
               <RestoreBackupControl onRestored={config.reload} />
@@ -657,26 +799,49 @@ export function SettingsPage() {
           <CommunityLinksMini />
         </aside>
 
-        <main className="min-w-0 overflow-y-auto p-6">
+        <main className="min-w-0 p-4 sm:p-6 lg:overflow-y-auto">
+          {posture === "unavailable" && (
+            <ReadOnlyBanner className="mb-4">
+              The dashboard could not read which settings are available on this machine, so only
+              Enrolment and Organization are shown.
+            </ReadOnlyBanner>
+          )}
+          {readOnly && (
+            <ReadOnlyBanner className="mb-4">
+              Managed by {governedOrgLabel(gov.data)} - changes to this section cannot be saved from
+              this machine.
+            </ReadOnlyBanner>
+          )}
           {active === "pricing" && (
             <PricingSection
               config={config.data}
               loading={config.loading}
               error={config.error}
+              denied={config.denied}
+              deniedPermission={config.deniedPermission}
               onReload={config.reload}
+              readOnly={readOnly}
             />
           )}
+          {active === "pricing" && <RepriceCard />}
           {active === "backfill" && <BackfillSection />}
-          {active === "tools" && <ConnectedToolsSection />}
-          {active === "health" && <HealthSection />}
-          {active === "storage" && <StorageSection />}
-          {active === "enrolment" && <EnrolmentSection />}
+          {active === "tools" && <ConnectedToolsSection icon={sectionIcon("tools")} />}
+          {active === "health" && <HealthSection icon={sectionIcon("health")} />}
+          {active === "storage" && <StorageSection icon={sectionIcon("storage")} />}
+          {active === "enrolment" && <EnrolmentSection icon={sectionIcon("enrolment")} />}
+          {active === "cloud" && <CloudIntelligenceSection icon={sectionIcon("cloud")} readOnly={readOnly} />}
+          {active === "intel" && <OrgIntelSection icon={sectionIcon("intel")} readOnly={readOnly} />}
+          {active === "intel" && <OrgDigestsCard icon={sectionIcon("intel")} />}
           {active === "intelligence" && (
             <IntelligenceSection
               config={config.data}
+              schema={schema.data}
               loading={config.loading}
               error={config.error}
+              denied={config.denied}
+              deniedPermission={config.deniedPermission}
               onReload={config.reload}
+              readOnly={readOnly}
             />
           )}
           {active !== "pricing" &&
@@ -685,13 +850,15 @@ export function SettingsPage() {
             active !== "health" &&
             active !== "storage" &&
             active !== "enrolment" &&
+            active !== "cloud" &&
+            active !== "intel" &&
             active !== "intelligence" && (
               <SectionView
                 section={active}
                 config={config.data}
-                loading={config.loading}
-                error={config.error}
+                schema={schema.data}
                 onReload={config.reload}
+                readOnly={readOnly}
               />
             )}
         </main>
@@ -714,18 +881,17 @@ function SettingsHeader({
   return (
     <div className="border-b border-line-1 bg-bg-1 px-6 py-4">
       <PageHeader
+        icon={navIcon("settings")}
         title="Settings"
         helpId="tab.settings"
         sub={
           <>
             View and edit the live <code className="font-mono text-fg-2">config.toml</code>.
-            Pricing hot-reloads (cost engine swaps in place) and Profiles
-            apply to new sessions on save. Every other section saves the
-            file (prior version preserved
-            at <code className="font-mono text-fg-2">.bak</code>) and
-            surfaces a "restart daemon" banner — consumers bind at
-            startup so the new value takes effect on the next
-            <code className="font-mono text-fg-2"> observer start</code>.
+            Every key is editable here (except credentials, which stay
+            file-only). Each key says whether it applies now, to new
+            sessions, or on the next daemon restart; scalar edits keep your
+            comments, and the prior file is preserved
+            at <code className="font-mono text-fg-2">.bak</code>.
             {configPath && (
               <>
                 {" · "}
@@ -739,13 +905,9 @@ function SettingsHeader({
           </>
         }
         right={
-          <button
-            type="button"
-            onClick={onToggleHelp}
-            className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-2 hover:bg-bg-3 hover:text-fg-0"
-          >
+          <Button size="sm" onClick={onToggleHelp}>
             {helpOpen ? "Hide help" : "Show help"}
-          </button>
+          </Button>
         }
       />
     </div>
@@ -754,31 +916,19 @@ function SettingsHeader({
 
 function AboutSectionRail({ def }: { def: SectionDef }) {
   return (
-    <aside className="overflow-y-auto border-l border-line-1 bg-bg-1 px-4 py-5">
+    <aside className="border-l border-line-1 bg-bg-1 px-4 py-5 lg:overflow-y-auto">
       <div className="mb-3 flex items-center gap-2">
         <h2 className="text-[12.5px] font-semibold text-fg-1">
           About this section
         </h2>
-        <span
-          className={clsx(
-            "rounded-pill border px-1.5 py-px text-[9.5px] font-medium uppercase tracking-[0.04em]",
-            STATUS_CLASS[def.status],
-          )}
-        >
-          {STATUS_LABEL[def.status]}
-        </span>
+        <Pill variant={STATUS_TONE[def.status]}>{STATUS_LABEL[def.status]}</Pill>
         {def.plane === "admin" && (
-          <Tooltip
-            content="Plane A — governs an admin/org-hosted app's end-users, not this node's own coding-agent. See docs/deployment-models.md."
-            maxWidth={340}
+          <Pill
+            variant="accent"
+            title="Plane A - governs an admin/org-hosted app's end-users, not this node's own coding-agent. See docs/deployment-models.md."
           >
-            <span
-              tabIndex={0}
-              className="cursor-help rounded-pill border border-accent/40 bg-accent-soft px-1.5 py-px text-[9.5px] font-medium uppercase tracking-[0.04em] text-accent focus:outline-none"
-            >
-              admin plane
-            </span>
-          </Tooltip>
+            admin plane
+          </Pill>
         )}
       </div>
       <AboutBlock label={def.label.toUpperCase()} body={def.about.summary} />
@@ -799,13 +949,21 @@ function AboutBlock({ label, body }: { label: string; body: string }) {
   );
 }
 
-function SectionNav({
+function SettingsRail({
   active,
   onChange,
+  sections,
+  gov,
 }: {
   active: SectionId;
   onChange: (s: SectionId) => void;
+  // Pre-filtered by the caller (governance hidden_settings already
+  // removed) — defaults to the full list so any other caller keeps
+  // today's behavior.
+  sections?: SectionDef[];
+  gov?: Governance | null;
 }) {
+  const list = sections ?? SECTIONS;
   // Plane-A (admin) sections split out of the flat config list into
   // their own labeled subgroup so the operator sees at a glance that
   // they govern an admin-hosted app's end-users, not this node's own
@@ -814,67 +972,55 @@ function SectionNav({
     {
       id: "edit",
       label: "Edit",
-      items: SECTIONS.filter((s) => s.group === "edit"),
+      items: list.filter((s) => s.group === "edit"),
     },
     {
       id: "config",
-      label: "Config (read-only)",
-      items: SECTIONS.filter(
+      label: "Config",
+      items: list.filter(
         (s) => s.group === "config" && s.plane !== "admin",
       ),
     },
     {
       id: "admin-plane",
       label: "Observability (admin plane)",
-      items: SECTIONS.filter((s) => s.plane === "admin"),
+      items: list.filter((s) => s.plane === "admin"),
     },
   ].filter((g) => g.items.length > 0);
+  // Rendered through the shared SectionRail (promoted from this function,
+  // platform tabs F2): the vertical rail at lg+, a scrolling chip row below lg
+  // (where this page's grid stacks), the active section kept in view.
+  const railGroups: SectionRailGroup<SectionId>[] = groups.map((g) => ({
+    id: g.id,
+    label: g.label,
+    items: g.items.map((s) => ({
+      id: s.id,
+      label: s.label,
+      icon: s.icon,
+      trailing: (
+        <>
+          {isSettingsReadOnly(gov, s.id) && (
+            <Tooltip content="Managed by your organization">
+              <span className="shrink-0 text-fg-3" aria-label="Managed by your organization">
+                <Icon icon={Lock} size={11} />
+              </span>
+            </Tooltip>
+          )}
+          <Pill variant={STATUS_TONE[s.status]} className="shrink-0">
+            {STATUS_LABEL[s.status]}
+          </Pill>
+        </>
+      ),
+    })),
+  }));
   return (
-    <nav className="flex flex-col gap-4">
-      {groups.map((g) => (
-        <div key={g.id}>
-          <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-3">
-            {g.label}
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {g.items.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onChange(s.id)}
-                className={clsx(
-                  "flex items-center gap-2 rounded-2 px-2 py-1.5 text-left text-[12px] transition-colors",
-                  active === s.id
-                    ? "bg-bg-3 text-fg-0"
-                    : "text-fg-2 hover:bg-bg-2 hover:text-fg-1",
-                )}
-              >
-                <span
-                  className={clsx(
-                    "grid h-5 w-5 shrink-0 place-items-center rounded-1",
-                    active === s.id
-                      ? "bg-bg-4 text-accent"
-                      : "bg-bg-2 text-fg-3",
-                  )}
-                  aria-hidden
-                >
-                  {s.icon}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                <span
-                  className={clsx(
-                    "shrink-0 rounded-pill border px-1.5 py-px text-[9.5px] font-medium uppercase tracking-[0.04em]",
-                    STATUS_CLASS[s.status],
-                  )}
-                >
-                  {STATUS_LABEL[s.status]}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </nav>
+    <SectionRail
+      groups={railGroups}
+      value={active}
+      onChange={onChange}
+      ariaLabel="Settings sections"
+      collapseBelow="lg"
+    />
   );
 }
 
@@ -884,12 +1030,18 @@ function PricingSection({
   config,
   loading,
   error,
+  denied,
+  deniedPermission,
   onReload,
+  readOnly,
 }: {
   config: ConfigResponse | null;
   loading: boolean;
   error: Error | null;
+  denied?: boolean;
+  deniedPermission?: string | null;
   onReload: () => void;
+  readOnly?: boolean;
 }) {
   const defaults = useApi<PricingDefaultsResponse>(
     "/api/config/pricing/defaults",
@@ -901,6 +1053,14 @@ function PricingSection({
   const [save, setSave] = useState<{
     state: "idle" | "saving" | "ok" | "err";
     message?: string;
+    // Advisory problems the cost engine found while rebuilding the
+    // dated-pricing table on this save — a malformed
+    // [intelligence.pricing.dated] row that was skipped, or a dated
+    // timeline whose newest entry disagrees with the flat rate just
+    // saved. The save still succeeded (pricing never fails closed on
+    // these); this is how the operator finds out an override was
+    // silently ignored. See cost.Engine.PricingWarnings.
+    warnings?: string[];
   }>({ state: "idle" });
 
   // Seed local edits from server config when it loads.
@@ -925,9 +1085,12 @@ function PricingSection({
     if (!config) return;
     setSave({ state: "saving" });
     try {
-      const res = await fetchJSON<{ saved: boolean }>(
+      // base_etag (T-639): the etag of the config this table was seeded
+      // from, so a config.toml changed since is refused with 409 rather
+      // than overwritten.
+      const res = await fetchJSON<{ saved: boolean; warnings?: string[] }>(
         "/api/config/pricing",
-        undefined,
+        { base_etag: config.config_etag ?? "" },
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -935,7 +1098,11 @@ function PricingSection({
         },
       );
       if (!res.saved) throw new Error("server did not confirm save");
-      setSave({ state: "ok", message: "Saved · cost engine reloaded" });
+      setSave({
+        state: "ok",
+        message: "Saved · cost engine reloaded",
+        warnings: res.warnings,
+      });
       onReload();
     } catch (e) {
       setSave({
@@ -976,11 +1143,12 @@ function PricingSection({
   return (
     <ChartShell
       title="Pricing overrides"
-      sub="Per-million-token rates that shadow the baked-in defaults. Save triggers an in-place cost engine reload — Cost / Analysis / Session-detail pages reflect the new rates on next query (no daemon restart)."
+      icon={sectionIcon("pricing")}
+      sub="Per-million-token rates that shadow the baked-in defaults. Save triggers an in-place cost engine reload - Cost / Analysis / Session-detail pages reflect the new rates on next query (no daemon restart)."
       right={
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
           {save.state === "ok" && (
-            <span className="text-success">{save.message}</span>
+            <SuccessCheck label={save.message} className="!text-[11px]" />
           )}
           {save.state === "err" && (
             <Tooltip content={save.message} maxWidth={360}>
@@ -990,80 +1158,85 @@ function PricingSection({
             </Tooltip>
           )}
           <Tooltip content="Jump to baked-in defaults">
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => setShowDefaults((v) => !v)}
-              className="rounded-pill border border-line-2 bg-bg-3 px-2 py-0.5 text-[10.5px] text-fg-2 hover:bg-bg-4"
+              className="!rounded-pill"
             >
               Baked-in defaults · {defaultKeys.length}
-            </button>
+            </Button>
           </Tooltip>
           <Tooltip content="Pick a default model and add a pricing override">
-            <button
-              type="button"
-              onClick={() => setShowDefaults(true)}
-              className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-1 hover:bg-bg-3"
-            >
-              + Add override
-            </button>
+            <Button size="sm" iconLeft={Plus} onClick={() => setShowDefaults(true)}>
+              Add override
+            </Button>
           </Tooltip>
-          <button
-            type="button"
+          <Button
+            variant="soft"
+            size="sm"
             onClick={saveAll}
-            disabled={save.state === "saving" || loading || !config}
-            className="rounded-2 border border-accent/40 bg-accent-soft px-3 py-1 text-[11px] font-medium text-accent disabled:opacity-40"
+            disabled={save.state === "saving" || loading || !config || readOnly}
+            title={readOnly ? "Managed by your organization" : undefined}
           >
             {save.state === "saving" ? "Saving…" : "Save pricing"}
-          </button>
+          </Button>
         </div>
       }
     >
       <ChartState
         loading={loading && !config}
         error={error}
+        denied={denied}
+        deniedPermission={deniedPermission}
         empty={false}
         height={120}
       >
+        {save.warnings && save.warnings.length > 0 && (
+          <PricingWarningsBanner warnings={save.warnings} />
+        )}
         {modelKeys.length === 0 ? (
           <div className="rounded-2 border border-dashed border-line-2 bg-bg-3/40 px-4 py-3 text-[12px] text-fg-3">
             No overrides defined. The cost engine is using its baked-in
             defaults (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowDefaults((v) => !v)}
-              className="text-accent hover:text-accent-strong"
+              className="!inline-flex !gap-0 !border-0 !bg-transparent !p-0 !text-accent hover:!bg-transparent hover:!text-accent-strong"
             >
               {showDefaults ? "hide" : "show"} {defaultKeys.length} models
-            </button>
+            </Button>
             ). Add an override below to shadow a default rate.
           </div>
         ) : (
           <PricingTable
             models={overrides}
             modelKeys={modelKeys}
+            defaults={defaults.data?.defaults}
             onChange={updateRate}
             onRemove={removeOverride}
           />
         )}
 
         <details
-          className="mt-4 rounded-2 border border-line-1 bg-bg-2"
+          className="mt-4 rounded-2 border border-line-2 bg-bg-2"
           open={showDefaults}
           onToggle={(e) =>
             setShowDefaults((e.target as HTMLDetailsElement).open)
           }
         >
-          <summary className="cursor-pointer px-3 py-2 text-[11.5px] text-fg-2">
+          <Summary className="px-3 py-2 text-[11.5px] text-fg-2">
             Baked-in defaults ·{" "}
             <span className="font-mono">{defaultKeys.length}</span> models
-          </summary>
+          </Summary>
           <div className="border-t border-line-1 p-3">
             {defaults.loading && (
-              <div className="text-[11px] text-fg-3">loading…</div>
+              <InlineLoading label="Loading defaults" />
             )}
             {defaults.data && (
               <DefaultsTable
                 defaults={defaults.data.defaults}
+                dated={defaults.data.dated_defaults}
                 onAdd={addOverride}
                 existing={new Set(modelKeys)}
               />
@@ -1072,6 +1245,37 @@ function PricingSection({
         </details>
       </ChartState>
     </ChartShell>
+  );
+}
+
+// PricingWarningsBanner surfaces advisory problems the cost engine found
+// while rebuilding the dated-pricing table on the last save — pricing
+// never fails closed on these, so the save above still succeeded; this
+// is the only way the operator learns an override was silently ignored
+// (a malformed [intelligence.pricing.dated] row, or a dated timeline
+// whose newest entry no longer matches the flat rate they just saved).
+function PricingWarningsBanner({ warnings }: { warnings: string[] }) {
+  return (
+    <div className="mb-4 flex items-start gap-3 rounded-3 border border-warn/30 bg-warn-soft/60 px-4 py-2.5 text-[11.5px]">
+      <Icon icon={TriangleAlert} size={14} className="mt-0.5 shrink-0 text-warn" />
+      <div className="min-w-0 flex-1 text-fg-2">
+        <b className="text-fg-1">
+          Saved, but the dated-rate table has {warnings.length === 1 ? "a problem" : `${warnings.length} problems`}.
+        </b>{" "}
+        Historical costs may be right while today&apos;s are wrong - check{" "}
+        <code className="rounded-1 border border-line-3 bg-bg-3 px-1.5 py-0.5 font-mono text-[11px] text-fg-1">
+          [intelligence.pricing.dated]
+        </code>{" "}
+        in config.toml.
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-4">
+          {warnings.map((w, i) => (
+            <li key={i} className="text-fg-3">
+              {w}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -1102,74 +1306,94 @@ const PRICING_FIELDS: { key: keyof ModelPricing; label: string }[] = [
 function PricingTable({
   models,
   modelKeys,
+  defaults,
   onChange,
   onRemove,
 }: {
   models: Record<string, ModelPricing>;
   modelKeys: string[];
+  // Baked-in reference rates, keyed like `models` — consulted ONLY to
+  // read a model's `peak` variant (peak scheduling isn't overridable in
+  // this phase; the rates a developer edits below are always the
+  // OFF-PEAK base). Absent while /api/config/pricing/defaults is still
+  // loading, in which case no peak badge renders yet.
+  defaults?: Record<string, CostPricing>;
   onChange: (key: string, field: keyof ModelPricing, val: string) => void;
   onRemove: (key: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[820px] text-left text-[11.5px]">
-        <thead className="text-[10px] uppercase tracking-[0.06em] text-fg-3">
-          <tr className="border-b border-line-2">
-            <th className="py-1.5 pl-2 font-medium">Model</th>
-            {PRICING_FIELDS.map((f) => (
-              <Tooltip key={f.key} content="$ per million tokens">
-                <th tabIndex={0} className="cursor-help py-1.5 text-right font-medium focus:outline-none">
-                  {f.label}
-                </th>
-              </Tooltip>
-            ))}
-            <th className="py-1.5 pl-3 font-medium" />
-          </tr>
-        </thead>
-        <tbody>
-          {modelKeys.map((k) => (
+    <Table
+      minWidth={820}
+      head={
+        <tr className="border-b border-line-2">
+          <th className="py-1.5 pl-2 font-medium">Model</th>
+          {PRICING_FIELDS.map((f) => (
+            <Tooltip key={f.key} content="$ per million tokens">
+              <th tabIndex={0} className="cursor-help py-1.5 text-right font-medium focus:outline-none">
+                {f.label}
+              </th>
+            </Tooltip>
+          ))}
+          <th className="py-1.5 pl-3 font-medium" />
+        </tr>
+      }
+    >
+      {modelKeys.map((k) => {
+        const def = defaults?.[k];
+        return (
             <tr
               key={k}
               className="border-b border-line-1 last:border-b-0 hover:bg-bg-3/40"
             >
-              <td className="py-1.5 pl-2 font-mono text-fg-1">{k}</td>
+              <td className="py-1.5 pl-2 font-mono text-fg-1">
+                <span className="inline-flex items-center gap-1.5">
+                  {k}
+                  {def?.peak && <PeakBadge base={def} peak={def.peak} />}
+                </span>
+              </td>
               {PRICING_FIELDS.map((f) => (
                 <td key={f.key} className="py-1.5">
-                  <input
+                  <Input
+                    mono
                     type="number"
                     step="0.01"
                     min="0"
                     value={models[k][f.key]}
                     onChange={(e) => onChange(k, f.key, e.target.value)}
-                    className="ml-auto block h-7 w-[88px] rounded-1 border border-line-2 bg-bg-2 px-2 text-right font-mono text-[11px] text-fg-1 focus:border-accent focus:outline-none"
+                    className="ml-auto h-7 w-[88px] !rounded-1 !px-2 !text-[11px] text-right"
                   />
                 </td>
               ))}
               <td className="py-1.5 pl-3">
                 <Tooltip content="Remove override (revert to default)">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => onRemove(k)}
-                    className="text-[10.5px] text-fg-3 hover:text-danger"
+                    className="!p-0 !border-0 !bg-transparent !text-[10.5px] !text-fg-3 hover:!bg-transparent hover:!text-danger"
                   >
                     Reset
-                  </button>
+                  </Button>
                 </Tooltip>
               </td>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        );
+      })}
+    </Table>
   );
 }
 
 function DefaultsTable({
   defaults,
+  dated,
   existing,
   onAdd,
 }: {
   defaults: Record<string, CostPricing>;
+  // Baked-in historical rate timelines, keyed like `defaults`. Only
+  // models whose price actually changed appear here — most models
+  // have no entry, meaning "this rate has been flat since forever."
+  dated?: Record<string, DatedCostPricing[]>;
   existing: Set<string>;
   onAdd: (key: string) => void;
 }) {
@@ -1181,27 +1405,29 @@ function DefaultsTable({
   }, [defaults, query]);
   return (
     <>
-      <input
+      <Input
         type="search"
         placeholder={`Filter ${Object.keys(defaults).length} models…`}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="mb-2 h-7 w-full rounded-2 border border-line-2 bg-bg-2 px-2 text-[11px] text-fg-1 placeholder:text-fg-4 focus:border-accent focus:outline-none"
+        className="mb-2"
       />
-      <div className="max-h-[300px] overflow-y-auto">
-        <table className="w-full text-left text-[11px]">
-          <thead className="sticky top-0 bg-bg-2 text-[10px] uppercase tracking-[0.06em] text-fg-3">
-            <tr className="border-b border-line-2">
-              <th className="py-1 pl-2 font-medium">Model</th>
-              <th className="py-1 text-right font-medium">Input</th>
-              <th className="py-1 text-right font-medium">Output</th>
-              <th className="py-1 text-right font-medium">Cache R</th>
-              <th className="py-1 text-right font-medium">Cache W</th>
-              <th className="py-1 pl-3 font-medium" />
-            </tr>
-          </thead>
-          <tbody>
-            {keys.map((k) => {
+      <Table
+        maxHeight={300}
+        stickyHead
+        size="sm"
+        head={
+          <tr className="border-b border-line-2">
+            <th className="py-1 pl-2 font-medium">Model</th>
+            <th className="py-1 text-right font-medium">Input</th>
+            <th className="py-1 text-right font-medium">Output</th>
+            <th className="py-1 text-right font-medium">Cache R</th>
+            <th className="py-1 text-right font-medium">Cache W</th>
+            <th className="py-1 pl-3 font-medium" />
+          </tr>
+        }
+      >
+        {keys.map((k) => {
               const p = defaults[k];
               const exists = existing.has(k);
               return (
@@ -1209,7 +1435,15 @@ function DefaultsTable({
                   key={k}
                   className="border-b border-line-1 last:border-b-0"
                 >
-                  <td className="py-1 pl-2 font-mono text-fg-1">{k}</td>
+                  <td className="py-1 pl-2 font-mono text-fg-1">
+                    <span className="inline-flex items-center gap-1.5">
+                      {k}
+                      {dated?.[k] && dated[k].length > 0 && (
+                        <RateHistoryBadge periods={dated[k]} />
+                      )}
+                      {p.peak && <PeakBadge base={p} peak={p.peak} />}
+                    </span>
+                  </td>
                   <td className="py-1 text-right font-mono text-fg-2 tabular-nums">
                     {fmtUSD(p.input, true)}
                   </td>
@@ -1223,22 +1457,180 @@ function DefaultsTable({
                     {fmtUSD(p.cache_creation, true)}
                   </td>
                   <td className="py-1 pl-3">
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       onClick={() => onAdd(k)}
                       disabled={exists}
-                      className="rounded-1 border border-line-2 bg-bg-3 px-2 py-0.5 text-[10px] text-fg-2 hover:text-fg-0 disabled:opacity-30"
                     >
                       {exists ? "Already overridden" : "Override"}
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+      </Table>
     </>
+  );
+}
+
+// RateHistoryBadge marks a baked-in default whose price actually changed
+// over time (a `dated_defaults` entry) so the defaults table never
+// implies a flat single rate for a model the cost engine is in fact
+// pricing on a timeline. Hover/focus shows every period, oldest first.
+function RateHistoryBadge({ periods }: { periods: DatedCostPricing[] }) {
+  const sorted = useMemo(
+    () =>
+      [...periods].sort((a, b) =>
+        a.effective_from.localeCompare(b.effective_from),
+      ),
+    [periods],
+  );
+  const content = (
+    <div className="max-w-[280px] text-left">
+      <div className="mb-1 font-medium text-fg-1">
+        Rate changed over time
+      </div>
+      <div className="space-y-1">
+        {sorted.map((p, i) => (
+          <div
+            key={i}
+            className="flex items-baseline justify-between gap-3 font-mono text-[10.5px]"
+          >
+            <span className="text-fg-3">{fmtEffectiveFrom(p.effective_from)}</span>
+            <span className="text-fg-1 tabular-nums">
+              {fmtUSD(p.input, true)} in / {fmtUSD(p.output, true)} out
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <Tooltip content={content} maxWidth={320}>
+      <span
+        tabIndex={0}
+        aria-label={`Rate history - ${sorted.length} period${sorted.length === 1 ? "" : "s"}`}
+        className="inline-grid h-4 w-4 shrink-0 cursor-help place-items-center rounded-pill border border-line-3 text-fg-3 hover:border-accent/50 hover:text-accent focus:outline-none"
+      >
+        <Icon icon={Clock} size={9} />
+      </span>
+    </Tooltip>
+  );
+}
+
+// fmtEffectiveFrom renders a DatedCostPricing.effective_from instant as
+// a short date, or "since forever" for Go's time.Time zero value
+// ("0001-01-01T00:00:00Z") — the idiomatic way the cost engine spells
+// the oldest, open-ended period of a rate timeline.
+function fmtEffectiveFrom(iso: string): string {
+  if (!iso || iso.startsWith("0001-01-01")) return "since forever";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+// WEEKDAY_ABBR indexes like Go's time.Weekday (0=Sun..6=Sat) — the same
+// numbering PeakWindow.days uses on the wire.
+const WEEKDAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// formatWeekdays collapses a set of weekday numbers into contiguous
+// range labels, e.g. [1,2,3,4,5] -> "Mon-Fri", [0,6] -> "Sun, Sat",
+// and all seven -> "every day". Does not handle a range that wraps
+// past Saturday into Sunday (v1 schedules don't author one).
+function formatWeekdays(days: number[]): string {
+  const sorted = [...new Set(days)].sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+  if (sorted.length === 7) return "every day";
+  const labels: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const d = sorted[i];
+    if (d === prev + 1) {
+      prev = d;
+      continue;
+    }
+    labels.push(
+      start === prev
+        ? WEEKDAY_ABBR[start]
+        : `${WEEKDAY_ABBR[start]}-${WEEKDAY_ABBR[prev]}`,
+    );
+    start = d;
+    prev = d;
+  }
+  return labels.join(", ");
+}
+
+// formatPeakSchedule renders a PeakSchedule as one compact human-
+// readable clause, e.g. "Mon-Fri 01:00-04:00, 06:00-10:00 UTC" for
+// deepseek-v4-pro's two same-weekday windows. Windows that share an
+// identical weekday set are grouped onto one line so the schedule
+// doesn't repeat the day range per window; windows on different
+// weekday sets are joined with "; ".
+function formatPeakSchedule(schedule: PeakSchedule): string {
+  const windows = schedule?.windows ?? [];
+  if (windows.length === 0) return "no active window";
+  const order: string[] = [];
+  const groups = new Map<string, { days: number[]; times: string[] }>();
+  for (const w of windows) {
+    const key = [...new Set(w.days)].sort((a, b) => a - b).join(",");
+    let g = groups.get(key);
+    if (!g) {
+      g = { days: w.days, times: [] };
+      groups.set(key, g);
+      order.push(key);
+    }
+    g.times.push(`${w.start_utc}-${w.end_utc}`);
+  }
+  return order
+    .map((key) => {
+      const g = groups.get(key)!;
+      return `${formatWeekdays(g.days)} ${g.times.join(", ")} UTC`;
+    })
+    .join("; ");
+}
+
+// PeakBadge marks a model that bills at a higher rate during recurring
+// UTC windows (`cost.Pricing.Peak`) — today only deepseek-v4-pro. `base`
+// is the OFF-PEAK rate the surrounding row already shows; the badge's
+// tooltip is the only place the peak rates and the window are spelled
+// out, mirroring RateHistoryBadge's hover-for-detail idiom so the table
+// itself stays exactly as compact as it is for every non-peak model.
+function PeakBadge({
+  base,
+  peak,
+}: {
+  base: Pick<CostPricing, "input" | "output" | "cache_read">;
+  peak: PeakRates;
+}) {
+  const windowLabel = useMemo(() => formatPeakSchedule(peak.schedule), [peak.schedule]);
+  const content = (
+    <div className="max-w-[280px] text-left">
+      <div className="mb-1 font-medium text-fg-1">Peak-hours pricing</div>
+      <div className="space-y-1">
+        <div className="flex items-baseline justify-between gap-3 font-mono text-[10.5px]">
+          <span className="text-fg-3">Off-peak</span>
+          <span className="text-fg-1 tabular-nums">
+            {fmtUSD(base.input, true)} in / {fmtUSD(base.output, true)} out
+          </span>
+        </div>
+        <div className="flex items-baseline justify-between gap-3 font-mono text-[10.5px]">
+          <span className="text-fg-3">Peak</span>
+          <span className="text-fg-1 tabular-nums">
+            {fmtUSD(peak.input, true)} in / {fmtUSD(peak.output, true)} out
+          </span>
+        </div>
+      </div>
+      <div className="mt-1.5 border-t border-line-2 pt-1 text-[10.5px] text-fg-3">
+        {windowLabel}
+      </div>
+    </div>
+  );
+  return (
+    <Pill variant="accent" title={content}>
+      <Icon icon={Zap} size={9} />
+      peak
+    </Pill>
   );
 }
 
@@ -1400,18 +1792,14 @@ function BackfillSection() {
   return (
     <ChartShell
       title="Backfill jobs"
+      icon={sectionIcon("backfill")}
       sub="Each mode re-fills a column or row class added in a later migration. SQL-checkable modes show a candidate count; file-walking modes mark `-1` (only the run itself can count). Jobs spawn the observer CLI subprocess with the current config path."
       right={
         status.data && status.data.modes.length > 0 ? (
           <Tooltip content="Fire every mode in sequence">
-            <button
-              type="button"
-              onClick={runAll}
-              disabled={anyRunning}
-              className="rounded-2 border border-accent/40 bg-accent-soft px-3 py-1 text-[11px] font-medium text-accent disabled:opacity-40"
-            >
+            <Button variant="soft" size="sm" onClick={runAll} disabled={anyRunning}>
               {anyRunning ? "Running…" : "Run all"}
-            </button>
+            </Button>
           </Tooltip>
         ) : null
       }
@@ -1435,13 +1823,9 @@ function BackfillSection() {
               <span className="text-danger">{failedCount} failed</span>
             )}
           </span>
-          <button
-            type="button"
-            onClick={() => setTrackerOpen(true)}
-            className="ml-auto rounded-2 border border-line-3 bg-bg-3 px-2.5 py-0.5 text-[11px] text-fg-1 hover:border-accent hover:text-accent"
-          >
+          <Button size="sm" onClick={() => setTrackerOpen(true)} className="ml-auto">
             View progress
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1450,40 +1834,42 @@ function BackfillSection() {
           <span className="font-semibold text-fg-1">Full rescan</span>
           <span className="text-fg-3">
             re-walks session files from offset 0 (idempotent; the recovery
-            path for watcher gaps) —
+            path for watcher gaps) -
           </span>
-          <select
+          <Select
             value={scanAdapter}
             onChange={(e) => setScanAdapter(e.target.value)}
-            className="rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-[11px] text-fg-1"
-          >
-            <option value="">all adapters</option>
-            {(toolsStatus.data?.tools ?? []).map((t) => (
-              <option key={t.tool} value={t.tool}>
-                {t.tool}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
+            className="!w-auto"
+            options={[
+              { value: "", label: "all adapters" },
+              ...(toolsStatus.data?.tools ?? []).map((t) => ({
+                value: t.tool,
+                label: t.tool,
+              })),
+            ]}
+          />
+          <Button
+            variant="soft"
+            size="sm"
             onClick={runScan}
             disabled={
               jobs[scanAdapter ? `scan:${scanAdapter}` : "scan"]?.status ===
               "running"
             }
-            className="rounded-2 border border-accent/40 bg-accent-soft px-3 py-1 text-[11px] font-medium text-accent disabled:opacity-40"
           >
             {jobs[scanAdapter ? `scan:${scanAdapter}` : "scan"]?.status ===
             "running"
               ? "Rescanning…"
               : "Rescan"}
-          </button>
+          </Button>
         </div>
       </div>
 
       <ChartState
         loading={status.loading && !status.data}
         error={status.error}
+        denied={status.denied}
+        deniedPermission={status.deniedPermission}
         empty={!status.data?.modes.length}
         emptyHint="No backfill modes registered."
         height={160}
@@ -1516,25 +1902,25 @@ function BackfillSection() {
                         {m.description}
                       </p>
                     </div>
-                    <button
-                      type="button"
+                    <Button
+                      variant="soft"
+                      size="sm"
                       onClick={() => run(m.mode)}
                       disabled={job?.status === "running"}
-                      className="rounded-2 border border-accent/40 bg-accent-soft px-3 py-1 text-[11px] font-medium text-accent disabled:opacity-40"
                     >
                       {job?.status === "running" ? "Running…" : "Run"}
-                    </button>
+                    </Button>
                   </div>
 
                   {job && (job.status === "done" || job.status === "failed") && (
-                    <details className="mt-2 rounded-1 border border-line-1 bg-bg-1">
-                      <summary className="cursor-pointer px-2 py-1 text-[11px] text-fg-3">
+                    <details className="mt-2 rounded-1 border border-line-2 bg-bg-3">
+                      <Summary className="px-2 py-1 text-caption text-fg-3">
                         Output · exit {job.exit_code ?? "?"} ·{" "}
                         {job.output.length.toLocaleString()}B
                         {job.error && (
                           <span className="ml-2 text-danger">{job.error}</span>
                         )}
-                      </summary>
+                      </Summary>
                       <pre className="m-0 max-h-[200px] overflow-auto whitespace-pre-wrap break-all px-2 py-1.5 font-mono text-[11px] text-fg-2">
                         {job.output || "(no output captured)"}
                       </pre>
@@ -1601,7 +1987,7 @@ function BackfillTrackerDialog({
           {failedCount > 0 && (
             <span className="text-danger">{failedCount} failed</span>
           )}
-          {jobs.length === 0 && "no jobs yet — click Run to kick one off"}
+          {jobs.length === 0 && "no jobs yet - click Run to kick one off"}
         </span>
       }
       width={720}
@@ -1690,37 +2076,48 @@ function CandidatesPill({
   );
 }
 
+// JobStatusPill renders a background job's status from the ONE JOB_STATUS
+// table (@shared/lib/sessionVocab); running spins.
 function JobStatusPill({ status }: { status: string }) {
-  switch (status) {
-    case "running":
-      return <Pill variant="accent">running</Pill>;
-    case "done":
-      return <Pill variant="success">done</Pill>;
-    case "failed":
-      return <Pill variant="danger">failed</Pill>;
-    default:
-      return <Pill>{status}</Pill>;
-  }
+  return <VocabPill vocab="jobStatus" table={JOB_STATUS} value={status} />;
 }
 
 // ============================================================ Intelligence
 
+// The keys the hand-written Intelligence form (and the Code intelligence
+// card) already edit, so the schema-driven "More settings" card below them
+// never renders the same key twice.
+const INTELLIGENCE_FORM_FIELDS = new Set([
+  "Intelligence.SummaryModel",
+  "Intelligence.APIKeyEnv",
+  "Intelligence.MonthlyBudgetUSD",
+  "CodeIntel.Enabled",
+]);
+
 function IntelligenceSection({
   config,
+  schema,
   loading,
   error,
+  denied,
+  deniedPermission,
   onReload,
+  readOnly,
 }: {
   config: ConfigResponse | null;
+  schema: ConfigSchemaDescriptor | null;
   loading: boolean;
   error: Error | null;
+  denied?: boolean;
+  deniedPermission?: string | null;
   onReload: () => void;
+  readOnly?: boolean;
 }) {
   const intel = config?.config?.Intelligence;
   const [summaryModel, setSummaryModel] = useState("");
+  const pricedModels = usePricedModels();
   const [apiKeyEnv, setApiKeyEnv] = useState("");
   const [monthlyBudget, setMonthlyBudget] = useState(0);
-  const [codeGraphEnabled, setCodeGraphEnabled] = useState(false);
   const [save, setSave] = useState<{
     state: "idle" | "saving" | "ok" | "err";
     message?: string;
@@ -1731,26 +2128,16 @@ function IntelligenceSection({
     setSummaryModel(intel.SummaryModel ?? "");
     setApiKeyEnv(intel.APIKeyEnv ?? "");
     setMonthlyBudget(intel.MonthlyBudgetUSD ?? 0);
-    setCodeGraphEnabled(intel.CodeGraph?.Enabled ?? false);
   }, [intel]);
 
   async function saveSection() {
     setSave({ state: "saving" });
     try {
-      const res = await fetchJSON<{ saved: boolean; restart_required: boolean }>(
-        "/api/config/section/intelligence",
-        undefined,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            SummaryModel: summaryModel,
-            APIKeyEnv: apiKeyEnv,
-            MonthlyBudgetUSD: monthlyBudget,
-            CodeGraph: { Enabled: codeGraphEnabled },
-          }),
-        },
-      );
+      const res = await saveConfigSection("intelligence", {
+        SummaryModel: summaryModel,
+        APIKeyEnv: apiKeyEnv,
+        MonthlyBudgetUSD: monthlyBudget,
+      });
       if (!res.saved) throw new Error("server did not confirm save");
       if (res.restart_required) markRestartPending("intelligence");
       setSave({
@@ -1771,11 +2158,12 @@ function IntelligenceSection({
   return (
     <ChartShell
       title="Intelligence"
-      sub="Summary model + monthly budget + code-graph toggle. Saving writes config.toml and surfaces a Restart-required banner — these consumers bind config at startup, unlike pricing."
+      icon={sectionIcon("intelligence")}
+      sub="Summary model + monthly budget. Saving writes config.toml and surfaces a Restart-required banner - these consumers bind config at startup, unlike pricing."
       right={
         <div className="flex items-center gap-2 text-[11px]">
           {save.state === "ok" && (
-            <span className="text-success">{save.message}</span>
+            <SuccessCheck label={save.message} className="!text-[11px]" />
           )}
           {save.state === "err" && (
             <Tooltip content={save.message} maxWidth={360}>
@@ -1784,76 +2172,112 @@ function IntelligenceSection({
               </span>
             </Tooltip>
           )}
-          <button
-            type="button"
+          <Button
+            variant="soft"
+            size="sm"
             onClick={saveSection}
-            disabled={save.state === "saving" || loading || !intel}
-            className="rounded-2 border border-accent/40 bg-accent-soft px-3 py-1 text-[11px] font-medium text-accent disabled:opacity-40"
+            disabled={save.state === "saving" || loading || !intel || readOnly}
+            title={readOnly ? "Managed by your organization" : undefined}
           >
             {save.state === "saving" ? "Saving…" : "Save section"}
-          </button>
+          </Button>
         </div>
       }
     >
       <ChartState
         loading={loading && !config}
         error={error}
+        denied={denied}
+        deniedPermission={deniedPermission}
         empty={!intel}
         emptyHint="Intelligence section unavailable."
         height={200}
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Summary model" hint="Used by `observer summarize` for session summaries.">
-            <input
-              type="text"
+          <Field label="Summary model" hint="Used for session summaries (Summarize now, below). Pick a priced model, or type another id.">
+            <SinglePicker
+              options={keepSelected(pricedModels.options, summaryModel ? [summaryModel] : [])}
               value={summaryModel}
-              onChange={(e) => setSummaryModel(e.target.value)}
-              placeholder="claude-haiku-4-5-20251001"
-              className="h-8 w-full rounded-2 border border-line-2 bg-bg-2 px-2 font-mono text-[12px] text-fg-1 focus:border-accent focus:outline-none"
+              onChange={setSummaryModel}
+              allowFree
+              loading={pricedModels.loading}
+              placeholder="Pick a model…"
+              ariaLabel="Summary model"
             />
           </Field>
           <Field label="API key env" hint="Env var name to read the summary API key from.">
-            <input
+            <Input
+              mono
               type="text"
               value={apiKeyEnv}
               onChange={(e) => setApiKeyEnv(e.target.value)}
               placeholder="ANTHROPIC_API_KEY"
-              className="h-8 w-full rounded-2 border border-line-2 bg-bg-2 px-2 font-mono text-[12px] text-fg-1 focus:border-accent focus:outline-none"
+              className="h-8"
             />
           </Field>
           <Field label="Monthly budget (USD)" hint="Drives the MTD budget bar on the Analysis tab.">
-            <input
+            <Input
+              mono
               type="number"
               min="0"
               step="10"
               value={monthlyBudget}
               onChange={(e) => setMonthlyBudget(Number(e.target.value) || 0)}
-              className="h-8 w-full rounded-2 border border-line-2 bg-bg-2 px-2 font-mono text-[12px] text-fg-1 focus:border-accent focus:outline-none"
+              className="h-8"
             />
             <div className="mt-1 text-[11px] text-fg-3">
               Current: <strong>{fmtUSD(monthlyBudget)}</strong>
             </div>
           </Field>
-          <Field
-            label="Code graph"
-            hint="Enable codebase-memory-mcp queries for richer MCP responses."
+        </div>
+        {/* `observer summarize` as a dashboard job (backlog item 6): the
+            same command, run with this section's saved model and key
+            variable. It is an outbound call with the operator's own key, so
+            the confirm step says exactly that. */}
+        <div className="mt-4 rounded-3 border border-line-2 bg-bg-2 p-4 text-[11.5px]">
+          <div className="text-[12px] font-semibold text-fg-1">Summarize sessions now</div>
+          <p className="m-0 mt-0.5 text-fg-3">
+            Writes a short summary for every session that has none, using the saved summary
+            model. Save this section first if you just changed it.
+          </p>
+          <CommandJobButton
+            job="summarize"
+            className="mt-2"
+            disabled={readOnly}
+            confirmLabel="Send sessions to the model?"
+            // no-bare-usd:allow (not money: an environment variable name)
+            armedNote={`Sends a digest of each unsummarized session (action types, file paths and commands as stored) to ${intel?.SummaryModel || "the summary model"}, using the key in $${intel?.APIKeyEnv || "ANTHROPIC_API_KEY"}.`}
+            runningLabel="Summarizing…"
+            doneText="Summaries written."
           >
-            <label className="flex items-center gap-2 text-[12px] text-fg-1">
-              <input
-                type="checkbox"
-                checked={codeGraphEnabled}
-                onChange={(e) => setCodeGraphEnabled(e.target.checked)}
-                className="h-3.5 w-3.5 accent-current"
-              />
-              {codeGraphEnabled ? "Enabled" : "Disabled"}
-            </label>
-          </Field>
+            Summarize now
+          </CommandJobButton>
+        </div>
+        {/* Code intelligence is opt-in (D-307): one click turns it on,
+            no command to run. */}
+        <CodeIntelCard config={config} readOnly={readOnly} onSaved={onReload} />
+        {/* Every other key the schema places in this section ([codeintel]
+            tuning, [predict], [guidance], [projects], scoring) - this
+            bespoke section rendered none of them before. */}
+        <div className="mt-4">
+          <SchemaSection
+            section="intelligence"
+            config={config}
+            schema={schema}
+            readOnly={readOnly}
+            excludeFieldPaths={INTELLIGENCE_FORM_FIELDS}
+            onSaved={onReload}
+            compact
+          />
         </div>
       </ChartState>
     </ChartShell>
   );
 }
 
+// Field is this page's local name for the shared SettingRow in its
+// stacked layout (label above the control, hint below). Kept as a shim so
+// the existing call sites are untouched.
 function Field({
   label,
   hint,
@@ -1864,34 +2288,34 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-fg-3">
-        {label}
-      </div>
+    <SettingRow layout="stack" label={label} help={hint}>
       {children}
-      {hint && <div className="mt-1 text-[11px] text-fg-3">{hint}</div>}
-    </div>
+    </SettingRow>
   );
 }
 
 // ============================================================ SectionView
 //
 // Per-section router. Sections with a registered structured spec
-// (`./settings/sectionSpecs`) render as a form (legacy parity);
-// everything else falls back to the read-only TOML viewer.
+// (`./settings/sectionSpecs`) render that hand-written form first, then a
+// schema-driven "More settings" card for every key of the section the spec
+// does not cover; every other section renders entirely from the schema
+// (dashboard-config-management plan P1-7). Nothing is read-only any more
+// except what the schema says is: secrets, owner-elsewhere keys and
+// deprecated aliases.
 
 function SectionView({
   section,
   config,
-  loading,
-  error,
+  schema,
   onReload,
+  readOnly,
 }: {
   section: SectionId;
   config: ConfigResponse | null;
-  loading: boolean;
-  error: Error | null;
+  schema: ConfigSchemaDescriptor | null;
   onReload: () => void;
+  readOnly?: boolean;
 }) {
   const spec = SECTION_SPECS[section];
   if (section === "llm") {
@@ -1905,36 +2329,69 @@ function SectionView({
     return (
       <StructuredConfigSection
         spec={spec}
+        icon={sectionIcon(section)}
         config={config}
+        readOnly={readOnly}
         footer={
-          section === "antigravity" ? (
-            <AntigravityHelperCard />
-          ) : section === "process" ? (
-            <ETWCapturerCard />
-          ) : section === "retention" ? (
-            <PruneNowCard />
-          ) : section === "profiles" ? (
-            <>
-              <CustomProfilesCard config={config} onChanged={onReload} />
-              <ProfilesReferenceCard />
-            </>
-          ) : section === "mcp" ? (
-            <MCPValueMeterCard />
-          ) : section === "routing" ? (
-            <RoutingRulesEditorCard />
-          ) : undefined
+          <>
+            {section === "antigravity" ? (
+              <AntigravityHelperCard />
+            ) : section === "process" ? (
+              <ETWCapturerCard />
+            ) : section === "retention" ? (
+              <PruneNowCard />
+            ) : section === "profiles" ? (
+              <>
+                <ToolProfilesCard readOnly={readOnly} onChanged={onReload} />
+                <ProjectProfilesCard readOnly={readOnly} />
+                <CustomProfilesCard config={config} onChanged={onReload} readOnly={readOnly} />
+                <ProfilesReferenceCard />
+              </>
+            ) : section === "mcp" ? (
+              <MCPValueMeterCard />
+            ) : section === "routing" ? (
+              <RoutingRulesEditorCard readOnly={readOnly} />
+            ) : section === "terminal" ? (
+              <ShellWrapCard readOnly={readOnly} />
+            ) : null}
+            <div className="mt-4">
+              <SchemaSection
+                section={section}
+                config={config}
+                schema={schema}
+                readOnly={readOnly}
+                excludeFieldPaths={specFieldPaths(spec)}
+                onSaved={onReload}
+                compact
+              />
+            </div>
+          </>
         }
       />
     );
   }
   return (
-    <ConfigViewerSection
+    <SchemaSection
       section={section}
+      title={SECTIONS.find((s) => s.id === section)?.label ?? section}
+      icon={sectionIcon(section)}
       config={config}
-      loading={loading}
-      error={error}
+      schema={schema}
+      readOnly={readOnly}
+      onSaved={onReload}
     />
   );
+}
+
+// specFieldPaths lists the JSON field paths a hand-written spec already
+// edits, so the schema card below it never renders the same key twice.
+function specFieldPaths(spec: SectionSpec): Set<string> {
+  const out = new Set<string>();
+  for (const f of spec.fields ?? []) out.add([...spec.path, f.id].join("."));
+  for (const g of spec.groups ?? []) {
+    for (const f of g.fields) out.add([...g.path, f.id].join("."));
+  }
+  return out;
 }
 
 // RoutingRulesEditorCard — the R2.2 [[routing.rules]] fragment editor
@@ -1969,7 +2426,7 @@ type RoutingRulesLintResult = {
   rules: number;
 };
 
-const ROUTING_RULES_PLACEHOLDER = `# No custom rules yet. Example — route read-only turns to haiku-class:
+const ROUTING_RULES_PLACEHOLDER = `# No custom rules yet. Example - route read-only turns to haiku-class:
 #
 # [[routing.rules]]
 # name = "cheap-reads"
@@ -1979,7 +2436,7 @@ const ROUTING_RULES_PLACEHOLDER = `# No custom rules yet. Example — route read
 #
 # Recipes: docs/model-routing.md (recipe gallery)`;
 
-function RoutingRulesEditorCard() {
+function RoutingRulesEditorCard({ readOnly }: { readOnly?: boolean }) {
   const policy = useApi<RoutingPolicyView>("/api/routing/policy");
   const [draft, setDraft] = useState<string | null>(null);
   const [lint, setLint] = useState<RoutingRulesLintResult | null>(null);
@@ -2018,11 +2475,7 @@ function RoutingRulesEditorCard() {
     try {
       const cfg = await fetchJSON<{ config: { Routing: Record<string, unknown> } }>("/api/config");
       const sec = { ...cfg.config.Routing, RulesTOML: text };
-      await fetchJSON("/api/config/section/routing", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sec),
-      });
+      await saveConfigSection("routing", sec);
       markRestartPending("routing");
       setSaved(true);
     } catch (e) {
@@ -2034,21 +2487,22 @@ function RoutingRulesEditorCard() {
 
   const findings = lint?.lint ?? [];
   return (
-    <div className="mt-4 rounded-3 border border-line-2 bg-bg-2 p-4 text-[11.5px]">
+    <Card className="mt-4 text-[11.5px]">
       <div className="text-[12px] font-semibold text-fg-1">
-        Custom rules — [[routing.rules]]
+        Custom rules - [[routing.rules]]
         <HelpInd id="card.settings_routing_rules" />
       </div>
       <p className="m-0 mt-0.5 text-fg-3">
         Custom rows append AFTER the template's rules and are walked top-down, first match wins. Saving replaces ALL
-        custom rules (an empty editor clears them); the save is lint-gated — a fragment that would fail the next
+        custom rules (an empty editor clears them); the save is lint-gated - a fragment that would fail the next
         daemon start is refused with the file untouched. Worked examples:{" "}
         <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">docs/model-routing.md</code> (recipe
         gallery). Tiers, budgets, privacy rules, key pools and local upstreams stay config-file-only.
       </p>
       {policy.error && <p className="m-0 mt-2 text-danger">{String(policy.error)}</p>}
-      <textarea
-        className="mt-3 h-56 w-full resize-y rounded-2 border border-line-1 bg-bg-1 p-2 font-mono text-[11.5px] leading-relaxed text-fg-1"
+      <Textarea
+        mono
+        className="mt-3 h-56 leading-relaxed"
         value={text}
         onChange={(e) => {
           setDraft(e.target.value);
@@ -2059,9 +2513,10 @@ function RoutingRulesEditorCard() {
         spellCheck={false}
         disabled={policy.loading}
       />
+
       {lint && lint.ok && (
         <div className="mt-2 text-success">
-          Lints clean — {lint.rules} rule(s).
+          Lints clean - {lint.rules} rule(s).
           {findings.length > 0 && " Warnings below (non-blocking):"}
         </div>
       )}
@@ -2084,23 +2539,22 @@ function RoutingRulesEditorCard() {
       )}
       {error && <p className="m-0 mt-2 text-danger">{error}</p>}
       <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
+        <Button
           onClick={validate}
           disabled={busy || policy.loading}
-          className="rounded-2 border border-line-1 bg-bg-1 px-3 py-1.5 text-[12px] text-fg-1 hover:border-line-2 disabled:opacity-50"
+          loading={busy}
         >
           {busy ? "Working…" : "Validate"}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
           onClick={save}
-          disabled={busy || policy.loading}
-          className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={busy || policy.loading || readOnly}
+          title={readOnly ? "Managed by your organization" : undefined}
         >
           Save rules
-        </button>
-        {saved && <Pill variant="warn">saved — restart the daemon to apply</Pill>}
+        </Button>
+        {saved && <Pill variant="warn">saved - restart the daemon to apply</Pill>}
         {policy.data && !saved && (
           <span className="text-fg-3">
             {policy.data.rules} rule(s) on disk · policy {policy.data.policy} @{" "}
@@ -2108,11 +2562,20 @@ function RoutingRulesEditorCard() {
           </span>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
-// MCPValueMeterCard — the P4.10 value meter under the MCP section:
+// MCP_TOOL_VERDICT - the MCP value meter's verdict (tone + wording); glyph
+// from VOCAB_ICONS.mcpToolVerdict. An unrecognized verdict reads as no data.
+const MCP_TOOL_VERDICT: VocabTable = {
+  active: { tone: "success", label: "earning its overhead" },
+  low_use: { tone: "warn", label: "low use for the tax" },
+  unused: { tone: "warn", label: "paying tax, zero calls" },
+  no_data: { tone: "neutral", label: "no usage data" },
+};
+
+// MCPValueMeterCard - the P4.10 value meter under the MCP section:
 // what the retrieval tools actually got called vs the per-turn schema
 // overhead MCP registration costs. Same numbers as the advisor's
 // mcp_overhead detector, standing instead of one-off. Honesty rules:
@@ -2120,26 +2583,20 @@ function RoutingRulesEditorCard() {
 function MCPValueMeterCard() {
   const meter = useApi<MCPValueResponse>("/api/mcp/value");
   const m = meter.data;
-  const verdictPill = (v: MCPValueResponse["verdict"]) => {
-    switch (v) {
-      case "active":
-        return <Pill variant="success">earning its overhead</Pill>;
-      case "low_use":
-        return <Pill variant="warn">low use for the tax</Pill>;
-      case "unused":
-        return <Pill variant="warn">paying tax, zero calls</Pill>;
-      default:
-        return <Pill variant="neutral">no usage data</Pill>;
-    }
-  };
+  const verdictPill = (v: MCPValueResponse["verdict"]) => (
+    <VocabPill vocab="mcpToolVerdict" table={MCP_TOOL_VERDICT} value={v in MCP_TOOL_VERDICT ? v : "no_data"} />
+  );
   return (
     <ChartShell
       title="Value meter"
+      icon={Gauge}
       sub="Are the MCP tools worth their per-turn schema overhead? Computed from your own last 30 days."
     >
       <ChartState
         loading={meter.loading}
         error={meter.error}
+        denied={meter.denied}
+        deniedPermission={meter.deniedPermission}
         empty={!meter.loading && !m}
         emptyHint="No data."
       >
@@ -2157,7 +2614,7 @@ function MCPValueMeterCard() {
                   </>
                 ) : m.verdict === "no_data" && !m.audit_enabled ? (
                   <>
-                    The MCP audit log is disabled — usage is invisible, so
+                    The MCP audit log is disabled - usage is invisible, so
                     this meter can't judge. Re-enable it above to measure.
                   </>
                 ) : m.verdict === "no_data" ? (
@@ -2174,40 +2631,50 @@ function MCPValueMeterCard() {
               <p className="text-fg-3">
                 Registration overhead: every turn of an MCP-registered tool
                 carries ~{fmtInt(m.schema_tokens_per_turn)} tokens of tool
-                schemas — roughly{" "}
+                schemas - roughly{" "}
                 <strong className="font-semibold text-fg-2">
                   {fmtInt(m.overhead_tokens_estimate)} tokens
                 </strong>{" "}
                 across this window's turns. If you rarely query observer
-                mid-session, <code className="font-mono">observer init
-                --skip-mcp</code> (or removing the MCP entries via the
-                Connected-tools wizard) drops the tax; capture is unaffected.
+                mid-session, removing observer&apos;s MCP entry from your AI
+                clients drops the tax; capture is unaffected. Remove it under{" "}
+                <Link
+                  to="/settings?section=tools"
+                  className="text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent"
+                >
+                  Connected tools
+                </Link>
+                : Set up, then &quot;Remove Observer&apos;s wiring
+                from &lt;tool&gt;&quot;, then MCP server, then Remove. That takes
+                out only the MCP entry (CLI twin:{" "}
+                <code className="font-mono">observer uninstall --&lt;tool&gt;
+                --skip-hooks</code>).
               </p>
             )}
             {m.by_tool.length > 0 && (
-              <table className="w-auto border-collapse">
-                <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-[0.06em] text-fg-3">
+              <Table
+                fit
+                head={
+                  <tr>
                     <th className="pb-1 pr-4 font-semibold">Tool</th>
                     <th className="pb-1 pr-4 font-semibold">Calls</th>
                     <th className="pb-1 font-semibold">Bytes returned</th>
                   </tr>
-                </thead>
-                <tbody>
-                  {m.by_tool.map((t) => (
-                    <tr key={t.tool} className="border-t border-line-1">
-                      <td className="py-1 pr-4 font-mono text-fg-2">{t.tool}</td>
-                      <td className="py-1 pr-4 text-fg-2">{fmtInt(t.calls)}</td>
-                      <td className="py-1 text-fg-2">{fmtInt(t.bytes)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                }
+              >
+                {m.by_tool.map((t) => (
+                  <tr key={t.tool} className="border-t border-line-1">
+                    <td className="py-1 pr-4 font-mono text-fg-2">{t.tool}</td>
+                    <td className="py-1 pr-4 text-fg-2">{fmtInt(t.calls)}</td>
+                    <td className="py-1 text-fg-2">{fmtInt(t.bytes)}</td>
+                  </tr>
+                ))}
+              </Table>
             )}
             {m.denied_calls > 0 && (
               <p className="text-fg-3">
                 {fmtInt(m.denied_calls)} call(s) were denied by the
-                allow/deny rules above — denials are audit rows too.
+                allow/deny rules above - denials are audit rows too.
               </p>
             )}
           </div>
@@ -2226,9 +2693,11 @@ function MCPValueMeterCard() {
 function CustomProfilesCard({
   config,
   onChanged,
+  readOnly = false,
 }: {
   config: ConfigResponse | null;
   onChanged: () => void;
+  readOnly?: boolean;
 }) {
   const names = config?.profile_names ?? [];
   const userProfiles = names.filter(
@@ -2249,7 +2718,7 @@ function CustomProfilesCard({
     try {
       await fetchJSON("/api/config/profiles", undefined, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: await localConfirmHeaders(),
         body: JSON.stringify({ name: newName, from: newFrom }),
       });
       setNewName("");
@@ -2271,6 +2740,7 @@ function CustomProfilesCard({
     try {
       await fetchJSON(`/api/config/profiles/${name}`, undefined, {
         method: "DELETE",
+        headers: await localConfirmHeaders(),
       });
       setConfirmDelete(null);
       if (open === name) setOpen(null);
@@ -2290,8 +2760,9 @@ function CustomProfilesCard({
       <p className="mb-3 text-[11px] leading-snug text-fg-3">
         Your own named parameter sets, stored as TOML files next to the
         config (one per profile). Start from a built-in, adjust the keys
-        that matter, then assign it above (or per tool / per project via
-        the CLI). Edits apply to new sessions automatically. Deleting a
+        that matter, then assign it above, per provider or per tool (a
+        repository can also pin its own in its .observer/config.toml).
+        Edits apply to new sessions automatically. Deleting a
         profile that is still assigned falls back to your master
         parameters with a daemon warning.
       </p>
@@ -2301,37 +2772,32 @@ function CustomProfilesCard({
           {userProfiles.map((name) => (
             <div
               key={name}
-              className="rounded-2 border border-line-1 bg-bg-1 px-3 py-2"
+              className="rounded-2 border border-line-1 bg-bg-3 px-3 py-2"
             >
               <div className="flex items-center gap-3">
                 <span className="flex-1 font-mono text-[12px] text-fg-1">
                   {name}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  size="sm"
                   onClick={() => {
                     setOpen(open === name ? null : name);
                     setConfirmDelete(null);
                   }}
-                  className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-2 hover:bg-bg-3"
                 >
                   {open === name ? "Close" : "Edit"}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="sm"
+                  variant={confirmDelete === name ? "danger" : "secondary"}
+                  iconLeft={Trash2}
                   onClick={() => remove(name)}
-                  disabled={busy}
-                  className={clsx(
-                    "rounded-2 border px-2.5 py-1 text-[11px] disabled:opacity-40",
-                    confirmDelete === name
-                      ? "border-danger bg-danger/10 font-semibold text-danger"
-                      : "border-line-2 bg-bg-2 text-fg-3 hover:bg-bg-3",
-                  )}
+                  disabled={busy || readOnly}
                 >
                   {confirmDelete === name ? "Confirm delete" : "Delete"}
-                </button>
+                </Button>
               </div>
-              {open === name && <ProfileEditor name={name} />}
+              {open === name && <ProfileEditor name={name} readOnly={readOnly} />}
             </div>
           ))}
         </div>
@@ -2343,7 +2809,8 @@ function CustomProfilesCard({
       )}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line-1 pt-3">
-        <input
+        <Input
+          mono
           type="text"
           value={newName}
           onChange={(e) => {
@@ -2351,28 +2818,19 @@ function CustomProfilesCard({
             setErr(null);
           }}
           placeholder="profile-name"
-          className="w-44 rounded-2 border border-line-2 bg-bg-1 px-2.5 py-1.5 font-mono text-[12px] text-fg-1 placeholder:text-fg-4 focus:border-accent focus:outline-none"
+          className="w-44"
         />
         <span className="text-[11px] text-fg-3">from</span>
-        <select
+        <Select
+          mono
           value={newFrom}
           onChange={(e) => setNewFrom(e.target.value)}
-          className="rounded-2 border border-line-2 bg-bg-1 px-2.5 py-1.5 font-mono text-[12px] text-fg-1 focus:border-accent focus:outline-none"
-        >
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={create}
-          disabled={!validName || busy}
-          className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+          className="!w-auto"
+          options={names}
+        />
+        <Button variant="primary" iconLeft={Plus} onClick={create} disabled={!validName || busy || readOnly}>
           Create
-        </button>
+        </Button>
         {newName && !validName && (
           <span className="text-[11px] text-fg-3">
             lowercase letters, digits, dashes; max 64
@@ -2390,7 +2848,7 @@ function CustomProfilesCard({
 const PROFILE_EDIT_KEYS: {
   key: string;
   label: string;
-  kind: "select" | "number" | "text";
+  kind: "select" | "number" | "text" | "list";
   options?: string[];
   pick: (r: ProfileShowResponse) => string;
 }[] = [
@@ -2416,7 +2874,8 @@ const PROFILE_EDIT_KEYS: {
   {
     key: "compression.conversation.compress_types",
     label: "Compress types",
-    kind: "text",
+    kind: "list",
+    options: COMPRESS_TYPES,
     pick: (r) => (r.resolved.Conversation?.CompressTypes ?? []).join(", "),
   },
   {
@@ -2431,7 +2890,7 @@ const PROFILE_EDIT_KEYS: {
 // resolved against the master config, lets the user adjust the
 // headline keys, and applies changed keys one PATCH each (the
 // `observer profile set` seam — same validation, same allow-list).
-function ProfileEditor({ name }: { name: string }) {
+function ProfileEditor({ name, readOnly = false }: { name: string; readOnly?: boolean }) {
   const [data, setData] = useState<ProfileShowResponse | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -2475,11 +2934,11 @@ function ProfileEditor({ name }: { name: string }) {
       for (const key of changedKeys) {
         await fetchJSON(`/api/config/profiles/${name}`, undefined, {
           method: "PATCH",
-          headers: { "content-type": "application/json" },
+          headers: await localConfirmHeaders(),
           body: JSON.stringify({ key, value: draft[key] }),
         });
       }
-      setSavedMsg("Applied — new sessions pick this up automatically.");
+      setSavedMsg("Applied - new sessions pick this up automatically.");
       await load();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -2489,12 +2948,17 @@ function ProfileEditor({ name }: { name: string }) {
   }
 
   if (!data) {
-    return (
-      <p className="mt-2 text-[11px] text-fg-3">{err ?? "Loading…"}</p>
+    return err ? (
+      <ErrorState
+        className="mt-2"
+        title="Couldn't load this profile"
+        error={err}
+        onRetry={() => void load()}
+      />
+    ) : (
+      <InlineLoading label="Loading profile" className="mt-2" />
     );
   }
-  const inputCls =
-    "w-full rounded-2 border border-line-2 bg-bg-2 px-2 py-1 font-mono text-[11.5px] text-fg-1 focus:border-accent focus:outline-none";
   return (
     <div className="mt-2 border-t border-line-1 pt-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -2504,23 +2968,29 @@ function ProfileEditor({ name }: { name: string }) {
               {k.label}
             </div>
             {k.kind === "select" ? (
-              <select
-                className={inputCls}
+              <Select
+                mono
                 value={draft[k.key] ?? ""}
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, [k.key]: e.target.value }))
                 }
-              >
-                {(k.options ?? []).map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
+                options={k.options ?? []}
+              />
+            ) : k.kind === "list" ? (
+              <EntityMultiPicker
+                options={keepSelected(
+                  (k.options ?? []).map((o) => ({ id: o, label: o })),
+                  splitList(draft[k.key] ?? ""),
+                )}
+                value={splitList(draft[k.key] ?? "")}
+                onChange={(next) => setDraft((d) => ({ ...d, [k.key]: joinList(next) }))}
+                placeholder="Pick…"
+                ariaLabel={k.label}
+              />
             ) : (
-              <input
+              <Input
+                mono
                 type="text"
-                className={inputCls}
                 value={draft[k.key] ?? ""}
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, [k.key]: e.target.value }))
@@ -2531,26 +3001,133 @@ function ProfileEditor({ name }: { name: string }) {
         ))}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={apply}
-          disabled={changedKeys.length === 0 || busy}
-          className="rounded-2 bg-accent px-3 py-1 text-[11.5px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={changedKeys.length === 0 || busy || readOnly}
         >
           {busy ? "Applying…" : "Apply changes"}
-        </button>
+        </Button>
         <span className="text-[10.5px] text-fg-4">
-          Values shown resolved against your master config. Other keys:{" "}
-          <code className="font-mono">
-            observer profile set {name} &lt;key&gt; &lt;value&gt;
-          </code>
+          Values shown resolved against your master config.
         </span>
         {savedMsg && (
-          <span className="text-[11px] text-success">{savedMsg}</span>
+          <SuccessCheck label={savedMsg} className="!text-[11px]" />
         )}
         {err && <span className="text-[11px] text-danger">{err}</span>}
       </div>
+      <ProfileOtherKey name={name} onSet={() => void load()} />
+      <ResolvedProfileParams toml={data.resolved_toml} />
     </div>
+  );
+}
+
+// ProfileOtherKey sets any compression.* key on a custom profile: the
+// `observer profile set <name> <key> <value>` path (the same PATCH, so the
+// same allow-list and value validation refuse an unknown key or a bad
+// value before anything is written).
+function ProfileOtherKey({ name, onSet }: { name: string; onSet: () => void }) {
+  const schema = useConfigSchema();
+  // The settable keys: every compression.* scalar leaf the daemon's schema
+  // lists (the same allow-list the PATCH validates against).
+  const keyOptions = useMemo(
+    () =>
+      (schema.data?.leaves ?? [])
+        .filter((l) => l.path.startsWith("compression.") && !l.secret && !l.deprecated)
+        .map((l) => ({ id: l.path, label: l.path.slice("compression.".length), sublabel: l.kind })),
+    [schema.data],
+  );
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  async function set() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fetchJSON(`/api/config/profiles/${name}`, undefined, {
+        method: "PATCH",
+        headers: await localConfirmHeaders(),
+        body: JSON.stringify({ key: key.trim(), value }),
+      });
+      setMsg({ ok: true, text: `Set ${key.trim()}.` });
+      setKey("");
+      setValue("");
+      onSet();
+    } catch (e: unknown) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-3 border-t border-line-1 pt-2">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-3">Other key</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SinglePicker
+          options={keyOptions}
+          value={key}
+          onChange={setKey}
+          loading={schema.loading}
+          placeholder="Pick a compression key…"
+          ariaLabel="Compression key"
+          className="w-full sm:w-72"
+        />
+        <Input
+          mono
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="value"
+          aria-label="Value"
+          className="w-full sm:w-40"
+        />
+        <Button variant="secondary" size="sm" onClick={() => void set()} disabled={busy || !key.trim().startsWith("compression.")}>
+          {busy ? "Setting…" : "Set key"}
+        </Button>
+        {msg && <span className={clsx("text-[11px]", msg.ok ? "text-success" : "text-danger")}>{msg.text}</span>}
+      </div>
+      <p className="m-0 mt-1 text-[10.5px] text-fg-4">
+        Any compression.* key. Unknown keys and invalid values are refused before anything is written.
+      </p>
+    </div>
+  );
+}
+
+// ResolvedProfileParams is `observer profile show <name>`: every parameter
+// the profile resolves to against the master config, not just the headline
+// keys the editor exposes. The server renders it with the CLI's own encoder,
+// so the keys are the config keys "Other key" accepts.
+function ResolvedProfileParams({ toml }: { toml: string | undefined }) {
+  if (!toml) return null;
+  return (
+    <details className="mt-3 border-t border-line-1 pt-2 text-[11px]">
+      <Summary className="w-fit text-fg-3 hover:text-fg-2">All resolved parameters</Summary>
+      <ResolvedToml text={toml} />
+    </details>
+  );
+}
+
+function ResolvedToml({ text }: { text: string }) {
+  return (
+    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-2 border border-line-1 bg-bg-3 p-2 font-mono text-[10.5px] text-fg-2">
+      {text}
+    </pre>
+  );
+}
+
+// BuiltinProfileParams loads a built-in profile's resolved parameters on
+// demand for the reference card.
+function BuiltinProfileParams({ name }: { name: string }) {
+  const [open, setOpen] = useState(false);
+  const r = useApi<ProfileShowResponse>(open ? `/api/config/profiles/${name}` : null);
+  return (
+    <details onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <Summary className="w-fit text-[11px] text-accent hover:underline">All parameters</Summary>
+      {r.data?.resolved_toml && <ResolvedToml text={r.data.resolved_toml} />}
+      {r.error && <p className="m-0 mt-1 text-[11px] text-danger">{r.error.message}</p>}
+    </details>
   );
 }
 
@@ -2584,35 +3161,35 @@ function ProfilesReferenceCard() {
     },
   ];
   return (
-    <div className="mt-4 rounded-3 border border-line-2 bg-bg-2 p-4">
-      <h4 className="mb-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-fg-1">
-        Built-in profiles
-      </h4>
-      <table className="w-full border-collapse text-[11.5px]">
-        <thead>
-          <tr className="text-left text-[10px] uppercase tracking-[0.06em] text-fg-3">
+    <Card title="Built-in profiles" icon={Table2} className="mt-4">
+      <Table
+        minWidth={520}
+        head={
+          <tr>
             <th className="pb-1.5 pr-3 font-semibold">Profile</th>
             <th className="pb-1.5 pr-3 font-semibold">Tuned for</th>
             <th className="pb-1.5 font-semibold">Headline parameters</th>
           </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.name} className="border-t border-line-1">
-              <td className="py-1.5 pr-3 font-mono text-fg-1">{r.name}</td>
-              <td className="py-1.5 pr-3 text-fg-2">{r.tunedFor}</td>
-              <td className="py-1.5 font-mono text-[11px] text-fg-3">{r.headline}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        }
+      >
+        {rows.map((r) => (
+          <tr key={r.name} className="border-t border-line-1">
+            <td className="py-1.5 pr-3 font-mono text-fg-1">{r.name}</td>
+            <td className="py-1.5 pr-3 text-fg-2">{r.tunedFor}</td>
+            <td className="py-1.5 font-mono text-[11px] text-fg-3">
+              {r.headline}
+              <BuiltinProfileParams name={r.name} />
+            </td>
+          </tr>
+        ))}
+      </Table>
       <p className="mt-2 text-[11px] leading-snug text-fg-3">
-        Full resolved parameters: <code className="font-mono text-fg-2">observer profile show &lt;name&gt;</code>.
-        Assignments apply to new sessions immediately; the wrong pairing can
-        break provider caching — the per-provider defaults are the measured
-        safe choices.
+        All parameters opens every value the profile resolves to against your
+        master config. Assignments apply to new sessions immediately; the
+        wrong pairing can break provider caching, and the per-provider
+        defaults are the measured safe choices.
       </p>
-    </div>
+    </Card>
   );
 }
 
@@ -2648,38 +3225,31 @@ function RestoreBackupControl({ onRestored }: { onRestored: () => void }) {
   return (
     <div className="mt-2 border-t border-line-1 pt-2">
       {phase !== "confirm" ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setPhase("confirm")}
           disabled={phase === "working"}
-          className="text-[10.5px] text-accent hover:underline disabled:opacity-40"
+          className="!p-0 !border-0 !bg-transparent !text-[10.5px] !text-accent hover:!bg-transparent hover:underline"
         >
           {phase === "working" ? "Restoring…" : "Restore previous version…"}
-        </button>
+        </Button>
       ) : (
         <div className="space-y-1.5">
           <p className="m-0 text-fg-3">
             Swap config.toml with the backup
             {backup.data.modified_at
-              ? ` from ${new Date(backup.data.modified_at).toLocaleString()}`
+              ? ` from ${fmtDateTime(backup.data.modified_at)}`
               : ""}
             ? Restoring again undoes this.
           </p>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={restore}
-              className="rounded-2 bg-accent px-2 py-0.5 text-[10.5px] font-semibold text-accent-on hover:opacity-90"
-            >
+            <Button variant="primary" size="sm" onClick={restore}>
               Restore
-            </button>
-            <button
-              type="button"
-              onClick={() => setPhase("idle")}
-              className="rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-[10.5px] text-fg-2 hover:bg-bg-3"
-            >
+            </Button>
+            <Button size="sm" onClick={() => setPhase("idle")}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -2735,19 +3305,23 @@ function PruneNowCard() {
         <div className="min-w-0 flex-1">
           <div className="text-[12px] font-semibold text-fg-1">Run retention now</div>
           <p className="m-0 mt-0.5 text-fg-3">
-            Sweep old rows immediately using the thresholds above — the
+            Sweep old rows immediately using the thresholds above - the
             same pass the daemon runs on its schedule. Deletion is
             permanent; the thresholds decide what counts as old.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={run}
+        {/* Permanent deletion: the in-place two-step confirm (first click
+            arms, the second runs the prune), never a first-click delete. */}
+        <ConfirmButton
+          variant="primary"
+          className="shrink-0"
+          onConfirm={run}
           disabled={busy || job?.status === "running"}
-          className="shrink-0 rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          confirmLabel="Prune now?"
+          armedNote="Deletes every row older than the thresholds above. This cannot be undone."
         >
           {job?.status === "running" ? "Pruning…" : "Run retention now"}
-        </button>
+        </ConfirmButton>
       </div>
       {err && <p className="m-0 mt-2 text-danger">{err}</p>}
       {job && job.status !== "running" && (
@@ -2756,7 +3330,7 @@ function PruneNowCard() {
         </p>
       )}
       {outputTail && (
-        <pre className="m-0 mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-2 border border-line-1 bg-bg-1 px-3 py-2 font-mono text-[11px] text-fg-3">
+        <pre className="m-0 mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-2 border border-line-2 bg-bg-3 px-3 py-2 font-mono text-caption text-fg-3">
           {outputTail}
         </pre>
       )}
@@ -2764,99 +3338,3 @@ function PruneNowCard() {
   );
 }
 
-// ============================================================ Read-only
-
-function ConfigViewerSection({
-  section,
-  config,
-  loading,
-  error,
-}: {
-  section: SectionId;
-  config: ConfigResponse | null;
-  loading: boolean;
-  error: Error | null;
-}) {
-  const data = sectionData(section, config?.config);
-
-  return (
-    <ChartShell
-      title={SECTIONS.find((s) => s.id === section)?.label ?? section}
-      sub="Read-only view of the running config. Edit the source TOML at the path on the left, then restart the daemon — or wire a save endpoint here in a future phase."
-    >
-      <ChartState
-        loading={loading && !config}
-        error={error}
-        empty={!data}
-        emptyHint="Section not present in config."
-        height={160}
-      >
-        {data != null ? (
-          <div className="space-y-3">
-            <StatCard
-              label="Keys"
-              value={fmtInt(countKeys(data))}
-              sub="Rendered as TOML; the running daemon binds at startup"
-            />
-            <Suspense
-              fallback={
-                <pre className="m-0 max-h-[440px] overflow-auto whitespace-pre rounded-2 border border-line-1 bg-bg-1 px-3 py-2 font-mono text-[11.5px] text-fg-3">
-                  loading…
-                </pre>
-              }
-            >
-              <TomlView data={data} />
-            </Suspense>
-          </div>
-        ) : null}
-      </ChartState>
-    </ChartShell>
-  );
-}
-
-function sectionData(section: SectionId, cfg?: unknown): unknown {
-  if (!cfg || typeof cfg !== "object") return null;
-  const c = cfg as Record<string, unknown>;
-  switch (section) {
-    case "observer":
-      return slim(c.Observer, ["Watch", "Freshness", "Retention", "Hooks", "Antigravity"]);
-    case "watcher":
-      return readSub(c.Observer, "Watch");
-    case "freshness":
-      return readSub(c.Observer, "Freshness");
-    case "retention":
-      return readSub(c.Observer, "Retention");
-    case "hooks":
-      return readSub(c.Observer, "Hooks");
-    case "antigravity":
-      return readSub(c.Observer, "Antigravity");
-    case "proxy":
-      return c.Proxy ?? null;
-    case "compression":
-      return c.Compression ?? null;
-    default:
-      return null;
-  }
-}
-
-function slim(obj: unknown, exclude: string[]): unknown {
-  if (!obj || typeof obj !== "object") return obj;
-  const o = obj as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const k of Object.keys(o)) {
-    if (!exclude.includes(k)) out[k] = o[k];
-  }
-  return out;
-}
-
-function readSub(parent: unknown, key: string): unknown {
-  if (!parent || typeof parent !== "object") return null;
-  const p = parent as Record<string, unknown>;
-  return p[key] ?? null;
-}
-
-function countKeys(v: unknown): number {
-  if (v == null || typeof v !== "object") return 0;
-  if (Array.isArray(v)) return v.length;
-  return Object.keys(v as Record<string, unknown>).length;
-}

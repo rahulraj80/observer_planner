@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_aggregate_share
+
 package main
 
 import (
@@ -6,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -17,7 +20,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/aggregatesvc"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -55,7 +57,7 @@ func newAggregateCmd() *cobra.Command {
 		Long: "The aggregate rail is an explicit, off-by-default path that can submit a\n" +
 			"tiny monthly cost aggregate (per model-family x tool) to a superbased-\n" +
 			"operated collector for the \"State of Agent Coding Costs\" report.\n\n" +
-			"It carries NO stable machine identifier and NO content — only coarsened\n" +
+			"It carries NO stable machine identifier and NO content - only coarsened\n" +
 			"per-(model-family x tool) token/cost aggregates for one finalized month.\n" +
 			"`preview` prints the exact JSON that would ever leave the machine;\n" +
 			"`enable` requires you to see that preview and type consent first.\n" +
@@ -81,10 +83,10 @@ func newAggregatePreviewCmd() *cobra.Command {
 		Use:   "preview",
 		Short: "Print the exact monthly aggregate JSON that WOULD be sent (local, no network)",
 		Long: "Build and print the exact Submission for a FINALIZED calendar\n" +
-			"month — the literal, coarsened JSON that would ever leave the machine —\n" +
+			"month - the literal, coarsened JSON that would ever leave the machine -\n" +
 			"plus a plain-English summary and the destination. Entirely local: no\n" +
 			"network, and the payload carries only per-(model-family x tool)\n" +
-			"aggregates with a provenance split — never project names, paths, model\n" +
+			"aggregates with a provenance split - never project names, paths, model\n" +
 			"ids, session titles, or any content.\n\n" +
 			"Defaults to the most-recently-finalized month; --month YYYY-MM selects an\n" +
 			"earlier finalized month (the current partial month is refused). --json\n" +
@@ -179,7 +181,7 @@ func newAggregateEnableCmd() *cobra.Command {
 				var typed string
 				_, _ = fmt.Fscanln(cmd.InOrStdin(), &typed)
 				if strings.TrimSpace(strings.ToLower(typed)) != "yes" {
-					fmt.Fprintln(out, "aborted — nothing enabled, no receipt written")
+					fmt.Fprintln(out, "aborted - nothing enabled, no receipt written")
 					return nil
 				}
 			}
@@ -205,7 +207,7 @@ func newAggregateEnableCmd() *cobra.Command {
 			if err := setAggregateEnabled(configPath, true); err != nil {
 				return err
 			}
-			fmt.Fprintln(out, "\naggregate rail ENABLED — consent receipt recorded.")
+			fmt.Fprintln(out, "\naggregate rail ENABLED - consent receipt recorded.")
 			fmt.Fprintln(out, "Run `observer aggregate submit` to send a month now, or leave it to the daemon (once wired).")
 			fmt.Fprintln(out, "Revoke future sharing anytime with `observer aggregate disable`.")
 			return nil
@@ -224,7 +226,7 @@ func newAggregateDisableCmd() *cobra.Command {
 		Short: "Revoke consent and turn the aggregate rail off (idempotent)",
 		Long: "Revoke the consent receipt and set [aggregate_share].enabled = false.\n\n" +
 			"HONEST REVOCATION: disabling prevents FUTURE submissions. Previously\n" +
-			"accepted anonymous records cannot be individually located or deleted —\n" +
+			"accepted anonymous records cannot be individually located or deleted -\n" +
 			"the rail intentionally carries no per-record handle. This revokes future\n" +
 			"sharing; it does not retract past anonymous aggregates.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -241,7 +243,7 @@ func newAggregateDisableCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "aggregate rail DISABLED — consent revoked; no future submissions.")
+			fmt.Fprintln(out, "aggregate rail DISABLED - consent revoked; no future submissions.")
 			fmt.Fprintln(out, "Note: previously accepted anonymous records cannot be individually located or deleted.")
 			return nil
 		},
@@ -260,7 +262,7 @@ func newAggregateSubmitCmd() *cobra.Command {
 		Use:   "submit",
 		Short: "Send one finalized month's aggregate (gated by consent; --dry-run to rehearse)",
 		Long: "Perform a single gated submission for a finalized month. Requires the\n" +
-			"rail to be enabled AND a valid consent receipt — a schema/endpoint/\n" +
+			"rail to be enabled AND a valid consent receipt - a schema/endpoint/\n" +
 			"registry change since consent blocks the send until you re-run\n" +
 			"`observer aggregate enable`.\n\n" +
 			"The attempt is recorded in the node-local ledger with a random\n" +
@@ -324,7 +326,7 @@ func liveState(cfg config.Config) aggregate.LiveState {
 // one collector; the Phase-5 daemon tick reuses the exact same constructor
 // (then calls Collector.SubmitDue).
 func newAggregateCollector(cfg config.Config, db *sql.DB) (*aggregatesvc.Collector, error) {
-	engine := cost.NewEngine(cfg.Intelligence)
+	engine := acquireProcessCostEngine(context.Background(), cfg, db, slog.Default())
 	return aggregatesvc.New(aggregatesvc.Config{
 		Store: store.New(db),
 		Build: func(ctx context.Context, month, submissionID string) (aggregate.Submission, error) {
@@ -349,7 +351,7 @@ func runAggregateSubmit(cmd *cobra.Command, cfg config.Config, db *sql.DB, month
 	res, err := col.SubmitMonth(cmd.Context(), month, dryRun)
 	if err != nil {
 		if errors.Is(err, aggregateclient.ErrNotConsented) {
-			return fmt.Errorf("aggregate submit: %w — run `observer aggregate enable`", err)
+			return fmt.Errorf("aggregate submit: %w - run `observer aggregate enable`", err)
 		}
 		return fmt.Errorf("aggregate submit: %w", err)
 	}
@@ -391,7 +393,7 @@ func runAggregateStatus(cmd *cobra.Command, cfg config.Config, db *sql.DB, raw b
 			receipt.ConsentedAt.Format(time.RFC3339), receipt.Actor, receipt.SchemaVersion, receipt.Endpoint)
 	}
 	if status != aggregate.ConsentValid && cfg.AggregateShare.Enabled {
-		fmt.Fprintf(out, "    (submission is SUSPENDED until re-consent — run `observer aggregate enable`)\n")
+		fmt.Fprintf(out, "    (submission is SUSPENDED until re-consent - run `observer aggregate enable`)\n")
 	}
 
 	fmt.Fprintf(out, "  submissions:   %d month(s) in the ledger\n", len(rows))
@@ -442,7 +444,7 @@ func setAggregateEnabled(configPath string, enabled bool) error {
 // was agreed to.
 func disclosureText(endpoint string) string {
 	var b strings.Builder
-	b.WriteString("DISCLOSURE — what enabling the aggregate rail means:\n")
+	b.WriteString("DISCLOSURE - what enabling the aggregate rail means:\n")
 	b.WriteString("  WHAT LEAVES:  once per FINALIZED calendar month, a coarsened aggregate of\n")
 	b.WriteString("                per-(model-family x tool) token counts and cost, split into a\n")
 	b.WriteString("                proxy-accurate and an estimated bucket. Model ids collapse to a\n")
@@ -456,7 +458,7 @@ func disclosureText(endpoint string) string {
 	b.WriteString("                identifier, but cross-month linkage by fingerprint and network-\n")
 	b.WriteString("                layer linkage (source IP, request time observed by infrastructure)\n")
 	b.WriteString("                cannot be eliminated by client code alone. \"No stable application\n")
-	b.WriteString("                identifier\" is the honest guarantee — not \"unlinkable\".\n")
+	b.WriteString("                identifier\" is the honest guarantee - not \"unlinkable\".\n")
 	b.WriteString("  REVOCATION:   `observer aggregate disable` stops FUTURE sharing. Previously\n")
 	b.WriteString("                accepted anonymous records cannot be individually located or deleted.\n")
 	return b.String()

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_export_otel
+
 package main
 
 import (
@@ -76,6 +78,6 @@ func TestGuardOTelTail_CursorIndependentOfCloud(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cloudCur == otelCur {
-		t.Errorf("cloud cursor moved with the otel tail (%d == %d) — consumers must be independent", cloudCur, otelCur)
+		t.Errorf("cloud cursor moved with the otel tail (%d == %d) - consumers must be independent", cloudCur, otelCur)
 	}
 }

@@ -2,7 +2,6 @@ package hook
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -12,11 +11,11 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
 
-// HandleGuarded is the guarded counterpart of HandleApprove for
-// pre-execution hook channels (guard spec §3.2 seam 1, §6.1): parse
-// the payload into a policy.Event, evaluate, and — when the verdict
-// requires blocking or asking — write the client's decision JSON.
-// HandleApprove remains the path for [guard] enabled=false.
+// HandleGuarded is the guarded counterpart of HandleApprove for Claude
+// Code's PreToolUse (guard spec §3.2 seam 1, §6.1): the Claude Code row of
+// the tool-gate dialect table, served by the one generalized handler
+// (HandleToolGate). HandleApprove remains the path for [guard]
+// enabled=false.
 //
 // Reply-ownership contract: HandleGuarded writes to stdout ONLY when
 // it blocks (deny/ask emission) — it then returns blocked=true and
@@ -38,59 +37,47 @@ func HandleGuarded(
 	persist func(guard.ActionVerdict),
 	stdout, stderr io.Writer,
 ) (blocked bool, recordAfterReply func()) {
-	pe, ok := BuildClaudeCodeEvent(body)
-	if !ok {
-		// Not an evaluable tool shape: nothing to judge, caller
-		// proceeds with its normal approve path.
-		return false, nil
-	}
-	verdict, recordWorthy := ev.EvaluateHook(pe)
-	em := guard.ResolveEmission(verdict.Verdict, pe.Caps)
-	verdict.Enforced = em.Enforced
-	if em.DegradedFrom != "" {
-		// Don't clobber a marker EvaluateHook already set (the §6.3
-		// "approved" exception marker) with the empty no-degradation
-		// case.
-		verdict.DegradedFrom = em.DegradedFrom
-	}
+	return HandleGuardedDecided(event, body, ev, persist, nil, stdout, stderr)
+}
 
-	doPersist := func() {
-		if persist != nil {
-			persist(verdict)
-		}
-	}
-	logForensics := func(action string) {
-		appendHookEventLog(hookEvent{
-			Event:        event,
-			Bytes:        len(body),
-			SessionID:    pe.SessionID,
-			Tool:         payloadFieldString(body, "tool_name"),
-			Action:       action,
-			RuleID:       verdict.Verdict.RuleID,
-			Decision:     verdict.Verdict.Decision.String(),
-			Severity:     verdict.Verdict.Severity.String(),
-			DegradedFrom: em.DegradedFrom,
-		})
-	}
+// HandleGuardedDecided is HandleGuarded with ToolGateRequest.Decided: on a
+// block, decided runs right after the reply is written and before persist,
+// so the cmd layer marks the reply sent before any work that could panic or
+// outlive the watchdog (review M2-11). A nil decided is HandleGuarded.
+func HandleGuardedDecided(
+	event string,
+	body []byte,
+	ev guard.Evaluator,
+	persist func(guard.ActionVerdict),
+	decided func(exitCode int),
+	stdout, stderr io.Writer,
+) (blocked bool, recordAfterReply func()) {
+	res := HandleToolGate(ToolGateRequest{
+		Tool: models.ToolClaudeCode, Dialect: ToolGateDialectClaudeCode,
+		NativeEvent: "PreToolUse", Label: event, Body: body, Decided: decided,
+	}, ev, persist, stdout, stderr)
+	return res.Replied, res.RecordAfterReply
+}
 
-	if em.Permission == "ask" || em.Permission == "deny" {
-		// Reply FIRST (machine-parsable reason — agents read it and
-		// self-correct), then forensics + DB.
-		_ = json.NewEncoder(stdout).Encode(buildClaudeCodeBlockReply(em))
-		fmt.Fprintf(stderr, "observer-hook: %s guard %s (%s: %s)\n",
-			event, em.Permission, verdict.Verdict.RuleID, verdict.Verdict.Reason)
-		logForensics("guard:" + em.Permission)
-		doPersist()
-		return true, nil
-	}
-
-	if !recordWorthy {
-		return false, nil
-	}
-	// Flag-class (or degraded) verdict on the allow path: record it,
-	// but only after the caller's reply.
-	logForensics("approve+flag")
-	return false, doPersist
+// HandleTruncatedPreTool is the fail-closed branch for a Claude Code
+// PreToolUse payload the caller could NOT read in full (security review
+// 2026-09-27, SR27-D2). A truncated body fails json.Unmarshal, and
+// HandleGuarded treats "not an evaluable shape" as approve - so before
+// this branch a Write/Edit whose content pushed the payload past the read
+// bound (e.g. an Edit of ~/.claude/settings.json or ~/.bashrc) was
+// approved WITHOUT evaluation even when an enforce-mode deny rule covered
+// its target. When the guard is enforcing, the call is held for the human
+// (ask) rather than approved; when it is not enforcing (observe / off),
+// nothing is written and the caller keeps its normal approve path. The
+// generalized form is HandleToolGate's Truncated request field.
+//
+// Returns true when it wrote the ask reply (the caller must not write
+// another).
+func HandleTruncatedPreTool(event string, enforcing bool, stdout, stderr io.Writer) bool {
+	return handleTruncatedToolGate(ToolGateRequest{
+		Tool: models.ToolClaudeCode, Dialect: ToolGateDialectClaudeCode,
+		NativeEvent: "PreToolUse", Label: event, Truncated: true, Enforcing: enforcing,
+	}, stdout, stderr).Replied
 }
 
 // claudeCodeBlockReply is the §6.2 Claude Code decision shape: the
@@ -133,10 +120,12 @@ type guardedPreToolPayload struct {
 	Cwd       string `json:"cwd"`
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
-		Command  string `json:"command"`
-		FilePath string `json:"file_path"`
-		URL      string `json:"url"`
-		Query    string `json:"query"`
+		Command      string `json:"command"`
+		FilePath     string `json:"file_path"`
+		NotebookPath string `json:"notebook_path"`
+		Path         string `json:"path"`
+		URL          string `json:"url"`
+		Query        string `json:"query"`
 	} `json:"tool_input"`
 }
 
@@ -153,42 +142,85 @@ var claudeCodePreToolCaps = policy.Capabilities{
 // claudeToolShape maps a Claude Code tool name onto the policy event
 // vocabulary. Table-driven (Module rule 5); the target selector keys
 // off which tool_input field carries the operand.
+//
+// Every Claude Code tool that runs a shell command or returns file content
+// needs a row here: a tool with no row is approved WITHOUT evaluation, so a
+// missing row is a guard bypass (security review 2026-09-27, SR27-D1 -
+// Monitor and PowerShell run a command, Grep returns file content).
 var claudeToolShape = map[string]struct {
 	kind       policy.EventKind
 	actionType string
 	target     func(*guardedPreToolPayload) string
+	dialect    policy.Dialect // "" = posix
 }{
 	"Bash": {
-		policy.KindShellExec, models.ActionRunCommand,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.Command },
+		kind: policy.KindShellExec, actionType: models.ActionRunCommand,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.Command },
+	},
+	// Monitor runs its `command` as a background shell script whose stdout
+	// streams back as events - the same exec surface as Bash.
+	"Monitor": {
+		kind: policy.KindShellExec, actionType: models.ActionRunCommand,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.Command },
+	},
+	// The Windows-native PowerShell tool (and its lower-case aliases, the
+	// same spellings internal/tooltax classifies as run_command).
+	"PowerShell": {
+		kind: policy.KindShellExec, actionType: models.ActionRunCommand,
+		target:  func(p *guardedPreToolPayload) string { return p.ToolInput.Command },
+		dialect: policy.DialectPowerShell,
+	},
+	"powershell": {
+		kind: policy.KindShellExec, actionType: models.ActionRunCommand,
+		target:  func(p *guardedPreToolPayload) string { return p.ToolInput.Command },
+		dialect: policy.DialectPowerShell,
+	},
+	"pwsh": {
+		kind: policy.KindShellExec, actionType: models.ActionRunCommand,
+		target:  func(p *guardedPreToolPayload) string { return p.ToolInput.Command },
+		dialect: policy.DialectPowerShell,
+	},
+	// Grep with output_mode "content" returns file bytes, so its path is a
+	// read for the sensitive-path rules. A Grep with no path searches cwd
+	// (empty target -> not evaluated, as before).
+	"Grep": {
+		kind: policy.KindFileAccess, actionType: models.ActionReadFile,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.Path },
 	},
 	"Write": {
-		policy.KindFileAccess, models.ActionWriteFile,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
+		kind: policy.KindFileAccess, actionType: models.ActionWriteFile,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
 	},
 	"Edit": {
-		policy.KindFileAccess, models.ActionEditFile,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
+		kind: policy.KindFileAccess, actionType: models.ActionEditFile,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
 	},
 	"MultiEdit": {
-		policy.KindFileAccess, models.ActionEditFile,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
+		kind: policy.KindFileAccess, actionType: models.ActionEditFile,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
 	},
+	// Claude Code's NotebookEdit names its operand notebook_path (file_path
+	// kept as a fallback for older payloads).
 	"NotebookEdit": {
-		policy.KindFileAccess, models.ActionEditFile,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
+		kind: policy.KindFileAccess, actionType: models.ActionEditFile,
+		target: func(p *guardedPreToolPayload) string {
+			if p.ToolInput.NotebookPath != "" {
+				return p.ToolInput.NotebookPath
+			}
+			return p.ToolInput.FilePath
+		},
 	},
 	"Read": {
-		policy.KindFileAccess, models.ActionReadFile,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
+		kind: policy.KindFileAccess, actionType: models.ActionReadFile,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.FilePath },
 	},
 	"WebFetch": {
-		policy.KindToolCall, models.ActionWebFetch,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.URL },
+		kind: policy.KindToolCall, actionType: models.ActionWebFetch,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.URL },
 	},
 	"WebSearch": {
-		policy.KindToolCall, models.ActionWebSearch,
-		func(p *guardedPreToolPayload) string { return p.ToolInput.Query },
+		kind: policy.KindToolCall, actionType: models.ActionWebSearch,
+		target: func(p *guardedPreToolPayload) string { return p.ToolInput.Query },
 	},
 }
 
@@ -206,9 +238,10 @@ var claudeToolShape = map[string]struct {
 //     action post-hoc seconds later with the real root. Cwd IS set,
 //     so relative targets still resolve for the home-anchored rules
 //     (sensitive paths, persistence vectors).
-//   - Dialect stays posix: Claude Code's Bash tool runs a POSIX shell
-//     on every platform (Git-Bash on Windows); nested
-//     powershell/cmd payloads are detected mid-parse regardless.
+//   - Dialect stays posix for Bash/Monitor: Claude Code's Bash tool runs
+//     a POSIX shell on every platform (Git-Bash on Windows); nested
+//     powershell/cmd payloads are detected mid-parse regardless. The
+//     Windows-native PowerShell tool rows set DialectPowerShell.
 //   - mcp__<server>__<tool> names classify as mcp_call with the full
 //     name as Target (MCPServerFromTarget parses the server out).
 func BuildClaudeCodeEvent(body []byte) (policy.Event, bool) {
@@ -223,10 +256,12 @@ func BuildClaudeCodeEvent(body []byte) (policy.Event, bool) {
 		Caps:      claudeCodePreToolCaps,
 		Now:       time.Now().UTC(),
 	}
+	ev.Caps.Sandboxed = sandboxedChild()
 	if shape, ok := claudeToolShape[p.ToolName]; ok {
 		ev.Kind = shape.kind
 		ev.ActionType = shape.actionType
 		ev.Target = shape.target(&p)
+		ev.Dialect = shape.dialect
 		if ev.Target == "" {
 			return policy.Event{}, false
 		}

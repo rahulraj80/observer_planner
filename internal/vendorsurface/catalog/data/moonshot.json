@@ -1,0 +1,4024 @@
+{
+ "group": "moonshot",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/moonshot-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "kimi.business.admin",
+   "vendor_group": "moonshot",
+   "vendor": "kimi",
+   "plane": "kimi.business",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Business admin (first purchaser)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kimi Business (2..150 seats per purchase, annual)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "kimi.com web / desktop enterprise workspace (no API)",
+   "read_write_doc": "UI",
+   "class_doc": "Seats, Identity, Roles",
+   "grain_doc": "Snapshot (seats total / unallocated / pending release; members; roles admin and member; invite links valid 2 or 7 days; remove member frees seat next cycle)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/en/help/kimi-business/kimi-business",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.kimi.ai/help/kimi-business/kimi-business-faq",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimi.business.data_policy",
+   "vendor_group": "moonshot",
+   "vendor": "kimi",
+   "plane": "kimi.business",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kimi Business"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "not documented",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "contract / service agreement",
+   "read_write_doc": "n/a",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot (business data not used for training by default; agreement governs)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/en/help/kimi-business/kimi-business",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimi.business.member_credit",
+   "vendor_group": "moonshot",
+   "vendor": "kimi",
+   "plane": "kimi.business",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "member (self)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kimi Business"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "current period",
+   "per_user_doc": "per user (self)",
+   "mechanism_doc": "kimi.com UI",
+   "read_write_doc": "UI",
+   "class_doc": "Usage",
+   "grain_doc": "Snapshot (member sees own credit; admin view of member usage not documented)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/en/help/kimi-business/kimi-business",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimi.business.orders",
+   "vendor_group": "moonshot",
+   "vendor": "kimi",
+   "plane": "kimi.business",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Business admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kimi Business"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "kimi.com Business admin UI",
+   "read_write_doc": "UI",
+   "class_doc": "BillingExport, Cost",
+   "grain_doc": "orders, self-service invoicing, corporate bank transfer",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.ai/help/kimi-business/kimi-business-faq",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.cli.config_file",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.cli",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "on reload",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "files ~/.kimi-code/config.toml, <project>/.kimi-code/local.toml (trusted only), mcp.json, tui.toml; env overrides; NO system / managed layer",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (default_permission_mode, [[permission.rules]] allow / deny / ask with scope, [tools] enabled / disabled incl. mcp__ globs, dangerous_command_guard, telemetry, providers, hooks)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node file)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/config-files.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/overrides.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.cli.export",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.cli",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per session",
+   "mechanism_doc": "`kimi export` CLI, or local POST .../export",
+   "read_write_doc": "R",
+   "class_doc": "Content, Sessions",
+   "grain_doc": "per session zip with logs",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (manual)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/data-locations.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.cli.hooks",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.cli",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "timeout 1..600 s"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per session",
+   "mechanism_doc": "[[hooks]] in user config.toml; stdin JSON; exit 2 or permissionDecision deny",
+   "read_write_doc": "R/W",
+   "class_doc": "Telemetry (node), Sessions",
+   "grain_doc": "Event (20 events; UserPromptSubmit, PreToolUse, Stop blockable; payload hook_event_name, session_id, session_title, client_type, cwd; no token fields)",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.cli.local_store",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.cli",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "manual cleanup only",
+   "per_user_doc": "per session",
+   "mechanism_doc": "node files (existing Observer kimi-code adapter)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Content, Usage",
+   "grain_doc": "PerSession (session_index.jsonl, sessions/<workDirKey>/<id>/agents/*/wire.jsonl, state.json, logs, tasks)",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/data-locations.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.cli.usage_command",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.cli",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "membership"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "CLI `/usage` (human output); Web UI shows plan usage since v0.33.0",
+   "read_write_doc": "R",
+   "class_doc": "Limits, Usage",
+   "grain_doc": "Snapshot (quota and membership status)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (machine twin = local.oauth_usage)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/en/help/kimi-code/faq",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code/whats-new.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.cli.vendor_telemetry",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.cli",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "built in; `telemetry = false` or KIMI_DISABLE_TELEMETRY=1 disables; no customer endpoint, no OTel",
+   "read_write_doc": "none for customer",
+   "class_doc": "Telemetry (vendor-directed)",
+   "grain_doc": "anonymous events to Moonshot",
+   "build": "catalog_only",
+   "build_doc": "Nothing (no customer contract)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.coding_api_limits",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.coding_api_limits",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "membership"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per account",
+   "mechanism_doc": "docs; enforced at api.kimi.com/coding (429 not retried when quota exhausted)",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits",
+   "grain_doc": "Snapshot (about 300 to 1,200 requests per 5 hours, concurrency 30, up to 100 tokens/s; HighSpeed about 3x credit)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/en/help/kimi-code/membership-guide",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.console",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "member (self)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Plus and above"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "kimi.com/code/console UI",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials, Limits, Usage",
+   "grain_doc": "Snapshot (up to 5 API keys shown once; device list, idle > 30 days auto-unbound; remaining quota; rate-limit status; Extra Usage balance; Buy Extra Usage at 80 percent)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code/membership.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.kimi.com/en/help/kimi-code/membership-guide",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.extra_usage",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.extra_usage",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "member (self)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "subscribers; enterprise \"not yet supported\""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "balance never expires",
+   "per_user_doc": "per user",
+   "mechanism_doc": "kimi.com Subscription page Extra Usage section",
+   "read_write_doc": "UI",
+   "class_doc": "Limits, Cost",
+   "grain_doc": "Snapshot (optional monthly spending cap per account; top-up min CNY 25, max 10 top-ups and CNY 3,000 per day, balance cap CNY 10,000; shared with Kimi web)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code/membership.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.local.config_api",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.local",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "local bearer token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "local REST GET/POST /api/v1/config (merge-patch), /api/v1/providers, /api/v1/mcp/servers, /api/v1/plugins",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (resolved config incl. permission rules, tools, providers with secrets redacted except single-provider GET)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/server-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.local.oauth_usage",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.local",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "local bearer token; user logged in with OAuth"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "auth failure ban 10 / 60 s on non-loopback"
+   },
+   "tier": {
+    "doc": "Kimi Code membership"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "none",
+   "per_user_doc": "per user (self only)",
+   "mechanism_doc": "local REST GET /api/v1/oauth/usage on the `kimi web` server (default 127.0.0.1:58627), relayed from the Kimi cloud (cloud endpoint itself undocumented)",
+   "read_write_doc": "R",
+   "class_doc": "Limits, Usage (ratios), Cost (Extra Usage wallet)",
+   "grain_doc": "Snapshot per Kimi account (limit5h, limit7d, monthTotal, monthCode each usedRatio + resetAt; extraUsage balance, totals, monthly limit, used amount in cents, currency)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side, experimental interface)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/server-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.local.sessions",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.local",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "local bearer token"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor before_id / after_id, page_size 1..100, or page_token"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429xx bands"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "as long as local store",
+   "per_user_doc": "per session",
+   "mechanism_doc": "local REST /api/v1/sessions..., /api/v2/sessions; GET .../snapshot for real usage",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Usage, Cost (estimate), Content",
+   "grain_doc": "PerSession (snapshot: input / output / cache tokens, context tokens and limit, total_cost_usd, turn count; messages, transcript, plans, approvals, questions, tasks, export zip)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side, experimental)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/server-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.local.userinfo",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.local",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "local bearer token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "membership"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user (self)",
+   "mechanism_doc": "local REST GET /api/v1/oauth/userinfo, GET /api/v1/oauth/region, GET /api/v1/auth",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Seats (membership level)",
+   "grain_doc": "Snapshot (userId, nickname, region mainland-cn / global, level, domain, optional email / phone)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/server-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.local.ws_events",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.local",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "local bearer token (header or subprotocol kimi-code.bearer.<token>)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "resume by as_of_seq / epoch"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per session",
+   "mechanism_doc": "local WebSocket /api/v1/ws, subscribe by session_ids; GET /asyncapi.json",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Telemetry (local)",
+   "grain_doc": "Event (turn.started, assistant.delta, tool.call.started, tool.result, turn.ended, event.approval.requested, event.session.created / archived, event.config.changed, compaction.*)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/server-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.remote_control",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.remote_control",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "paid membership"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per user",
+   "mechanism_doc": "web relay https://code-rc.kimi.com or code-rc.kimi.ai /devices/<id>/; paid membership; same account login",
+   "read_write_doc": "UI",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession view of a running local session through the vendor relay (device list by hostname, ~3 devices per account)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/remote-control.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kimicode.web.quota",
+   "vendor_group": "moonshot",
+   "vendor": "kimicode",
+   "plane": "kimicode.web",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "member (self)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "membership"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "current month",
+   "per_user_doc": "per user",
+   "mechanism_doc": "kimi.com Settings > Subscription and Invoices",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "Snapshot / month (My Quota, monthly usage, Extra Usage spend progress bar)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.kimi.com/code/docs/en/kimi-code/membership.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.account.signin",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.account",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "console User Center > Security Information",
+   "read_write_doc": "UI",
+   "class_doc": "Identity",
+   "grain_doc": "per user (email code, Google OAuth, phone + password; no SSO, no SAML, no SCIM, no MFA documented)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/account-security-and-sign-in.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.api_keys",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project admin and project members"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per creator",
+   "mechanism_doc": "console API Keys page (create, edit, delete)",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot per key (project scoped; caps 10 / 50 / 100 per org; keys of a member removed from a project are invalidated)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.bill_export",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "monthly",
+   "lookback_doc": "not documented",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "console export by hand (format not documented)",
+   "read_write_doc": "R",
+   "class_doc": "BillingExport, Cost",
+   "grain_doc": "monthly org bill file",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/platform-changelog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.file_mgmt",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project member"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "until deleted",
+   "per_user_doc": "per org",
+   "mechanism_doc": "console",
+   "read_write_doc": "UI",
+   "class_doc": "Content",
+   "grain_doc": "file manager twin of the files API; batch inference via console",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (API twin = platform.files)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "unspecified",
+     "unit": "text",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/use-batch-inference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.invoices",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "on request",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "console Invoice Management",
+   "read_write_doc": "R/W",
+   "class_doc": "BillingExport",
+   "grain_doc": "invoice per request (basis: consumed or top-up amount; issuer Beijing Moonshot AI Technology Co., Ltd.; IT services 6 percent tax)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/account-and-payments.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.ip_allowlist",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "verified: account; enterprise: creator + org admins"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "verified orgs only"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "console Organization Management > Organization Verification",
+   "read_write_doc": "UI",
+   "class_doc": "Policy (network)",
+   "grain_doc": "Snapshot (<= 20 public IPv4 / CIDR; applies to every key in the org; empty = no restriction; each save replaces list)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.org_members",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin (creator by default)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "invites need enterprise verification"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "console Organization Management > Member Management",
+   "read_write_doc": "UI",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "Snapshot (Organization Administrator, General Member; per-member invite link)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.org_verification",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "console",
+   "read_write_doc": "UI",
+   "class_doc": "Identity (org)",
+   "grain_doc": "Snapshot (Org ID, verification state, multiple accounts per verified business)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.project_budget",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "~10 min",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per project",
+   "mechanism_doc": "console Project Settings > Project Budget / Rate Limiting Settings",
+   "read_write_doc": "UI",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot (daily and monthly spending cap per project; requests denied when reached; ~10 minute lag)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.ai/docs/guide/account-and-payments.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.project_ratelimits",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per project",
+   "mechanism_doc": "console project settings",
+   "read_write_doc": "UI",
+   "class_doc": "RateLimits",
+   "grain_doc": "Snapshot (project TPM cap, clamped to org TPM; web search QPS at org or project level)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RateLimitProject",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.ai/docs/platform-changelog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.projects",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin creates; project admin invites"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any (count by verification)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per project",
+   "mechanism_doc": "console Project Management",
+   "read_write_doc": "UI",
+   "class_doc": "Projects, Roles",
+   "grain_doc": "Snapshot (projects; Project Administrator, General Project Member; caps 1 / 20 / 50 by verification)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.spend_alerts",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin / project admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "on threshold",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per project / org",
+   "mechanism_doc": "console settings; delivery SMS or email only",
+   "read_write_doc": "UI",
+   "class_doc": "Limits (alerts)",
+   "grain_doc": "Event (China: project daily / monthly spend threshold, SMS to org admin phone; global: balance below threshold, email to org email, default USD 5)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.ai/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.spend_overview",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin / project admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per project (per user unclear)",
+   "mechanism_doc": "console UI only",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "Org and project consumption analysis pages; same-day spending on account overview (2026-07); user spending analysis (2024-07)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/org-best-practice.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.ai/docs/platform-changelog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.console.topup",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "console top-up page (WeChat Pay / Alipay, bank transfer for business)",
+   "read_write_doc": "UI",
+   "class_doc": "Cost, Limits",
+   "grain_doc": "Snapshot (top-up, custom amounts, automatic top-up with threshold and amount; vouchers with validity)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/platform-changelog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.contract.zdr",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.contract",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "org (sales)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "non-ZDR retention \"as long as necessary\"; storage Singapore (global)",
+   "per_user_doc": "aggregate (scope org / project / key not stated)",
+   "mechanism_doc": "sales request; no console toggle or API flag",
+   "read_write_doc": "n/a",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot (ZDR on or off; prompts and responses discarded after delivery; images/videos uploaded as files and security / billing logs excluded)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/guide/zero-data-retention.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.ai/docs/agreement/userprivacy.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.docs.tier_table",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.docs",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "as docs change",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate (account)",
+   "mechanism_doc": "docs page; current tier shown in console user info (no API)",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits",
+   "grain_doc": "Snapshot (Tier0..Tier5 by cumulative top-up USD 1 / 10 / 20 / 100 / 1000 / 3000: concurrency 1..100, RPM 3..300, TPM 0.5M..5M, TPD 1.5M then unlimited, search QPS 1..50)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/pricing/limits.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.agents",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "page_size / page_token"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "China, enterprise verified, beta via sales"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "versions kept",
+   "per_user_doc": "per project / org",
+   "mechanism_doc": "REST GET/POST /v1/agents, GET/PATCH /v1/agents/{id}, archive, versions on api.moonshot.cn with header kimi-api-version: 2026-09-01-beta",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (per-agent tools enabled, permission_policy always_allow only, mcp_servers, mcp_toolset, skills, plugins), versioned",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (not the kimi-code adapter)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/hosted-agents/permissions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.environments",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page_size"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "China beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "versions",
+   "per_user_doc": "per org",
+   "mechanism_doc": "REST POST/GET/PATCH /v1/environments, archive, DELETE",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (network: unrestricted default or limited with allowed_hosts <= 128, allow_mcp_servers, allow_package_managers, proxy; packages; setup script)",
+   "grain_doc": "Snapshot, versioned",
+   "build": "buildable",
+   "build_doc": "Driverable (not kimi-code)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/hosted-agents/environments.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.events",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "page_token, order asc / desc"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "China beta"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per session",
+   "mechanism_doc": "REST GET /v1/sessions/{id}/events (+ threads), SSE /events/stream with cursor or Last-Event-ID",
+   "read_write_doc": "R",
+   "class_doc": "Content, Sessions",
+   "grain_doc": "Event (user.message, agent.message / thinking / tool_use with evaluated_permission / tool_result, session.status with stop_reason, session.error, thread events; id, processed_at)",
+   "build": "buildable",
+   "build_doc": "Driverable (not kimi-code; no usage fields)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/hosted-agents/event-stream.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.pricing",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "China beta"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "docs page; charges not itemized by any API",
+   "read_write_doc": "R",
+   "class_doc": "Cost (reference)",
+   "grain_doc": "rates (sandbox CNY 0.072 per hour per 1 CPU / 1 GB, per-second; plugins per 1,000 calls; tokens at model price)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/pricing/hosted-agents.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.sessions",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "page_size / page_token"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "China beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "until deleted (archive keeps events)",
+   "per_user_doc": "per project",
+   "mechanism_doc": "REST GET/POST /v1/sessions (filters agent_id, agent_version, statuses, include_archived), GET/PATCH /v1/sessions/{id}, POST /archive, DELETE",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession (id, status idle / running / terminated, agent version snapshot, resources, title, agent_overrides; created_at / updated_at sort)",
+   "build": "buildable",
+   "build_doc": "Driverable (not kimi-code)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/hosted-agents/session-operations.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.triggers_and_assets",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "page_token"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "China beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per project",
+   "mechanism_doc": "REST /v1/triggers (+ runs, pause, resume, run), /v1/artifacts, /v1/files (2026-09-01-beta header switches scope org to project), /v1/memory_stores, /v1/skills, /v1/plugins",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions (scheduled runs), Content (artifacts, files, memory stores, skills, plugins)",
+   "grain_doc": "Snapshot / Event",
+   "build": "buildable",
+   "build_doc": "Driverable (not kimi-code)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "snapshot",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/llms.txt",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.hosted.vaults",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.hosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "page_size / page_token"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "China beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "archive wipes secrets",
+   "per_user_doc": "per org / project",
+   "mechanism_doc": "REST /v1/vaults CRUD, /credentials CRUD + batch + rotate (PATCH) + archive, /v1/vaults/credentials/check, /oauth-sessions",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot (vaults; credentials mcp_oauth / static_bearer / environment_variable; secret values write-only; <= 20 active per vault)",
+   "build": "buildable",
+   "build_doc": "Driverable (not kimi-code)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.com/docs/hosted-agents/vaults.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.balance",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "any project API key (Bearer)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "none (no history)",
+   "per_user_doc": "aggregate (account / org)",
+   "mechanism_doc": "REST GET /v1/users/me/balance on api.moonshot.ai (USD) or api.moonshot.cn (CNY); currency implied by host",
+   "read_write_doc": "R",
+   "class_doc": "Cost, Limits (balance gate)",
+   "grain_doc": "Snapshot (available_balance, voucher_balance, cash_balance; code, scode, status)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/balance.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.com/docs/api/balance.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.batches",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any (open to all since 2026-04)"
+   },
+   "freshness_doc": "async",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per org",
+   "mechanism_doc": "REST POST/GET /v1/batches ; GET /v1/batches/{id} ; POST /v1/batches/{id}/cancel (lists batches \"for your organization\")",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions (async jobs), Usage (batch result counts)",
+   "grain_doc": "per batch",
+   "build": "buildable",
+   "build_doc": "Driverable (not admin)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/batch-list.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.estimate_tokens",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "REST POST /v1/tokenizers/estimate-token-count",
+   "read_write_doc": "R",
+   "class_doc": "Usage (estimate only)",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (not an admin read)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/estimate.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.files",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "file count cap (error asks to delete old files)"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "until deleted (no stated period)",
+   "per_user_doc": "per org",
+   "mechanism_doc": "REST POST/GET /v1/files ; GET/DELETE /v1/files/{id} ; GET /v1/files/{id}/content",
+   "read_write_doc": "R/W",
+   "class_doc": "Content (uploaded files)",
+   "grain_doc": "Snapshot per file (id file_..., purpose file-extract / batch / batch_output / image / video ...)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "snapshot",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/files-list.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.kimi.com/en/help/kimi-api/api-data-security",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.inline_usage",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "response body of /v1/chat/completions, /v1/responses, /anthropic/v1/messages (node proxy capture)",
+   "read_write_doc": "R",
+   "class_doc": "Usage",
+   "grain_doc": "PerCall (prompt_tokens, completion_tokens, total_tokens, cached_tokens, prompt_tokens_details.cached_tokens and cache_write_tokens; final SSE chunk only with stream_options.include_usage)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.models",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any (404 resource_not_found if tier lacks a model)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per account",
+   "mechanism_doc": "REST GET /v1/models",
+   "read_write_doc": "R",
+   "class_doc": "Policy (models visible to this account / tier)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/list-models.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.ratelimit_errors",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "response status + error.type + headers (node proxy capture)",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits, Limits",
+   "grain_doc": "PerCall (429 rate_limit_reached_error: concurrency / RPM / TPM / TPD; 429 exceeded_current_quota_error: balance or account disabled; 403 IP not allowed; tools 429 X-RateLimit-Limit/Remaining/Reset)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/errors.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://platform.kimi.ai/docs/pricing/limits.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "moonshot.platform.signature_verify",
+   "vendor_group": "moonshot",
+   "vendor": "moonshot",
+   "plane": "moonshot.platform",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429 possible, limit not stated"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "server keeps no nonce record (replays verify true)",
+   "per_user_doc": "per call",
+   "mechanism_doc": "send X-Msh-Request-Nonce on a call, read Msh-Request-Timestamp / Msh-Request-Signature (reqsigv1_) response headers, then REST POST /v1/signatures/verify",
+   "read_write_doc": "R",
+   "class_doc": "Audit (call provenance, not admin audit)",
+   "grain_doc": "PerCall (valid true/false for nonce + timestamp + model + signature)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.kimi.ai/docs/api/signatures-verify.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

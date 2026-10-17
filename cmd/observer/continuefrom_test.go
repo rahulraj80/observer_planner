@@ -173,6 +173,11 @@ func TestContinueFromLauncher(t *testing.T) {
 		"droid":            "observer droid",
 		"open-interpreter": "observer open-interpreter",
 		"command-code":     "observer command-code",
+		// The 2026-10-03 terminal-picker coverage wave (doc-assisted).
+		"aider":    "observer aider",
+		"crush":    "observer crush",
+		"junie":    "observer junie",
+		"poolside": "observer pool",
 	}
 	for tool, want := range wired {
 		if got := continueFromLauncher(tool); got != want {
@@ -208,7 +213,7 @@ func TestLaunchCapabilityMatchesWiredLauncher(t *testing.T) {
 					c.Tool, c.Handoff.Launch.Subcommand, want, launcher)
 			}
 		} else if launcher != "" {
-			t.Errorf("adapter %q has a wired continueFromLauncher %q but declares no Launch capability — drift",
+			t.Errorf("adapter %q has a wired continueFromLauncher %q but declares no Launch capability - drift",
 				c.Tool, launcher)
 		}
 	}

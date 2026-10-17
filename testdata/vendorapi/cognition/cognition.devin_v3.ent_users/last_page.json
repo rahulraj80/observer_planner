@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "user_id": "user_synth0003",
+      "email": "lead@example.com",
+      "name": "Lead Two",
+      "role_assignments": [],
+      "enterprise_joined_at": 1767312000
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null,
+  "total": 3
+}

@@ -4,7 +4,7 @@ import (
 	"sort"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // buildSubagentEvidence walks each session's action stream and
@@ -15,7 +15,7 @@ import (
 // it ran in, weighted by attributed actions — an approximation, stated
 // as such in the §R10.3 rationale, because token rows carry no
 // sidechain flag.
-func buildSubagentEvidence(turns []TurnRow, actionsBySession map[string][]ActionRow) []routing.SubagentEvidence {
+func buildSubagentEvidence(turns []TurnRow, actionsBySession map[string][]ActionRow) []routingcore.SubagentEvidence {
 	// Dominant model per session (by turn count; ties → lexicographic).
 	sessionModel := map[string]string{}
 	{
@@ -38,7 +38,7 @@ func buildSubagentEvidence(turns []TurnRow, actionsBySession map[string][]Action
 	}
 
 	type agg struct {
-		ev          routing.SubagentEvidence
+		ev          routingcore.SubagentEvidence
 		sessions    map[string]bool
 		modelWeight map[string]int64 // session-dominant model → attributed actions
 	}
@@ -64,7 +64,7 @@ func buildSubagentEvidence(turns []TurnRow, actionsBySession map[string][]Action
 			g, ok := byName[current]
 			if !ok {
 				g = &agg{
-					ev:          routing.SubagentEvidence{Name: current},
+					ev:          routingcore.SubagentEvidence{Name: current},
 					sessions:    map[string]bool{},
 					modelWeight: map[string]int64{},
 				}
@@ -90,7 +90,7 @@ func buildSubagentEvidence(turns []TurnRow, actionsBySession map[string][]Action
 	}
 
 	sort.Strings(order)
-	out := make([]routing.SubagentEvidence, 0, len(order))
+	out := make([]routingcore.SubagentEvidence, 0, len(order))
 	for _, name := range order {
 		g := byName[name]
 		g.ev.Sessions = len(g.sessions)

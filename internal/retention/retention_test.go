@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -25,7 +27,7 @@ func init() {
 func seed(t *testing.T) (string, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestRun_NoAgeCapKeepsEverything(t *testing.T) {
 
 func TestRun_FileStateAge(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +155,7 @@ func TestRun_FileStateAge(t *testing.T) {
 
 func TestRun_ObserverLogPruning(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +223,7 @@ func TestRun_FileStateLastActionIDNulledWhenActionDeleted(t *testing.T) {
 // only at the actions table. The pruner must keep those sessions.
 func TestRun_OrphanedSessions_TokenUsageReferencePreserved(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -354,7 +356,7 @@ func TestRun_ChildActionRefsNulledNotBlocked(t *testing.T) {
 // the seed test cleanup. Avoids leaking handles between subtests.
 func openExisting(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	d, err := db.Open(context.Background(), db.Options{Path: path})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -370,7 +372,7 @@ func openExisting(t *testing.T, path string) *sql.DB {
 // table (operator's 68K→90 incident).
 func TestShrinkToCap_FloorProtectsRecentActions(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "big.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

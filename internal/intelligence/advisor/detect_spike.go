@@ -82,6 +82,7 @@ func detectSpendSpike(f *Facts, th Thresholds) []Suggestion {
 	sort.Slice(todays, func(i, j int) bool { return todays[i].usd > todays[j].usd })
 	top := ""
 	if len(todays) > 0 {
+		// no-bare-usd:allow (advisor prose; masked on every surface under the token display)
 		top = fmt.Sprintf(" The biggest contributor is a %s session at $%.2f.", todays[0].tool, todays[0].usd)
 	}
 	return []Suggestion{{
@@ -89,7 +90,7 @@ func detectSpendSpike(f *Facts, th Thresholds) []Suggestion {
 		Category: CategoryCost, Scope: ScopeGlobal, Severity: sev,
 		Title: fmt.Sprintf("Today is %.1f× your daily average ($%.2f vs $%.2f)", ratio, todayUSD, avg),
 		Nudge: fmt.Sprintf(
-			"Spend today is $%.2f against a $%.2f average over your last %d active days.%s Nothing is wrong by itself — this is the \"did I mean to do that?\" check while the day is still going.",
+			"Spend today is $%.2f against a $%.2f average over your last %d active days.%s Nothing is wrong by itself - this is the \"did I mean to do that?\" check while the day is still going.",
 			todayUSD, avg, len(prior), top,
 		),
 		// The $ figure is the EXCESS over baseline — the spike's

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package dashboard
 
 import (
@@ -16,7 +18,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/processbridge/setup"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // etwStatusServer assembles a Server over a seeded config + DB and returns it
@@ -39,7 +41,7 @@ func etwStatusServer(t *testing.T, mutate func(*config.Config)) (*Server, string
 	if err := config.WriteToml(cfgPath, cfg); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -201,7 +203,7 @@ func TestProcessETWStatusProbeZeroValueIsUnknown(t *testing.T) {
 	t.Parallel()
 
 	if got := etwProbeOf(setup.Probe(0)); got != etwProbeUnknown {
-		t.Fatalf("the tri-state's ZERO value maps to %q; it must map to %q — "+
+		t.Fatalf("the tri-state's ZERO value maps to %q; it must map to %q - "+
 			"reporting a never-run probe as %q would tell the operator the task does not exist",
 			got, etwProbeUnknown, etwProbeAbsent)
 	}
@@ -225,7 +227,7 @@ func TestProcessETWStatusHealthAbsent(t *testing.T) {
 		t.Fatalf("health reported with no daemon record: %+v", got.Health)
 	}
 	if got.HealthReason == "" {
-		t.Fatal("a null health carries no reason — absence must be explained, not silent")
+		t.Fatal("a null health carries no reason - absence must be explained, not silent")
 	}
 }
 
@@ -240,12 +242,12 @@ func TestProcessETWStatusTransportHealth(t *testing.T) {
 		WrittenAt:                   now,
 		Backend:                     "poll+etw",
 		BackendUp:                   true,
-		NetworkAccountingMode:       processobs.NetworkAccountingUnavailable,
-		TransportState:              processobs.TransportStateConfigured,
+		NetworkAccountingMode:       procmodel.NetworkAccountingUnavailable,
+		TransportState:              procmodel.TransportStateConfigured,
 		TransportAddr:               "127.0.0.1:8823",
 		TransportAuthFailures:       3,
 		TransportLastAuthError:      "processobs/bridge: malformed handshake: not a SBO-PROCESS-BRIDGE client",
-		TransportLastAuthErrorClass: processobs.TransportAuthClassMalformed,
+		TransportLastAuthErrorClass: procmodel.TransportAuthClassMalformed,
 	}); err != nil {
 		t.Fatalf("WriteProcessHealth: %v", err)
 	}
@@ -266,8 +268,8 @@ func TestProcessETWStatusTransportHealth(t *testing.T) {
 	// fabricated "shared-token mismatch" — and a test pinned the fabrication
 	// as expected. AuthFailures counts every refusal, including an unrelated
 	// Windows-host process probing a WSL loopback bind.
-	if tr.LastAuthErrorClass != processobs.TransportAuthClassMalformed {
-		t.Errorf("last_auth_error_class = %q, want %q", tr.LastAuthErrorClass, processobs.TransportAuthClassMalformed)
+	if tr.LastAuthErrorClass != procmodel.TransportAuthClassMalformed {
+		t.Errorf("last_auth_error_class = %q, want %q", tr.LastAuthErrorClass, procmodel.TransportAuthClassMalformed)
 	}
 	if !strings.Contains(tr.LastAuthError, "not a SBO-PROCESS-BRIDGE client") {
 		t.Errorf("last_auth_error is not the daemon's verbatim record: %q", tr.LastAuthError)
@@ -305,7 +307,7 @@ func TestProcessETWStatusStaleQualifiesTimestamps(t *testing.T) {
 		WrittenAt:              old,
 		Backend:                "poll+etw",
 		BackendUp:              true,
-		TransportState:         processobs.TransportStateConfigured,
+		TransportState:         procmodel.TransportStateConfigured,
 		TransportAddr:          "127.0.0.1:8823",
 		TransportConnections:   1,
 		TransportConnected:     true,
@@ -319,7 +321,7 @@ func TestProcessETWStatusStaleQualifiesTimestamps(t *testing.T) {
 		t.Fatal("no health reported")
 	}
 	if !got.Health.Stale {
-		t.Fatal("an old record is not flagged stale — the card would render a dead daemon's 'connected' present-tense")
+		t.Fatal("an old record is not flagged stale - the card would render a dead daemon's 'connected' present-tense")
 	}
 	if got.Health.AgeSeconds < diag.ProcessHealthStaleAfter.Seconds() {
 		t.Fatalf("age_seconds = %v, want at least the staleness threshold", got.Health.AgeSeconds)
@@ -362,7 +364,7 @@ func TestProcessETWStatusCapturerDecodeReported(t *testing.T) {
 				WrittenAt:                           at,
 				Backend:                             "poll+etw",
 				BackendUp:                           true,
-				TransportState:                      processobs.TransportStateConfigured,
+				TransportState:                      procmodel.TransportStateConfigured,
 				TransportAddr:                       "127.0.0.1:8823",
 				TransportConnections:                1,
 				TransportConnected:                  true,
@@ -417,7 +419,7 @@ func TestProcessETWStatusUndetectablePlanStillReportsHealth(t *testing.T) {
 		t.Fatal("an unreadable config produced a plan")
 	}
 	if got.State != "" {
-		t.Fatalf("state = %q, want empty — a config failure is not a planner outcome", got.State)
+		t.Fatalf("state = %q, want empty - a config failure is not a planner outcome", got.State)
 	}
 	if got.Probe != etwProbeUnknown {
 		t.Fatalf("probe = %q on a path that never probed, want %q", got.Probe, etwProbeUnknown)
@@ -430,8 +432,8 @@ func TestProcessETWStatusUndetectablePlanStillReportsHealth(t *testing.T) {
 	}
 	// A record with no transport key at all must read as "none", not as a
 	// broken transport with zero connections.
-	if got.Health.TransportState != processobs.TransportStateNone {
-		t.Errorf("transport_state = %q, want %q", got.Health.TransportState, processobs.TransportStateNone)
+	if got.Health.TransportState != procmodel.TransportStateNone {
+		t.Errorf("transport_state = %q, want %q", got.Health.TransportState, procmodel.TransportStateNone)
 	}
 	if got.Health.Transport != nil {
 		t.Errorf("a transport object for a record with no transport: %+v", got.Health.Transport)
@@ -462,7 +464,7 @@ func TestProcessETWStatusSchtasksPresent(t *testing.T) {
 		server, _ := etwStatusServer(t, func(c *config.Config) { c.Observer.Process.ETW.Enabled = true })
 		server.etwSetupEnvFn = func() setup.Env { return setup.Env{} }
 		if got := getETWStatus(t, server); got.SchtasksPresent {
-			t.Errorf("schtasks_present = true with no LookPath seam — a probe nobody ran must not invent a Windows host")
+			t.Errorf("schtasks_present = true with no LookPath seam - a probe nobody ran must not invent a Windows host")
 		}
 	})
 
@@ -489,7 +491,7 @@ func TestProcessETWStatusSchtasksPresent(t *testing.T) {
 			t.Fatalf("state/skip = %q/%q, want skip/etw_disabled", got.State, got.SkipReason)
 		}
 		if !got.SchtasksPresent {
-			t.Error("schtasks_present must stay true when the feed is merely OFF — " +
+			t.Error("schtasks_present must stay true when the feed is merely OFF - " +
 				"otherwise a Windows operator can never be offered the toggle")
 		}
 	})
@@ -557,7 +559,7 @@ func TestProcessETWStatusCapturerClassificationCounters(t *testing.T) {
 				WrittenAt:                       at,
 				Backend:                         "poll+etw",
 				BackendUp:                       true,
-				TransportState:                  processobs.TransportStateConfigured,
+				TransportState:                  procmodel.TransportStateConfigured,
 				TransportAddr:                   "127.0.0.1:8823",
 				TransportConnections:            1,
 				TransportConnected:              true,

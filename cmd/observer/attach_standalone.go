@@ -1,21 +1,25 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/attachsock"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/git"
+	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
-	"github.com/marmutapp/superbased-observer/internal/remotenotify"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/termfeed"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
@@ -49,7 +53,16 @@ import (
 type terminalStack struct {
 	svc    *termsvc.Service
 	mgr    *termsession.Manager
-	status dashboard.TerminalStatusProvider
+	status dashapi.TerminalStatusProvider
+	// sandboxProber is the B9 dashapi.SandboxProber (the SAME *sandboxHolder
+	// wired as termsvc.Options.Sandboxer — one hot-swappable seam, two
+	// surfaces). It is non-nil whenever a stack was built, even with
+	// [terminal.sandbox].enabled = false: the holder then reports
+	// disabled_by_config and fails Prepare closed, and it picks the feature
+	// up WITHOUT a restart once the operator saves the enable switch. Held
+	// as the interface so the surfaces hand the dashboard a value, never a
+	// non-nil interface over a nil pointer.
+	sandboxProber dashapi.SandboxProber
 	// attachAudit records the metadata-only terminal_attach spawn-audit row (F4,
 	// session-attach design §3.5). Nil when no DB is wired (auditing disabled).
 	// Built over the SAME SpawnAuditKind vocabulary the dashboard resume handler
@@ -70,6 +83,12 @@ type terminalStack struct {
 	// multi-orphan finding), while never touching the fresh replacement (finding:
 	// wrong-run supersede). Empty/nil when no DB is wired.
 	resumableRuns map[string][]string
+	// instances owns the instance switcher's SSH local port forwards
+	// (docs/ssh-terminals.md "Instance switcher"). It is built from the SAME
+	// [terminal.ssh] profile list the SSH terminal picker uses — one
+	// operator-authored allow-list, two surfaces over it — and is torn down by
+	// close so an `ssh -N` child can never outlive this daemon.
+	instances sshInstances
 	// attachDir is the attach socket's owner-only directory. The attach host
 	// takes a durable cross-process resume flock here (H3). Empty disables the
 	// flock layer (no DB).
@@ -93,6 +112,21 @@ type terminalStack struct {
 	// native-terminal writer-reclaim capability, resolved once at build time and
 	// handed to the attach host. Default TRUE.
 	reclaimOnInput bool
+	// guard is the process-wide egress-policy Guard (internal/guard), acquired
+	// nil-safely via acquireProcessGuard when a DB is wired and [guard] is
+	// enabled. Consulted by the launch surface (P7 gateway-arc item 3) to
+	// decide whether a fresh launch of a sandbox_enforce-classified tool must
+	// be auto-upgraded to a sandboxed launch. Nil when guarding is disabled or
+	// no DB is wired — every consumer must nil-check.
+	guard *guard.Guard
+	// nf is the node.features policy handle (P7 gateway-arc item 4's
+	// org_disallow honor path) shared with the rest of the process. Nil-safe
+	// on every method; a nil nf answers "allowed" for every tool.
+	nf *nodeFeaturesHandle
+	// toolInstalls is the dashboard-install record + uninstall seam
+	// (tool_installs, agent migration 149), settled by this stack's OnExit.
+	// Nil when no DB is wired.
+	toolInstalls *toolInstallLedger
 	// close stops the status-hub reaper and kills every live session; wire it
 	// into the command's teardown BEFORE the DB is closed (start.go relies on
 	// defer-LIFO ordering to run it first).
@@ -110,13 +144,47 @@ type terminalStack struct {
 // Fresh-agent launch (F1) is a SEPARATE, default-off opt-in resolved into the
 // termsvc.Policy from [terminal] + [terminal.launch]; building the stack never
 // widens it (that stays gated on [terminal.launch].allow_fresh_agent).
-func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger) (*terminalStack, error) {
+// resolveTerminalSandbox builds the B9 sandbox seam: ONE long-lived
+// sandboxHolder implementing both termsvc.Sandboxer and
+// dashapi.SandboxProber over a hot-swappable *sandboxRuntime
+// (cmd/observer/terminal_sandbox.go), plus the managed-workspaces root
+// termsvc validates prepared workspaces against. Extracted from
+// buildTerminalStack to keep that function under the gocyclo bound.
+//
+// The holder is returned UNCONDITIONALLY — including when
+// [terminal.sandbox].enabled is false. That is the change that makes the
+// feature hot-reloadable: the old code resolved enabled-ness once and
+// returned nil seams when it was off, which pinned the dashboard to
+// "disabled_by_config" until the daemon restarted even after the operator
+// enabled the sandbox from Terminals → Settings. Fail-closed behaviour is
+// unchanged — a holder with no live runtime returns
+// termsvc.ErrSandboxUnavailable from Prepare (exactly what a nil Sandboxer
+// produces) and reports disabled_by_config from the probe (exactly what a
+// nil prober produces), so nothing a sandboxed launch may do has widened.
+func resolveTerminalSandbox(cfg config.Config, binPath string, logger *slog.Logger) (termsvc.Sandboxer, string, dashapi.SandboxProber) {
+	// The path the holder stats to notice a [terminal.sandbox] save. Empty
+	// (unresolvable) simply pins the holder to its boot-time resolve.
+	cfgPath, _ := config.ResolveGlobalPath(daemonConfigPath())
+	h := newSandboxHolder(cfg, cfgPath, filepath.Dir(cfg.Observer.DBPath), binPath, logger)
+	return h, h.workspacesDir(), h
+}
+
+func buildTerminalStack(ctx context.Context, cfg config.Config, database *sql.DB, logger *slog.Logger, nf *nodeFeaturesHandle) (*terminalStack, error) {
 	// Leave the stack unbuilt on an OS with no in-process PTY backend (a
 	// native-Windows daemon). A nil stack is the honest "disabled" state: the
 	// dashboard "Launch here" button is hidden and the attach socket is not
 	// served, rather than either failing on use.
 	if !termsession.PTYSupported() {
-		logger.Info("embedded terminal disabled — no in-process PTY backend on this OS (run the daemon under WSL/Linux); dashboard launch + session-attach are unavailable, handoff-doc migration is unaffected")
+		// This branch is gated on PTYSupported() alone, so name that cause
+		// (audit DI-16). The other way a nil stack arises — [handoff].
+		// allow_dashboard_launch = false — is reported where that gate lives
+		// (the dashboard's 503, errTerminalUnavailable). The stale "run the
+		// daemon under WSL/Linux" has been wrong since ConPTY landed
+		// (a6cc151c3, 2026-07-04) — a native Windows daemon runs these
+		// terminals fine when it's new enough.
+		logger.Info("embedded terminal disabled - unsupported on this OS " +
+			"(Windows before 10 version 1809 has no ConPTY; other platforms need a PTY backend); " +
+			"dashboard launch + session-attach are unavailable, handoff-doc migration is unaffected")
 		return nil, nil
 	}
 	binPath, err := os.Executable()
@@ -184,7 +252,15 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 	// lifecycle, plan §8.1). termsession stays store-free — this cmd-side FUNC
 	// SEAM maps each content-free LeaseEvent to a typed remote_audit row.
 	opts.OnLeaseEvent = newLeaseAuditSink(database)
-	notifier := newRemoteNotifier(cfg, logger)
+	// The session-finished push (remote notify rail) is a func seam:
+	// remotenotify.go builds it, nil when the rail is off or the remote
+	// component is not in this build (remote_omit.go).
+	notifySessionFinished := newSessionFinishedNotifier(cfg, logger)
+	// Dashboard-installed tools (tool_installs, agent migration 149): the
+	// record of guided installs/uninstalls the dashboard spawns. Its settle
+	// signal is THIS manager's OnExit (below); nil without a DB.
+	installLedger := newToolInstallLedgerFor(database, logger)
+	wirePostInstallHookRegistration(installLedger, cfg, logger)
 	// DEFERRED (review B6): this OnExit closure runs on the manager's own exit
 	// goroutine and calls svc.EndRunByHandle (a DB write) with a background
 	// context. At daemon shutdown that write can, in principle, race the DB
@@ -200,30 +276,51 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 			svc.EndRunByHandle(context.Background(), se.Handle, se.ExitCode)
 		}
 		scanHub.Drop(se.Handle)
-		if notifier != nil {
+		installLedger.observeExit(se.Handle, se.ExitCode) // nil-safe
+		if notifySessionFinished != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
-			if nerr := notifier.Notify(ctx, remotenotify.Event{
-				Type:       remotenotify.EventSessionFinished,
-				SessionID:  se.SessionID,
-				Tool:       se.Subcommand,
-				Subcommand: se.Subcommand,
-				ExitCode:   se.ExitCode,
-				Time:       se.At,
-			}); nerr != nil {
+			if nerr := notifySessionFinished(ctx, se); nerr != nil {
 				logger.Warn("remote notify: session-finished delivery failed", "err", nerr, "session", se.SessionID)
 			}
 		}
 	}
 
 	mgr := termsession.NewManager(opts)
+	installLedger.setExitStatus(mgr.ExitStatus) // nil-safe
 	launcher := &ptyLauncher{mgr: mgr, binPath: binPath, feed: feed, logger: logger}
+
+	// B9 sandbox seam (plan §1/§9 U5): ONE cmd-side sandboxHolder implementing
+	// BOTH termsvc.Sandboxer (Prepare) and dashapi.SandboxProber
+	// (ProbeSandbox) over internal/sandbox + internal/workspace, holding the
+	// live runtime behind an atomic pointer so a [terminal.sandbox] save takes
+	// effect on the next launch instead of the next restart. Resolved
+	// out-of-line to keep buildTerminalStack under the gocyclo bound.
+	//
+	// Fail-closed is unchanged: with the feature off (or a runtime that will
+	// not initialize) Prepare returns termsvc.ErrSandboxUnavailable and the
+	// probe reports disabled_by_config / runtime_init_failed — the U4/U6
+	// states, now told apart instead of flattened into one string.
+	//
+	// sandboxWorkspacesDir is the ONE managed-workspace root termsvc holds for
+	// the daemon's life; moving workspaces_dir at runtime is the one knob that
+	// still needs a restart (the holder logs a warning when it sees that).
+	sandboxSeam, sandboxWorkspacesDir, sandboxProber := resolveTerminalSandbox(cfg, binPath, logger)
+
+	// T-488/T-489: the [terminal] launch policy and SSH profiles have ONE
+	// owner that follows config.toml, so a dashboard save (or a hand edit)
+	// binds on the next launch instead of the next daemon restart. The boot
+	// snapshot seeds it; the stamp check reloads it.
+	termCfgPath, _ := config.ResolveGlobalPath(daemonConfigPath())
+	termCfg := newTerminalConfigHolder(cfg.Terminal, termCfgPath, logger)
+
 	svc = termsvc.New(termsvc.Options{
-		Policy:   terminalLaunchPolicy(cfg.Terminal),
-		Recorder: termRunRecorder{st: store.New(database)},
-		Launcher: launcher,
-		Feed:     feed,
-		Logger:   logger,
+		Policy:       terminalLaunchPolicy(cfg.Terminal),
+		PolicySource: termCfg.Policy,
+		Recorder:     termRunRecorder{st: store.New(database)},
+		Launcher:     launcher,
+		Feed:         feed,
+		Logger:       logger,
 		// Close the pre-registration exit gap: launch() reconciles a just-spawned
 		// handle against the authoritative Manager exit status the instant it
 		// installs the mapping (Manager stays the one owner of exit truth).
@@ -231,6 +328,28 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 		// The DIRECT per-run exit seam: EndRunByHandle fires this once per run so
 		// the attach hub's correctness never rides the lossy status feed.
 		OnRunExit: hub.NotifyExit,
+		// B9: the sandbox workspace+wrap-argv seam (nil when disabled → a
+		// Sandbox:true FreshRequest fails closed with ErrSandboxUnavailable).
+		Sandboxer:            sandboxSeam,
+		SandboxWorkspacesDir: sandboxWorkspacesDir,
+		// T2: the DETACHED IDE / desktop-app spawn seam. It shares this stack's
+		// service (one run-identity model, one policy, one recorder, one status
+		// feed) but NONE of its PTY machinery — a GUI child has no pseudo-
+		// terminal, no OOB channel and no job object (it must outlive the
+		// daemon, the exact opposite of a PTY child's contract).
+		//
+		// FOLLOW-UP (documented, not solved here): the terminal stack is only
+		// built when termsession.PTYSupported(), so a host with no PTY backend
+		// also gets no GUI launch — even though a detached spawn needs no PTY
+		// at all. On Windows 10 1809+ PTYSupported() is true, so this is not a
+		// live gap today; decoupling the GUI seam from the PTY stack is a
+		// separate change.
+		GUILauncher: &guiLauncher{
+			proxyPort:  cfg.Proxy.Port,
+			configPath: daemonConfigPath,
+			resolveEnv: dashResolveEnv,
+			logger:     logger,
+		},
 	})
 	// Wire the OOB run->session correlation seam (P2-1): when the launcher
 	// wrapper announces the child's agent session id on the trusted OOB channel,
@@ -256,9 +375,11 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 	// launcher that has no OOB id echo (only claude-code and codex correlate
 	// today; every other launcher's Session Cockpit otherwise waits forever). It
 	// reads the SAME svc seams the OOB path uses (HandleForRun = liveness truth;
-	// ProjectRoot = the validated launch dir; Correlate = the one scored-link
-	// seam) so a stale crash-orphan run from a previous boot simply misses the
-	// live-handle lookup and is skipped. Gated on a wired DB, and run on its OWN
+	// SpawnDir = the directory the run's child actually runs in — NOT
+	// ProjectRoot, whose emptiness for a launch with no requested project root
+	// used to make this sweep skip the run forever; Correlate = the one
+	// scored-link seam) so a stale crash-orphan run from a previous boot simply
+	// misses the live-handle lookup and is skipped. Gated on a wired DB, and run on its OWN
 	// context so the stack's close func can stop it FIRST — before the H2 shutdown
 	// stamps and mgr.Shutdown() — so no in-flight tick write can race the
 	// defer-LIFO DB close (the same ordering discipline the H2 stamps rely on).
@@ -267,8 +388,9 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 		disc := newTerminalDiscoverer(
 			store.New(database),
 			svc.HandleForRun,
+			newTerminalNativeResolver(svc.HandleForRun, mgr.ProcessIdentityForHandle, svc.KindForHandle, &cfg),
 			svc.SessionLinkForRun,
-			svc.ProjectRoot,
+			svc.SpawnDir,
 			correlate,
 			func(dir string) string {
 				info, gerr := git.Resolve(dir)
@@ -297,7 +419,7 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 	// F4 agent-status hub: fuses the feed (OSC hints + OOB/lifecycle) with
 	// termsession output-recency/exit into a per-run status. Gated by
 	// [terminal.status].enabled; when off, no provider is wired (endpoints 503).
-	var statusProvider dashboard.TerminalStatusProvider
+	var statusProvider dashapi.TerminalStatusProvider
 	stopStatus := func() {}
 	if cfg.Terminal.Status.Enabled {
 		hub := newTerminalStatusHub(
@@ -364,7 +486,7 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 			live, err := st.LiveRunForSessionExcluding(ctx, sessionID, termrun.MinLinkConfidence, excludeRunIDs)
 			if err != nil {
 				if logger != nil {
-					logger.Warn("attach: live-run authority query failed — falling back to the in-memory guard + flock", "err", err, "session", sessionID)
+					logger.Warn("attach: live-run authority query failed - falling back to the in-memory guard + flock", "err", err, "session", sessionID)
 				}
 				return false
 			}
@@ -372,17 +494,38 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 		}
 	}
 
+	// Instance switcher forwards. Read through the SAME live holder the
+	// terminal service's policy comes from (T-488), so the two surfaces can
+	// never disagree about which machines exist or how long a connect may
+	// take, and a profile added, edited or removed in the dashboard binds
+	// without a restart (an edited or removed profile's live forward closes).
+	instances := newSSHInstances(termCfg, logger)
+
+	// P7 gateway-arc item 3: acquire the SAME process-wide guard the proxy
+	// already primed (acquireProcessGuard is keyed + cached by DB path, so
+	// this is a cache hit in the common `observer start` path, not a second
+	// build). Nil-safe when no DB is wired or guarding is disabled.
+	var procGuard *guard.Guard
+	if database != nil {
+		procGuard = acquireProcessGuard(ctx, cfg, store.New(database), logger)
+	}
+
 	return &terminalStack{
 		svc:              svc,
+		instances:        instances,
 		mgr:              mgr,
 		status:           statusProvider,
-		attachAudit:      newSpawnAuditSink(database, dashboard.SpawnAuditKind(termrun.KindAttach)),
+		sandboxProber:    sandboxProber,
+		attachAudit:      newSpawnAuditSink(database, dashapi.SpawnAuditKind(termrun.KindAttach)),
 		hub:              hub,
 		resumableRuns:    resumable,
 		attachDir:        attachDir,
 		supersedeResumed: supersedeResumed,
 		resumeAuthority:  resumeAuthority,
 		reclaimOnInput:   cfg.Terminal.Attach.ReclaimOnInput,
+		guard:            procGuard,
+		nf:               nf,
+		toolInstalls:     installLedger,
 		close: func() {
 			// Stop the discovery sweep FIRST — before ANY DB write below and before
 			// mgr.Shutdown() — and WAIT for its goroutine to drain, so no in-flight
@@ -428,6 +571,10 @@ func buildTerminalStack(cfg config.Config, database *sql.DB, logger *slog.Logger
 			// terminal that no longer exists. mgr.Shutdown's own exit edges are
 			// then a no-op (the seeder has already dropped the handles).
 			pidSeeder.releaseAll()
+			// Close every instance-switcher forward BEFORE the PTY shutdown, so
+			// no `ssh -N` child outlives the daemon that opened it (there is no
+			// reaper that would ever clean one up otherwise).
+			instances.Close()
 			mgr.Shutdown()
 		},
 	}, nil
@@ -456,7 +603,7 @@ func rediscoverResumableSessions(database *sql.DB, logger *slog.Logger) map[stri
 	runs, err := store.New(database).ListTerminalRuns(ctx, 500)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("attach: rediscover resumable sessions failed — auto-resume validation will reject all targets", "err", err)
+			logger.Warn("attach: rediscover resumable sessions failed - auto-resume validation will reject all targets", "err", err)
 		}
 		return map[string][]string{}
 	}
@@ -528,12 +675,21 @@ func resumableSessionSet(runs []store.TerminalRunSummary) map[string][]string {
 	return set
 }
 
-// launchManager wraps the shared stack in the dashboard.LaunchManager adapter.
+// launchManager wraps the shared stack in the dashapi.LaunchManager adapter.
 // The adapter's remote-execute authorizer stays nil until wireRemoteExecuteTier
 // installs it (fail-closed until then). The returned adapter drives the SAME
 // svc + mgr the attach host does.
 func (s *terminalStack) launchManager() *launchManagerAdapter {
-	return &launchManagerAdapter{svc: s.svc, mgr: s.mgr, attachAudit: s.attachAudit}
+	return &launchManagerAdapter{
+		svc:           s.svc,
+		mgr:           s.mgr,
+		attachAudit:   s.attachAudit,
+		instances:     s.instances,
+		guard:         s.guard,
+		sandboxProber: s.sandboxProber,
+		nf:            s.nf,
+		toolGate:      daemonToolGate,
+	}
 }
 
 // attachHost builds the session-attach socket Host over the shared stack's
@@ -564,24 +720,6 @@ func (s *terminalStack) attachHost() attachsock.Host {
 		withReclaim(s.reclaimOnInput)
 }
 
-// terminalSurfaces is the decoupled per-surface result start.go consumes: the
-// dashboard launch manager (nil unless [handoff].allow_dashboard_launch), its
-// status provider, and the attach-socket host (nil unless
-// [terminal.attach].enabled) — all derived from ONE shared terminalStack, plus
-// its single teardown func. A nil field is the honest "surface disabled" state
-// for that capability alone; the OTHER surface is unaffected.
-type terminalSurfaces struct {
-	launchMgr    dashboard.LaunchManager
-	launchStatus dashboard.TerminalStatusProvider
-	attachHost   attachsock.Host
-	// mgr is the concrete one-owner session manager (nil when no stack was
-	// built). Exposed so start.go can register post-construction hooks that
-	// need the concrete type (SetOnStandingLocalTakeover) — the dashboard
-	// itself keeps talking through the LaunchManager interface.
-	mgr   *termsession.Manager
-	close func()
-}
-
 // buildTerminalSurfaces constructs the shared terminal stack ONCE and derives
 // the requested surfaces from it, decoupled: the attach host is wired whenever
 // [terminal.attach].enabled is true and the launch manager whenever
@@ -589,13 +727,13 @@ type terminalSurfaces struct {
 // is requested (or there is no PTY backend) it returns a zero-value result with
 // a no-op close and NO stack is built. The single source of the per-surface
 // gating truth — shared by `observer start` and its tests.
-func buildTerminalSurfaces(cfg config.Config, database *sql.DB, logger *slog.Logger) (terminalSurfaces, error) {
+func buildTerminalSurfaces(ctx context.Context, cfg config.Config, database *sql.DB, logger *slog.Logger, nf *nodeFeaturesHandle) (terminalSurfaces, error) {
 	surf := terminalSurfaces{close: func() {}}
 	// Terminal websocket liveness bounds ([terminal].ws_ping_*). Applied before
 	// any bridge can start; non-positive values leave the built-in defaults, and
 	// the failure budget is what lets a FROZEN backgrounded mobile tab survive a
 	// trip to another app instead of having its bridge reaped inside ~40s.
-	dashboard.SetTerminalPingPolicy(
+	setTerminalPingPolicy(
 		time.Duration(cfg.Terminal.WSPingIntervalSeconds)*time.Second,
 		time.Duration(cfg.Terminal.WSPingTimeoutSeconds)*time.Second,
 		cfg.Terminal.WSPingFailuresAllowed,
@@ -604,7 +742,7 @@ func buildTerminalSurfaces(cfg config.Config, database *sql.DB, logger *slog.Log
 	if !cfg.Handoff.AllowDashboardLaunch && !cfg.Terminal.Attach.Enabled {
 		return surf, nil
 	}
-	stack, err := buildTerminalStack(cfg, database, logger)
+	stack, err := buildTerminalStack(ctx, cfg, database, logger, nf)
 	if err != nil {
 		return surf, err
 	}
@@ -615,6 +753,11 @@ func buildTerminalSurfaces(cfg config.Config, database *sql.DB, logger *slog.Log
 	}
 	surf.close = stack.close
 	surf.mgr = stack.mgr
+	// B9: expose the sandbox prober (nil when the feature is off) so the
+	// dashboard's /api/terminal/sandbox + fail-closed launch validation see it.
+	// Independent of the launch-manager gate below: the endpoint is always
+	// registered and reports honestly whether sandbox support exists.
+	surf.sandboxProber = stack.sandboxProber
 	// Assign the launch manager only when the gate is on so the field stays a
 	// nil interface (not a non-nil interface over a nil pointer) when disabled —
 	// the dashboard keys off that nil to hide the button, and
@@ -622,9 +765,34 @@ func buildTerminalSurfaces(cfg config.Config, database *sql.DB, logger *slog.Log
 	if cfg.Handoff.AllowDashboardLaunch {
 		surf.launchMgr = stack.launchManager()
 		surf.launchStatus = stack.status
+		surf.policyStop = &policyStopProvider{mgr: stack.mgr, st: store.New(database)}
+		if stack.toolInstalls != nil {
+			surf.toolInstalls = stack.toolInstalls
+		}
 	}
 	if cfg.Terminal.Attach.Enabled {
 		surf.attachHost = stack.attachHost()
 	}
 	return surf, nil
+}
+
+// wirePostInstallHookRegistration gives a tool the dashboard just installed
+// its live-tested hook bindings right away (the same writer and decision
+// `observer start` uses), not at the next daemon restart. Gated on the same
+// [observer.hooks] auto_register consent as start. Nil-ledger safe.
+func wirePostInstallHookRegistration(l *toolInstallLedger, cfg config.Config, logger *slog.Logger) {
+	if !cfg.Observer.Hooks.AutoRegister {
+		return
+	}
+	promptLane := cfg.Guard.Prompt.Enabled && cfg.Guard.Prompt.HookLane
+	l.setOnInstalled(func(tool string) {
+		var out, errb bytes.Buffer
+		autoRegisterInstalledTool(&out, &errb, daemonConfigPath(), promptLane, tool)
+		if s := strings.TrimSpace(out.String()); s != "" {
+			logger.Info("guided install: hooks registered", "tool", tool, "detail", s)
+		}
+		if s := strings.TrimSpace(errb.String()); s != "" {
+			logger.Warn("guided install: hook registration", "tool", tool, "detail", s)
+		}
+	})
 }

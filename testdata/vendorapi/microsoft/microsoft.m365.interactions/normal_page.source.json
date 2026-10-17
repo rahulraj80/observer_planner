@@ -1,0 +1,52 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "value": "VerifiedOfficial",
+    "value[]": "VerifiedOfficial",
+    "value[].appClass": "VerifiedOfficial",
+    "value[].attachments": "VerifiedOfficial",
+    "value[].body": "VerifiedOfficial",
+    "value[].body.content": "VerifiedOfficial",
+    "value[].body.contentType": "VerifiedOfficial",
+    "value[].contexts": "VerifiedOfficial",
+    "value[].conversationType": "VerifiedOfficial",
+    "value[].createdDateTime": "VerifiedOfficial",
+    "value[].etag": "VerifiedOfficial",
+    "value[].from": "VerifiedOfficial",
+    "value[].from.@odata\\.type": "VerifiedOfficial",
+    "value[].from.application": "VerifiedOfficial",
+    "value[].from.device": "VerifiedOfficial",
+    "value[].from.user": "VerifiedOfficial",
+    "value[].from.user.@odata\\.type": "VerifiedOfficial",
+    "value[].from.user.displayName": "VerifiedOfficial",
+    "value[].from.user.id": "VerifiedOfficial",
+    "value[].from.user.tenantId": "VerifiedOfficial",
+    "value[].from.user.userIdentityType": "VerifiedOfficial",
+    "value[].id": "VerifiedOfficial",
+    "value[].interactionType": "VerifiedOfficial",
+    "value[].links": "VerifiedOfficial",
+    "value[].locale": "VerifiedOfficial",
+    "value[].mentions": "VerifiedOfficial",
+    "value[].requestId": "VerifiedOfficial",
+    "value[].sessionId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "3b386ba15622caf0f407bd2ce3145e6b199d0159cc05a2e86f19defad1c17ca9",
+  "http": {
+    "method": "GET",
+    "path": "/v1.0/copilot/users/254efcd0-5094-4fc5-b2b3-1637629393e1/interactionHistory/getAllEnterpriseInteractions",
+    "query": {
+      "$filter": "createdDateTime gt 2025-11-24T00:00:00Z and createdDateTime lt 2025-11-25T00:00:00Z",
+      "$top": "100"
+    },
+    "status": 200
+  },
+  "notes": "Example 3 of the reference (v1.0 pivot: createdDateTime filter with both bounds), the response body verbatim. The $top value is the reference's recommended page size.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "MicrosoftDocs/m365copilot-docs main, aiInteractionHistory: getAllEnterpriseInteractions (ms.date 02/23/2026), fetched 2026-10-08",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2a40f99c16a1150f72fc25106503a767e3e0b5b7e0bf1cdefabb049f2c519aee",
+  "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/m365copilot-docs/main/docs/api/ai-services/interaction-export/aiinteractionhistory-getallenterpriseinteractions.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "microsoft.m365.interactions"
+}

@@ -34,8 +34,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/net/http2"
 )
 
 func main() {
@@ -373,6 +371,30 @@ foreach ($p in $lsProcesses) {
 	return servers, nil
 }
 
+// newHTTP2Client returns an http.Client that speaks ONLY HTTP/2: over TLS
+// without certificate verification (the language_server self-signs) when
+// useTLS, else plaintext h2c with prior knowledge. It mirrors
+// buildHTTP2Client in internal/adapter/antigravity/grpc.go: net/http's own
+// HTTP/2 client selected through Transport.Protocols (the replacement x/net
+// names for its deprecated http2.Transport), no HTTP/1 fallback, no proxy,
+// and a 5 s dial timeout on the h2c path.
+func newHTTP2Client(useTLS bool) *http.Client {
+	protocols := new(http.Protocols)
+	if useTLS {
+		protocols.SetHTTP2(true)
+		return &http.Client{Transport: &http.Transport{
+			Protocols:       protocols,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // language_server self-signs at runtime
+		}}
+	}
+	protocols.SetUnencryptedHTTP2(true)
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Client{Transport: &http.Transport{
+		Protocols:   protocols,
+		DialContext: d.DialContext,
+	}}
+}
+
 // callConvertTrajectory mirrors the gRPC client in
 // internal/adapter/antigravity/grpc.go but is duplicated here to
 // keep this helper a standalone binary with minimal deps.
@@ -393,20 +415,7 @@ func callConvertTrajectory(ctx context.Context, endpoint, csrf, conversationID s
 	req.ContentLength = int64(len(frame))
 	req.Body = io.NopCloser(byteReader(frame))
 
-	var client *http.Client
-	if strings.HasPrefix(endpoint, "https://") {
-		client = &http.Client{Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-		}}
-	} else {
-		client = &http.Client{Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				d := net.Dialer{Timeout: 5 * time.Second}
-				return d.DialContext(ctx, network, addr)
-			},
-		}}
-	}
+	client := newHTTP2Client(strings.HasPrefix(endpoint, "https://"))
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -456,7 +465,7 @@ func callRawMethod(ctx context.Context, endpoint, csrf, method string, conversat
 	url := strings.TrimRight(endpoint, "/") + "/exa.language_server_pb.LanguageServerService/" + method
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(rctx, http.MethodPost, url, nil)
+	req, err := http.NewRequestWithContext(rctx, http.MethodPost, url, nil) //nolint:gosec // G704: endpoint is the local language server the bridge discovered on this machine, not request input
 	if err != nil {
 		return nil, err
 	}
@@ -466,21 +475,8 @@ func callRawMethod(ctx context.Context, endpoint, csrf, method string, conversat
 	req.ContentLength = int64(len(frame))
 	req.Body = io.NopCloser(byteReader(frame))
 
-	var client *http.Client
-	if strings.HasPrefix(endpoint, "https://") {
-		client = &http.Client{Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-		}}
-	} else {
-		client = &http.Client{Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				d := net.Dialer{Timeout: 5 * time.Second}
-				return d.DialContext(ctx, network, addr)
-			},
-		}}
-	}
-	resp, err := client.Do(req)
+	client := newHTTP2Client(strings.HasPrefix(endpoint, "https://"))
+	resp, err := client.Do(req) //nolint:gosec // G704: endpoint is the local language server the bridge discovered on this machine, not request input
 	if err != nil {
 		return nil, err
 	}

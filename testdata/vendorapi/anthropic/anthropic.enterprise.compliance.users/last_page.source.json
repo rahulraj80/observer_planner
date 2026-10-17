@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].email": "VerifiedOfficial",
+    "data[].full_name": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].organization_role": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ffad8255c433e0e3cee739c2722024bd70ef09dd99855d8657eac12a56cb2f8b",
+  "http": {
+    "method": "GET",
+    "path": "/v1/compliance/organizations/{org_uuid}/users",
+    "query": {
+      "page": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/compliance/organizations/{org_uuid}/users. Terminal page derived from the normal page: the paging flag is set to its documented terminal value (has_more false and next_page null, or hasNextPage false); every other value is unchanged.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "generated Compliance API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2ece9f3f845885fdfa0f44bbe7ea6c31fe869a313eabf2c3e6f5babf9e17a0ed",
+  "source_url": "https://platform.claude.com/docs/en/api/compliance.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.compliance.users"
+}

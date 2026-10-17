@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -33,7 +34,7 @@ func newVerbosityCmd() *cobra.Command {
 		Use:   "verbosity [session-id]",
 		Short: "Show output composition: explanation vs code, by language",
 		Long: "Breaks an assistant's output into narrative prose, shown (fenced) display\n" +
-			"artifacts, and authored code — file writes and shell commands — resolved\n" +
+			"artifacts, and authored code - file writes and shell commands - resolved\n" +
 			"by language. Shell/CLI counts as code. Byte counts are exact; the\n" +
 			"code:explanation ratio answers \"am I getting code or explanation?\".\n\n" +
 			"Pass a session id for one session, or --by model|project|day for an\n" +
@@ -81,7 +82,7 @@ func newVerbosityCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load verbosity for %q: %w", sessionID, err)
 			}
-			vc := loadVerbosityCost(cmd.Context(), st, cost.NewEngine(cfg.Intelligence), sessionID, b)
+			vc := loadVerbosityCost(cmd.Context(), st, acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default()), sessionID, b)
 			if jsonOut {
 				return printVerbosityJSON(cmd, b, vc)
 			}
@@ -267,7 +268,7 @@ func printVerbosityText(cmd *cobra.Command, sessionID string, b *verbosity.Break
 		total += v
 	}
 
-	fmt.Fprintf(out, "Output composition — session %s\n\n", sessionID)
+	fmt.Fprintf(out, "Output composition - session %s\n\n", sessionID)
 	if total == 0 {
 		fmt.Fprintln(out, "  (no assistant output captured for this session)")
 		return
@@ -281,7 +282,7 @@ func printVerbosityText(cmd *cobra.Command, sessionID string, b *verbosity.Break
 	fmt.Fprintf(out, "  HEADLINE   code %s (%.1f%%)  vs  explanation %s (%.1f%%)   code:explain = %s\n",
 		humanBytes(code), pct(code), humanBytes(explain), pct(explain), ratio)
 	if vc != nil {
-		fmt.Fprintf(out, "  EST. COST  code %s  vs  explanation %s   total %s  (%s; est. — output tokens apportioned by content type)\n",
+		fmt.Fprintf(out, "  EST. COST  code %s  vs  explanation %s   total %s  (%s; est. - output tokens apportioned by content type)\n",
 			humanUSD(vc.codeUSD), humanUSD(vc.explainUSD), humanUSD(vc.totalUSD), vc.model)
 	}
 	fmt.Fprintln(out)

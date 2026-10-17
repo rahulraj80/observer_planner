@@ -1,0 +1,14 @@
+{
+  "members": [
+    {
+      "id": "member_synth004",
+      "userId": "550e8400-e29b-41d4-a716-446655440004",
+      "name": "Dana",
+      "email": "dana@example.com",
+      "role": "org_member",
+      "status": "DISABLED",
+      "joinedAt": "2025-08-02T09:00:00Z"
+    }
+  ],
+  "maxResults": 100
+}

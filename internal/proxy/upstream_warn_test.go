@@ -70,11 +70,11 @@ func TestStripUpstreamPrefixWarnsOncePerUnknownID(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		r := httptest.NewRequest(http.MethodPost, "/up/typo/v1/chat/completions", nil)
-		if up := p.stripUpstreamPrefix(r); up != nil {
+		if up, _ := p.stripUpstreamPrefix(r); up != nil {
 			t.Fatalf("unknown id must not resolve an upstream")
 		}
 		if r.URL.Path != "/up/typo/v1/chat/completions" {
-			t.Fatalf("fail-open broken: path rewritten to %q", r.URL.Path)
+			t.Fatalf("unknown id path rewritten to %q; it must stay as addressed (serve refuses it)", r.URL.Path)
 		}
 	}
 	if got := wc.n(); got != 1 {
@@ -82,7 +82,7 @@ func TestStripUpstreamPrefixWarnsOncePerUnknownID(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodPost, "/up/other/v1/chat/completions", nil)
-	if up := p.stripUpstreamPrefix(r); up != nil {
+	if up, _ := p.stripUpstreamPrefix(r); up != nil {
 		t.Fatalf("second unknown id must not resolve an upstream")
 	}
 	if got := wc.n(); got != 2 {
@@ -101,9 +101,16 @@ func TestStripUpstreamPrefixSilentBranches(t *testing.T) {
 	}{
 		{"known id", map[string]string{"openrouter": "https://openrouter.ai/api"}, "/up/openrouter/api/v1/chat/completions"},
 		{"no /up/ prefix", map[string]string{"openrouter": "https://openrouter.ai/api"}, "/v1/chat/completions"},
-		{"prefix with no trailing segment", map[string]string{"openrouter": "https://openrouter.ai/api"}, "/up/openrouter"},
-		{"empty id", map[string]string{"openrouter": "https://openrouter.ai/api"}, "/up//v1"},
-		{"no upstreams configured", nil, "/up/openrouter/api/v1/chat/completions"},
+		{"path that merely starts with up", map[string]string{"openrouter": "https://openrouter.ai/api"}, "/upload/v1/files"},
+		// "/up/openrouter" and "/up//v1" used to be silent here because they
+		// failed open to a fixed upstream; they are malformed lane addresses
+		// now, refused and warned once in total (pass-2 C156-18,
+		// TestMalformedLaneAddressesWarnOnce).
+		//
+		// A /up/<id>/ path with no upstreams configured used to be silent here
+		// because it failed open; it is now an unresolvable lane, refused and
+		// warned once (Sol A5-02, TestUnknownUpstreamLaneNeverForwardsCredentials).
+		{"no upstreams configured, no /up/ prefix", nil, "/v1/chat/completions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,6 +125,29 @@ func TestStripUpstreamPrefixSilentBranches(t *testing.T) {
 	}
 }
 
+// TestMalformedLaneAddressesWarnOnce (pass-2 C156-18): every malformed lane
+// address resolves to the malformed refusal, never an upstream, and they
+// share ONE warning per daemon so a misconfigured client cannot flood the log.
+func TestMalformedLaneAddressesWarnOnce(t *testing.T) {
+	p, wc := newWarnCountingProxy(t, map[string]string{"openrouter": "https://openrouter.ai/api"})
+	for i := 0; i < 20; i++ {
+		for _, path := range []string{"/up/openrouter", "/up//v1", "/up/", "/up"} {
+			r := httptest.NewRequest(http.MethodPost, "/", nil)
+			r.URL.Path = path
+			res := p.resolveUpstreamPrefix(r)
+			if !res.malformed || res.up != nil || res.id != "" {
+				t.Fatalf("%s: got %+v, want a malformed refusal with no upstream", path, res)
+			}
+			if r.URL.Path != path {
+				t.Fatalf("%s: path rewritten to %q", path, r.URL.Path)
+			}
+		}
+	}
+	if got := wc.n(); got != 1 {
+		t.Errorf("malformed addresses produced %d warns, want exactly 1:\n%s", got, wc.buf.String())
+	}
+}
+
 // TestStripUpstreamPrefixWarnCapBoundsTheDedupMap pins the bound: a long-lived
 // daemon sprayed with distinct unknown ids warns at most unknownUpstreamWarnCap
 // times and keeps the dedup map at that size, so it cannot grow without limit.
@@ -127,7 +157,7 @@ func TestStripUpstreamPrefixWarnCapBoundsTheDedupMap(t *testing.T) {
 	const distinct = 500
 	for i := 0; i < distinct; i++ {
 		path := fmt.Sprintf("/up/id-%d/v1/chat/completions", i)
-		if up := p.stripUpstreamPrefix(httptest.NewRequest(http.MethodPost, path, nil)); up != nil {
+		if up, _ := p.stripUpstreamPrefix(httptest.NewRequest(http.MethodPost, path, nil)); up != nil {
 			t.Fatalf("unknown id %d must not resolve an upstream", i)
 		}
 	}
@@ -139,7 +169,7 @@ func TestStripUpstreamPrefixWarnCapBoundsTheDedupMap(t *testing.T) {
 	}
 	// Routing behaviour is untouched by the cap: a known id still resolves.
 	r := httptest.NewRequest(http.MethodPost, "/up/openrouter/api/v1/chat/completions", nil)
-	if up := p.stripUpstreamPrefix(r); up == nil {
+	if up, _ := p.stripUpstreamPrefix(r); up == nil {
 		t.Error("known id stopped resolving after the warn cap was reached")
 	} else if r.URL.Path != "/api/v1/chat/completions" {
 		t.Errorf("known id path = %q, want /api/v1/chat/completions", r.URL.Path)

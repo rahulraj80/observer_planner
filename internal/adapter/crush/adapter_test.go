@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -172,8 +174,7 @@ func TestParseSessionFile_FullEmission(t *testing.T) {
 
 	want := map[string]string{
 		"crush.user_prompt":    models.ActionUserPrompt,
-		"crush.reasoning":      models.ActionTaskComplete,
-		"crush.assistant_text": models.ActionTaskComplete,
+		"crush.assistant_text": models.ActionAssistantMessage,
 		"write":                models.ActionWriteFile,
 		"bash":                 models.ActionRunCommand,
 	}
@@ -195,9 +196,13 @@ func TestParseSessionFile_FullEmission(t *testing.T) {
 	if b := byRaw["bash"]; b.Success || b.ErrorMessage == "" {
 		t.Errorf("bash event = %+v, want failure + error", b)
 	}
-	// reasoning carries the thinking preview.
-	if r := byRaw["crush.reasoning"]; r.PrecedingReasoning == "" {
-		t.Errorf("reasoning event missing PrecedingReasoning: %+v", r)
+	// B3: reasoning mints no row of its own — the thinking that
+	// introduced the `write` call rides that call's PrecedingReasoning.
+	if _, ok := byRaw["crush.reasoning"]; ok {
+		t.Errorf("crush.reasoning row emitted; reasoning must never be its own action (B3)")
+	}
+	if w := byRaw["write"]; w.PrecedingReasoning != "I should create the file first." {
+		t.Errorf("write PrecedingReasoning = %q, want the reasoning part's text", w.PrecedingReasoning)
 	}
 	// write target derived from input.file_path.
 	if w := byRaw["write"]; w.Target != "/proj/hello.txt" {
@@ -409,6 +414,88 @@ func TestMapTool(t *testing.T) {
 	}
 }
 
+// b3Session exercises every reasoning-threading rule in one session.
+// The message ids sort in creation order, which is the order the parser
+// sees them (ORDER BY created_at, id).
+//
+//	b1 user      "first task"                 → clears pending
+//	b2 assistant reasoning THINK_ONE, bash A, bash B
+//	                                          → A carries THINK_ONE, B empty (consumed-once)
+//	b3 assistant reasoning STALE_ACROSS_TURN  → never consumed
+//	b4 user      "second task"                → discards STALE_ACROSS_TURN
+//	b5 assistant bash C                       → empty (turn-boundary discard)
+//	b6 assistant reasoning FIRST, reasoning SECOND, bash D
+//	                                          → D carries SECOND (last-wins)
+//	b7 assistant reasoning CROSS_SESSION (ses_b3)
+//	b8 assistant bash E in a DIFFERENT session → empty (session-scoped)
+func b3Session() []string {
+	return []string{
+		`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+		 VALUES ('ses_b3','B3',10,2,0.01,1783600100,1783600000)`,
+		`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at) VALUES
+		 ('b1','ses_b3','user','[{"type":"text","data":{"text":"first task"}}]','','',1783600001,1783600001),
+		 ('b2','ses_b3','assistant','[{"type":"reasoning","data":{"thinking":"THINK_ONE","started_at":1783600002,"finished_at":1783600003}},{"type":"tool_call","data":{"id":"call_a","name":"bash","input":"{\"command\":\"cmd_a\"}","finished":true}},{"type":"tool_call","data":{"id":"call_b","name":"bash","input":"{\"command\":\"cmd_b\"}","finished":true}}]','m','openai',1783600004,1783600004),
+		 ('b3','ses_b3','assistant','[{"type":"reasoning","data":{"thinking":"STALE_ACROSS_TURN","started_at":1783600005,"finished_at":1783600006}}]','m','openai',1783600007,1783600007),
+		 ('b4','ses_b3','user','[{"type":"text","data":{"text":"second task"}}]','','',1783600008,1783600008),
+		 ('b5','ses_b3','assistant','[{"type":"tool_call","data":{"id":"call_c","name":"bash","input":"{\"command\":\"cmd_c\"}","finished":true}}]','m','openai',1783600009,1783600009),
+		 ('b6','ses_b3','assistant','[{"type":"reasoning","data":{"thinking":"FIRST"}},{"type":"reasoning","data":{"thinking":"SECOND"}},{"type":"tool_call","data":{"id":"call_d","name":"bash","input":"{\"command\":\"cmd_d\"}","finished":true}}]','m','openai',1783600010,1783600010),
+		 ('b7','ses_b3','assistant','[{"type":"reasoning","data":{"thinking":"CROSS_SESSION"}}]','m','openai',1783600011,1783600011),
+		 ('b8','ses_other','assistant','[{"type":"tool_call","data":{"id":"call_e","name":"bash","input":"{\"command\":\"cmd_e\"}","finished":true}}]','m','openai',1783600012,1783600012)`,
+	}
+}
+
+// TestReasoningNeverMintsAnAction is the B3 regression pin: a Crush
+// `reasoning` part must produce NO action row (neither the retired
+// `crush.reasoning` raw name nor any other reasoning-shaped row) and its
+// text must instead ride the successor event's PrecedingReasoning under
+// the consumed-once / last-wins / turn-boundary-discard contract.
+func TestReasoningNeverMintsAnAction(t *testing.T) {
+	root, dbPath := dbPathUnder(t)
+	newCrushDB(t, dbPath, b3Session()...)
+	a := NewWithOptions(nil, []string{filepath.Join(root, ".crush")})
+
+	res, err := a.ParseSessionFile(context.Background(), dbPath, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+
+	byCmd := map[string]models.ToolEvent{}
+	for _, ev := range res.ToolEvents {
+		if ev.RawToolName == "crush.reasoning" {
+			t.Fatalf("crush.reasoning row emitted: %+v", ev)
+		}
+		if strings.Contains(strings.ToLower(ev.RawToolName), "reasoning") ||
+			strings.Contains(strings.ToLower(ev.RawToolName), "thinking") {
+			t.Fatalf("reasoning-named action row emitted: raw=%q %+v", ev.RawToolName, ev)
+		}
+		// No row may carry the reasoning bodies as its own content.
+		for _, body := range []string{"THINK_ONE", "STALE_ACROSS_TURN", "FIRST", "SECOND", "CROSS_SESSION"} {
+			if ev.Target == body || ev.ToolOutput == body {
+				t.Fatalf("reasoning body %q surfaced as action content: %+v", body, ev)
+			}
+		}
+		if ev.RawToolName == "bash" {
+			byCmd[ev.Target] = ev
+		}
+	}
+	if len(byCmd) != 5 {
+		t.Fatalf("want 5 bash rows, got %d (%v)", len(byCmd), res.ToolEvents)
+	}
+
+	cases := []struct{ cmd, wantReasoning, why string }{
+		{"cmd_a", "THINK_ONE", "the reasoning that introduced it"},
+		{"cmd_b", "", "consumed-once: the sibling call already took it"},
+		{"cmd_c", "", "turn-boundary discard: a user prompt intervened"},
+		{"cmd_d", "SECOND", "last-wins: the newer reasoning part replaces the older"},
+		{"cmd_e", "", "session-scoped: pending reasoning never crosses into another session"},
+	}
+	for _, c := range cases {
+		if got := byCmd[c.cmd].PrecedingReasoning; got != c.wantReasoning {
+			t.Errorf("%s PrecedingReasoning = %q, want %q (%s)", c.cmd, got, c.wantReasoning, c.why)
+		}
+	}
+}
+
 // --- helpers ----------------------------------------------------------
 
 func appendMessage(t *testing.T, dbPath, stmt string) {
@@ -429,4 +516,301 @@ func keys(m map[string]models.ToolEvent) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestSessionTokenCounts pins the reportability table: Crush's session
+// counters hold the LAST step's usage, so they are the session total
+// only for a session with at most one step (one assistant message), and
+// counters Crush never wrote are "not recorded", not "zero tokens".
+func TestSessionTokenCounts(t *testing.T) {
+	cases := []struct {
+		name            string
+		prompt, compl   int64
+		steps           int
+		wantIn, wantOut int64
+		wantRel         string
+	}{
+		{"no assistant message yet", 100, 5, 0, 100, 5, models.ReliabilityApproximate},
+		{"single step: counters are the total", 21749, 5, 1, 21749, 5, models.ReliabilityApproximate},
+		{"two steps: counters are a last-step snapshot", 12059, 49, 2, 0, 0, models.ReliabilityUnknown},
+		{"many steps", 40000, 900, 30, 0, 0, models.ReliabilityUnknown},
+		{"single step, counters never written", 0, 0, 1, 0, 0, models.ReliabilityUnknown},
+		{"no step, counters never written", 0, 0, 0, 0, 0, models.ReliabilityUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := sessionTokenCounts(tc.prompt, tc.compl, tc.steps)
+			if u.In != tc.wantIn || u.Out != tc.wantOut || u.Reliability != tc.wantRel {
+				t.Errorf("sessionTokenCounts(%d,%d,%d) = %d/%d %q, want %d/%d %q",
+					tc.prompt, tc.compl, tc.steps, u.In, u.Out, u.Reliability, tc.wantIn, tc.wantOut, tc.wantRel)
+			}
+		})
+	}
+}
+
+// zeroCostMultiStepSession is a flat-rate / local-model session with two
+// successful steps and Crush's own cost 0: its counters (9500/30) are the
+// second step's context snapshot.
+func zeroCostMultiStepSession() []string {
+	return []string{
+		`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+		 VALUES ('ses_flatmulti','Flat multi',9500,30,0.0,1790000310,1790000300)`,
+		`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at) VALUES
+		 ('mm_u','ses_flatmulti','user','[{"type":"text","data":{"text":"work"}}]','','',1790000300,1790000300),
+		 ('mm_a1','ses_flatmulti','assistant','[{"type":"finish","data":{"reason":"tool_use","time":1790000305}}]','qwen3-coder','ollama',1790000301,1790000305),
+		 ('mm_a2','ses_flatmulti','assistant','[{"type":"text","data":{"text":"done"}},{"type":"finish","data":{"reason":"end_turn","time":1790000310}}]','qwen3-coder','ollama',1790000306,1790000310)`,
+	}
+}
+
+// TestParseSessionFile_StepCountDecidesTokens covers the capture rule
+// end to end: Crush's prompt/completion counters are the last usage-
+// bearing step's, so they are reported (approximate) only for a one-step
+// session; every other non-vacant session still emits its row with the
+// model and Crush's own cost, zero counts and Reliability = unknown
+// (full coverage, "unknown means unknown"). Steps finished with reason
+// error/canceled never updated the counters and do not count.
+func TestParseSessionFile_StepCountDecidesTokens(t *testing.T) {
+	cases := []struct {
+		name            string
+		stmts           []string
+		session         string
+		wantIn, wantOut int64
+		wantCost        float64
+		wantModel       string
+		wantRel         string
+	}{
+		{
+			// (a) one step, positive cost: counts reported unchanged.
+			name:    "one-step session reports its counts",
+			stmts:   simpleSession(),
+			session: "ses_simple",
+			wantIn:  21749, wantOut: 5, wantCost: 0.05448195,
+			wantModel: "gpt-5.4", wantRel: models.ReliabilityApproximate,
+		},
+		{
+			// (a) one step, Crush's own cost 0: the real counts are kept
+			// (full-coverage ruling 2026-09-28; the gross prompt may
+			// over-bill on a read-side re-price - documented).
+			name: "zero-cost one-step session keeps its counts",
+			stmts: []string{
+				`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+				 VALUES ('ses_flat','Flat rate',9120,40,0.0,1790000110,1790000100)`,
+				`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at) VALUES
+				 ('mz_u','ses_flat','user','[{"type":"text","data":{"text":"hi"}}]','','',1790000100,1790000100),
+				 ('mz_a','ses_flat','assistant','[{"type":"text","data":{"text":"hello"}},{"type":"finish","data":{"reason":"end_turn","time":1790000110}}]','qwen3-coder','ollama',1790000105,1790000110)`,
+			},
+			session: "ses_flat",
+			wantIn:  9120, wantOut: 40, wantCost: 0,
+			wantModel: "qwen3-coder", wantRel: models.ReliabilityApproximate,
+		},
+		{
+			// (b) three successful assistant steps: the counters are the
+			// third step's context snapshot, not the session total; the
+			// cumulative cost is carried as-is.
+			name:    "multi-step session reports cost, tokens unknown",
+			stmts:   toolSession(),
+			session: "ses_tool",
+			wantIn:  0, wantOut: 0, wantCost: 0.08627345,
+			wantModel: "gpt-5.4-mini", wantRel: models.ReliabilityUnknown,
+		},
+		{
+			// (c) the R2 follow-up: a zero-cost multi-step session used to
+			// emit NO row, losing its model attribution.
+			name:    "zero-cost multi-step session keeps its model, tokens unknown",
+			stmts:   zeroCostMultiStepSession(),
+			session: "ses_flatmulti",
+			wantIn:  0, wantOut: 0, wantCost: 0,
+			wantModel: "qwen3-coder", wantRel: models.ReliabilityUnknown,
+		},
+		{
+			// Crush recorded a cost but never the counters: unknown, not
+			// "zero tokens".
+			name: "cost without counters reports tokens unknown",
+			stmts: []string{
+				`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+				 VALUES ('ses_costonly','Cost only',0,0,0.002,1790000510,1790000500)`,
+				`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at) VALUES
+				 ('mo_a','ses_costonly','assistant','[{"type":"text","data":{"text":"ok"}},{"type":"finish","data":{"reason":"end_turn","time":1790000510}}]','gpt-5.4-mini','openai',1790000505,1790000510)`,
+			},
+			session: "ses_costonly",
+			wantIn:  0, wantOut: 0, wantCost: 0.002,
+			wantModel: "gpt-5.4-mini", wantRel: models.ReliabilityUnknown,
+		},
+		{
+			// Mirrors the live windows_failover capture: a bedrock step
+			// that failed (finish reason "error") then one successful
+			// openai step, whose usage IS the counters.
+			name: "errored step does not count, one real step reports tokens",
+			stmts: []string{
+				`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+				 VALUES ('ses_err','Untitled',12059,49,0.01786425,1783551012,1783550940)`,
+				`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at) VALUES
+				 ('me_u','ses_err','user','[{"type":"text","data":{"text":"hi"}}]','','',1783550940,1783550940),
+				 ('me_a1','ses_err','assistant','[{"type":"finish","data":{"reason":"error","time":1783550949,"message":"Forbidden"}}]','us.anthropic.claude-sonnet-4-6','bedrock',1783550948,1783550949),
+				 ('me_u2','ses_err','user','[{"type":"text","data":{"text":"hi"}}]','','',1783551000,1783551000),
+				 ('me_a2','ses_err','assistant','[{"type":"text","data":{"text":"hello"}},{"type":"finish","data":{"reason":"end_turn","time":1783551012}}]','gpt-5.4-mini','openai',1783551010,1783551012)`,
+			},
+			session: "ses_err",
+			wantIn:  12059, wantOut: 49, wantCost: 0.01786425,
+			wantModel: "gpt-5.4-mini", wantRel: models.ReliabilityApproximate,
+		},
+		{
+			name: "canceled step does not count",
+			stmts: []string{
+				`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+				 VALUES ('ses_cxl','Untitled',800,7,0.001,1790000020,1790000000)`,
+				`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at) VALUES
+				 ('mc_a1','ses_cxl','assistant','[{"type":"finish","data":{"reason":"canceled","time":1790000005}}]','gpt-5.4-mini','openai',1790000001,1790000005),
+				 ('mc_a2','ses_cxl','assistant','[{"type":"text","data":{"text":"ok"}},{"type":"finish","data":{"reason":"end_turn","time":1790000020}}]','gpt-5.4-mini','openai',1790000010,1790000020)`,
+			},
+			session: "ses_cxl",
+			wantIn:  800, wantOut: 7, wantCost: 0.001,
+			wantModel: "gpt-5.4-mini", wantRel: models.ReliabilityApproximate,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, dbPath := dbPathUnder(t)
+			newCrushDB(t, dbPath, tc.stmts...)
+			a := NewWithOptions(nil, []string{filepath.Join(root, ".crush")})
+			res, err := a.ParseSessionFile(context.Background(), dbPath, 0)
+			if err != nil {
+				t.Fatalf("ParseSessionFile: %v", err)
+			}
+			var te *models.TokenEvent
+			for i := range res.TokenEvents {
+				if res.TokenEvents[i].SessionID == tc.session {
+					te = &res.TokenEvents[i]
+				}
+			}
+			if te == nil {
+				t.Fatalf("no token event for %s (full coverage: every non-vacant session has a row)", tc.session)
+			}
+			if te.InputTokens != tc.wantIn || te.OutputTokens != tc.wantOut {
+				t.Errorf("tokens = %d/%d, want %d/%d", te.InputTokens, te.OutputTokens, tc.wantIn, tc.wantOut)
+			}
+			if te.CacheReadTokens != 0 || te.CacheCreationTokens != 0 || te.ReasoningTokens != 0 {
+				t.Errorf("cache/reasoning = %d/%d/%d, want 0 (crush.db stores no split)", te.CacheReadTokens, te.CacheCreationTokens, te.ReasoningTokens)
+			}
+			if te.EstimatedCostUSD != tc.wantCost {
+				t.Errorf("EstimatedCostUSD = %v, want %v (Crush's own cumulative cost)", te.EstimatedCostUSD, tc.wantCost)
+			}
+			if te.Model != tc.wantModel {
+				t.Errorf("Model = %q, want %q", te.Model, tc.wantModel)
+			}
+			if te.Source != models.TokenSourceJSONL || te.Reliability != tc.wantRel {
+				t.Errorf("source/reliability = %q/%q, want %q/%q", te.Source, te.Reliability, models.TokenSourceJSONL, tc.wantRel)
+			}
+			if te.SourceEventID != "tokens:"+tc.session {
+				t.Errorf("SourceEventID = %q, want tokens:%s", te.SourceEventID, tc.session)
+			}
+		})
+	}
+}
+
+// TestParseSessionFile_TokenRowsIdempotent pins (d): re-parsing the same
+// store yields byte-identical token rows under the same deterministic
+// SourceEventIDs (one per session, so the store's ON CONFLICT upsert and
+// --crush-rescan's correction see the same key), and a session that
+// grows from one step to several keeps its ONE row id: the parse emits
+// the unknown-count row under the key the one-step row used, never a
+// second row beside it.
+func TestParseSessionFile_TokenRowsIdempotent(t *testing.T) {
+	root, dbPath := dbPathUnder(t)
+	stmts := append(simpleSession(), zeroCostMultiStepSession()...)
+	stmts = append(stmts, toolSession()...)
+	newCrushDB(t, dbPath, stmts...)
+	a := NewWithOptions(nil, []string{filepath.Join(root, ".crush")})
+	ctx := context.Background()
+
+	first, err := a.ParseSessionFile(ctx, dbPath, 0)
+	if err != nil {
+		t.Fatalf("parse1: %v", err)
+	}
+	second, err := a.ParseSessionFile(ctx, dbPath, 0)
+	if err != nil {
+		t.Fatalf("parse2: %v", err)
+	}
+	if len(first.TokenEvents) != 3 {
+		t.Fatalf("want 3 token rows (one per non-vacant session), got %d", len(first.TokenEvents))
+	}
+	if !reflect.DeepEqual(first.TokenEvents, second.TokenEvents) {
+		t.Errorf("re-parse changed the token rows:\n%+v\n%+v", first.TokenEvents, second.TokenEvents)
+	}
+	ids := map[string]int{}
+	for _, te := range first.TokenEvents {
+		ids[te.SourceEventID]++
+	}
+	for id, n := range ids {
+		if n != 1 {
+			t.Errorf("SourceEventID %q emitted %d times, want 1", id, n)
+		}
+	}
+
+	// ses_simple grows a second successful step: its counters become a
+	// snapshot, so the row turns unknown - under the SAME key.
+	appendMessage(t, dbPath, `INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at)
+		VALUES ('m_a2','ses_simple','assistant','[{"type":"text","data":{"text":"more"}},{"type":"finish","data":{"reason":"end_turn","time":1790001200}}]','gpt-5.4','openai',1790001150,1790001200)`)
+	appendMessage(t, dbPath, `UPDATE sessions SET prompt_tokens = 22000, completion_tokens = 9, cost = 0.1, updated_at = 1790001200 WHERE id = 'ses_simple'`)
+	grown, err := a.ParseSessionFile(ctx, dbPath, first.NewOffset)
+	if err != nil {
+		t.Fatalf("parse3: %v", err)
+	}
+	var rows []models.TokenEvent
+	for _, te := range grown.TokenEvents {
+		if te.SessionID == "ses_simple" {
+			rows = append(rows, te)
+		}
+	}
+	if len(rows) != 1 {
+		t.Fatalf("grown session emitted %d token rows, want 1", len(rows))
+	}
+	if g := rows[0]; g.SourceEventID != "tokens:ses_simple" || g.InputTokens != 0 || g.OutputTokens != 0 ||
+		g.EstimatedCostUSD != 0.1 || g.Reliability != models.ReliabilityUnknown || g.Model != "gpt-5.4" {
+		t.Errorf("grown row = %+v, want tokens:ses_simple 0/0 $0.1 unknown gpt-5.4", g)
+	}
+}
+
+// TestParseSessionFile_PrismServedModelWins covers Crush v0.96's
+// messages.prism_model_id (migration 20260902000000): a Hyper turn
+// routed through a Prism model records the ROUTER model in
+// messages.model and the model that served the turn in prism_model_id.
+// Synthetic fixture; model ids are placeholders.
+func TestParseSessionFile_PrismServedModelWins(t *testing.T) {
+	root, dbPath := dbPathUnder(t)
+	newCrushDB(t, dbPath,
+		`ALTER TABLE messages ADD COLUMN prism_model_id TEXT`,
+		`ALTER TABLE messages ADD COLUMN prism_model_name TEXT`,
+		`ALTER TABLE messages ADD COLUMN prism_hypercredit_savings REAL`,
+		`ALTER TABLE messages ADD COLUMN prism_dollar_savings REAL`,
+		`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+		 VALUES ('ses_prism','Prism',1000,20,0.01,1790000010,1790000000)`,
+		`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at,prism_model_id,prism_model_name) VALUES
+		 ('mp_u','ses_prism','user','[{"type":"text","data":{"text":"hi"}}]','','',1790000000,1790000000,NULL,NULL),
+		 ('mp_a','ses_prism','assistant','[{"type":"text","data":{"text":"hello"}}]','prism-router','hyper',1790000005,1790000010,'served-model-x','Served Model X')`,
+		`INSERT INTO sessions(id,title,prompt_tokens,completion_tokens,cost,updated_at,created_at)
+		 VALUES ('ses_direct','Direct',500,10,0.005,1790000110,1790000100)`,
+		`INSERT INTO messages(id,session_id,role,parts,model,provider,created_at,updated_at,prism_model_id) VALUES
+		 ('md_a','ses_direct','assistant','[{"type":"text","data":{"text":"ok"}}]','gpt-5.4-mini','openai',1790000105,1790000110,'')`,
+	)
+	a := NewWithOptions(nil, []string{filepath.Join(root, ".crush")})
+	res, err := a.ParseSessionFile(context.Background(), dbPath, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	tokByID := map[string]models.TokenEvent{}
+	for _, te := range res.TokenEvents {
+		tokByID[te.SessionID] = te
+	}
+	if m := tokByID["ses_prism"].Model; m != "served-model-x" {
+		t.Errorf("prism token model = %q, want served-model-x (prism_model_id wins)", m)
+	}
+	if m := tokByID["ses_direct"].Model; m != "gpt-5.4-mini" {
+		t.Errorf("direct token model = %q, want gpt-5.4-mini (empty prism_model_id falls back)", m)
+	}
+	for _, ev := range res.ToolEvents {
+		if ev.SessionID == "ses_prism" && ev.ActionType == models.ActionAssistantMessage && ev.Model != "served-model-x" {
+			t.Errorf("prism assistant action model = %q, want served-model-x", ev.Model)
+		}
+	}
 }

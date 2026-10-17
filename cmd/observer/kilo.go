@@ -3,12 +3,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // newKiloCmd implements `observer kilo` — a PURE SEEDING wrapper around the
@@ -49,12 +52,19 @@ func newKiloCmd() *cobra.Command {
 			"All arguments after the subcommand are forwarded to kilo. Use `--`\n" +
 			"to separate observer flags from kilo flags:\n" +
 			"    observer kilo -- run \"summarize the diff\"\n\n" +
+			"kilo supports a top-level `--model` flag to select which model\n" +
+			"the session uses (pass it after `--` with your other kilo args).\n\n" +
 			"With --continue-from <session-id> the launcher distills a handover\n" +
 			"from that session and seeds it via kilo's --prompt flag, opening\n" +
 			"the interactive TUI seeded with that first prompt (the headless\n" +
 			"one-shot form is the `run` subcommand). See docs/session-handoff.md.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach gate (attach-all-launchers): default-on attach hands the PTY
 			// to the daemon so the dashboard can drive this session. Seed-only
 			// spec — kilo-code-cli is native-exempt, so NO proxy env, NO
@@ -121,7 +131,13 @@ func newKiloCmd() *cobra.Command {
 				args = seeded
 				continueDir = cwd
 			}
-			return runKiloLauncher(bin, args, continueDir)
+			// Best-effort attribution config: a load failure just disables
+			// the launch seed (recordLaunchSeed treats "" as off).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+			}
+			return runKiloLauncher(configPath, dbPath, bin, args, continueDir)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
@@ -132,7 +148,6 @@ func newKiloCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "kilo-code-cli")
 	resume = registerResumeFlag(cmd, "kilo-code-cli")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
@@ -153,14 +168,50 @@ func kiloAttachPassthrough(kiloPath string) []string {
 // runKiloLauncher execs `kilo` with the (optionally seeded) argv, wiring the
 // child's stdio to the parent's and forwarding the exit code via exitErr (the
 // same shape as the other launchers). No proxy env is injected — kilo-code-cli
-// is native-exempt.
-func runKiloLauncher(bin string, args []string, dir string) error {
+// is native-exempt. dbPath (cfg.Observer.DBPath, "" to disable) records a
+// best-effort launch_seeds row for the started child so the daemon's
+// correlation sweep can attribute the session directly.
+func runKiloLauncher(configPath, dbPath, bin string, args []string, dir string) error {
+	// P6 item 5 + G8: the process that starts the tool refuses an
+	// org-disallowed tool and counts a tool grant's use, once (review M3-10).
+	if err := refuseIfToolDisallowedDB(dbPath, "kilo-code-cli", os.Stderr); err != nil {
+		return err
+	}
+	// Executable + argv are what make process-cutoff recovery reachable for a
+	// native-exempt tool: kilo can never prove a proxy route, so the daemon's
+	// attested cutoff over this exact installed surface is its only admission
+	// path (budgetlaunch_direct_linux.go).
+	if err := enforceBudgetControlledLaunch(context.Background(), configPath, "kilo-code-cli",
+		budgetLaunchEvidence{
+			Route: budgetLaunchRouteDirect, Executable: bin, Arguments: args,
+		}); err != nil {
+		return err
+	}
 	child := exec.Command(bin, args...) //nolint:gosec // user-launched tool, args are theirs
 	child.Dir = dir                     // "" inherits the caller's cwd; set by --continue-from to the source project root
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
-	if rErr := child.Run(); rErr != nil {
+	discovery := prepareGenericDiscovery(context.Background(), "kilo-code-cli", dir)
+	if rErr := child.Start(); rErr != nil {
+		return fmt.Errorf("exec kilo: %w", rErr)
+	}
+	// Direct process attribution (migration 086): record the child pid now
+	// that Start has made it knowable; retract the seed when the child is
+	// reaped. Best-effort both ways — a seeding failure never affects the
+	// launch (see cmd/observer/launchseed.go).
+	recordLaunchSeed(dbPath, "kilo-code-cli", dir, child.Process.Pid, os.Stderr)
+	// Best-effort generic post-launch session discovery (WS-DISCOVERY): a
+	// no-op unless the trusted OOB channel is active AND "kilo-code-cli"
+	// resolves to an adapter that declares session-file watch roots. Cancel
+	// the instant the child exits so a window cut short by exit never
+	// announces a candidate that only looked unique because the scan stopped
+	// early.
+	discoverCancel := discovery.start()
+	if discoverCancel != nil {
+		defer discoverCancel()
+	}
+	if rErr := child.Wait(); rErr != nil {
 		var ee *exec.ExitError
 		if errors.As(rErr, &ee) {
 			return exitErr(ee.ExitCode())

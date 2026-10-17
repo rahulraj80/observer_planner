@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "action": "VerifiedOfficial",
+    "counts": "VerifiedOfficial",
+    "counts.failed": "VerifiedOfficial",
+    "counts.noVmSkipped": "VerifiedOfficial",
+    "counts.queued": "VerifiedOfficial",
+    "counts.running": "VerifiedOfficial",
+    "counts.skipped": "VerifiedOfficial",
+    "counts.succeeded": "VerifiedOfficial",
+    "counts.total": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "itemsTruncated": "VerifiedOfficial",
+    "nextCursor": "VerifiedOfficial",
+    "operationId": "VerifiedOfficial",
+    "state": "VerifiedOfficial"
+  },
+  "fixture_sha256": "51f7cac5a3dda125084c8787f361e67b1ac8822cfac15f8f52499166cf2f71a2",
+  "http": {
+    "method": "GET",
+    "path": "/organizations/teams/{teamId}/grok-bot/operations/latest",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get Latest Grok Bot Computer Operation\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Organization API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "afeeece4ca452a084d847ce76824665e6f720b39acdad55c2233e4ad51b7c5b1",
+  "source_url": "https://cursor.com/docs/account/organizations/organization-admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.org.grokbot_computer_ops"
+}

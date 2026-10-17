@@ -1,0 +1,171 @@
+{
+  "data": {
+    "intents": {
+      "distribution": [
+        {
+          "intent": "Write Code",
+          "count": 18
+        },
+        {
+          "intent": "Ask",
+          "count": 7
+        },
+        {
+          "intent": "Plan",
+          "count": 3
+        }
+      ],
+      "topValues": [
+        {
+          "intent": "Write Code",
+          "count": 18
+        },
+        {
+          "intent": "Ask",
+          "count": 7
+        }
+      ],
+      "timeSeries": [
+        {
+          "date": "2026-03-01",
+          "intent": "Ask",
+          "count": 2
+        },
+        {
+          "date": "2026-03-02",
+          "intent": "Write Code",
+          "count": 6
+        }
+      ],
+      "subcategories": {
+        "askMode": [
+          {
+            "subcategory": "error_fix",
+            "count": 4
+          }
+        ],
+        "planMode": [
+          {
+            "subcategory": "implementation",
+            "count": 3
+          }
+        ],
+        "writeCode": [
+          {
+            "subcategory": "feature",
+            "count": 11
+          }
+        ]
+      }
+    },
+    "complexity": {
+      "distribution": [
+        {
+          "complexity": "high",
+          "count": 12
+        },
+        {
+          "complexity": "medium",
+          "count": 10
+        }
+      ],
+      "timeSeries": [
+        {
+          "date": "2026-03-01",
+          "complexity": "medium",
+          "count": 4
+        },
+        {
+          "date": "2026-03-02",
+          "complexity": "high",
+          "count": 5
+        }
+      ]
+    },
+    "categories": {
+      "distribution": [
+        {
+          "category": "New Features",
+          "count": 9
+        },
+        {
+          "category": "Bug Fixing & Debugging",
+          "count": 6
+        }
+      ],
+      "timeSeries": [
+        {
+          "date": "2026-03-01",
+          "category": "Bug Fixing & Debugging",
+          "count": 2
+        },
+        {
+          "date": "2026-03-02",
+          "category": "New Features",
+          "count": 4
+        }
+      ]
+    },
+    "guidanceLevels": {
+      "distribution": [
+        {
+          "guidanceLevel": "high",
+          "count": 8
+        },
+        {
+          "guidanceLevel": "medium",
+          "count": 7
+        }
+      ],
+      "timeSeries": [
+        {
+          "date": "2026-03-01",
+          "guidanceLevel": "medium",
+          "count": 3
+        },
+        {
+          "date": "2026-03-02",
+          "guidanceLevel": "high",
+          "count": 4
+        }
+      ]
+    },
+    "workTypes": {
+      "distribution": [
+        {
+          "workType": "new_feature",
+          "count": 9
+        },
+        {
+          "workType": "bug",
+          "count": 6
+        }
+      ],
+      "timeSeries": [
+        {
+          "date": "2026-03-01",
+          "workType": "bug",
+          "count": 2
+        },
+        {
+          "date": "2026-03-02",
+          "workType": "new_feature",
+          "count": 4
+        }
+      ]
+    }
+  },
+  "params": {
+    "metric": "conversation-insights",
+    "teamId": 12345,
+    "startDate": "2026-03-01",
+    "endDate": "2026-03-07",
+    "include": [
+      "intents",
+      "complexity",
+      "categories",
+      "guidanceLevels",
+      "workTypes"
+    ]
+  }
+}

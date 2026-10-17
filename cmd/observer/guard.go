@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/guard"
+	"github.com/marmutapp/superbased-observer/internal/guardtest"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -32,10 +35,11 @@ func newGuardCmd() *cobra.Command {
 		Short: "Security & control layer: status, rules, dry-runs, audit verification",
 		Long: "The guard layer evaluates agent actions against a table-driven\n" +
 			"policy (built-in + user + project rules), records verdicts in a\n" +
-			"hash-chained audit table, and — in enforce mode — blocks at the\n" +
+			"hash-chained audit table, and - in enforce mode - blocks at the\n" +
 			"hook seam. See docs/plans/guard-layer-implementation-spec-2026-06-10.md.",
 	}
 	cmd.AddCommand(newGuardStatusCmd())
+	cmd.AddCommand(newNodeControlProbeChildCmd())
 	cmd.AddCommand(newGuardRulesCmd())
 	cmd.AddCommand(newGuardTestCmd())
 	cmd.AddCommand(newGuardLintCmd())
@@ -44,6 +48,7 @@ func newGuardCmd() *cobra.Command {
 	cmd.AddCommand(newGuardCompileCmd())
 	cmd.AddCommand(newGuardExportCmd())
 	cmd.AddCommand(newGuardReportCmd())
+	cmd.AddCommand(newGuardPromptCmd())
 	registerGuardEnforceCmds(cmd)
 	return cmd
 }
@@ -89,6 +94,12 @@ func newGuardStatusCmd() *cobra.Command {
 			fmt.Fprintf(out, "Alerts:       desktop=%s min_severity=%s\n", onOff(cfg.Guard.Alerts.Desktop), cfg.Guard.Alerts.MinSeverity)
 			for _, ps := range g.PolicyStates() {
 				fmt.Fprintf(out, "Policy layer: %-7s %s (sha256 %.12s…)\n", ps.Layer, ps.Path, ps.ContentHash)
+				// Non-fatal parse notes (org-bundle keys this binary
+				// predates and ignored). The layer IS loaded — this is
+				// deliberately NOT a LOAD ISSUE line.
+				for _, note := range ps.Notes {
+					fmt.Fprintf(out, "NOTE:         %s\n", note)
+				}
 			}
 			for _, issue := range g.LoadIssues() {
 				fmt.Fprintf(out, "LOAD ISSUE:   %s\n", issue)
@@ -116,11 +127,29 @@ func newGuardStatusCmd() *cobra.Command {
 			// must work on a fresh install before first capture.
 			database, err := db.Open(cmd.Context(), db.Options{Path: cfg.Observer.DBPath})
 			if err != nil {
-				fmt.Fprintf(out, "\n(DB unavailable — verdict counts and chain check skipped: %v)\n", err)
+				fmt.Fprintf(out, "\n(DB unavailable - verdict counts and chain check skipped: %v)\n", err)
 				return nil
 			}
 			defer database.Close()
 			s := store.New(database)
+
+			// WHICH PRICE TABLE this node's budget is enforced against
+			// (pricing arc §3.3). It sits with the guard's own status
+			// deliberately: `observer guard status` is where a developer
+			// looks to find out what the budget rules are doing, and a cap
+			// is a number in a unit. "$500/month" enforced at list prices
+			// when the org negotiated 40% off is not the budget the admin
+			// authored, and nothing else on this screen would say so.
+			fmt.Fprintf(out, "Pricing:      %s\n", guardPricingLine(cmd.Context(), cfg, database))
+
+			// THE ORG BUDGET POSTURE, on the screen a developer already opens
+			// when their requests start being denied (finding H5). Before
+			// this, the only surface carrying `budget_required` was the org
+			// ADMIN's dashboard — so the developer being blocked could see
+			// the deny verdicts below and nothing that said why, while the
+			// one person who could see the reason was not the one hitting it.
+			fmt.Fprintf(out, "Org budget:   %s\n", orgBudgetCLILine(cmd.Context(), cfg, database))
+			fmt.Fprintf(out, "Node control: %s\n", nodeInterventionStatusLine(cmd.Context(), s, cfg.Observer.DBPath))
 
 			sum, err := s.SummarizeGuardEvents(cmd.Context(), time.Now().UTC().Add(-24*time.Hour))
 			if err != nil {
@@ -144,7 +173,7 @@ func newGuardStatusCmd() *cobra.Command {
 			if report.OK {
 				fmt.Fprintf(out, "Audit chain:  OK (%d rows verified)\n", report.Checked)
 			} else {
-				fmt.Fprintf(out, "Audit chain:  BROKEN at id %d — %s\n", report.FirstDivergenceID, report.Detail)
+				fmt.Fprintf(out, "Audit chain:  BROKEN at id %d - %s\n", report.FirstDivergenceID, report.Detail)
 			}
 			return nil
 		},
@@ -233,7 +262,7 @@ func newGuardRulesCmd() *cobra.Command {
 func renderRuleCatalogMarkdown(infos []policy.RuleInfo) string {
 	var b strings.Builder
 	b.WriteString("# Guard rule catalog\n\n")
-	b.WriteString("GENERATED — do not edit by hand. Regenerate with:\n\n")
+	b.WriteString("GENERATED - do not edit by hand. Regenerate with:\n\n")
 	b.WriteString("    observer guard rules --markdown > docs/guard-rules.md\n\n")
 	b.WriteString("Rule IDs are stable and never reused (guard spec §5). The\n")
 	b.WriteString("Observe/Enforce columns are the mode-decision pair; observe is\n")
@@ -275,49 +304,31 @@ func newGuardTestCmd() *cobra.Command {
 			"so boundary rules behave as they would for a session in this repo.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, g, err := buildCLIGuard(configPath)
+			cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			ev, err := buildTestEvent(args, filePath, eventJSON)
 			if err != nil {
 				return err
 			}
-			verdict, gerr := g.Evaluate(ev)
-			if gerr != nil {
-				return fmt.Errorf("guard internal error: %w", gerr)
-			}
-
-			// Second engine in enforce mode answers "would this block
-			// once you flip enforce?" — the pre-enforce confidence
-			// question this command exists for.
-			enforceCfg := cfg.Guard
-			enforceCfg.Mode = "enforce"
+			// guardtest.Run evaluates under the configured mode AND in
+			// enforce ("would this block once you flip enforce?" - the
+			// pre-enforce confidence question this command exists for).
+			// The Security page's Test a command card runs the same call.
 			home, _ := os.UserHomeDir()
-			eg, err := guard.New(guard.Options{Config: enforceCfg, Home: home})
+			res, err := guardtest.Run(cfg.Guard, home, nil, ev)
 			if err != nil {
-				return fmt.Errorf("construct enforce-mode guard: %w", err)
+				return err
 			}
-			enforceVerdict, _ := eg.Evaluate(ev)
 
 			out := cmd.OutOrStdout()
 			if jsonOut {
 				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
-				return enc.Encode(map[string]any{
-					"kind":             string(ev.Kind),
-					"target":           ev.Target,
-					"project_root":     ev.ProjectRoot,
-					"rule_id":          verdict.RuleID,
-					"severity":         verdict.Severity.String(),
-					"decision":         verdict.Decision.String(),
-					"enforce_decision": enforceVerdict.Decision.String(),
-					"reason":           verdict.Reason,
-					"advice":           verdict.Advice,
-					"source":           verdict.Source,
-				})
+				return enc.Encode(res.Report())
 			}
-			printTestVerdict(out, cfg.Guard.Mode, ev, verdict, enforceVerdict)
+			printTestVerdict(out, cfg.Guard.Mode, ev, res.Verdict, res.EnforceVerdict)
 			return nil
 		},
 	}
@@ -338,10 +349,7 @@ func buildTestEvent(args []string, filePath, eventJSON string) (policy.Event, er
 	if r, ok := git.FindRoot(cwd); ok {
 		root = r
 	}
-	base := policy.Event{
-		Tool: "guard-test", SessionID: "guard-test",
-		Cwd: cwd, ProjectRoot: root, Now: time.Now().UTC(),
-	}
+	base := guardtest.Base(cwd, root, time.Now().UTC())
 	set := 0
 	if len(args) == 1 && args[0] != "" {
 		set++
@@ -357,9 +365,7 @@ func buildTestEvent(args []string, filePath, eventJSON string) (policy.Event, er
 	}
 	switch {
 	case filePath != "":
-		base.Kind = policy.KindFileAccess
-		base.ActionType = "write_file"
-		base.Target = filePath
+		return guardtest.FileWrite(base, filePath), nil
 	case eventJSON != "":
 		var raw struct {
 			Kind       string `json:"kind"`
@@ -373,25 +379,17 @@ func buildTestEvent(args []string, filePath, eventJSON string) (policy.Event, er
 		if raw.Kind == "" || raw.Target == "" {
 			return policy.Event{}, errors.New(`--event requires at least {"kind":..., "target":...}`)
 		}
-		base.Kind = policy.EventKind(raw.Kind)
-		base.Target = raw.Target
-		base.ActionType = raw.ActionType
-		if raw.SessionID != "" {
-			base.SessionID = raw.SessionID
-		}
+		return guardtest.Raw(base, raw.Kind, raw.Target, raw.ActionType, raw.SessionID), nil
 	default:
-		base.Kind = policy.KindShellExec
-		base.ActionType = "run_command"
-		base.Target = args[0]
+		return guardtest.Command(base, args[0]), nil
 	}
-	return base, nil
 }
 
 // printTestVerdict renders the human dry-run report.
 func printTestVerdict(out io.Writer, mode string, ev policy.Event, v, enforceV policy.Verdict) {
 	fmt.Fprintf(out, "Event:        %s %q (project root %s)\n", ev.Kind, ev.Target, ev.ProjectRoot)
 	if v.RuleID == "" {
-		fmt.Fprintf(out, "Verdict:      allow — no rule matched\n")
+		fmt.Fprintf(out, "Verdict:      allow - no rule matched\n")
 	} else {
 		fmt.Fprintf(out, "Verdict:      %s (%s, severity %s, source %s)\n", v.Decision, v.RuleID, v.Severity, v.Source)
 		fmt.Fprintf(out, "Reason:       %s\n", v.Reason)
@@ -401,7 +399,7 @@ func printTestVerdict(out io.Writer, mode string, ev policy.Event, v, enforceV p
 	}
 	fmt.Fprintf(out, "Current mode: %s\n", mode)
 	if enforceV.Decision != v.Decision {
-		fmt.Fprintf(out, "In enforce:   %s — flipping [guard] mode would change this verdict\n", enforceV.Decision)
+		fmt.Fprintf(out, "In enforce:   %s - flipping [guard] mode would change this verdict\n", enforceV.Decision)
 	} else {
 		fmt.Fprintf(out, "In enforce:   %s (unchanged)\n", enforceV.Decision)
 	}
@@ -421,6 +419,7 @@ func newGuardLintCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 			out := cmd.OutOrStdout()
+			home, _ := os.UserHomeDir()
 
 			type target struct {
 				path  string
@@ -434,7 +433,6 @@ func newGuardLintCmd() *cobra.Command {
 					targets = append(targets, target{a, "user"})
 				}
 			} else {
-				home, _ := os.UserHomeDir()
 				if up := expandUserPolicyPath(cfg.Guard.Rules.UserPolicy, home); up != "" {
 					targets = append(targets, target{up, "user"})
 				}
@@ -446,6 +444,16 @@ func newGuardLintCmd() *cobra.Command {
 				if cfg.Guard.Rules.ProjectPolicy != "" {
 					targets = append(targets, target{filepath.Join(root, filepath.FromSlash(cfg.Guard.Rules.ProjectPolicy)), "project"})
 				}
+				// The dashboard-authored trusted per-project layer for THIS
+				// repo. It lints via the org-aware guard.LintTrustedProject
+				// (not the plain Lint) so a trusted relaxation of an
+				// org-floored rule surfaces here instead of a false PASS: a
+				// standalone Lint(raw, "trusted_project") has no org context
+				// and cannot see the floor the runtime engine correctly
+				// enforces (F3).
+				if tp := guard.TrustedProjectPolicyPath(cfg.Guard, home, root); tp != "" {
+					targets = append(targets, target{tp, "trusted_project"})
+				}
 			}
 
 			problems := 0
@@ -453,22 +461,30 @@ func newGuardLintCmd() *cobra.Command {
 			for _, tgt := range targets {
 				raw, err := os.ReadFile(tgt.path)
 				if errors.Is(err, os.ErrNotExist) {
-					fmt.Fprintf(out, "%-8s %s — not present (ok)\n", tgt.layer, tgt.path)
+					fmt.Fprintf(out, "%-8s %s - not present (ok)\n", tgt.layer, tgt.path)
 					continue
 				}
 				if err != nil {
-					fmt.Fprintf(out, "%-8s %s — read error: %v\n", tgt.layer, tgt.path, err)
+					fmt.Fprintf(out, "%-8s %s - read error: %v\n", tgt.layer, tgt.path, err)
 					problems++
 					continue
 				}
 				checked++
-				issues := guard.Lint(raw, tgt.layer)
+				var issues []string
+				if tgt.layer == "trusted_project" {
+					// Org-aware: reads the configured org bundle so an
+					// org-floor violation is caught, matching the runtime
+					// per-project engine build and the dashboard save-gate.
+					issues = guard.LintTrustedProject(cfg.Guard, home, raw)
+				} else {
+					issues = guard.Lint(raw, tgt.layer)
+				}
 				if len(issues) == 0 {
-					fmt.Fprintf(out, "%-8s %s — OK\n", tgt.layer, tgt.path)
+					fmt.Fprintf(out, "%-8s %s - OK\n", tgt.layer, tgt.path)
 					continue
 				}
 				for _, issue := range issues {
-					fmt.Fprintf(out, "%-8s %s — %s\n", tgt.layer, tgt.path, issue)
+					fmt.Fprintf(out, "%-8s %s - %s\n", tgt.layer, tgt.path, issue)
 					problems++
 				}
 			}
@@ -495,7 +511,7 @@ func newGuardVerifyAuditCmd() *cobra.Command {
 			"chain link (SHA-256 over the previous link + the row's canonical\n" +
 			"bytes) and re-anchoring on the retention checkpoint. Reports the\n" +
 			"first divergence. Tamper-EVIDENT, not tamper-proof: an attacker\n" +
-			"with DB write access could recompute the whole chain — what this\n" +
+			"with DB write access could recompute the whole chain - what this\n" +
 			"catches is silent edits and mid-chain deletions.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -514,10 +530,10 @@ func newGuardVerifyAuditCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if report.OK {
-				fmt.Fprintf(out, "audit chain OK — %d row(s) verified\n", report.Checked)
+				fmt.Fprintf(out, "audit chain OK - %d row(s) verified\n", report.Checked)
 				return nil
 			}
-			fmt.Fprintf(out, "audit chain BROKEN — first divergence at id %d (%d row(s) walked)\n%s\n",
+			fmt.Fprintf(out, "audit chain BROKEN - first divergence at id %d (%d row(s) walked)\n%s\n",
 				report.FirstDivergenceID, report.Checked, report.Detail)
 			return errors.New("guard verify-audit: chain divergence")
 		},
@@ -539,6 +555,71 @@ func expandUserPolicyPath(p, home string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
+}
+
+// orgBudgetCLILine composes the `observer guard status` "Org budget:" line
+// and, when it is displaying a PRIMED cache rather than a live daemon fetch,
+// rewrites the fetch-result tokens that would otherwise describe work this
+// CLI process did not perform (2026-09-13 W7/W8
+// verification finding B).
+//
+// guardBudgetPostureLine (orgbudget_wire.go) is the single composer of this
+// line — coverage, from_org and budget_required are its verdict and stay
+// untouched here. But `observer guard status` runs in the
+// CLI process, never the daemon: it has made no live fetch of its own, so
+// whenever this node's org_budget_cache actually holds a verified body,
+// guardBudgetPostureLine necessarily reports fetch_state=unreachable for it
+// (the same pair orgclient.Client.LoadPersistedBudget reports on a cold
+// daemon start, for the identical reason). Printing the bare word
+// "unreachable" there reads as an outage even when the daemon right beside
+// it is fetching fine — exactly what the verification found on a healthy
+// managed devbox, where the org's own posture row for the same node said
+// fetch_state=ok, last_fetch_ok=1.
+//
+// This is a DISPLAY fix only: orgcontract's fetch-state vocabulary is
+// untouched (adding a "primed from cache" member would be a wire change,
+// out of scope here) and the daemon's own rendering path never calls this
+// function, so it is byte-identical.
+func orgBudgetCLILine(ctx context.Context, cfg config.Config, database *sql.DB) string {
+	line := guardBudgetPostureLine(ctx, cfg, database)
+	if database == nil {
+		return line
+	}
+	// WHICH OF THIS DEVELOPER'S USAGE THE ORG'S RATES ACTUALLY PRICED (ruling
+	// A3). Appended rather than folded into the composed posture because the
+	// posture answers "is a cap in force" and this answers "in whose dollars";
+	// it prints nothing at all when this process could not measure it.
+	line += budgetPricingCoverageLine(cliBudgetPricingCoverage(ctx, cfg, database))
+	cached, err := store.New(database).LoadOrgBudget(ctx)
+	if err != nil || !cached.Have {
+		// No verified body persisted (or the read itself failed): the line's
+		// own fetch_state — disabled/unverified/the pre-first-poll default —
+		// is already honest for "nothing to prime from", so it is left alone.
+		return line
+	}
+	return rewriteCachedBudgetFetchState(line, cached)
+}
+
+// rewriteCachedBudgetFetchState replaces the fetch result a composed budget
+// line derives from the CLI's cold in-memory state with an honest "cached"
+// rendering. It names what was cached and when using the SAME org_budget_cache
+// row internal/store/orgbudget.go::LoadOrgBudget exposes (version + fetched_at),
+// and marks last_fetch_ok unknown because only the daemon performs fetches.
+// It leaves the composer's enforcement verdicts untouched.
+func rewriteCachedBudgetFetchState(line string, cached store.OrgBudgetCache) string {
+	const fetchMarker = "fetch_state=unreachable"
+	if !strings.Contains(line, fetchMarker) {
+		return line
+	}
+	at := "an unknown time"
+	if !cached.FetchedAt.IsZero() {
+		at = cached.FetchedAt.UTC().Format(time.RFC3339)
+	}
+	replacement := fmt.Sprintf("fetch_state=cached (CLI read verified body v%d persisted at %s; daemon fetch state unavailable here)",
+		cached.Version, at)
+	line = strings.Replace(line, fetchMarker, replacement, 1)
+	line = strings.Replace(line, "last_fetch_ok=false", "last_fetch_ok=unknown_to_cli", 1)
+	return strings.Replace(line, "last_fetch_ok=true", "last_fetch_ok=unknown_to_cli", 1)
 }
 
 // onOff renders a bool as on/off for status output.

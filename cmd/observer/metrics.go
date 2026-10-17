@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/metrics"
 )
 
@@ -42,7 +42,7 @@ func newMetricsCmd() *cobra.Command {
 			server, err := metrics.New(metrics.Options{
 				DB:                database,
 				DBPath:            cfg.Observer.DBPath,
-				CostEngine:        cost.NewEngine(cfg.Intelligence),
+				CostEngine:        acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default()),
 				CostWindowMinutes: window,
 			})
 			if err != nil {
@@ -55,7 +55,7 @@ func newMetricsCmd() *cobra.Command {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"metrics listening on http://%s/metrics — ctrl-c to stop\n", listen)
+				"metrics listening on http://%s/metrics - ctrl-c to stop\n", listen)
 			if err := server.ListenAndServe(ctx, listen); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}

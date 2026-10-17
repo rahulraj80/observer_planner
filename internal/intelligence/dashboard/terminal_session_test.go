@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -16,7 +18,7 @@ import (
 // allow_terminal_view gate).
 func newTerminalSessionServer(t *testing.T, resolver func(string) (TerminalSessionLink, bool), remote RemoteController) *Server {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

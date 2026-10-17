@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -1139,8 +1140,8 @@ func TestParseRolloutResponseItem(t *testing.T) {
 	// precedes the tool calls (also feeds the per-turn PrecedingReasoning
 	// chain on the following tool events).
 	row := res.ToolEvents[1]
-	if row.ActionType != models.ActionTaskComplete {
-		t.Errorf("event 1 action: %s want task_complete", row.ActionType)
+	if row.ActionType != models.ActionAssistantMessage {
+		t.Errorf("event 1 action: %s want assistant_message", row.ActionType)
 	}
 	if row.RawToolName != "codex.assistant_text" {
 		t.Errorf("event 1 raw_tool_name: %q want codex.assistant_text", row.RawToolName)
@@ -1702,7 +1703,8 @@ func TestParseRolloutCompacted(t *testing.T) {
 // {type:"summary_text", text:"..."} segments, those should thread
 // into the turn's PrecedingReasoning chain — same place agent_message
 // already lives. This test forces a populated summary into the
-// fixture and verifies the next exec_command_end inherits it.
+// fixture and verifies the next exec_command_end inherits it, and
+// (B3) that the reasoning item itself mints no action row.
 func TestParseRolloutResponseItemReasoning(t *testing.T) {
 	t.Parallel()
 
@@ -1725,27 +1727,21 @@ func TestParseRolloutResponseItemReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseSessionFile: %v", err)
 	}
-	// v1.4.53: reasoning now emits its own row in addition to feeding
-	// the per-turn agentMessages cache. So we expect:
-	//   1) the codex.reasoning row from the response_item.reasoning
-	//   2) the exec_command_end row that inherits the text as PrecedingReasoning
-	if len(res.ToolEvents) != 2 {
-		t.Fatalf("tool events: %d want 2 (reasoning row + exec_command_end)", len(res.ToolEvents))
+	// B3 (2026-07-31): reasoning mints NO row of its own — v1.4.53's
+	// standalone `codex.reasoning` row is retired. The ONLY event here
+	// is the exec_command_end, which inherits the summary text through
+	// the per-turn agentMessages cache as PrecedingReasoning.
+	if len(res.ToolEvents) != 1 {
+		t.Fatalf("tool events: %d want 1 (exec_command_end only; reasoning is never an action row)", len(res.ToolEvents))
 	}
-	var reasoningRow, execRow *models.ToolEvent
+	var execRow *models.ToolEvent
 	for i := range res.ToolEvents {
-		switch res.ToolEvents[i].RawToolName {
-		case "codex.reasoning":
-			reasoningRow = &res.ToolEvents[i]
-		case "exec_command_end":
+		if strings.Contains(strings.ToLower(res.ToolEvents[i].RawToolName), "reasoning") {
+			t.Fatalf("reasoning-named action row emitted: raw=%q %+v", res.ToolEvents[i].RawToolName, res.ToolEvents[i])
+		}
+		if res.ToolEvents[i].RawToolName == "exec_command_end" {
 			execRow = &res.ToolEvents[i]
 		}
-	}
-	if reasoningRow == nil {
-		t.Fatalf("missing codex.reasoning row; got %+v", res.ToolEvents)
-	}
-	if !strings.Contains(reasoningRow.ToolOutput, "run the test suite") {
-		t.Errorf("reasoning row ToolOutput must carry summary text; got %q", reasoningRow.ToolOutput)
 	}
 	if execRow == nil {
 		t.Fatalf("missing exec_command_end row; got %+v", res.ToolEvents)
@@ -1848,8 +1844,8 @@ func TestParseSessionFile_AgentMessageEmitsAssistantTextRow(t *testing.T) {
 		if ev.RawToolName != "codex.assistant_text" {
 			t.Errorf("event[%d] RawToolName = %q, want codex.assistant_text", i, ev.RawToolName)
 		}
-		if ev.ActionType != models.ActionTaskComplete {
-			t.Errorf("event[%d] ActionType = %q, want %q", i, ev.ActionType, models.ActionTaskComplete)
+		if ev.ActionType != models.ActionAssistantMessage {
+			t.Errorf("event[%d] ActionType = %q, want %q", i, ev.ActionType, models.ActionAssistantMessage)
 		}
 		if ev.Target != want {
 			t.Errorf("event[%d] Target = %q, want %q", i, ev.Target, want)
@@ -1967,6 +1963,89 @@ func TestParseSessionFile_AgentMessageSourceEventIDStableAcrossReparse(t *testin
 	if resCold.ToolEvents[0].SourceEventID != resWarm.ToolEvents[0].SourceEventID {
 		t.Errorf("SourceEventID drift: cold=%q warm=%q",
 			resCold.ToolEvents[0].SourceEventID, resWarm.ToolEvents[0].SourceEventID)
+	}
+}
+
+// TestParseSessionFile_ItemCompletedAgentMessage pins the newer Codex CLI
+// wire format (observed live 2026-09-02) that wraps assistant text in an
+// event_msg/item_completed envelope with item.type=="AgentMessage" instead
+// of the legacy flat event_msg/agent_message shape. Rollouts using this
+// schema exclusively never emit "agent_message", so without a dedicated
+// item_completed case, 0 assistant_message rows get captured for the
+// entire session — the root cause of the dashboard's Messages tab falling
+// back to "API call (no recovered text)" on every Llm Call row.
+func TestParseSessionFile_ItemCompletedAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-09-02T10-00-00-thread.jsonl")
+	body := strings.Join([]string{
+		`{"timestamp":"2026-09-02T10:00:00.000Z","type":"session_meta","payload":{"id":"thread-item-completed","cwd":"/tmp","model":"gpt-5.6"}}`,
+		`{"timestamp":"2026-09-02T10:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`,
+		`{"timestamp":"2026-09-02T10:00:01.100Z","type":"event_msg","payload":{"type":"item_completed","thread_id":"thread-item-completed","turn_id":"turn-1","item":{"type":"AgentMessage","id":"msg_1","content":[{"type":"Text","text":"Here is what I found."}],"phase":"commentary"}}}`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewWithOptions(nil, dir)
+	res, err := a.ParseSessionFile(context.Background(), path, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	if len(res.ToolEvents) != 1 {
+		t.Fatalf("tool events: %d want 1", len(res.ToolEvents))
+	}
+	row := res.ToolEvents[0]
+	if row.ActionType != models.ActionAssistantMessage {
+		t.Errorf("action type: %s want assistant_message", row.ActionType)
+	}
+	if row.RawToolName != "codex.assistant_text" {
+		t.Errorf("raw_tool_name: %q want codex.assistant_text", row.RawToolName)
+	}
+	if !strings.Contains(row.ToolOutput, "Here is what I found.") {
+		t.Errorf("tool_output = %q want to contain the AgentMessage text", row.ToolOutput)
+	}
+	if len(res.TokenEvents) != 0 {
+		t.Errorf("TokenEvents must be empty for item_completed/AgentMessage rows, got %d", len(res.TokenEvents))
+	}
+}
+
+// TestParseSessionFile_ItemCompletedNonAgentMessageIgnored pins the
+// deliberate exclusion of the other item_completed sub-types: Reasoning and
+// CommandExecution are exact-count duplicates of the response_item
+// "reasoning" / "custom_tool_call(+output)" entries captured elsewhere, so handling
+// them here would double-count. (UserMessage is handled since T-559; see
+// itemusermessage_test.go.)
+func TestParseSessionFile_ItemCompletedNonAgentMessageIgnored(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-09-02T11-00-00-thread.jsonl")
+	body := strings.Join([]string{
+		`{"timestamp":"2026-09-02T11:00:00.000Z","type":"session_meta","payload":{"id":"thread-item-skip","cwd":"/tmp","model":"gpt-5.6"}}`,
+		`{"timestamp":"2026-09-02T11:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`,
+		`{"timestamp":"2026-09-02T11:00:01.100Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"Reasoning","id":"rs_1","content":[{"type":"text","text":"thinking..."}]}}}`,
+		`{"timestamp":"2026-09-02T11:00:01.200Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"CommandExecution","id":"cmd_1","content":[{"type":"text","text":"ls -la"}]}}}`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewWithOptions(nil, dir)
+	res, err := a.ParseSessionFile(context.Background(), path, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	if len(res.ToolEvents) != 0 {
+		var summary []string
+		for i, evt := range res.ToolEvents {
+			summary = append(summary, formatEventSummary(i, evt))
+		}
+		t.Fatalf("tool events: %d want 0 (Reasoning/CommandExecution item_completed rows must not emit)\n%s",
+			len(res.ToolEvents), strings.Join(summary, "\n"))
 	}
 }
 
@@ -2804,6 +2883,14 @@ func TestParseRolloutWebSearchCountResetsAcrossTokenCounts(t *testing.T) {
 // token_count line that carries rate_limits, reusing the generic
 // RateLimitStatus/Type/ResetsAt/OverageStatus schema cowork
 // introduced. Closes the v1.4.52 deferred carryover.
+//
+// Also pins the 2026-09-22 fix: emission gates on an actual window
+// being present (Primary or Secondary non-nil), never on PlanType —
+// a live account can report `plan_type:null` while still carrying a
+// fully valid window (the "plan_type:null" table row below), and the
+// old PlanType-based gate could ALSO let through a genuinely empty
+// envelope purely because PlanType happened to be a non-empty string
+// (the "both windows nil" table row below, which must emit nothing).
 func TestParseRolloutRateLimitsCapturedFromTokenCount(t *testing.T) {
 	t.Parallel()
 
@@ -2816,6 +2903,21 @@ func TestParseRolloutRateLimitsCapturedFromTokenCount(t *testing.T) {
 		`{"timestamp":"2026-05-15T12:50:48.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex","primary":{"used_percent":1,"window_minutes":300,"resets_at":1778867450},"secondary":{"used_percent":0,"window_minutes":10080,"resets_at":1779454250},"plan_type":"plus","rate_limit_reached_type":null}}}`,
 		// End-of-turn token_count: info populated, same rate_limits envelope.
 		`{"timestamp":"2026-05-15T12:52:20.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"cached_input_tokens":0,"reasoning_output_tokens":0,"total_tokens":110},"total_token_usage":{"input_tokens":100,"output_tokens":10,"cached_input_tokens":0,"reasoning_output_tokens":0,"total_tokens":110}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":1,"window_minutes":300,"resets_at":1778867450},"secondary":{"used_percent":0,"window_minutes":10080,"resets_at":1779454250},"plan_type":"plus","rate_limit_reached_type":null}}}`,
+		// LIVE 2026-09-22 shape: plan_type is JSON null (unmarshals the
+		// PlanType string field to ""), but primary carries a fully valid
+		// window (this account's newer plan reports ONLY the weekly window,
+		// crammed into the "primary" slot at window_minutes=10080). Under
+		// the old `rl.PlanType != ""` gate this row was silently dropped —
+		// confirmed live: zero rate_limit rows landed on the real DB for
+		// over a day of active codex use once the account's rate_limits
+		// envelope started arriving in this shape. Must now emit a row.
+		`{"timestamp":"2026-09-22T07:04:26.649Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":198087,"output_tokens":650,"cached_input_tokens":195968,"reasoning_output_tokens":544,"total_tokens":198737},"total_token_usage":{"input_tokens":9563394,"output_tokens":28832,"cached_input_tokens":8877056,"reasoning_output_tokens":15313,"total_tokens":9592226}},"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":1.0,"window_minutes":10080,"resets_at":1790578122},"secondary":null,"plan_type":null,"rate_limit_reached_type":null}}}`,
+		// 2026-08-26 shape: plan_type IS a non-empty string ("plus") but
+		// BOTH windows are null — a genuinely empty envelope. The old gate
+		// let this one through (PlanType != "") and produced a useless
+		// windowless row; the new gate correctly skips it. Regression guard
+		// for the OTHER direction of the fix.
+		`{"timestamp":"2026-08-26T14:12:36.737Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"premium","primary":null,"secondary":null,"plan_type":"plus","rate_limit_reached_type":null}}}`,
 		``,
 	}, "\n")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -2834,8 +2936,25 @@ func TestParseRolloutRateLimitsCapturedFromTokenCount(t *testing.T) {
 			rlRows = append(rlRows, ev)
 		}
 	}
+	// 1 startup + 1 live plan_type:null shape = 2. The end-of-turn line
+	// repeats the startup reading unchanged 92s later, so the change-only
+	// predicate (internal/ratelimitstate, 2026-09-30) suppresses it; the
+	// 2026-08-26 both-nil-windows line contributes 0 (correctly skipped).
 	if got := len(rlRows); got != 2 {
-		t.Fatalf("rate_limit rows: %d want 2 (1 startup + 1 end-of-turn)", got)
+		t.Fatalf("rate_limit rows: %d want 2 (1 startup + 1 plan_type:null-with-data; the unchanged end-of-turn repeat and the both-nil row must be skipped)", got)
+	}
+	nullPlanRow := rlRows[1]
+	if nullPlanRow.Metadata == nil {
+		t.Fatalf("plan_type:null row: Metadata=nil, want RateLimit fields populated")
+	}
+	if nullPlanRow.Metadata.RateLimitResetsAt != 1790578122 {
+		t.Errorf("plan_type:null row RateLimitResetsAt=%d, want 1790578122 (primary.resets_at)", nullPlanRow.Metadata.RateLimitResetsAt)
+	}
+	if nullPlanRow.Metadata.RateLimitOverageStatus != "" {
+		t.Errorf("plan_type:null row RateLimitOverageStatus=%q, want \"\" (plan_type was JSON null — an honest empty, never fabricated)", nullPlanRow.Metadata.RateLimitOverageStatus)
+	}
+	if !strings.Contains(nullPlanRow.RawToolInput, `"window_minutes":10080`) {
+		t.Errorf("plan_type:null row RawToolInput must preserve the primary window; got %q", nullPlanRow.RawToolInput)
 	}
 	row := rlRows[0]
 	if row.Tool != models.ToolCodex {
@@ -2865,13 +2984,15 @@ func TestParseRolloutRateLimitsCapturedFromTokenCount(t *testing.T) {
 	}
 }
 
-// TestParseRolloutReasoningEmptySummaryEmitsPlaceholderRow pins
-// that response_item.reasoning items with NO summary text (the
-// 100% case in Codex Desktop builds inspected through 2026-05)
-// still emit a row carrying an opaque (encrypted N bytes)
-// placeholder, so the reasoning's existence is visible in the
-// timeline even when the content is unrecoverable.
-func TestParseRolloutReasoningEmptySummaryEmitsPlaceholderRow(t *testing.T) {
+// TestParseRolloutReasoningEmptySummaryEmitsNothing pins the B3
+// contract for the dominant Codex shape: a response_item.reasoning
+// with NO summary text (the 100% case in Codex Desktop builds
+// inspected through 2026-05) produces NOTHING AT ALL. v1.4.53 minted
+// an opaque "(encrypted reasoning, N bytes)" placeholder row for it —
+// 15,040 content-free phantom task_complete rows in the live corpus.
+// A placeholder is never an action and is never threaded either: with
+// no readable summary there is nothing to carry.
+func TestParseRolloutReasoningEmptySummaryEmitsNothing(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -2892,21 +3013,19 @@ func TestParseRolloutReasoningEmptySummaryEmitsPlaceholderRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseSessionFile: %v", err)
 	}
-	var row *models.ToolEvent
-	for i := range res.ToolEvents {
-		if res.ToolEvents[i].RawToolName == "codex.reasoning" {
-			row = &res.ToolEvents[i]
-			break
+	for _, ev := range res.ToolEvents {
+		if strings.Contains(strings.ToLower(ev.RawToolName), "reasoning") {
+			t.Errorf("reasoning-named action row emitted: raw=%q %+v", ev.RawToolName, ev)
+		}
+		if strings.Contains(ev.Target, "encrypted reasoning") || ev.Target == "(reasoning)" {
+			t.Errorf("placeholder reasoning text surfaced as an action target: %+v", ev)
+		}
+		if strings.Contains(ev.PrecedingReasoning, "encrypted reasoning") || ev.PrecedingReasoning == "(reasoning)" {
+			t.Errorf("placeholder reasoning text threaded into PrecedingReasoning: %+v", ev)
 		}
 	}
-	if row == nil {
-		t.Fatalf("no codex.reasoning row emitted; got %+v", res.ToolEvents)
-	}
-	if !strings.Contains(row.Target, "encrypted reasoning") {
-		t.Errorf("empty-summary reasoning Target must mention 'encrypted reasoning'; got %q", row.Target)
-	}
-	if !strings.Contains(row.Target, "42 bytes") {
-		t.Errorf("encrypted-byte-count proxy missing from Target; got %q", row.Target)
+	if len(res.ToolEvents) != 0 {
+		t.Errorf("encrypted-only reasoning produced %d events, want 0: %+v", len(res.ToolEvents), res.ToolEvents)
 	}
 }
 
@@ -3418,5 +3537,90 @@ func TestParseSessionFile_DefersOversizedFragmentWithoutTerminator(t *testing.T)
 	wantID := fmt.Sprintf("tk:%s:L4", filepath.Base(path))
 	if got := res2.TokenEvents[0].SourceEventID; got != wantID {
 		t.Fatalf("token SourceEventID = %q; want %q (line counter must advance across the deferred-then-skipped record)", got, wantID)
+	}
+}
+
+// codexRateLimitLine renders one token_count line carrying a one-window
+// rate_limits envelope at the given used_percent / resets_at.
+func codexRateLimitLine(ts time.Time, used int, resetsAt int64) string {
+	return fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":%d,"window_minutes":10080,"resets_at":%d},"secondary":null,"plan_type":"prolite","rate_limit_reached_type":null}}}`,
+		ts.UTC().Format("2006-01-02T15:04:05.000Z"), used, resetsAt)
+}
+
+// TestParseRolloutRateLimitsChangeOnly pins the 2026-09-30 change-only
+// capture: Codex repeats its rate_limits envelope on every token_count
+// (one per inference), and the Messages table used to show a "Rate
+// limit · codex" row between every turn. N token_count lines whose limit
+// reading changes twice (plus server-side resets_at jitter of a few
+// seconds, which must NOT count) emit 1 (first) + 2 (changes) rows, not
+// N. A resumed parse that starts mid-file must make the identical
+// decisions (the prefix seeds the tracker).
+func TestParseRolloutRateLimitsChangeOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-09-28T13-22-00-rlchange.jsonl")
+	t0 := time.Date(2026, 9, 28, 13, 22, 0, 0, time.UTC)
+	const reset = int64(1791047433)
+	lines := []string{
+		`{"timestamp":"2026-09-28T13:22:00.000Z","type":"session_meta","payload":{"id":"rlchange","cwd":"/tmp","model":"gpt-5.5"}}`,
+		`{"timestamp":"2026-09-28T13:22:00.500Z","type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-5.5","cwd":"/tmp"}}`,
+	}
+	// 12 token_counts ~30s apart: used 9% x5, 10% x4, 11% x3; resets_at
+	// jitters by 0..3 seconds throughout.
+	used := []int{9, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11}
+	for i, u := range used {
+		lines = append(lines, codexRateLimitLine(t0.Add(time.Duration(i+1)*30*time.Second), u, reset+int64(i%4)))
+	}
+	lines = append(lines, "")
+	body := strings.Join(lines, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewWithOptions(nil, dir)
+	rlOf := func(res adapter.ParseResult) []models.ToolEvent {
+		var out []models.ToolEvent
+		for _, ev := range res.ToolEvents {
+			if ev.ActionType == models.ActionRateLimit {
+				out = append(out, ev)
+			}
+		}
+		return out
+	}
+	full, err := a.ParseSessionFile(context.Background(), path, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	rows := rlOf(full)
+	if len(rows) != 3 {
+		t.Fatalf("rate_limit rows: %d want 3 (1 first + 2 used_percent changes) of %d token_count lines", len(rows), len(used))
+	}
+	for i, want := range []string{`"used_percent":9`, `"used_percent":10`, `"used_percent":11`} {
+		if !strings.Contains(rows[i].RawToolInput, want) {
+			t.Errorf("row %d RawToolInput=%q want %s", i, rows[i].RawToolInput, want)
+		}
+	}
+
+	// Resume at every line boundary: rows from the prefix parse + rows
+	// from the resumed parse must equal the full parse's rows exactly.
+	offset := int64(0)
+	for li := 0; li < len(lines)-1; li++ {
+		offset += int64(len(lines[li]) + 1)
+		tail, err := a.ParseSessionFile(context.Background(), path, offset)
+		if err != nil {
+			t.Fatalf("resume at %d: %v", offset, err)
+		}
+		var want, got []string
+		for _, r := range rows {
+			var n int
+			if _, err := fmt.Sscanf(r.SourceEventID[strings.LastIndex(r.SourceEventID, ":L")+2:], "%d", &n); err == nil && n > li+1 {
+				want = append(want, r.SourceEventID)
+			}
+		}
+		for _, r := range rlOf(tail) {
+			got = append(got, r.SourceEventID)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("resume after line %d: rate_limit rows %v, want the full parse's %v", li+1, got, want)
+		}
 	}
 }

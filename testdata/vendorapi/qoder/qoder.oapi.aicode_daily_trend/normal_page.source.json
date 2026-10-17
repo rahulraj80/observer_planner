@@ -1,0 +1,48 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "extItems": "VerifiedOfficial",
+    "extItems[]": "VerifiedOfficial",
+    "extItems[].aiLinesAdded": "VerifiedOfficial",
+    "extItems[].aiLinesChanged": "VerifiedOfficial",
+    "extItems[].date": "VerifiedOfficial",
+    "extItems[].fileExtension": "VerifiedOfficial",
+    "extItems[].totalLinesAdded": "VerifiedOfficial",
+    "extItems[].totalLinesChanged": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].aiLinesAdded": "VerifiedOfficial",
+    "items[].aiLinesChanged": "VerifiedOfficial",
+    "items[].aiShareRate": "VerifiedOfficial",
+    "items[].commitCount": "VerifiedOfficial",
+    "items[].date": "Inferred",
+    "items[].otherLinesAdded": "VerifiedOfficial",
+    "items[].otherLinesChanged": "VerifiedOfficial",
+    "items[].totalLinesChanged": "VerifiedOfficial",
+    "nextItems": "VerifiedOfficial",
+    "nextItems[]": "VerifiedOfficial",
+    "nextItems[].date": "Inferred",
+    "nextItems[].nextAcceptRate": "VerifiedOfficial",
+    "nextItems[].nextAcceptedCount": "VerifiedOfficial",
+    "nextItems[].nextSuggestedCount": "VerifiedOfficial"
+  },
+  "fixture_sha256": "3205f17bdb7f3bd3781fba46916cab24e87e3cf7dc84617ace4fcee433cb057d",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/{organization_id}/ai-code/stats/daily-trend",
+    "query": {
+      "start_date": "2025-05-31T00:00:00Z",
+      "end_date": "2025-06-02T00:00:00Z"
+    },
+    "status": 200
+  },
+  "notes": "The documented 'Get AI code daily trend' response example, verbatim. That each date is a UTC calendar day is Inferred (the example shows midnight Z; no time zone rule is stated).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Qoder Teams OpenAPI AI Code Metrics (ai-code-metrics.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "90bd3021e6fc43ac6e6f50190253264c4be85578ec541cc03f5ae652eab63a32",
+  "source_url": "https://docs.qoder.com/account/teams/openapi/ai-code-metrics.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "qoder.oapi.aicode_daily_trend"
+}

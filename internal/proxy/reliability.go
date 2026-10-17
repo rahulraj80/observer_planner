@@ -190,7 +190,7 @@ func sleepCtx(ctx interface{ Done() <-chan struct{} }, d time.Duration) bool {
 // rebuildRequest clones the outbound request with a fresh body reader
 // (the previous attempt consumed it).
 func rebuildRequest(r *http.Request, outReq *http.Request, body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(r.Context(), outReq.Method, outReq.URL.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(r.Context(), outReq.Method, outReq.URL.String(), bytes.NewReader(body)) //nolint:gosec // G704: rebuilds the request the proxy already routed to a configured upstream
 	if err != nil {
 		return nil, err
 	}

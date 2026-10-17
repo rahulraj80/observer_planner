@@ -1,0 +1,42 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "billingGroups": "VerifiedOfficial",
+    "billingGroups[]": "VerifiedOfficial",
+    "billingGroups[].createdAt": "VerifiedOfficial",
+    "billingGroups[].creatorId": "VerifiedOfficial",
+    "billingGroups[].currentUsed": "VerifiedOfficial",
+    "billingGroups[].description": "VerifiedOfficial",
+    "billingGroups[].id": "VerifiedOfficial",
+    "billingGroups[].isBlocked": "VerifiedOfficial",
+    "billingGroups[].isUnassigned": "VerifiedOfficial",
+    "billingGroups[].limitAmount": "VerifiedOfficial",
+    "billingGroups[].memberCount": "VerifiedOfficial",
+    "billingGroups[].name": "VerifiedOfficial",
+    "billingGroups[].organizationId": "VerifiedOfficial",
+    "billingGroups[].updatedAt": "VerifiedOfficial",
+    "maxResults": "VerifiedOfficial",
+    "nextToken": "VerifiedOfficial",
+    "selectedPeriod": "VerifiedOfficial",
+    "selectedPeriod.periodEnd": "VerifiedOfficial",
+    "selectedPeriod.periodStart": "VerifiedOfficial"
+  },
+  "fixture_sha256": "148e1623056e17bed609c3675b4331fadaaa31fb80f8d782eff74fc77de3d5ae",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/{organization_id}/billing-groups",
+    "query": {
+      "maxResults": "100"
+    },
+    "status": 200
+  },
+  "notes": "The documented 'List billing groups' response example, verbatim (the first page prepends the synthetic Unassigned row).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Qoder Teams OpenAPI Billing Group APIs (billing-groups.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "7319466865048ed41105449a9ff8ddafa09a56acce7189b3475ed9c826ef6098",
+  "source_url": "https://docs.qoder.com/account/teams/openapi/billing-groups.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "qoder.oapi.billing_groups"
+}

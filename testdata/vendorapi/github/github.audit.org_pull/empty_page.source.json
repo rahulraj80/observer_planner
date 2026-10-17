@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial"
+  },
+  "fixture_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "http": {
+    "method": "GET",
+    "path": "/orgs/{org}/audit-log",
+    "query": {
+      "after": "MS42MDQ0NjQ2NTM2NTMyMTN8eEpKRmxGT2hRNmItNXZhQUZ5OVJqdw=="
+    },
+    "status": 200
+  },
+  "notes": "Synthesized empty page.",
+  "scenario": "empty_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.audit.org_pull"
+}

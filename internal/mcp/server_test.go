@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -26,7 +28,7 @@ func testServer(t *testing.T) (*Server, *sql.DB, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -218,6 +220,55 @@ func TestServer_Notification_NoResponse(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("notification produced response: %q", out.String())
+	}
+}
+
+type deadlineProbeTool struct {
+	observed chan error
+}
+
+func (*deadlineProbeTool) Name() string { return "deadline_probe" }
+
+func (*deadlineProbeTool) Description() string { return "test tool" }
+
+func (*deadlineProbeTool) InputSchema() map[string]any { return map[string]any{"type": "object"} }
+
+func (t *deadlineProbeTool) Invoke(ctx context.Context, _ json.RawMessage) (any, error) {
+	<-ctx.Done()
+	t.observed <- ctx.Err()
+	return nil, ctx.Err()
+}
+
+func TestServer_ToolCallTimeoutCancelsInvocation(t *testing.T) {
+	t.Parallel()
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "watchdog.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	probe := &deadlineProbeTool{observed: make(chan error, 1)}
+	s, err := New(Options{
+		DB:              database,
+		ToolCallTimeout: 20 * time.Millisecond,
+		ExtraTools:      []Tool{probe},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := rpcCall(t, s, "tools/call", 1, map[string]any{
+		"name": "deadline_probe", "arguments": map[string]any{},
+	})
+	result, ok := resp["result"].(map[string]any)
+	if !ok || result["isError"] != true {
+		t.Fatalf("response = %#v; want in-band tool error", resp)
+	}
+	select {
+	case got := <-probe.observed:
+		if !errors.Is(got, context.DeadlineExceeded) {
+			t.Fatalf("tool context err = %v; want deadline exceeded", got)
+		}
+	default:
+		t.Fatal("tool did not observe the watchdog deadline")
 	}
 }
 

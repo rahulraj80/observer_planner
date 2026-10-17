@@ -8,14 +8,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
-func seedDB(t *testing.T) *sql.DB {
+func seedDB(t testing.TB) *sql.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "idx.db")
-	d, err := db.Open(context.Background(), db.Options{Path: path})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

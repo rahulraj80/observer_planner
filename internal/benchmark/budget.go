@@ -19,6 +19,7 @@ func EstimateMatrixCost(cells, turnsPerCell int, usdPerTurn float64) float64 {
 // dimension".
 func (b Budget) CellCapExceeded(spendUSD float64, turns, wallSec int) (bool, string) {
 	if b.MaxCellUSD > 0 && spendUSD > b.MaxCellUSD {
+		// no-bare-usd:allow (ledger error_class, printed only by the benchmark CLI, which renders under the developer cost display)
 		return true, fmt.Sprintf("cell_usd_cap: $%.4f > $%.4f", spendUSD, b.MaxCellUSD)
 	}
 	if b.MaxTurnsPerCell > 0 && turns > b.MaxTurnsPerCell {

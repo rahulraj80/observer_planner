@@ -17,7 +17,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // Options configures a Renderer or Server.
@@ -270,13 +270,46 @@ func writeProcessHealthMetrics(out *buf, opts Options) {
 		"Age of the most recent process-observability health report, in seconds. Grows without bound if the daemon stops refreshing.",
 		h.Age(opts.Now()).Seconds())
 
+	// The capture-YIELD counters. They are the only scrape-side evidence that
+	// distinguishes an idle box from a daemon discarding every batch, and
+	// `reason` is a BOUNDED label (the procmodel.DropReason vocabulary), so it
+	// is safe as a series dimension unlike the free-form *_info reasons below.
+	if drops := labeledCounts(h.Dropped, "reason"); len(drops) > 0 {
+		writeGaugeLabeled(out, "observer_process_dropped",
+			"Process runs/events the daemon discarded, by reason, cumulative since daemon start. `sink_retry_exhausted` is the loud one - capture that was buffered against a failing sink and then LOST when the retention overflowed; `flush_backlog` is its upstream twin - capture shed because the flusher fell so far behind that the rows were never offered to the sink at all. `sink_error` is a permanent sink failure; `unattributed` and `self_excluded` are ordinary policy drops, not faults. Absent when nothing has been dropped.",
+			drops)
+	}
+	writeGaugeLabeled(out, "observer_process_sink_retained",
+		"Process runs held back RIGHT NOW after a transient sink failure, waiting for the next flush. This is a gauge, not a counter, and a non-zero value is NOT loss - it is capture being buffered while the database is busy. Sustained non-zero is the early warning that precedes observer_process_dropped{reason=\"sink_retry_exhausted\"}.",
+		[]labeled{{labels: [][2]string{{"backend", backend}}, value: float64(h.SinkRetained)}})
+	writeGaugeLabeled(out, "observer_process_sink_flush_max_ms",
+		"Longest single sink flush the daemon has observed, in milliseconds (a watermark, not a sample). Seconds-scale values mean the database was contended. This is NO LONGER a capture blackout - the flush runs on its own goroutine - so read it beside observer_process_flush_backlog_hits, which is what says the contention reached capture at all.",
+		[]labeled{{labels: [][2]string{{"backend", backend}}, value: float64(h.SinkFlushMaxMs)}})
+	writeGaugeLabeled(out, "observer_process_flush_backlog_hits",
+		"Times the capture drain found the hand-off buffer to the flusher full, cumulative since daemon start. Non-zero alone is NOT loss - the drain holds the batch and retries, so this is capture being delayed by a slow sink. It becomes loss only alongside observer_process_dropped{reason=\"flush_backlog\"}.",
+		[]labeled{{labels: [][2]string{{"backend", backend}}, value: float64(h.FlushBacklogHits)}})
+	writeGaugeLabeled(out, "observer_process_handoff_depth_max",
+		"High-water mark of the drain-to-flusher hand-off buffer, in BATCHES. A value pinned at the buffer's capacity beside a large observer_process_sink_flush_max_ms means the sink was the bottleneck for a sustained period.",
+		[]labeled{{labels: [][2]string{{"backend", backend}}, value: float64(h.HandoffDepthMax)}})
+	writeGaugeLabeled(out, "observer_process_queue_depth_max",
+		"High-water mark of the process-observability event queue. Read beside observer_process_sink_flush_max_ms: a peak near the backend's channel capacity means the backend was blocked on send and stopped enumerating.",
+		[]labeled{{labels: [][2]string{{"backend", backend}}, value: float64(h.QueueDepthMax)}})
+	if attributed := labeledCounts(h.AttributedByTool, "tool"); len(attributed) > 0 {
+		writeGaugeLabeled(out, "observer_process_attributed",
+			"Process runs the daemon resolved to a session, by tool, cumulative since daemon start. The denominator the drop counters are read against.",
+			attributed)
+	}
+	writeGaugeLabeled(out, "observer_process_unattributed",
+		"Process runs the daemon could not resolve to any session, cumulative since daemon start. Normal in bulk on a shared box (every unrelated process); read it beside observer_process_attributed, not alone.",
+		[]labeled{{labels: [][2]string{{"backend", backend}}, value: float64(h.Unattributed)}})
+
 	// Enum-style state set: exactly one mode is 1. Emitting every mode
 	// (rather than only the active one) means an alert can be written as
 	// `observer_process_network_accounting{mode="unavailable"} == 1` without
 	// needing an absence check, and a mode flip cannot leave a stale series
 	// at 1.
 	mode := h.NetworkAccountingMode
-	if mode != "" && !processobs.KnownNetworkAccountingMode(mode) {
+	if mode != "" && !procmodel.KnownNetworkAccountingMode(mode) {
 		// An unrecognised mode is bucketed, never emitted as itself. It is
 		// reported (not folded into "off" — the point of this surface is to
 		// not invent certainty) but the LABEL VALUE stays inside this build's
@@ -299,7 +332,7 @@ func writeProcessHealthMetrics(out *buf, opts Options) {
 		modes = append(modes, labeled{labels: [][2]string{{"mode", mode}}, value: 1})
 	}
 	writeGaugeLabeled(out, "observer_process_network_accounting",
-		"Per-process network byte accounting state, one series per mode: off (not requested), unavailable (requested but not attached — bytes are UNMEASURED, not zero), tcp (live, TCP payload bytes only — UDP/QUIC is never counted), unrecognised (the daemon reported a mode this exporter does not define — see `observer doctor` for the value).",
+		"Per-process network byte accounting state, one series per mode: off (not requested), unavailable (requested but not attached - bytes are UNMEASURED, not zero), tcp (live, TCP payload bytes only - UDP/QUIC is never counted), unrecognised (the daemon reported a mode this exporter does not define - see `observer doctor` for the value).",
 		modes)
 
 	// The reason is the actionable half of "unavailable" ("missing CAP_BPF/
@@ -335,12 +368,12 @@ func writeProcessHealthMetrics(out *buf, opts Options) {
 // that never came up: that gets its own info-style series, because otherwise
 // "requested and broken" scrapes identically to "never requested".
 func writeProcessTransportMetrics(out *buf, h diag.ProcessHealth) {
-	if h.TransportState == processobs.TransportStateUnavailable {
+	if h.TransportState == procmodel.TransportStateUnavailable {
 		// Info-style (value always 1), same shape as
 		// observer_process_network_accounting_info: the free-form reason is a
 		// label on an always-1 series, never a value.
 		writeGaugeLabeled(out, "observer_process_transport_unavailable_info",
-			"Always 1 when a cross-OS capture transport was REQUESTED but could not be created (bind conflict, unwritable token file, block left disabled), carrying the daemon's verbatim reason. Absent when no transport was requested and when one is running — a requested-and-broken transport must not scrape identically to an unconfigured one.",
+			"Always 1 when a cross-OS capture transport was REQUESTED but could not be created (bind conflict, unwritable token file, block left disabled), carrying the daemon's verbatim reason. Absent when no transport was requested and when one is running - a requested-and-broken transport must not scrape identically to an unconfigured one.",
 			[]labeled{{labels: [][2]string{{"reason", h.TransportUnavailableReason}}, value: 1}})
 		return
 	}
@@ -363,7 +396,7 @@ func writeProcessTransportMetrics(out *buf, h diag.ProcessHealth) {
 		"Capturers that connected AND authenticated over the daemon's accept listener, for the daemon's lifetime. 0 with 0 auth failures means no capturer has ever started.",
 		[]labeled{{labels: labels, value: float64(h.TransportConnections)}})
 	writeGaugeLabeled(out, "observer_process_transport_auth_failures",
-		"Connections REFUSED at the daemon's capturer handshake, for ANY reason (wrong shared token, a protocol version this daemon does not speak, an unrelated local process probing the port). Non-zero with observer_process_transport_connections == 0 means something is dialling and nothing is getting through — the count names no cause; observer_process_transport_auth_failure_info carries the daemon's verbatim reason.",
+		"Connections REFUSED at the daemon's capturer handshake, for ANY reason (wrong shared token, a protocol version this daemon does not speak, an unrelated local process probing the port). Non-zero with observer_process_transport_connections == 0 means something is dialling and nothing is getting through - the count names no cause; observer_process_transport_auth_failure_info carries the daemon's verbatim reason.",
 		[]labeled{{labels: labels, value: float64(h.TransportAuthFailures)}})
 	// The refusal's CLASS rides an info-style always-1 series as a label (the
 	// observer_process_network_accounting_info pattern), never a gauge value.
@@ -383,9 +416,9 @@ func writeProcessTransportMetrics(out *buf, h diag.ProcessHealth) {
 	// `observer doctor`'s transport line, which holds exactly one value.
 	if h.TransportLastAuthError != "" {
 		writeGaugeLabeled(out, "observer_process_transport_auth_failure_info",
-			"Always 1. Classifies the most recent refused capturer handshake: token_mismatch (the shared secret did not match), protocol_version (the client speaks a wire version this daemon does not), malformed (not a capturer handshake at all — often an unrelated local process probing the port), transport (the socket died mid-handshake), unknown (a refusal recorded by a daemon predating this field). The daemon's VERBATIM reason is deliberately not a label — it quotes remote input, and one series per distinct string is unbounded cardinality; read `observer doctor` for it. Absent until a refusal is recorded.",
+			"Always 1. Classifies the most recent refused capturer handshake: token_mismatch (the shared secret did not match), protocol_version (the client speaks a wire version this daemon does not), malformed (not a capturer handshake at all - often an unrelated local process probing the port), transport (the socket died mid-handshake), unknown (a refusal recorded by a daemon predating this field). The daemon's VERBATIM reason is deliberately not a label - it quotes remote input, and one series per distinct string is unbounded cardinality; read `observer doctor` for it. Absent until a refusal is recorded.",
 			[]labeled{{labels: append(append([][2]string{}, labels...),
-				[2]string{"class", processobs.NormalizeTransportAuthClass(h.TransportLastAuthErrorClass)}), value: 1}})
+				[2]string{"class", procmodel.NormalizeTransportAuthClass(h.TransportLastAuthErrorClass)}), value: 1}})
 	}
 
 	// The capturer's OWN decoder health — the only evidence that the
@@ -420,14 +453,14 @@ func writeProcessTransportMetrics(out *buf, h diag.ProcessHealth) {
 			"Network data events the cross-OS capturer's decoder ACCEPTED and counted bytes from, as of its most recent report. This is the only series that says the decoder measured anything: every per-process byte total comes from an accepted event, so a zero here means the byte totals are necessarily zero however clean the refusal counters look. Absent when no capturer has ever reported its decode health.",
 			[]labeled{{labels: labels, value: float64(h.TransportCapturerDecoded)}})
 		writeGaugeLabeled(out, "observer_process_capturer_decode_ignored",
-			"Events the cross-OS capturer's decoder saw and classified as not-a-data-event (control-plane, TCP connect/disconnect/accept/retransmit, UDP). A LARGE VALUE IS NORMAL AND HEALTHY — this is not a fault counter and must not be alerted on by itself. It is exported because it is one half of the only conjunction that catches a renumbered provider; see observer_process_capturer_decode_nothing_classified. Absent when no capturer has ever reported its decode health.",
+			"Events the cross-OS capturer's decoder saw and classified as not-a-data-event (control-plane, TCP connect/disconnect/accept/retransmit, UDP). A LARGE VALUE IS NORMAL AND HEALTHY - this is not a fault counter and must not be alerted on by itself. It is exported because it is one half of the only conjunction that catches a renumbered provider; see observer_process_capturer_decode_nothing_classified. Absent when no capturer has ever reported its decode health.",
 			[]labeled{{labels: labels, value: float64(h.TransportCapturerIgnored)}})
 		nothingClassified := 0.0
 		if h.CapturerDecodeNothingClassified() {
 			nothingClassified = 1
 		}
 		writeGaugeLabeled(out, "observer_process_capturer_decode_nothing_classified",
-			"1 when the capturer's decoder saw events, classified NONE of them as data, and refused none either — the renumbered-provider signature, in which every refusal-shaped check passes while the decoder measures nothing. It is exported as a derived series, not left to a PromQL conjunction, because the raw counters are individually unalarming and an operator cannot be expected to re-derive the one shape that matters. 1 is a SUSPICION, not a diagnosis: on a host moving TCP traffic it means the provider's event ids no longer match this build's layout table; on a genuinely idle host it means the feed has not yet proven it decodes anything. Absent when no capturer has ever reported its decode health.",
+			"1 when the capturer's decoder saw events, classified NONE of them as data, and refused none either - the renumbered-provider signature, in which every refusal-shaped check passes while the decoder measures nothing. It is exported as a derived series, not left to a PromQL conjunction, because the raw counters are individually unalarming and an operator cannot be expected to re-derive the one shape that matters. 1 is a SUSPICION, not a diagnosis: on a host moving TCP traffic it means the provider's event ids no longer match this build's layout table; on a genuinely idle host it means the feed has not yet proven it decodes anything. Absent when no capturer has ever reported its decode health.",
 			[]labeled{{labels: labels, value: nothingClassified}})
 		if !h.TransportCapturerDecodeAt.IsZero() {
 			writeGaugeLabeled(out, "observer_process_capturer_decode_report_timestamp_seconds",
@@ -454,7 +487,7 @@ func writeProcessTransportMetrics(out *buf, h diag.ProcessHealth) {
 // state set. It is READ FROM the processobs vocabulary rather than restated
 // here, so this exporter cannot drift out of sync with the one owner of that
 // list (CLAUDE.md rule 4).
-var processNetworkModes = processobs.NetworkAccountingModes()
+var processNetworkModes = procmodel.NetworkAccountingModes()
 
 // processNetworkModeUnrecognised is the bucket every mode this build does not
 // define lands in. It is not a processobs mode — it is this exporter's way of
@@ -572,6 +605,26 @@ func (b *buf) writeString(s string) { b.buf = append(b.buf, s...) }
 func (b *buf) writeByte(c byte)     { b.buf = append(b.buf, c) }
 
 // writeGauge emits HELP + TYPE + a single unlabeled sample.
+// labeledCounts turns a counter map into one labeled sample per non-zero
+// entry, under the given label name. Zero entries are skipped: a reason
+// recorded as zero is a series that will never be interesting and only widens
+// the cardinality. Nil/empty (or all-zero) yields nil, which writeGaugeLabeled
+// renders as absence — the same absent-is-not-zero rule the transport
+// counters follow.
+func labeledCounts(m map[string]int64, label string) []labeled {
+	out := make([]labeled, 0, len(m))
+	for k, v := range m {
+		if v == 0 || k == "" {
+			continue
+		}
+		out = append(out, labeled{labels: [][2]string{{label, k}}, value: float64(v)})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func writeGauge(w *buf, name, help string, value float64) {
 	writeHeader(w, name, help, "gauge")
 	w.writeString(name)

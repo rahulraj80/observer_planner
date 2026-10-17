@@ -1,3 +1,5 @@
+//go:build !sbo_omit_demo
+
 package main
 
 import (

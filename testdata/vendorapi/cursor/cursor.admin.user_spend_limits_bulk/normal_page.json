@@ -1,0 +1,21 @@
+{
+  "requestedCount": 3,
+  "updatedCount": 1,
+  "unchangedCount": 1,
+  "failedCount": 1,
+  "results": [
+    {
+      "userEmail": "developer@company.com",
+      "status": "updated"
+    },
+    {
+      "userEmail": "contractor@company.com",
+      "status": "unchanged"
+    },
+    {
+      "userEmail": "former-employee@company.com",
+      "status": "failed",
+      "error": "User not found in team"
+    }
+  ]
+}

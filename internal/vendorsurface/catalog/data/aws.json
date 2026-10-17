@@ -1,0 +1,3461 @@
+{
+ "group": "aws",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/aws-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "aws.billing.budgets",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "AWS limits"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "billing lag (hours)",
+   "lookback_doc": "budget history",
+   "per_user_doc": "account or tag scope",
+   "mechanism_doc": "REST AWS Budgets CreateBudget / DescribeBudgets / DescribeBudgetPerformanceHistory, notifications (SNS / email), Budget Actions (IAM / SCP / instance stop; cannot stop IdC-authenticated Kiro clients)",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits (alert state), SpendAlert control (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_CreateBudget.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_CreateBudgetAction.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.billing.cost_anomaly",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextPageToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "AWS limits"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "Cost Anomaly Detection monitors (service-scoped) + subscriptions",
+   "read_write_doc": "R/W",
+   "class_doc": "SpendAlert (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/manage-ad.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: AWS Cost Anomaly Detection API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.billing.cost_explorer",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextPageToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "paid per request (USD 0.01)"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "about daily",
+   "lookback_doc": "13 to 38 months per CE settings",
+   "per_user_doc": "aggregate or per tag",
+   "mechanism_doc": "REST `ce:GetCostAndUsage` filter SERVICE = Kiro, group by tag (user attributes) or RESOURCE_ID (resource-level only last 14 days)",
+   "read_write_doc": "R",
+   "class_doc": "Cost (OrgDay / per tag)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetCostAndUsage.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.billing.cur2_kiro",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.billing",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM billing (bcm-data-exports, S3)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "S3 objects"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "S3"
+   },
+   "tier": {
+    "doc": "any account owning a Kiro profile (charges land in the profile's account)"
+   },
+   "freshness_doc": "CUR delivery lag; fee lines dated 1st of month or spread daily",
+   "lookback_doc": "export from enable, plus CUR history per AWS",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Data Exports CUR 2.0 (or legacy CUR) with \"Include resource IDs\"; `line_item_product_code = 'Kiro'`, `line_item_resource_id` = IdC user id, usage type like `KiroEnterprise-ProPlus`; subscription fee and credit-consumption (overage) lines distinguished by operation; user-attribute cost allocation tags (cost center, division, organization, department) as tag columns. FOCUS also supported",
+   "read_write_doc": "R",
+   "class_doc": "BillingExport, Cost, Seats (PerUser x line item, daily or monthly fee lines)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (field mapping VerifiedOfficial via AWS CID guidance; usage-type values ThirdParty-ish, from AWS guidance text)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/billing/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/kiro-user-activity-dashboard.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/cli/latest/reference/bcm-data-exports/create-export.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.billing.user_attribute_cost_allocation",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM billing; SLR AWSServiceRoleForUserAttributeCostAllocation"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "CE limits"
+   },
+   "tier": {
+    "doc": "Organizations management account + IdC + IdP"
+   },
+   "freshness_doc": "import within 24 h, not retroactive",
+   "lookback_doc": "billing data",
+   "per_user_doc": "per user rolled to team",
+   "mechanism_doc": "Cost Management Preferences (UI) selects up to 4 IdC attributes; activated as cost allocation tags; readable via Cost Explorer `ListCostAllocationTags`; covers Amazon Q Developer (Kiro shown working by re:Post)",
+   "read_write_doc": "R (tags), W (UI)",
+   "class_doc": "Groups x Cost (team chargeback), Policy",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (read)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/user-attributes-cost-allocation.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_ListCostAllocationTags.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.cloudtrail.generic",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.cloudtrail",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "raw CloudTrail records from the customer trail (record envelope documented; Kiro event names are not)",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference-record-contents.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/logging-using-cloudtrail.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Added by the full v5 review (R-D-11), plan section 4.3.3.",
+   "derivation": {
+    "reach_rule": "review R-D-11",
+    "build_rule": "review R-D-11",
+    "source_rule": "review R-D-11",
+    "auth_rule": "review R-D-11"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.cloudtrail.kiro_event_mapping",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.cloudtrail",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken (LookupEvents 2 TPS)"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "LookupEvents throttled"
+   },
+   "tier": {
+    "doc": "any account"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "90 days (Event history) or trail retention",
+   "per_user_doc": "per actor",
+   "mechanism_doc": "CloudTrail management events (Event history 90 days via `LookupEvents`; trails to S3 / CloudTrail Lake / EventBridge). Event names = IAM action names (CreateAssignment, UpdateAssignment, DeleteAssignment, CreateProfile, UpdateProfile, DeleteProfile, Create/DeleteScimAccessToken, Associate/DisassociateLoginDomain, SetOverageConfig, Create/Update/DeleteClaim, SendMessage with content masked); event sources q.amazonaws.com, codewhisperer.amazonaws.com, user-subscriptions.amazonaws.com, sso, identitystore",
+   "read_write_doc": "R",
+   "class_doc": "Audit (Event)",
+   "grain_doc": "",
+   "build": "awaiting_reference",
+   "build_doc": "Driverable (Kiro event-name list ThirdParty / Inferred from IAM actions; Q Developer doc VerifiedOfficial)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/logging-using-cloudtrail.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_LookupEvents.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Renamed from aws.cloudtrail.kiro (R-D-11: Kiro event names inferred, AwaitingReference).",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "R-D-11: Kiro event names inferred, AwaitingReference",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.cloudtrail.q_developer_events",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.cloudtrail",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "AWS Signature Version 4 in the egress seam: access key id as the connection parameter access_key_id (a long-term AKIA key; STS is not built), the secret access key sealed; IAM cloudtrail:LookupEvents"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken in the request and response body (vendormock next_token family, body spelling)"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "LookupEvents: two requests per second per account per Region"
+   },
+   "tier": {
+    "doc": "any account (Event history, 90 days)"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "90 days (Event history)",
+   "per_user_doc": "per actor (Username)",
+   "mechanism_doc": "POST / on cloudtrail.us-east-1.amazonaws.com, AWS JSON 1.1, X-Amz-Target com.amazonaws.cloudtrail.v20131101.CloudTrail_20131101.LookupEvents, body {LookupAttributes [EventSource = q.amazonaws.com], StartTime, EndTime, MaxResults 50, NextToken}; Events[] {EventId, EventName, EventSource, EventTime, ReadOnly, Resources, Username}; AccessKeyId and CloudTrailEvent never decoded",
+   "read_write_doc": "R",
+   "class_doc": "Audit (Event)",
+   "grain_doc": "Event",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "cloudtrail.us-east-1.amazonaws.com",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_LookupEvents.html",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/logging-using-cloudtrail.html",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/boto/botocore/develop/botocore/data/cloudtrail/2013-11-01/service-2.json",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16D, T-713): driver internal/vendorapi/aws QDeveloperEvents, the first row of the egress seam's SigV4 signing table (us-east-1, signing name cloudtrail) and a reviewed POST row (body kind cloudtrail_lookup, content type application/x-amz-json-1.1 and X-Amz-Target, both signed). Conformance against the vendormock mock (SigV4 verified by the mock, NextToken in the body). Landed as vendor audit events in namespace aws.cloudtrail: EventId, EventName as a snake-case action, Username as the actor (aws_username), the first resource as the target, read_only and resource type as detail. Synthetic only, no vendor response observed. assumption_tested: the response is synthesized from the reference's syntax (no example response); integer EventTime seconds are Inferred (the AWS JSON protocol may send a fraction, which the driver accepts). Secret class reviewed: may_return_secret because CloudTrailEvent carries request parameters; closed DTO, never decoded. One Region per row; eu-central-1 (the other Q Developer profile Region) would be its own row. Kiro's own event names are still AwaitingReference (aws.cloudtrail.kiro_event_mapping).",
+   "derivation": {
+    "reach_rule": "http (LookupEvents is an API read of Event history)",
+    "build_rule": "lane ENTAPI-L16D: driver internal/vendorapi/aws QDeveloperEvents, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: CloudTrail service model signatureVersion v4, auth aws.auth#sigv4"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.cloudwatch.aws_q",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.cloudwatch",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM `cloudwatch:GetMetricData`"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "CW limits"
+   },
+   "tier": {
+    "doc": "Q Developer Pro (IDE only); Kiro population not stated"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "15 months",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "CloudWatch namespace `AWS/Q`: Invocations, DailyActiveUserTrend, SubscriptionCount, MonthlyActiveUniqueUsers, GeneratedLineCount, SuggestionReferenceCount (dims ProgrammingLanguage, SuggestionState, CompletionType), CodeScanCount, TotalCharacterCount, CodeWhispererCharacterCount; SLR AWSServiceRoleForAmazonQDeveloper holds PutMetricData on AWS/Q",
+   "read_write_doc": "R",
+   "class_doc": "Adoption, Usage, LOC (OrgDay-ish, near real time)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (contract), coverage for kiro-cli Unknown",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "org_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/monitoring-cloudwatch.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/enterprise/iam/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.iam.kiro_admin_policies",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.iam",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Marker"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "IAM limits"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per principal",
+   "mechanism_doc": "Admin RBAC is plain IAM (customer managed policy listing sso:*, sso-directory:*, user-subscriptions:*, codewhisperer:*, q:*, kms:*, cloudwatch:*); SCPs can deny q:CreateAssignment by group; SLRs AWSServiceRoleForUserSubscriptions, AWSServiceRoleForAmazonQDeveloper. No Kiro-native roles",
+   "read_write_doc": "R/W",
+   "class_doc": "Roles (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic IAM)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/iam/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.idc.identitystore",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.idc",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM SigV4"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "AWS API throttling"
+   },
+   "tier": {
+    "doc": "any IdC (only for IdC-sourced Kiro profiles)"
+   },
+   "freshness_doc": "live; Kiro group-subscription propagation up to 24 h",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "REST `identitystore` ListUsers, DescribeUser, ListGroups, ListGroupMemberships, ListGroupMembershipsForMember, IsMemberInGroups, Create/DeleteUser, Create/DeleteGroupMembership",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Groups (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/singlesignon/latest/IdentityStoreAPIReference/API_ListUsers.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/singlesignon/latest/IdentityStoreAPIReference/API_ListGroupMemberships.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.idc.kiro_app_assignments",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.idc",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM SigV4"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "AWS throttling"
+   },
+   "tier": {
+    "doc": "IdC-sourced profiles"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user / group",
+   "mechanism_doc": "REST `sso-admin` ListApplications (find `KiroProfile-<region>`), ListApplicationAssignments, Update/DescribeApplication",
+   "read_write_doc": "R",
+   "class_doc": "Seats (Snapshot, users and groups assigned, no tier)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (contract official; that the app's assignments equal subscriptions is Inferred from the Kiro doc \"an application is created in IAM Identity Center to track subscriptions\")",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/subscription-management/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/singlesignon/latest/APIReference/API_ListApplicationAssignments.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.activity_otlp",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Endpoint + ONE header stored in Secrets Manager secret (CMK, same Region), resource policy grants q.amazonaws.com GetSecretValue; public hostname, public TLS"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a (push)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise (GA 2026-09-01)"
+   },
+   "freshness_doc": "daily 02:00 UTC",
+   "lookback_doc": "receiver side; up to 3 retries per date, no backfill, no dedup on re-export, no failure notification",
+   "per_user_doc": "per user",
+   "mechanism_doc": "PushOTLP (gRPC default or HTTP/protobuf), monotonic Sum `kiro.daily.credits`, `.overage_credits`, `.messages`, `.conversations`, `.model_messages`; attrs kiro.user.id, kiro.client.type, kiro.user.new, date, kiro.user.email, kiro.subscription.tier, kiro.usage.limit, kiro.overage.enabled, kiro.overage.cap, kiro.model.name; resource service.name=kiro-enterprise, kiro.profile.arn, kiro.profile.id, kiro.account.id",
+   "read_write_doc": "R (push)",
+   "class_doc": "Usage, Cost (credits), Adoption, Limits, Telemetry (UserDay x client; model_messages per model)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/user-activity/opentelemetry/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.activity_report_csv",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Bucket policy grants `q.amazonaws.com` s3:PutObject (SourceAccount + SourceArn codewhisperer); Observer reads with an S3 read role"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "S3 ListObjectsV2 (1,000 keys/page)"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "S3 generic"
+   },
+   "tier": {
+    "doc": "Kiro enterprise (IdC or external IdP profile)"
+   },
+   "freshness_doc": "daily 02:00 UTC for prior UTC day; first file at next cycle",
+   "lookback_doc": "customer bucket lifecycle; no vendor backfill",
+   "per_user_doc": "per user",
+   "mechanism_doc": "PullBucket: `s3://<bucket>/<prefix>/AWSLogs/<acct>/KiroLogs/user_report/<region>/<yyyy>/<mm>/<dd>/00/<clientType>_<acct>_user_report_<ts>.csv`. Columns: Date, UserId, Client_Type (KIRO_IDE, KIRO_CLI, PLUGIN), Chat_Conversations, Credits_Used, Overage_Cap, Overage_Credits_Used, Overage_Enabled, ProfileId, Subscription_Tier, Total_Messages, New_User, User_Email, dynamic `<model>_messages`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost (credits), Adoption, Seats (tier), Limits (Overage_Cap) (UserDay x client_type)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "user_day",
+     "unit": "seats",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/user-activity/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.activity_report_legacy_csv",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same as above"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "S3"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "S3"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "daily (02:00 UTC cycle)",
+   "lookback_doc": "customer bucket",
+   "per_user_doc": "per user",
+   "mechanism_doc": "PullBucket: `.../KiroLogs/by_user_analytic/<Region>/<yyyy>/<mm>/<dd>/00/<acct>_by_user_analytic_<ts>.csv`, split per 1,000 users (`part_N`). Columns: Chat_AICodeLines, Chat_MessagesInteracted, Chat_MessagesSent, CodeFix_*, CodeReview_*, Dev_*, DocGeneration_*, InlineChat_*, Inline_SuggestionsCount / AcceptanceCount / AICodeLines, TestGeneration_*, Transformation_*",
+   "read_write_doc": "R",
+   "class_doc": "LOC, Adoption, Usage (UserDay)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "user_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/user-activity/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.cloud_sessions",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "IAM admin (toggle)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "IdC orgs (off by default), external IdP needs redirect URI"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Admin toggle only (Settings > Kiro Settings > Cloud Sessions); sessions belong to the user; no admin listing, export or audit documented; CMK, MCP, model and web-tool governance do NOT apply to Kiro Web",
+   "read_write_doc": "W (UI toggle)",
+   "class_doc": "Sessions (Kiro Web / `kiro-cli --cloud`)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (toggle); sessions Nothing",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/cloud-sessions/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/web/identity-center/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.cmk",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM / KMS"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "profile",
+   "mechanism_doc": "Console \"Encryption key\" setting (CMK for some features; not Kiro Web); KMS key policies for IdC / SCIM store decryption",
+   "read_write_doc": "W (UI)",
+   "class_doc": "Credentials (encryption key), Retention",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (key itself readable via KMS API)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/settings/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/privacy-and-security/data-protection/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.crew_fleet_policy",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file / admin-hosted URL"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro Crew (any)"
+   },
+   "freshness_doc": "periodic refresh, no restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "host",
+   "mechanism_doc": "Kiro Crew `~/.kiro/crew/security_policy.json` (enterprise ceiling) + `~/.kiro/crew/profiles/` (narrowing), effective = Policy intersect Profile; optional remote fleet policy published at a URL, fetched, cached, periodically refreshed; `kirocrew policy show / validate / explain`; sandbox modes auto / strict / off; denied-command rules",
+   "read_write_doc": "W (file / URL)",
+   "class_doc": "Policy, controls (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (file)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/crew/security/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.crew_local_audit",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro Crew"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local",
+   "per_user_doc": "per host",
+   "mechanism_doc": "Crew local HMAC-signed audit trail and security event log (`kirocrew security events / audit / verify`); never leaves the host",
+   "read_write_doc": "R (node)",
+   "class_doc": "Audit (Event), node-only",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "node capture only (not a vendor surface)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/crew/security/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.dashboard",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "IAM: q:ListDashboardMetrics, codewhisperer:ListProfiles, sso:ListInstances, user-subscriptions:ListUserSubscriptions"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "hourly (Active users daily UTC)",
+   "lookback_doc": "not stated",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI only (Kiro console Dashboard); backed by private `q:ListDashboardMetrics`",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Adoption, Usage (credits), Seats (OrgDay; tier, client type)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "org_day",
+     "unit": "seats",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/dashboard/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.identity_mgmt_console",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise with external IdP"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per profile",
+   "mechanism_doc": "UI Settings > Identity Management: SCIM endpoint, SCIM access tokens (long-lived, max 2, shown once, manual rotation, revoke), login domains (max 10, DNS TXT verification), Entra app/tenant ids; backed by private `q:ListScimAccessTokens` / `CreateScimAccessToken` / `DeleteScimAccessToken`, `q:ListLoginDomains` / `AssociateLoginDomain` / `DisassociateLoginDomain`, `q:ListUsers` / `ListGroups` / `BatchDescribeUsers` / `BatchDescribeGroups` / `BatchGetUsers` / `BatchGetGroups`",
+   "read_write_doc": "R/W (UI)",
+   "class_doc": "Credentials, Identity (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/privacy-and-security/iam-permissions/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/enterprise/identity-provider/okta/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.managed_settings_file",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin / root / MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any client (IDE 1.2+ / CLI 2.25.0+ for sign-in)"
+   },
+   "freshness_doc": "restart (permissions); next sign-in (sign-in)",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": "MDM file `/Library/Application Support/Kiro/managed-settings.json` (macOS), `C:\\ProgramData\\Kiro\\managed-settings.json` (Windows), `/etc/kiro/managed-settings.json` (Linux). `rules[]` {capability, match, exclude, effect deny or ask}; capabilities fs_read, fs_write, shell, web_fetch, web_search, mcp, subagent, skill, power, context, diagnostics, sandbox_network, signin_method; `settings` {idc_start_url, idc_region, external_idp_domain, external_idp_start_url, external_idp_region, signin_help_url}. Malformed / allow / unknown field = whole file rejected, fail closed; sign-in rules fail open",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy, controls (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (Rail B file)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/governance/permissions/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/enterprise/governance/sign-in/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/permissions/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.managed_updates_policy",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "MDM / root"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "startup",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": "OS policy domains: IDE `dev.kiro.desktop` `UpdateUrl`, `UpdateMode=none`; CLI `dev.kiro.cli` `update.baseUrl`; Linux CLI `/etc/kiro/policy.json`",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/managed-updates/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.mcp_registry_file",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "none to read (customer server; may be private network)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise, IdC or API-key auth only (not Builder ID / social)"
+   },
+   "freshness_doc": "24 h",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org / account",
+   "mechanism_doc": "Customer-hosted HTTPS JSON (subset of MCP registry v0.1: name, title, description, version, one `remotes` {type streamable-http or sse, url, headers} or one `packages` {registryType npm / pypi / oci, registryBaseUrl, identifier, transport stdio, runtimeArguments, packageArguments, environmentVariables}); clients fetch at startup and every 24 h, terminate unlisted servers, enforce version pins; URL set in console",
+   "read_write_doc": "W (Observer can author the file; URL is UI)",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (file content), URL CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/governance/mcp/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.profile_inventory",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "No list API (`codewhisperer:ListProfiles` is IAM-only); profile id / ARN observable in OTLP resource (`kiro.profile.arn`), CSV `ProfileId`, CloudTrail",
+   "read_write_doc": "R (derived)",
+   "class_doc": "Projects (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (derived from exports)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/user-activity/opentelemetry/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.prompt_logs_s3",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "bucket policy to q.amazonaws.com (Sid KiroLogsWrite)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "S3"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "S3"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "undocumented (Q layout partitions by UTC hour)",
+   "lookback_doc": "customer bucket",
+   "per_user_doc": "per event, per user",
+   "mechanism_doc": "PullBucket JSON `records[]`: generateCompletionsEventRequest (leftContext, rightContext, fileName, customizationArn, userId, timeStamp) / Response (completions, requestId); generateAssistantResponseEventRequest (prompt, chatTriggerType, customizationArn, userId, timeStamp) / Response (assistantResponse, followupPrompts, messageMetadata.conversationId, utteranceId, codeReferenceEvents, supplementaryWebLinksEvent, requestId). Kiro object key layout NOT documented (Q Developer layout is, see legacy row)",
+   "read_write_doc": "R",
+   "class_doc": "Content, Sessions (conversationId), Audit (Event)",
+   "grain_doc": "",
+   "build": "awaiting_reference",
+   "build_doc": "Driverable (key layout AwaitingReference)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "awaiting_reference",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/prompt-logging/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.scim_inbound",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "SCIM bearer token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "Kiro enterprise, external IdP"
+   },
+   "freshness_doc": "up to 6 h 40 min",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "SCIM 2.0 server per profile (endpoint + bearer token from console); IdPs push users/groups; required mappings userName, externalId (Entra objectId), plus name/email; Kiro provisioning cycle every 6 h (Entra push ~40 min)",
+   "read_write_doc": "W (inbound)",
+   "class_doc": "Identity, Groups (Event write)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable only as a SCIM client (would compete with the IdP; not recommended)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/identity-provider/microsoft-entra/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.shared_settings_console",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "IAM admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "client restart (models), startup + 24 h (MCP)",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org / account",
+   "mechanism_doc": "UI only: Model availability (approved list incl. Auto + default model), MCP on/off + MCP Registry URL (org level, account override), Web search and web fetch tools; Kiro settings: Overages, user activity report, prompt logging, dashboard, CMK, code references, member account subscriptions, API-key generation, Cloud Sessions",
+   "read_write_doc": "W (UI)",
+   "class_doc": "Policy, Retention (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialCreationPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/governance/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/enterprise/settings/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/enterprise/governance/model/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.subscription_private_api",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "SigV4 IAM; no SDK / CLI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "undocumented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Private APIs, IAM-only: `q:CreateAssignment` / `UpdateAssignment` / `DeleteAssignment` (profile resource; SAR condition keys identitystore:UserId / identitystore:GroupId; Kiro doc uses identitystore:RequestUserArn / RequestGroupArn), `user-subscriptions:` ListUserSubscriptions, ListClaims, ListApplicationClaims, Create/Update/DeleteClaim, CreateClaimAddOn, ListClaimAddOns, ListEntitlements, GetCurrentPlanDetails, SetOverageConfig, SetUsageLimit, GetEffectiveUsageLimit, ListUsageLimits, GetUsageLimitHistory, Set/Get/DeleteAutoTopUpRule, Create/Get/Confirm/CancelPurchaseSession, CreateUpdatePlanPreview. Endpoint `service.user-subscriptions.<region>.amazonaws.com` seen only by third parties",
+   "read_write_doc": "R/W (undocumented)",
+   "class_doc": "Seats, Limits, Cost (Snapshot, Event)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (never drive: undocumented)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/service-authorization/latest/reference/list_user-subscriptions.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/service-authorization/latest/reference/list_q.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://dev.classmethod.jp/en/articles/kiro-subscription-backend-zorn/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.subscriptions_console",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "IAM admin policy"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI Users & Groups + \"Download CSV\" (user name, status, plan, plan source, activation date, email); management-account unified list in the Amazon Q console when \"Member account subscriptions\" is on",
+   "read_write_doc": "R (UI/CSV by hand)",
+   "class_doc": "Seats, Identity (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/docs/enterprise/settings/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.kiro.user_api_keys",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.kiro",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise, toggle on"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Users mint API keys in the Kiro portal for kiro-cli (KIRO_API_KEY); admin toggle only; no admin inventory or revoke documented",
+   "read_write_doc": "none",
+   "class_doc": "Credentials (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "Nothing (inventory); toggle CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/governance/api-keys/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.organizations.accounts",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.organizations",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "oauth_user_token",
+    "doc": "IAM (management or delegated admin)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "AWS limits"
+   },
+   "tier": {
+    "doc": "Organizations"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "REST Organizations ListAccounts / DescribeAccount (Kiro profile lives in an account)",
+   "read_write_doc": "R",
+   "class_doc": "Projects (container)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/organizations/latest/APIReference/API_ListAccounts.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: oauth_user"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.qdev.activity_report_legacy",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.qdev",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "bucket policy to q.amazonaws.com"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "S3"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "S3"
+   },
+   "tier": {
+    "doc": "Q Developer Pro (legacy)"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "customer bucket",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`.../AWSLogs/<acct>/QDeveloperLogs/by_user_analytic/<region>/<yyyy>/<mm>/<dd>/00/<acct>_by_user_analytic_<ts>.csv`, 00:00 UTC",
+   "read_write_doc": "R",
+   "class_doc": "Usage, LOC (UserDay)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (legacy)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "user_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-admin-user-telemetry.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.qdev.customizations",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.qdev",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Q Developer Pro / Kiro (customizationArn appears in prompt logs)"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "codewhisperer Create/Get/List/UpdateCustomization, Associate/DisassociateCustomizationPermission, AllowVendedLogDeliveryForResource (IAM-only; console)",
+   "read_write_doc": "W (UI)",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/service-authorization/latest/reference/list_codewhisperer.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.qdev.prompt_logs_legacy",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.qdev",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "bucket policy"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "S3"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "S3"
+   },
+   "tier": {
+    "doc": "Q Developer Pro (legacy)"
+   },
+   "freshness_doc": "hourly partitions",
+   "lookback_doc": "customer bucket",
+   "per_user_doc": "per event",
+   "mechanism_doc": "`<bucket>/<prefix>/AWSLogs/<acct>/QDeveloperLogs/<log-type>/<region>/<yyyy>/<mm>/<dd>/<utc-hour>/<zip>.gz/<log>.json`; log-type GenerateAssistantResponse, GenerateCompletions, StartTaskAssistCodeGeneration; standalone or management-account subscriptions only",
+   "read_write_doc": "R",
+   "class_doc": "Content (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (legacy)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-admin-prompt-logging.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.secretsmanager.kiro_otel_secret",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.secretsmanager",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM / KMS (customer side)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Kiro enterprise"
+   },
+   "freshness_doc": "next 02:00 cycle",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Secrets Manager secret (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`); rotate by updating value at same ARN, read at each export",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials (export credential)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/monitor-and-track/user-activity/opentelemetry/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aws.servicequotas.kiro_overage_cap",
+   "vendor_group": "aws",
+   "vendor": "aws",
+   "plane": "aws.servicequotas",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "NextToken"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "AWS limits"
+   },
+   "tier": {
+    "doc": "Kiro enterprise with overages on"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "quota history",
+   "per_user_doc": "per profile (applies to every user)",
+   "mechanism_doc": "Service Quotas `GetServiceQuota` / `ListServiceQuotas` service code `kiro`, quota `Maximum allowed overage per Kiro profile` (code L-75434B0B per ThirdParty), us-east-1; `RequestServiceQuotaIncrease` (increase only, approval-gated; default auto-adjusts by account history)",
+   "read_write_doc": "R; W = increase request only",
+   "class_doc": "Limits (Snapshot; one per-user ceiling per profile)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (quota code ThirdParty)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kiro.dev/docs/enterprise/subscription-management/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kiro.dev/changelog/general/custom-overage-caps-via-service-quotas/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.aws.amazon.com/servicequotas/2019-06-24/apireference/API_GetServiceQuota.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://dev.classmethod.jp/articles/kiro-service-quotas-overage-cap/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: AWS Service Quotas API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

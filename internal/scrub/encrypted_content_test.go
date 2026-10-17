@@ -52,8 +52,8 @@ func TestScrubStillRedactsSecretsOutsideShield(t *testing.T) {
 	if strings.Contains(out, "ghp_realtokeninlogs1234567890abcd") {
 		t.Errorf("real Bearer token NOT redacted; output may leak: %s", out)
 	}
-	if !strings.Contains(out, Redacted) {
-		t.Errorf("expected at least one [REDACTED] in output, got: %s", out)
+	if !strings.Contains(out, "[REDACTED") {
+		t.Errorf("expected at least one redaction marker in output, got: %s", out)
 	}
 }
 

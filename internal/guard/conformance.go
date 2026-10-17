@@ -1,6 +1,9 @@
 package guard
 
 import (
+	"sort"
+
+	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
@@ -32,6 +35,21 @@ type ConformanceEntry struct {
 	Channel string
 	// Caps are the channel's enforcement capabilities.
 	Caps policy.Capabilities
+	// AskOnceKeyless is true when Caps.CanAsk is structurally true (the
+	// wire dialect DOCUMENTS an ask-capable reply verb) but the
+	// operational ask-once/reconsider bookkeeping can never actually use
+	// it, because the vendor's own hook payload carries no session/
+	// conversation id anywhere for the guard engine to key a resend
+	// override on (the engine's own documented empty-session-id rule
+	// then fails every finding closed to a hard, unconditional block).
+	// This is a STRUCTURAL fact about the wire shape — read from the
+	// vendor's own docs, same as Caps itself — not a per-tool exception:
+	// a consumer degrading CanAsk to "block only" reads THIS field
+	// rather than naming the tool (2026-09-22 review finding 12;
+	// CLAUDE.md #3, branch on capabilities, never on tool identity).
+	// Today only ToolCommandCode sets it; see its row's Notes for the
+	// grounding.
+	AskOnceKeyless bool
 	// Notes documents coverage caveats and degradation behavior —
 	// rendered verbatim on status surfaces.
 	Notes string
@@ -49,72 +67,223 @@ func watcherEntry(client string) ConformanceEntry {
 
 // ConformanceMatrix returns the full §6.5 table. Order: hook channels
 // first (the enforcement surfaces), then every adapter's watcher row.
+//
+// The hook rows are GENERATED from the internal/integration hook bindings
+// (hook-parity Lane 0 step 5): no channel is hand-listed here any more, so
+// registration, the receiver and this matrix read one fact. The watcher
+// rows keep their explicit client list (conformanceWatcherClients): it
+// includes retag identities with no registry row of their own.
 func ConformanceMatrix() []ConformanceEntry {
-	entries := []ConformanceEntry{
-		{
-			Client:  models.ToolClaudeCode,
-			Channel: "hook:PreToolUse",
-			Caps:    policy.Capabilities{PreExecution: true, CanBlock: true, CanAsk: true},
-			Notes:   "native ask via permissionDecision; payload carries cwd but no project root, so boundary rules defer to the watcher",
-		},
-		{
-			Client:  models.ToolCursor,
-			Channel: "hook:" + "beforeShellExecution",
-			Caps:    policy.Capabilities{PreExecution: true, CanBlock: true, CanAsk: true},
-			Notes:   "permission JSON allow|deny|ask; payload carries the workspace root, so boundary rules are active pre-execution",
-		},
-		{
-			Client:  models.ToolCursor,
-			Channel: "hook:" + "beforeMCPExecution",
-			Caps:    policy.Capabilities{PreExecution: true, CanBlock: true, CanAsk: true},
-			Notes:   "permission JSON allow|deny|ask",
-		},
-		{
-			Client:  models.ToolCursor,
-			Channel: "hook:" + "beforeReadFile",
-			Caps:    policy.Capabilities{PreExecution: true, CanBlock: true, CanAsk: true},
-			Notes:   "permission JSON allow|deny|ask",
-		},
-		{
-			Client:  models.ToolCodex,
-			Channel: "hook:notify",
-			Caps:    policy.Capabilities{},
-			Notes:   "observe-only notification channel — no documented deny semantics (Q4); enforcement comes from the native rules dialect once G11 compiles it",
-		},
-		{
-			Client:  models.ToolHermes,
-			Channel: "hook:plugin",
-			Caps:    policy.Capabilities{},
-			Notes:   "observe-only audit-log plugin bridge — no documented deny semantics (Q4)",
-		},
-	}
+	entries := conformanceHookRows()
 	// Every adapter has the watcher channel — including the
 	// hook-capable ones (the hook sees declared calls; the watcher
 	// sees results: the F1 mitigation).
-	for _, client := range []string{
-		models.ToolClaudeCode, models.ToolCodex, models.ToolCursor,
-		models.ToolCline, models.ToolClineCLI, models.ToolRooCode,
-		models.ToolCopilot, models.ToolCopilotCLI, models.ToolCowork,
-		models.ToolOpenCode, models.ToolOpenClaw, models.ToolPi,
-		models.ToolGeminiCLI, models.ToolAntigravity, models.ToolAntigravityCLI, models.ToolHermes,
-		models.ToolKiloCode, models.ToolKiloCodeCLI,
-		// 2026-07 adapter wave: watcher-path adapters (SQLite/JSONL
-		// tail); the store/watcher guard seam applies generically, so
-		// each qualifies for the post-hoc watcher row like the other
-		// watcher-only adapters (hermes, kilo-code-cli).
-		models.ToolQwenCode, models.ToolKiroCLI, models.ToolCrush,
-		models.ToolKimiCode, models.ToolGrok, models.ToolDevin,
-		models.ToolQoder, models.ToolAider, models.ToolGoose,
-		// 2026-07-29 wave: all three are watcher-path adapters (JSONL
-		// tail) with no hook mechanism grounded (registry Hook is
-		// HookNone for each), so the post-hoc watcher row is their ONLY
-		// guard surface — exactly the F2 coverage this table makes
-		// visible rather than hiding.
-		models.ToolDroid, models.ToolOpenInterpreter, models.ToolCommandCode,
-	} {
+	for _, client := range conformanceWatcherClients {
 		entries = append(entries, watcherEntry(client))
 	}
 	return entries
+}
+
+// conformanceRowRule is one row of the ordered table that decides whether a
+// hook binding is a conformance channel and with which capabilities. Walked
+// top-down; the first rule that matches wins.
+type conformanceRowRule struct {
+	name  string
+	match func(c integration.Capability, b integration.HookBinding) bool
+	caps  func(b integration.HookBinding) (policy.Capabilities, bool)
+}
+
+// zeroCaps is the observe-only / probe-required row: zero capabilities,
+// never AskOnceKeyless.
+func zeroCaps(integration.HookBinding) (policy.Capabilities, bool) {
+	return policy.Capabilities{}, false
+}
+
+// conformanceRowRules (Q4 discipline: CanBlock / CanAsk only where the
+// binding's dialect documents deny / ask):
+//
+//  1. a binding naming a GuardChannel is an observe-only channel row;
+//  2. a WIRED tool or prompt gate whose reply can deny is an enforcement
+//     row: PreExecution from its pre phase, CanAsk from an ask decision,
+//     AskOnceKeyless when it can ask but its payload carries no session key
+//     to key the ask-once resend on;
+//  3. an unwired prompt gate on a probe_required row is the honest
+//     zero-capability placeholder until `observer doctor --probe-hook`
+//     verifies the wire shape.
+var conformanceRowRules = []conformanceRowRule{
+	{
+		name:  "observe_only_channel",
+		match: func(_ integration.Capability, b integration.HookBinding) bool { return b.GuardChannel != "" },
+		caps:  zeroCaps,
+	},
+	{
+		name: "wired_gate",
+		match: func(_ integration.Capability, b integration.HookBinding) bool {
+			return (b.Cap == integration.HookCapToolGate || b.Cap == integration.HookCapPromptGate) &&
+				b.Wired && b.HasDecision(integration.HookDecisionDeny)
+		},
+		caps: func(b integration.HookBinding) (policy.Capabilities, bool) {
+			c := policy.Capabilities{
+				PreExecution: b.Phase == integration.HookPhasePre,
+				CanBlock:     true,
+				CanAsk:       b.HasDecision(integration.HookDecisionAsk),
+			}
+			return c, c.CanAsk && !b.SessionKey
+		},
+	},
+	{
+		name: "probe_required_prompt_gate",
+		match: func(c integration.Capability, b integration.HookBinding) bool {
+			return b.Cap == integration.HookCapPromptGate && !b.Wired && c.PromptLane == integration.PromptLaneProbeRequired
+		},
+		caps: zeroCaps,
+	},
+}
+
+// conformanceHookRows generates the hook-channel rows from the registry
+// bindings, in conformanceDisplayOrder.
+func conformanceHookRows() []ConformanceEntry {
+	caps := integration.Capabilities()
+	sort.Slice(caps, func(i, j int) bool { return caps[i].Tool < caps[j].Tool })
+	var rows []ConformanceEntry
+	for _, c := range caps {
+		for _, b := range c.Hook.Bindings {
+			for _, r := range conformanceRowRules {
+				if !r.match(c, b) {
+					continue
+				}
+				channel := b.NativeEvent
+				if b.GuardChannel != "" {
+					channel = b.GuardChannel
+				}
+				cp, keyless := r.caps(b)
+				rows = append(rows, ConformanceEntry{
+					Client: c.Tool, Channel: "hook:" + channel,
+					Caps: cp, AskOnceKeyless: keyless, Notes: b.Note,
+				})
+				break
+			}
+		}
+	}
+	rank := make(map[string]int, len(conformanceDisplayOrder))
+	for i, k := range conformanceDisplayOrder {
+		rank[k] = i
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		ri, iok := rank[rows[i].Client+" "+rows[i].Channel]
+		rj, jok := rank[rows[j].Client+" "+rows[j].Channel]
+		switch {
+		case iok && jok:
+			return ri < rj
+		case iok != jok:
+			return iok // a listed row sorts before an unlisted one
+		default:
+			return false // unlisted rows keep their generated order
+		}
+	})
+	return rows
+}
+
+// conformanceDisplayOrder is the order the hook rows were rendered in
+// before the matrix was generated. `observer guard status`, the guard
+// export and /api/guard/conformance all render the matrix in returned
+// order, so the generated rows keep it; a channel added later sorts after
+// these in registry order, with no edit here required.
+var conformanceDisplayOrder = []string{
+	models.ToolClaudeCode + " hook:PreToolUse",
+	models.ToolClaudeCode + " hook:UserPromptSubmit",
+	models.ToolCodex + " hook:UserPromptSubmit",
+	models.ToolDroid + " hook:UserPromptSubmit",
+	models.ToolQwenCode + " hook:UserPromptSubmit",
+	models.ToolCursor + " hook:beforeSubmitPrompt",
+	models.ToolGeminiCLI + " hook:BeforeAgent",
+	models.ToolKimiCode + " hook:UserPromptSubmit",
+	models.ToolKiroCLI + " hook:userPromptSubmit",
+	models.ToolCline + " hook:UserPromptSubmit",
+	models.ToolQoder + " hook:UserPromptSubmit",
+	models.ToolPoolside + " hook:UserPromptSubmit",
+	models.ToolZcode + " hook:UserPromptSubmit",
+	models.ToolCommandCode + " hook:transformInput",
+	models.ToolDevin + " hook:pre_user_prompt",
+	models.ToolOpenInterpreter + " hook:UserPromptSubmit",
+	models.ToolCursor + " hook:beforeShellExecution",
+	models.ToolCursor + " hook:beforeMCPExecution",
+	models.ToolCursor + " hook:beforeReadFile",
+	models.ToolCodex + " hook:notify",
+	models.ToolHermes + " hook:plugin",
+}
+
+// conformanceWatcherClients is every client that gets the post-hoc watcher
+// row, in display order. A named table, not derived from the registry: it
+// includes retag identities (roo-code, zoo-code) that have no registry row.
+var conformanceWatcherClients = []string{
+	models.ToolClaudeCode, models.ToolCodex, models.ToolCursor,
+	models.ToolCline, models.ToolClineCLI, models.ToolRooCode,
+	// zoo-code (2026-09-03): the ZooCode community continuation of
+	// Roo Code, parsed by the same watcher-path cline adapter — same
+	// shape as roo-code, so it gets the same post-hoc watcher row.
+	models.ToolZooCode,
+	models.ToolCopilot, models.ToolCopilotCLI, models.ToolCowork,
+	models.ToolOpenCode, models.ToolOpenClaw, models.ToolPi,
+	models.ToolGeminiCLI, models.ToolAntigravity, models.ToolAntigravityCLI, models.ToolHermes,
+	models.ToolKiloCode, models.ToolKiloCodeCLI,
+	// 2026-07 adapter wave: watcher-path adapters (SQLite/JSONL
+	// tail); the store/watcher guard seam applies generically, so
+	// each qualifies for the post-hoc watcher row like the other
+	// watcher-only adapters (hermes, kilo-code-cli).
+	models.ToolQwenCode, models.ToolKiroCLI, models.ToolCrush,
+	models.ToolKimiCode, models.ToolGrok, models.ToolDevin,
+	models.ToolQoder, models.ToolAider, models.ToolGoose,
+	// 2026-07-29 wave: all three are watcher-path adapters (JSONL
+	// tail) with no hook mechanism grounded (registry Hook is
+	// HookNone for each), so the post-hoc watcher row is their ONLY
+	// guard surface — exactly the F2 coverage this table makes
+	// visible rather than hiding.
+	models.ToolDroid, models.ToolOpenInterpreter, models.ToolCommandCode,
+	// muse (2026-08-06): watcher-path adapter (event-sourced JSONL
+	// tail); registry Hook is HookNone (the binary carries a hook
+	// vocabulary but no receiver exists), so the post-hoc watcher
+	// row is its only guard surface.
+	models.ToolMuse,
+	// prime-agent (2026-08-06): watcher-path adapter (JSONL tail of
+	// the pi-fork session envelope); registry Hook is HookNone, so
+	// the post-hoc watcher row is its only guard surface — same
+	// shape as muse.
+	models.ToolPrimeAgent,
+	// deepseek + junie: watcher-path adapters (compressed-JSONL and
+	// event-sourced-JSONL tails respectively), registry Hook HookNone
+	// for both, so the post-hoc watcher row is their only guard
+	// surface — same shape as muse/prime-agent.
+	models.ToolDeepSeek, models.ToolJunie,
+	// zcode + mistral-code + freebuff (2026-08-18 wave): watcher-path
+	// adapters (SQLite/JSONL tail), registry Hook HookNone for all
+	// three, so the post-hoc watcher row is their only guard
+	// surface — same shape as the 2026-07 wave above.
+	models.ToolZcode, models.ToolMistralCode, models.ToolFreebuff,
+	// grokbot (2026-08-28): watcher-path adapter (plaintext-JSON blob
+	// re-read), registry Hook HookNone, so the post-hoc watcher row is
+	// its only guard surface. Note the row is post-hoc in a STRONGER
+	// sense than its neighbours: Grok Bot executes tools in a REMOTE
+	// sandbox, so guard could not police them even with a pre-execution
+	// channel — there is no local tool execution to intercept.
+	models.ToolGrokbot,
+	// kiro-crew (2026-09-03): watcher-path adapter (whole-file JSONL
+	// re-read), registry Hook HookNone, so the post-hoc watcher row is
+	// its only guard surface. The row is thin by design — Crew drives
+	// kiro-cli, and the tool calls it orchestrates are captured (and
+	// guarded) under the kiro-cli row above; this adapter only emits
+	// rows for a Crew chat with no kiro-cli twin.
+	models.ToolKiroCrew,
+	// poolside (2026-09-05): watcher-path adapter (event-sourced
+	// NDJSON trajectory tail), registry Hook HookNone (no hook
+	// mechanism grounded for the IDE-embedded ACP agent), so the
+	// post-hoc watcher row is its only guard surface.
+	models.ToolPoolside,
+	// zed (2026-09-06): watcher-path adapter (whole-thread SQLite
+	// re-read), registry Hook HookNone (Zed is itself the editor,
+	// with no hook mechanism grounded), so the post-hoc watcher row
+	// is its only guard surface.
+	models.ToolZed,
 }
 
 // CapabilitiesFor looks up one adapter×channel row. ok=false means

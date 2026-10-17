@@ -56,7 +56,14 @@ func (s *Server) handleVerbosityAggregate(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	st := store.New(s.opts.DB)
 
-	groups, err := st.LoadVerbosityAggregate(ctx, by, sinceDays)
+	// The global filters (tool / project / model), session grain: the
+	// rollup is built from sessions' actions.
+	scope := store.VerbosityScope{
+		Tool:        r.URL.Query().Get("tool"),
+		ProjectRoot: r.URL.Query().Get("project"),
+		Model:       modelParam(r),
+	}
+	groups, err := st.LoadVerbosityAggregateScoped(ctx, by, sinceDays, scope)
 	if err != nil {
 		// Unknown dimension is the only expected error → 400, not 500.
 		http.Error(w, fmt.Sprintf("verbosity aggregate: %v", err), http.StatusBadRequest)
@@ -67,7 +74,7 @@ func (s *Server) handleVerbosityAggregate(w http.ResponseWriter, r *http.Request
 	// model's output rate. Best-effort — a query/pricing miss just omits $.
 	costByKey := map[string]float64{}
 	pricedKey := map[string]bool{}
-	if toks, terr := st.LoadVerbosityGroupTokens(ctx, by, sinceDays); terr == nil {
+	if toks, terr := st.LoadVerbosityGroupTokensScoped(ctx, by, sinceDays, scope); terr == nil {
 		for _, t := range toks {
 			if rates, ok := lookupRates(s.opts.CostEngine, t.Model); ok && rates.Output > 0 {
 				costByKey[t.Key] += float64(t.Output+t.Reasoning) * rates.Output

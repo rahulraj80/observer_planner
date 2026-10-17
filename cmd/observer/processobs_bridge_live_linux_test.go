@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !sbo_omit_processobs
 
 package main
 
@@ -13,6 +13,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/processobs"
 	"github.com/marmutapp/superbased-observer/internal/processobs/bridge"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -39,13 +40,13 @@ func TestProcessBridgeLive_CrossOSAttribution(t *testing.T) {
 	}
 	winObserver, ok := bridge.ResolveWindowsObserver(os.Getenv("OBSERVER_WINDOWS_BINARY"))
 	if !ok {
-		t.Skip("no Windows observer.exe resolved — build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
+		t.Skip("no Windows observer.exe resolved - build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -155,13 +156,13 @@ func TestProcessBridgeLive_EnvTokenAttribution(t *testing.T) {
 	}
 	winObserver, ok := bridge.ResolveWindowsObserver(os.Getenv("OBSERVER_WINDOWS_BINARY"))
 	if !ok {
-		t.Skip("no Windows observer.exe resolved — build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
+		t.Skip("no Windows observer.exe resolved - build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -250,7 +251,7 @@ func TestProcessBridgeLive_EnvTokenAttribution(t *testing.T) {
 		}
 	}
 	if !sawClaude {
-		t.Fatalf("fake claude.exe not attributed by EV (session has %d runs) — check WSLENV propagation + a freshly-built bin/observer.exe", len(runs))
+		t.Fatalf("fake claude.exe not attributed by EV (session has %d runs) - check WSLENV propagation + a freshly-built bin/observer.exe", len(runs))
 	}
 	t.Logf("live EV smoke: claude.exe attributed env_token/high; session tree has %d runs", len(runs))
 }

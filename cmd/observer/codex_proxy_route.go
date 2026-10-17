@@ -31,12 +31,12 @@ func codexProxyFailClosedMsg(reason proxyFallbackReason, proxyURL string, offend
 	switch reason {
 	case reasonProxyDownConflict:
 		return fmt.Sprintf(
-			"observer codex: refusing to launch — the observer proxy at %s is unreachable, but %s still routes codex to it (via the top-level openai_base_url key or model_provider=%q + [model_providers.%s].base_url), and codex 0.130+ reads that file, so every request would hit the dead proxy and fail (the launcher can't neutralize a config.toml route — its `-c` override is dropped). Fix it one of two ways: start the daemon with `observer start` (recommended — restores capture), OR remove that routing from %s (or restore its config.toml.bak.* backup) to run codex against its own provider. Then re-run.",
+			"observer codex: refusing to launch - the observer proxy at %s is unreachable, but %s still routes codex to it (via the top-level openai_base_url key or model_provider=%q + [model_providers.%s].base_url), and codex 0.130+ reads that file, so every request would hit the dead proxy and fail (the launcher can't neutralize a config.toml route - its `-c` override is dropped). Fix it one of two ways: start the daemon with `observer start` (recommended - restores capture), OR remove that routing from %s (or restore its config.toml.bak.* backup) to run codex against its own provider. Then re-run.",
 			primary, joined, proxyroute.ProviderName, proxyroute.ProviderName, joined,
 		)
 	default: // reasonNoProxyRouteConflict
 		return fmt.Sprintf(
-			"observer codex: refusing to launch under --no-proxy-route — %s still routes codex to the observer proxy (%s), either via the top-level openai_base_url key or via model_provider=%q + [model_providers.%s].base_url, and codex 0.130+ reads that file, so it would KEEP routing through the proxy and capture turns you asked not to capture. This was written by `observer codex --write-config` or `observer init` (or hand-edited); remove that routing from %s (or restore its config.toml.bak.* backup) and re-run.",
+			"observer codex: refusing to launch under --no-proxy-route - %s still routes codex to the observer proxy (%s), either via the top-level openai_base_url key or via model_provider=%q + [model_providers.%s].base_url, and codex 0.130+ reads that file, so it would KEEP routing through the proxy and capture turns you asked not to capture. This was written by `observer codex --write-config` or `observer init` (or hand-edited); remove that routing from %s (or restore its config.toml.bak.* backup) and re-run.",
 			joined, primary, proxyroute.ProviderName, proxyroute.ProviderName, joined,
 		)
 	}

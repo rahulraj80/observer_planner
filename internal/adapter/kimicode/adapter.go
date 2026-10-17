@@ -83,10 +83,41 @@ func matchesShape(path string) bool {
 // resolved $HOME so a WSL2 observer picks up Windows-side sessions on
 // /mnt/c/Users/<u>/.kimi-code and vice versa. kimi-code uses the same
 // ~/.kimi-code layout on every OS (not %APPDATA%).
+//
+// $KIMI_CODE_HOME wins on the native side when set: the kimi-code bundle
+// resolves its own storage root from KIMI_CODE_HOME before falling back
+// to os.homedir()/.kimi-code, so an operator who relocated the home sees
+// their traces under $KIMI_CODE_HOME/sessions and nowhere else. Like
+// clinecli's CLINE_DIR handling, the env var is only meaningful for THIS
+// process's environment, so it is not re-resolved per cross-mount home —
+// the per-home defaults below still contribute their own
+// `.kimi-code/sessions` paths. The value is absolutized before use (see
+// adapter.AbsEnvRoot) so a relative KIMI_CODE_HOME can never become a relative
+// watch root. Empty/duplicate candidates are dropped so WatchPaths never
+// carries the same directory twice.
 func defaultRoots() []string {
 	var roots []string
+	seen := map[string]struct{}{}
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		p = filepath.Clean(p)
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		roots = append(roots, p)
+	}
+
+	if home := adapter.AbsEnvRoot("KIMI_CODE_HOME"); home != "" {
+		add(filepath.Join(home, "sessions"))
+	}
 	for _, h := range crossmount.AllHomes() {
-		roots = append(roots, filepath.Join(h.Path, ".kimi-code", "sessions"))
+		if h.Path == "" {
+			continue
+		}
+		add(filepath.Join(h.Path, ".kimi-code", "sessions"))
 	}
 	return roots
 }
@@ -129,10 +160,12 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	lineNum := 0
 	for {
 		if ctx.Err() != nil {
+			adapter.ApplyProjectIdentity(&res, st.identity)
 			return res, ctx.Err()
 		}
 		lineStr, readErr := reader.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
+			adapter.ApplyProjectIdentity(&res, st.identity)
 			return res, fmt.Errorf("kimicode.ParseSessionFile: read: %w", readErr)
 		}
 		hasNewline := strings.HasSuffix(lineStr, "\n")
@@ -167,7 +200,21 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			break
 		}
 	}
+	st.flagPendingOutcomes(&res)
+	adapter.ApplyProjectIdentity(&res, st.identity)
 	return res, nil
+}
+
+// flagPendingOutcomes marks every tool call still waiting for its result
+// at EOF. Its Success=true is a placeholder, so the store holds
+// failure-context bookkeeping for the row until the matching
+// ActionOutcomeUpdate reports the real outcome.
+func (st *parseState) flagPendingOutcomes(res *adapter.ParseResult) {
+	for _, idx := range st.pendingCall {
+		if idx < len(res.ToolEvents) {
+			res.ToolEvents[idx].OutcomePending = true
+		}
+	}
 }
 
 // parseState carries the per-call mutable bookkeeping the line handler
@@ -196,6 +243,12 @@ type parseState struct {
 	rootResolved bool
 	resolvedRoot string
 	gitBranch    string
+	gitRemote    string
+	// identity is the Project Identity Resolver v2 bundle (2026-09-06,
+	// §3.1 / W1) resolved alongside gitBranch/gitRemote, applied to
+	// every event in the ParseResult via adapter.ApplyProjectIdentity
+	// before ParseSessionFile returns.
+	identity git.Identity
 	// lastCwd is a project-root fallback lifted from a tool.call display
 	// hint when the sibling state.json is unavailable.
 	lastCwd string
@@ -260,6 +313,7 @@ func (st *parseState) emitSessionStart(line *wireLine, res *adapter.ParseResult)
 		SessionID:     st.sessionID,
 		ProjectRoot:   st.projectRoot(),
 		GitBranch:     st.gitBranch,
+		GitRemote:     st.gitRemote,
 		Timestamp:     unixMillis(line.CreatedAt),
 		Tool:          models.ToolKimiCode,
 		ActionType:    models.ActionSessionStart,
@@ -287,6 +341,7 @@ func (st *parseState) emitUserPrompt(line *wireLine, raw string, res *adapter.Pa
 		SessionID:     st.sessionID,
 		ProjectRoot:   st.projectRoot(),
 		GitBranch:     st.gitBranch,
+		GitRemote:     st.gitRemote,
 		Timestamp:     unixMillis(line.Time),
 		Tool:          models.ToolKimiCode,
 		ActionType:    models.ActionUserPrompt,
@@ -313,6 +368,7 @@ func (st *parseState) emitToolCall(ev *loopEvent, ts int64, res *adapter.ParseRe
 		SessionID:     st.sessionID,
 		ProjectRoot:   st.projectRoot(),
 		GitBranch:     st.gitBranch,
+		GitRemote:     st.gitRemote,
 		Timestamp:     unixMillis(ts),
 		Model:         st.lastModel,
 		Tool:          models.ToolKimiCode,
@@ -331,13 +387,44 @@ func (st *parseState) emitToolCall(ev *loopEvent, ts int64, res *adapter.ParseRe
 
 // applyToolResult stamps success + scrubbed output onto the ToolEvent the
 // matching tool.call produced.
+//
+// When no pending call matches, the tool.call was emitted in an EARLIER
+// parse window and its row is already persisted (optimistically
+// successful): the outcome goes out as an ActionOutcomeUpdate keyed by
+// the same "tool:<id>" SourceEventID emitToolCall built.
+//
+// Key caveat: the emit side keys on ToolCallID||UUID, the result side on
+// ToolCallID||ParentUUID. They agree whenever ToolCallID is present; the
+// ParentUUID fallback is the same call-UUID guess the in-window match
+// already relies on, so cross-tick is exactly as accurate as in-window,
+// no more.
 func (st *parseState) applyToolResult(ev *loopEvent, res *adapter.ParseResult) {
 	id := firstNonEmpty(ev.ToolCallID, ev.ParentUUID)
+	output, success, errMsg := resultOutcome(ev.Result)
 	idx, ok := st.pendingCall[id]
 	if !ok || idx >= len(res.ToolEvents) {
+		if id == "" {
+			return
+		}
+		// DurationMs stays 0 — the call lived in the prior window and
+		// UpdateActionOutcome no-ops a zero.
+		up := models.ActionOutcomeUpdate{
+			SourceFile:    st.path,
+			SourceEventID: "tool:" + id,
+			// resultOutcome always returns a verdict: a tool.result
+			// with neither error nor isError IS the success signal.
+			SuccessKnown: true,
+			Success:      success,
+		}
+		if output != "" {
+			up.ToolOutput = st.adapter.scrubber.String(contentcap.Cap(output, contentcap.DefaultMaxBytes))
+		}
+		if !success && errMsg != "" {
+			up.ErrorMessage = truncate(st.adapter.scrubber.String(errMsg), 500)
+		}
+		res.OutcomeUpdates = append(res.OutcomeUpdates, up)
 		return
 	}
-	output, success, errMsg := resultOutcome(ev.Result)
 	te := &res.ToolEvents[idx]
 	te.Success = success
 	if output != "" {
@@ -361,6 +448,7 @@ func (st *parseState) emitAssistantText(ev *loopEvent, ts int64, res *adapter.Pa
 		SessionID:     st.sessionID,
 		ProjectRoot:   st.projectRoot(),
 		GitBranch:     st.gitBranch,
+		GitRemote:     st.gitRemote,
 		Timestamp:     unixMillis(ts),
 		Model:         st.lastModel,
 		Tool:          models.ToolKimiCode,
@@ -390,6 +478,7 @@ func (st *parseState) emitToken(line *wireLine, raw string, res *adapter.ParseRe
 		SessionID:           st.sessionID,
 		ProjectRoot:         st.projectRoot(),
 		GitBranch:           st.gitBranch,
+		GitRemote:           st.gitRemote,
 		Timestamp:           unixMillis(line.Time),
 		Tool:                models.ToolKimiCode,
 		Model:               firstNonEmpty(normalizeModel(line.Model), st.lastModel),
@@ -420,14 +509,17 @@ func (st *parseState) projectRoot() string {
 	}
 	st.rootResolved = true
 	cwd = crossmount.TranslateForeignPath(cwd)
-	info, err := git.Resolve(cwd)
+	id, err := git.ResolveIdentity(cwd, git.IdentityOptions{})
 	if err != nil {
 		st.resolvedRoot = cwd
 		return cwd
 	}
-	st.resolvedRoot = info.Root
-	st.gitBranch = info.Branch
-	return info.Root
+	st.resolvedRoot = id.Root
+	st.gitBranch = id.Branch
+	// id.Remote is already NormalizeRemote'd by ResolveIdentity.
+	st.gitRemote = id.Remote
+	st.identity = id
+	return id.Root
 }
 
 // workDirFromState reads the session-root state.json (two levels up from
@@ -447,5 +539,8 @@ func (st *parseState) workDirFromState() string {
 	if json.Unmarshal(b, &s) != nil {
 		return ""
 	}
-	return strings.TrimSpace(s.WorkDir)
+	if wd := strings.TrimSpace(s.WorkDir); wd != "" {
+		return wd
+	}
+	return strings.TrimSpace(s.Cwd)
 }

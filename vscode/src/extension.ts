@@ -12,18 +12,48 @@ import { BudgetNotifier } from './notifications/budget';
 import { WatcherLagNotifier } from './notifications/watcherLag';
 import { createCostStatusBar, StatusBarController } from './status/costBar';
 import { createCacheStatusBar } from './status/cacheBar';
+import { createComponentGate } from './components';
+import { createAgentAccessStatusBar } from './agentAccessStatus';
+import { registerLocTracker } from './loc/tracker';
 import { registerTerminalProfile } from './terminal/profile';
 import { TodayTreeProvider } from './views/todayTree';
 import { SessionsTreeProvider } from './views/sessionsTree';
 import { DiscoveryTreeProvider } from './views/discoveryTree';
 import { CostsTreeProvider } from './views/costsTree';
+import { shouldDeferActivation, untrustedWorkspaceWarning } from './trust-internals';
 
 let manager: DaemonManager | undefined;
 let statusBar: StatusBarController | undefined;
 let cacheStatusBar: StatusBarController | undefined;
+let trustSubscription: vscode.Disposable | undefined;
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   output.appendLine('SuperBased extension activating');
+
+  // P1-5: refuse to resolve or spawn the observer binary in an untrusted
+  // workspace. A cloned repo's .vscode/settings.json must never be able to
+  // pick the executable this extension runs. observer.binary.path and
+  // observer.binary.preferPathBinary are already machine-scoped and listed
+  // in capabilities.untrustedWorkspaces.restrictedConfigurations
+  // (package.json), so VS Code itself won't apply a workspace-level value
+  // for them here — this is a defense-in-depth check that additionally
+  // defers the whole daemon lifecycle (resolve/spawn/attach) until trust is
+  // granted, rather than relying solely on the setting being ignored.
+  if (shouldDeferActivation(vscode.workspace.isTrusted)) {
+    const message = untrustedWorkspaceWarning();
+    output.appendLine(message);
+    void vscode.window.showWarningMessage(message);
+    trustSubscription?.dispose();
+    trustSubscription = vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      trustSubscription?.dispose();
+      trustSubscription = undefined;
+      output.appendLine('Workspace trust granted - resuming activation.');
+      void activate(ctx);
+    });
+    ctx.subscriptions.push(trustSubscription);
+    return;
+  }
+
   try {
     const bin = await resolveBinary(ctx);
     output.appendLine(
@@ -43,6 +73,22 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     output.appendLine(`Daemon mode: ${mode}`);
     await manager.reconcile();
 
+    // Tell the daemon which extension version is running (enterprise update
+    // management W5, ruling R6), so an org's fleet board can show
+    // editor/daemon skew. AFTER reconcile, because before it there may be no
+    // daemon listening; best-effort and never awaited into a failure path -
+    // this is a report about the editor, not a feature the user asked for.
+    void manager
+      .getClient()
+      .postExtensionVersion(ctx.extension.packageJSON.version ?? '')
+      .then((ok) => {
+        if (!ok) {
+          output.appendLine(
+            'Extension version not reported: the daemon has no /api/update/extension-version endpoint (older build, or update management is off).',
+          );
+        }
+      });
+
     registerCommands(ctx, bin, manager);
 
     statusBar = createCostStatusBar(ctx, manager);
@@ -50,10 +96,19 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       ctx.subscriptions.push(statusBar);
     }
 
-    cacheStatusBar = createCacheStatusBar(ctx, manager);
+    // Component gate (T-670): hides surfaces of components that are not
+    // active on this machine (context keys + the cache bar's route check).
+    const gate = createComponentGate(manager);
+    ctx.subscriptions.push(gate);
+
+    cacheStatusBar = createCacheStatusBar(ctx, manager, gate);
     if (cacheStatusBar) {
       ctx.subscriptions.push(cacheStatusBar);
     }
+
+    // Agent Access P10: "MCP access" item (hidden unless the relay is on
+    // and the node is enrolled); disposed with the extension context.
+    ctx.subscriptions.push(createAgentAccessStatusBar(ctx, manager));
 
     const today = new TodayTreeProvider(manager);
     const sessions = new SessionsTreeProvider(manager);
@@ -75,6 +130,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     registerInstructionFilesCodeLens(ctx);
     registerInstructionCommands(ctx, bin);
     registerFileFreshness(ctx, manager);
+    registerLocTracker(ctx, manager);
 
     const budget = new BudgetNotifier(ctx, manager);
     budget.start();

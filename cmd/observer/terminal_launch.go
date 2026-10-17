@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -6,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -54,37 +57,57 @@ func (r termRunRecorder) RecordCorrelation(ctx context.Context, c termrun.Correl
 	})
 }
 
-// Environment variables the daemon injects so the launcher wrapper (F3) can
-// find and authenticate the OOB channel. The tool child never inherits the FD
-// once F3 sets close-on-exec; F1 only allocates + drains it.
-const (
-	envOOBFD   = "OBSERVER_OOB_FD"   // inherited FD number (3+)
-	envOOBAuth = "OBSERVER_OOB_AUTH" // per-session Hello auth secret
-	envOOBCorr = "OBSERVER_OOB_CORR" // run correlation nonce to echo
-	envOOBTool = "OBSERVER_OOB_TOOL" // target tool name
-	envOOBRun  = "OBSERVER_OOB_RUN"  // run id (informational)
-)
+// configArgAlreadyPresent reports whether an argv slice already expresses its own
+// `--config`. It stops at the first bare `--`: everything after that separator
+// belongs to the launched TOOL, so a tool's own `--config` must not suppress the
+// daemon's (the two flags address different programs).
+func configArgAlreadyPresent(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--config" || strings.HasPrefix(a, "--config=") {
+			return true
+		}
+	}
+	return false
+}
 
-// envDaemonChild is the INFALLIBLE marker the daemon sets in EVERY child env it
-// spawns. The two agent-launch paths (attach-spawn + dashboard terminal) funnel
-// through launchChildEnv, and the ONE non-termsvc path — a SpecSetup session
-// (CreateSetup), which bypasses this launcher — carries it via setupChildEnv, so
-// the "every daemon child carries the marker" invariant holds tree-wide (finding:
-// marker completeness). Unlike the OOB channel (which is best-effort — a missing
-// FD or a failed Hello leaves oobChannelActive() false), this env var is set
-// unconditionally, so a daemon-owned inner launcher whose OOB channel died still
-// recognizes itself as a daemon child and refuses to re-attach. decideAttach
-// checks it FIRST as the primary anti-recursion gate (review finding H1);
-// oobChannelActive() stays a belt-and-suspenders secondary row.
-const envDaemonChild = "OBSERVER_DAEMON_CHILD"
+// launchConfigArgs returns the `--config <path>` tokens a daemon-spawned
+// `observer <verb>` launch should carry, or nil when it should carry none.
+//
+// The decision is capability-shaped, never tool-shaped (CLAUDE.md #3): EVERY
+// launcher verb in the capability registry accepts `--config` (verified against
+// the built binary's own flag sets, 2026-09-03), so the only two questions are
+// whether the daemon HAS an explicit path to propagate and whether the caller
+// already expressed one. The attach path composes its own `--proxy`/`--config`
+// overrides into ExtraArgs; those win, because they are the CLI client's
+// deliberate per-launch intent rather than the daemon-wide default.
+func launchConfigArgs(cfgPath string, extraArgs []string) []string {
+	if cfgPath == "" || configArgAlreadyPresent(extraArgs) {
+		return nil
+	}
+	return []string{"--config", cfgPath}
+}
 
-// runningAsDaemonChild reports whether THIS process was spawned by the daemon's
-// terminal launcher (the env marker is present). It is the infallible input
-// decideAttach consults before the best-effort OOB probe. Reading the env keeps
-// decideAttach pure — the launcher passes this bool in like the reachability
-// probe.
-func runningAsDaemonChild() bool {
-	return os.Getenv(envDaemonChild) == "1"
+// launchExtraArgs composes the ExtraArgs a spawn hands termsession: the daemon's
+// `--config` propagation PREFIXED to the caller's own tokens.
+//
+// Prefixed, never appended: ExtraArgs can end in a bare `--` remainder destined
+// for the tool (`-- --model X`) or a native resume tail, and a flag appended past
+// that separator would be handed to the TOOL instead of to `observer <verb>`.
+// The prefix lands immediately after the subcommand (and after a handoff's
+// `--continue-from <id>`), which every launcher's flag parser accepts.
+//
+// Shell and SSH launches are unaffected by construction, not by a branch here:
+// termsession.Spec.argv() ignores ExtraArgs entirely for SpecShell/SpecSSH, so
+// the `shell` pseudo-tool can never receive an `observer` flag.
+func launchExtraArgs(extraArgs []string) []string {
+	add := launchConfigArgs(daemonConfigPath(), extraArgs)
+	if len(add) == 0 {
+		return extraArgs
+	}
+	return append(add, extraArgs...)
 }
 
 // ptyLauncher implements termsvc.Launcher over *termsession.Manager. It
@@ -126,6 +149,10 @@ func argvModeForKind(kind termrun.Kind) termsession.ArgvMode {
 	return argvModeTable[kind]
 }
 
+// resolveShellArgv (the server-derived SpecShell argv: the daemon's own $SHELL
+// with a per-OS fallback ladder) lives in terminal_launch_shell.go, where the
+// OS and its I/O are injected so both ladders are table-tested.
+
 // Spawn starts a PTY-backed launcher for a validated request and returns its
 // opaque handle. It is the single place the OOB FD is allocated: after the
 // child is spawned the daemon closes its own copy of the write end so the read
@@ -160,9 +187,34 @@ func (l *ptyLauncher) Spawn(req termsvc.LaunchRequest) (string, error) {
 		ExtraFiles:  []*os.File{oobWrite},
 		// Attach launches carry the CLI client's allow-listed argv (routing
 		// escape hatch + `--` tool remainder) so the inner `observer <sub>`
-		// self-configures exactly like a bare launch (B2/B3). Nil for
-		// dashboard fresh/handoff launches → argv unchanged.
-		ExtraArgs: req.ExtraArgs,
+		// self-configures exactly like a bare launch (B2/B3). Dashboard
+		// fresh/handoff launches carry none of their own — but EVERY launch
+		// gets the daemon's `--config` propagation prefixed here
+		// (launchExtraArgs), so a child resolves the same proxy port and DB
+		// the daemon did instead of re-deriving them from the default path.
+		ExtraArgs: launchExtraArgs(req.ExtraArgs),
+		// B9 Seam-B application (plan §1/§3/D2): the bwrap wrapper prefix the
+		// Sandboxer resolved. termsession.Spec.argv() prepends it before
+		// [BinPath, Subcommand, ...ExtraArgs], so the whole inner `observer
+		// <verb>` launch runs inside the isolation boundary. Empty for every
+		// non-sandboxed launch → argv byte-identical to today.
+		WrapArgv: req.WrapArgv,
+	}
+	if len(req.SSHArgv) > 0 {
+		// An outbound SSH remote-system session (plan §2). Like SpecShell it
+		// runs no `observer <sub>` at all — SpecSSH carries its own
+		// server-derived argv, composed by internal/sshprofile from an
+		// operator-authored config profile. It deliberately does NOT take
+		// WrapArgv: bwrap would blind the known_hosts / key file / agent
+		// socket ssh needs (see termsession.SpecSSH).
+		spec.Kind = termsession.SpecSSH
+		spec.SSHArgv = req.SSHArgv
+	} else if req.IsShell {
+		// A plain-shell fresh launch runs no `observer <sub>` at all — SpecShell
+		// carries its own server-derived argv (resolveShellArgv), ignoring
+		// BinPath/Subcommand/ArgvMode/SessionID entirely (see Spec.argv()).
+		spec.Kind = termsession.SpecShell
+		spec.ShellArgv = resolveShellArgv()
 	}
 	handle, cerr := l.mgr.Create(spec)
 	// Close the daemon's copy of the write end unconditionally: the child has
@@ -211,6 +263,12 @@ func launchChildEnv(req termsvc.LaunchRequest, authToken string) []string {
 		}
 		out = append(out, kv)
 	}
+	// The inherited env describes whoever started the daemon, not the xterm.js
+	// emulator this child is attached to: advertise the emulator's color
+	// capabilities so auto-detecting programs do not print monochrome (see
+	// terminal_color_env.go). Layered BEFORE ExtraEnv so a deliberate caller
+	// value still wins.
+	out = terminalColorEnv(out, runtime.GOOS == "windows")
 	// Caller-supplied extra env (attach proxy-routing vars). Defensively drop
 	// any OBSERVER_OOB_ / OBSERVER_DAEMON_CHILD entry so the internal channel and
 	// the daemon-child marker can't be spoofed in by a caller.
@@ -220,6 +278,14 @@ func launchChildEnv(req termsvc.LaunchRequest, authToken string) []string {
 		}
 		out = append(out, kv)
 	}
+	// PATH parity (audit DI-04b): the child EXECUTES with the merged PATH the
+	// daemon RESOLVED the tool on, so a binary that was only reachable through
+	// the operator's login shell can actually run — an `#!/usr/bin/env node`
+	// shim otherwise starts fine and dies at exit 127. Layered AFTER ExtraEnv
+	// (a caller that set PATH explicitly still gets its dirs kept, widened) and
+	// BEFORE the internal OOB vars. Strictly additive: every daemon PATH entry
+	// survives in order, and a launch with nothing grounded to add is a no-op.
+	out = applyChildPATH(out, launchLoginPathDirs(req.LoginPathDirs), req.BinPath)
 	out = append(
 		out,
 		// Infallible daemon-child marker (H1): set on EVERY spawned child so an
@@ -231,15 +297,23 @@ func launchChildEnv(req termsvc.LaunchRequest, authToken string) []string {
 		envOOBTool+"="+req.Tool,
 		envOOBRun+"="+req.RunID,
 	)
+	// B9 (plan §6): when this launch runs inside the bwrap boundary, stamp the
+	// sandbox marker so the hook lane can honestly set Event.Caps.Sandboxed. It
+	// is set here AND stripped from inherited/caller env by isInternalChildEnv,
+	// so a user env can never spoof OBSERVER_SANDBOX=1 into a non-sandboxed
+	// child (U9 finding). Never set on an unsandboxed launch → honest zero.
+	if req.Sandboxed {
+		out = append(out, sandboxEnvMarker+"=1")
+	}
+	// Windows env keys are case-insensitive, so the layering above can leave
+	// both `Path=` (inherited) and `PATH=` (ExtraEnv) in one block and "last
+	// wins" stops being true. Branching on runtime.GOOS here is a PLATFORM
+	// CAPABILITY test (how the OS keys an environment block), not a tool or
+	// caller identity — see dedupEnvWindows.
+	if runtime.GOOS == "windows" {
+		return dedupEnvWindows(out)
+	}
 	return out
-}
-
-// isInternalChildEnv reports whether an env entry is one the daemon manages for
-// its children (the OOB channel vars or the daemon-child marker) and must strip
-// from any inherited/caller-supplied env before re-adding its own fresh copy —
-// so a nested launch can never inherit a stale channel or spoof the marker.
-func isInternalChildEnv(kv string) bool {
-	return strings.HasPrefix(kv, "OBSERVER_OOB_") || strings.HasPrefix(kv, envDaemonChild+"=")
 }
 
 // setupChildEnv builds the environment for a SETUP session (CreateSetup) — the
@@ -253,7 +327,17 @@ func isInternalChildEnv(kv string) bool {
 // completeness). Recursion via a setup command is currently unreachable (the
 // argv is a fixed, server-derived command), so the marker here is belt-and-
 // suspenders that makes the invariant claim honest rather than aspirational.
-func setupChildEnv() []string {
+func setupChildEnv() []string { return setupChildEnvFor("") }
+
+// setupChildEnvFor is setupChildEnv for a setup command whose PROGRAM the
+// daemon has already resolved to an absolute path (the guided tool install:
+// dashboardInstallPlanFor resolves `npm` / `bash` / `uv` over the merged PATH).
+// It widens the setup PTY's PATH the same way a tool launch is widened (audit
+// DI-04a/b) so the installer itself — an npm shim needing node, a vendor script
+// needing curl from a login-only dir — can run on a daemon whose own PATH is
+// narrower than the operator's shell. binPath "" adds only the login-only dirs;
+// a daemon with none of those is unchanged.
+func setupChildEnvFor(binPath string) []string {
 	parent := os.Environ()
 	out := make([]string, 0, len(parent)+1)
 	for _, kv := range parent {
@@ -262,7 +346,15 @@ func setupChildEnv() []string {
 		}
 		out = append(out, kv)
 	}
-	return append(out, envDaemonChild+"=1")
+	// A setup session renders in the same xterm.js emulator as a launch.
+	out = terminalColorEnv(out, runtime.GOOS == "windows")
+	out = applyChildPATH(out, daemonLoginPathDirs(), binPath)
+	out = append(out, envDaemonChild+"=1")
+	// Same Windows case-insensitive-key hardening as launchChildEnv.
+	if runtime.GOOS == "windows" {
+		return dedupEnvWindows(out)
+	}
+	return out
 }
 
 // auditEnv logs one metadata-only line per launch: the var count and the

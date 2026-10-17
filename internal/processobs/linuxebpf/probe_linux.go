@@ -28,25 +28,25 @@ func Available(logger *slog.Logger) bool {
 
 	off, err := startBoottimeOffset()
 	if err != nil {
-		logger.Debug("processobs/linuxebpf: cannot resolve task_struct.start_boottime from BTF — eBPF capture disabled, using poll", "err", err)
+		logger.Debug("processobs/linuxebpf: cannot resolve task_struct.start_boottime from BTF - eBPF capture disabled, using poll", "err", err)
 		return false
 	}
 	nsDev, nsIno, err := pidnsDevIno()
 	if err != nil {
-		logger.Debug("processobs/linuxebpf: cannot resolve pid namespace — eBPF capture disabled, using poll", "err", err)
+		logger.Debug("processobs/linuxebpf: cannot resolve pid namespace - eBPF capture disabled, using poll", "err", err)
 		return false
 	}
 
 	rb, err := newRingbufMap()
 	if err != nil {
-		logger.Debug("processobs/linuxebpf: ring-buffer map unavailable — eBPF capture disabled, using poll", "err", err)
+		logger.Debug("processobs/linuxebpf: ring-buffer map unavailable - eBPF capture disabled, using poll", "err", err)
 		return false
 	}
 	defer rb.Close()
 
 	prog, err := buildProgram("sbo_probe", rb, evExec, off, nsDev, nsIno)
 	if err != nil {
-		logger.Debug("processobs/linuxebpf: program load failed (likely no CAP_BPF) — eBPF capture disabled, using poll", "err", err)
+		logger.Debug("processobs/linuxebpf: program load failed (likely no CAP_BPF) - eBPF capture disabled, using poll", "err", err)
 		return false
 	}
 	defer prog.Close()
@@ -56,7 +56,7 @@ func Available(logger *slog.Logger) bool {
 		Program: prog,
 	})
 	if err != nil {
-		logger.Debug("processobs/linuxebpf: tracepoint attach failed (likely no CAP_PERFMON) — eBPF capture disabled, using poll", "err", err)
+		logger.Debug("processobs/linuxebpf: tracepoint attach failed (likely no CAP_PERFMON) - eBPF capture disabled, using poll", "err", err)
 		return false
 	}
 	_ = lk.Close()

@@ -16,36 +16,6 @@ import (
 // (TerminalStatusProvider) rather than importing the service, the same
 // injected-seam discipline as LaunchManager.
 
-// TerminalStatusResult is one run's fused status (metadata only; honest
-// "unknown" + evidence + age so a hint is never presented as a fact).
-type TerminalStatusResult struct {
-	Handle     string  `json:"handle"`
-	RunID      string  `json:"run_id,omitempty"`
-	Status     string  `json:"status"`
-	Evidence   string  `json:"evidence"`
-	Confidence string  `json:"confidence"`
-	AgeSeconds float64 `json:"age_seconds"`
-}
-
-// TerminalStatusSubscription is one consumer of the live status stream. The
-// caller MUST Close it when done.
-type TerminalStatusSubscription interface {
-	// Updates delivers status changes; closed when the subscription ends.
-	Updates() <-chan TerminalStatusResult
-	// Close releases the subscription.
-	Close()
-}
-
-// TerminalStatusProvider is the dashboard's seam onto the terminal application
-// service's status fusion (F4). The nil provider is the disabled state (the
-// endpoints 503 / the WS closes immediately).
-type TerminalStatusProvider interface {
-	// StatusForHandle returns the current fused status for a live PTY handle.
-	StatusForHandle(handle string) (TerminalStatusResult, bool)
-	// Subscribe opens a live status stream across all live runs.
-	Subscribe() TerminalStatusSubscription
-}
-
 // hideSetupStatusFromRemote reports whether a terminal STATUS query for handle
 // must be hidden from the request principal: a REMOTE-exposed caller (listener
 // provenance §4.4, resolved at the boundary) may not learn a privileged
@@ -92,6 +62,9 @@ func (s *Server) handleTerminalStatus(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		http.NotFound(w, r)
 		return
+	}
+	if stop, ok := s.resolvePolicyStop(r.Context(), handle); ok {
+		res.PolicyStop = &stop
 	}
 	writeJSON(w, res)
 }

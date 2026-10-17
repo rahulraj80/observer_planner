@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/marmutapp/superbased-observer/internal/adapter/mirrorbase"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 )
@@ -260,6 +262,78 @@ func TestParseSessionFile_NewToolNamesMappedCorrectly(t *testing.T) {
 	}
 }
 
+// TestMapTool_VendorGroundedNames pins the 2026-09-28 (R2-TOOLMAP)
+// mappings for OpenCode tool ids that used to land in `unknown`. Each
+// id is grounded in the OpenCode source (packages/opencode/src/tool/*.ts
+// Tool.define(<id>), 1.18.32; codesearch from the pre-#27019 tree) and
+// seen in live stores. One case per new mapping.
+func TestMapTool_VendorGroundedNames(t *testing.T) {
+	cases := []struct {
+		name       string
+		partJSON   string // a tool part's `data` column, as OpenCode writes it
+		wantAction string
+		wantTarget string
+		wantOK     bool
+		wantErr    string
+	}{
+		{
+			name:       "question",
+			partJSON:   `{"type":"tool","tool":"question","state":{"status":"completed","title":"Asked 2 questions","input":{"questions":[{"header":"h","question":"q?"}]}}}`,
+			wantAction: models.ActionAskUser, wantTarget: "Asked 2 questions", wantOK: true,
+		},
+		{
+			name:       "plan_exit",
+			partJSON:   `{"type":"tool","tool":"plan_exit","state":{"status":"completed","title":"Switching to build agent","input":{}}}`,
+			wantAction: models.ActionPermissionMode, wantTarget: "Switching to build agent", wantOK: true,
+		},
+		{
+			name:       "skill",
+			partJSON:   `{"type":"tool","tool":"skill","state":{"status":"completed","title":"Loaded skill: pdf","input":{"name":"pdf"}}}`,
+			wantAction: models.ActionSkillInvoke, wantTarget: "Loaded skill: pdf", wantOK: true,
+		},
+		{
+			name:       "lsp",
+			partJSON:   `{"type":"tool","tool":"lsp","state":{"status":"completed","title":"goToDefinition","input":{"operation":"goToDefinition","filePath":"src/a.ts","line":3,"character":5}}}`,
+			wantAction: models.ActionSearchText, wantTarget: "src/a.ts", wantOK: true,
+		},
+		{
+			name:       "codesearch",
+			partJSON:   `{"type":"tool","tool":"codesearch","state":{"status":"completed","title":"Code search: react useState","input":{"query":"react useState"}}}`,
+			wantAction: models.ActionWebSearch, wantTarget: "Code search: react useState", wantOK: true,
+		},
+		{
+			// The pseudo-tool itself "completed", but the model's call
+			// failed: Success must be false and Target the attempted tool
+			// (live shape, win store 2026-09-27).
+			name:       "invalid",
+			partJSON:   `{"type":"tool","tool":"invalid","state":{"status":"completed","title":"Invalid Tool","input":{"tool":"task","error":"Model tried to call unavailable tool 'task'."},"output":"The arguments provided to the tool are invalid: Model tried to call unavailable tool 'task'."}}`,
+			wantAction: models.ActionToolFailure, wantTarget: "task", wantOK: false,
+			wantErr: "Model tried to call unavailable tool 'task'.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var part toolPartData
+			if err := json.Unmarshal([]byte(tc.partJSON), &part); err != nil {
+				t.Fatalf("fixture: %v", err)
+			}
+			at, target, ok, errMsg := mapTool(part)
+			if at != tc.wantAction {
+				t.Errorf("action = %q, want %q", at, tc.wantAction)
+			}
+			if target != tc.wantTarget {
+				t.Errorf("target = %q, want %q", target, tc.wantTarget)
+			}
+			if ok != tc.wantOK {
+				t.Errorf("success = %v, want %v", ok, tc.wantOK)
+			}
+			if errMsg != tc.wantErr {
+				t.Errorf("errMsg = %q, want %q", errMsg, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseSessionFile_SQLiteWatermarkSkipsOldRows(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "opencode.db")
@@ -369,9 +443,12 @@ func TestParseSessionFile_VariantStampsEffortLevelOnAssistantRows(t *testing.T) 
 		"opencode.assistant_text": {raw: "opencode.assistant_text", effort: "high"},
 		// The terminus row stamps the source finish reason into the
 		// canonical Metadata.StopReason column alongside the effort.
-		"assistant.stop":       {raw: "assistant.stop", effort: "high", stop: "stop"},
-		"bash":                 {raw: "bash", effort: "high"},
-		"opencode.reasoning":   {raw: "opencode.reasoning", effort: "high"},
+		"assistant.stop": {raw: "assistant.stop", effort: "high", stop: "stop"},
+		"bash":           {raw: "bash", effort: "high"},
+		// UPDATED 2026-07-31 (B3 convergence): the `opencode.reasoning`
+		// row is gone — reasoning is threaded onto its successor's
+		// PrecedingReasoning, never minted as an action of its own — so
+		// there is no reasoning row left to carry effort metadata.
 		"opencode.step_finish": {raw: "opencode.step_finish", effort: "high"},
 	}
 	seen := map[string]bool{}
@@ -436,7 +513,7 @@ func TestParseSessionFile_ResolveProjectRootTranslatesForeignCwd(t *testing.T) {
 		t.Skip("foreign-cwd translation to /mnt/c is a Linux/WSL-daemon-reading-Windows-mount behavior; on a Windows host a C:\\ path is native and correctly stays untranslated")
 	}
 	a := NewWithOptions(nil, []string{t.TempDir()})
-	cache := map[string]string{}
+	cache := map[string]projectGitInfo{}
 	got := a.resolveProjectRoot(`C:\programsx\open-code-test`, cache)
 	// git.Resolve will fail to find a .git dir under /mnt/c on this
 	// host; the fallback path stores the (translated) cwd directly.
@@ -445,14 +522,18 @@ func TestParseSessionFile_ResolveProjectRootTranslatesForeignCwd(t *testing.T) {
 	}
 }
 
-// TestParseSessionFile_ReasoningPartEmitsRow pins F4 from the audit.
+// TestParseSessionFile_ReasoningPartThreadsAndMintsNoRow is the B3
+// successor of TestParseSessionFile_ReasoningPartEmitsRow (2026-07-31).
 // OpenCode Desktop and the CLI both emit `reasoning`-typed parts
-// carrying the model's chain-of-thought body (verified 2026-05-21 on a
-// live Desktop session: 11 reasoning parts across 11 messages).
-// Pre-fix the adapter dropped them silently. This test seeds one
-// reasoning part and asserts a single ActionTaskComplete row lands
-// with RawToolName=opencode.reasoning and the body in ToolOutput.
-func TestParseSessionFile_ReasoningPartEmitsRow(t *testing.T) {
+// carrying the model's chain-of-thought (verified 2026-05-21 on a live
+// Desktop session: 11 reasoning parts across 11 messages). The adapter
+// used to mint an `opencode.reasoning` task_complete row per part; it
+// now mints NONE and threads the body onto the successor part's
+// PrecedingReasoning instead. This pins all three semantics at once:
+// no row, consumed-once (the tool takes the first thought, the text
+// part does NOT re-take it), and last-wins (the two thoughts between
+// the tool and the text collapse to the newest).
+func TestParseSessionFile_ReasoningPartThreadsAndMintsNoRow(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "opencode.db")
 	setupOpenCodeDBWithReasoning(t, path)
@@ -463,31 +544,58 @@ func TestParseSessionFile_ReasoningPartEmitsRow(t *testing.T) {
 		t.Fatalf("ParseSessionFile: %v", err)
 	}
 
-	var reasoning []models.ToolEvent
+	byRaw := map[string]models.ToolEvent{}
 	for _, ev := range res.ToolEvents {
 		if ev.RawToolName == "opencode.reasoning" {
-			reasoning = append(reasoning, ev)
+			t.Fatalf("opencode.reasoning row minted: %+v", ev)
+		}
+		byRaw[ev.RawToolName] = ev
+	}
+
+	tool, ok := byRaw["bash"]
+	if !ok {
+		t.Fatalf("no tool row; events=%+v", res.ToolEvents)
+	}
+	if tool.PrecedingReasoning != "Considering the next step..." {
+		t.Errorf("tool PrecedingReasoning = %q, want the reasoning body (it must beat the part title %q)",
+			tool.PrecedingReasoning, "Run ls")
+	}
+	asst, ok := byRaw["opencode.assistant_text"]
+	if !ok {
+		t.Fatalf("no assistant_text row; events=%+v", res.ToolEvents)
+	}
+	if asst.PrecedingReasoning != "Second thought, the newer one." {
+		t.Errorf("assistant_text PrecedingReasoning = %q, want the LAST reasoning before it", asst.PrecedingReasoning)
+	}
+}
+
+// TestParseSessionFile_ReasoningThreadsAcrossParseWindow pins the
+// widened index window: a poll tick can land between the reasoning part
+// and the successor it belongs to. The successor's own batch sees no
+// reasoning part at all under the incremental `time_updated > ?` filter,
+// so the index deliberately re-reads every part of the messages that
+// batch touches.
+func TestParseSessionFile_ReasoningThreadsAcrossParseWindow(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "opencode.db")
+	setupOpenCodeDBWithReasoning(t, path)
+
+	a := NewWithOptions(nil, []string{root})
+	// fromOffset past the reasoning part's time_updated (3500) but
+	// before the tool part's (4500).
+	res, err := a.ParseSessionFile(context.Background(), path, 4000)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	for _, ev := range res.ToolEvents {
+		if ev.RawToolName == "bash" {
+			if ev.PrecedingReasoning != "Considering the next step..." {
+				t.Errorf("cross-window tool PrecedingReasoning = %q", ev.PrecedingReasoning)
+			}
+			return
 		}
 	}
-	if len(reasoning) != 1 {
-		t.Fatalf("opencode.reasoning rows: got %d want 1 (events=%+v)", len(reasoning), res.ToolEvents)
-	}
-	ev := reasoning[0]
-	if ev.ActionType != models.ActionTaskComplete {
-		t.Errorf("ActionType = %q, want task_complete", ev.ActionType)
-	}
-	if ev.ToolOutput != "Considering the next step..." {
-		t.Errorf("ToolOutput = %q, want %q", ev.ToolOutput, "Considering the next step...")
-	}
-	if ev.DurationMs != 4500 {
-		t.Errorf("DurationMs = %d, want 4500 (end-start)", ev.DurationMs)
-	}
-	if ev.MessageID != "msg_asst" {
-		t.Errorf("MessageID = %q, want msg_asst", ev.MessageID)
-	}
-	if ev.SourceEventID != "reasoning:prt_reasoning" {
-		t.Errorf("SourceEventID = %q, want reasoning:prt_reasoning", ev.SourceEventID)
-	}
+	t.Fatalf("no tool row in the incremental batch; events=%+v", res.ToolEvents)
 }
 
 // TestParseSessionFile_StepFinishPartEmitsToolEventOnly pins F5 from
@@ -666,6 +774,42 @@ func TestStageMirrorIfForeign_CopiesTrioAndReusesOnRepeat(t *testing.T) {
 	}
 }
 
+// TestStageMirrorIfForeign_RespectsProcessBaseOverride pins F1: the
+// mirror staging directory is derived from the single-owner
+// mirrorbase.Base() seam, so installing a per-process override (the
+// one-shot usage report's "nothing written outside a scratch dir"
+// contract) redirects the mirror write there instead of the default
+// os.UserCacheDir()-derived location.
+func TestStageMirrorIfForeign_RespectsProcessBaseOverride(t *testing.T) {
+	srcRoot := t.TempDir()
+	overrideBase := t.TempDir()
+	mirrorbase.SetBaseForProcess(overrideBase)
+	t.Cleanup(func() { mirrorbase.SetBaseForProcess("") })
+
+	orig := allHomesFunc
+	t.Cleanup(func() { allHomesFunc = orig })
+	allHomesFunc = func() []crossmount.HomeRoot {
+		return []crossmount.HomeRoot{
+			{Path: srcRoot, OS: crossmount.OSWindows, Origin: "wsl-mnt:fake"},
+		}
+	}
+	srcDB := filepath.Join(srcRoot, "opencode.db")
+	if err := os.WriteFile(srcDB, []byte("DBv1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := stageMirrorIfForeign(srcDB)
+	if err != nil {
+		t.Fatalf("stageMirrorIfForeign: %v", err)
+	}
+	if !strings.HasPrefix(got, overrideBase) {
+		t.Errorf("mirror path %q must be under process override base %q, want redirect", got, overrideBase)
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("mirrored db not staged at %q: %v", got, err)
+	}
+}
+
 // TestStageMirrorIfForeign_RefreshesOnSourceWALAdvance pins the WAL-
 // triggered refresh — the main .db's mtime can stay stable while the
 // WAL advances on every flush, so the mirror must re-copy when the
@@ -770,7 +914,11 @@ func setupOpenCodeDBWithReasoning(t *testing.T, path string) {
 			('msg_asst', 'ses_1', 2000, 7500,
 			 '{"role":"assistant","agent":"build","modelID":"gpt-5.4-nano","providerID":"openai","path":{"cwd":"/tmp/oc"},"time":{"created":2000,"completed":7500},"finish":"stop"}')`,
 		`INSERT INTO part(id, message_id, session_id, time_created, time_updated, data) VALUES
-			('prt_reasoning', 'msg_asst', 'ses_1', 3000, 7500, '{"type":"reasoning","text":"Considering the next step...","time":{"start":3000,"end":7500}}')`,
+			('prt_reasoning', 'msg_asst', 'ses_1', 3000, 3500, '{"type":"reasoning","text":"Considering the next step...","time":{"start":3000,"end":7500}}'),
+			('prt_tool', 'msg_asst', 'ses_1', 4000, 4500, '{"type":"tool","tool":"bash","callID":"c1","state":{"status":"completed","input":{"command":"ls"},"output":"ok","title":"Run ls","time":{"start":4000,"end":4500}}}'),
+			('prt_reasoning_2', 'msg_asst', 'ses_1', 5000, 5100, '{"type":"reasoning","text":"First thought, superseded.","time":{"start":5000,"end":5100}}'),
+			('prt_reasoning_3', 'msg_asst', 'ses_1', 5500, 5600, '{"type":"reasoning","text":"Second thought, the newer one.","time":{"start":5500,"end":5600}}'),
+			('prt_text', 'msg_asst', 'ses_1', 6000, 6100, '{"type":"text","text":"Done."}')`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
@@ -990,5 +1138,95 @@ func setupOpenCodeDBWithTokens(t *testing.T, path string) {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("exec %q: %v", stmt, err)
 		}
+	}
+}
+
+// TestLoadSessionLineages pins the session.parent_id → SessionLineage
+// emission: linked children carry ParentThreadID + ThreadSource="subagent",
+// unlinked/empty-parent rows are skipped, and a pre-parent_id schema
+// degrades to "no linkage" instead of failing the parse.
+func TestLoadSessionLineages(t *testing.T) {
+	tests := []struct {
+		name    string
+		schema  string // session-table DDL (controls the parent_id column)
+		rows    []string
+		want    []models.SessionLineage
+		wantNil bool
+	}{
+		{
+			name:   "linked children emitted as subagent lineage",
+			schema: `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT)`,
+			rows: []string{
+				`INSERT INTO session(id, directory, time_updated, parent_id) VALUES ('ses_parent', '/tmp/oc', 100, NULL)`,
+				`INSERT INTO session(id, directory, time_updated, parent_id) VALUES ('ses_child1', '/tmp/oc', 200, 'ses_parent')`,
+				`INSERT INTO session(id, directory, time_updated, parent_id) VALUES ('ses_child2', '/tmp/oc', 300, 'ses_parent')`,
+			},
+			want: []models.SessionLineage{
+				{SessionID: "ses_child1", ParentThreadID: "ses_parent", ThreadSource: "subagent"},
+				{SessionID: "ses_child2", ParentThreadID: "ses_parent", ThreadSource: "subagent"},
+			},
+		},
+		{
+			name:   "empty parent_id string skipped",
+			schema: `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT)`,
+			rows: []string{
+				`INSERT INTO session(id, directory, time_updated, parent_id) VALUES ('ses_a', '/tmp/oc', 100, '')`,
+				`INSERT INTO session(id, directory, time_updated, parent_id) VALUES ('ses_b', '/tmp/oc', 200, 'ses_a')`,
+			},
+			want: []models.SessionLineage{
+				{SessionID: "ses_b", ParentThreadID: "ses_a", ThreadSource: "subagent"},
+			},
+		},
+		{
+			name:    "pre-parent_id schema degrades to no linkage",
+			schema:  `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL)`,
+			rows:    []string{`INSERT INTO session(id, directory, time_updated) VALUES ('ses_1', '/tmp/oc', 100)`},
+			wantNil: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			dbPath := filepath.Join(dir, "opencode.db")
+			db, err := sql.Open("sqlite", dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(tt.schema); err != nil {
+				t.Fatal(err)
+			}
+			for _, stmt := range tt.rows {
+				if _, err := db.Exec(stmt); err != nil {
+					t.Fatalf("exec %q: %v", stmt, err)
+				}
+			}
+			db.Close()
+
+			a := NewWithOptions(nil, []string{dir})
+			got, err := a.loadSessionLineages(context.Background(), func() *sql.DB {
+				d, err := openReadOnlyDB(dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return d
+			}())
+			if err != nil {
+				t.Fatalf("loadSessionLineages: %v", err)
+			}
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("want nil lineages, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d lineages, want %d: %+v", len(got), len(tt.want), got)
+			}
+			for i, w := range tt.want {
+				if got[i] != w {
+					t.Errorf("lineage[%d] = %+v, want %+v", i, got[i], w)
+				}
+			}
+		})
 	}
 }

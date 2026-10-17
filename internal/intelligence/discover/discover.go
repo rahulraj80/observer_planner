@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 )
 
 // Report is the full discover output.
@@ -14,6 +16,7 @@ type Report struct {
 	Project          string             `json:"project,omitempty"`
 	Days             int                `json:"days,omitempty"`
 	Since            string             `json:"since,omitempty"`
+	Until            string             `json:"until,omitempty"`
 	StaleReads       []StaleReadFile    `json:"stale_reads"`
 	RepeatedCommands []RepeatedCommand  `json:"repeated_commands"`
 	CrossToolFiles   []CrossToolFile    `json:"cross_tool_files"`
@@ -107,15 +110,30 @@ type Options struct {
 	// tools. Honored by Run + WastedTokens so dashboard tiles scope
 	// to the active global Tool dropdown.
 	Tool string
+	// Model filters to the actions of sessions that used one model
+	// (internal/modelfilter.SessionsUsing; session grain, like Tool).
+	// Empty means all models. Mirrors the dashboard's global Model filter.
+	Model string
 	// Days restricts to the last N days. Zero disables.
 	Days int
 	// Since overrides Days when non-zero.
 	Since time.Time
+	// Until, when non-zero, closes the window: no action at or after it is
+	// counted (the dashboard's closed custom range, REVIEW-3 P3-19). Zero
+	// leaves the window open-ended (until now).
+	Until time.Time
 	// Limit caps each section's row count (stale reads, repeats, cross-tool).
 	// Zero means 20.
 	Limit int
 	// Now overrides time.Now for deterministic tests.
 	Now func() time.Time
+	// StaleOnly stops Run after the stale-read pass: TotalActions, StaleReads
+	// and the stale fields of Summary are exactly what a full Run returns;
+	// RepeatedCommands, CrossToolFiles, NativeVsBash and their Summary fields
+	// stay empty. For a reader that shows only the stale-read counts (the
+	// node Overview's KPI tile), which otherwise paid for the whole report -
+	// the repeated-command and no-change-rerun passes are most of its cost.
+	StaleOnly bool
 }
 
 // Discoverer runs a pass against a DB.
@@ -133,15 +151,12 @@ func (d *Discoverer) WastedTokens(ctx context.Context, opts Options) (int64, err
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	since := opts.Since
-	if since.IsZero() && opts.Days > 0 {
-		since = opts.Now().Add(-time.Duration(opts.Days) * 24 * time.Hour)
-	}
+	win := spanOf(opts)
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 500
 	}
-	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, since, limit)
+	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -160,26 +175,26 @@ func (d *Discoverer) Run(ctx context.Context, opts Options) (Report, error) {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	since := opts.Since
-	if since.IsZero() && opts.Days > 0 {
-		since = opts.Now().Add(-time.Duration(opts.Days) * 24 * time.Hour)
-	}
+	win := spanOf(opts)
 
 	report := Report{
 		Project: opts.ProjectRoot,
 		Days:    opts.Days,
 	}
-	if !since.IsZero() {
-		report.Since = since.UTC().Format(time.RFC3339)
+	if !win.since.IsZero() {
+		report.Since = win.since.UTC().Format(time.RFC3339)
+	}
+	if !win.until.IsZero() {
+		report.Until = win.until.UTC().Format(time.RFC3339)
 	}
 
-	total, err := d.totalActions(ctx, opts.ProjectRoot, opts.Tool, since)
+	total, err := d.totalActions(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win)
 	if err != nil {
 		return Report{}, err
 	}
 	report.Summary.TotalActions = total
 
-	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, since, opts.Limit)
+	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, opts.Limit)
 	if err != nil {
 		return Report{}, err
 	}
@@ -189,22 +204,25 @@ func (d *Discoverer) Run(ctx context.Context, opts Options) (Report, error) {
 		report.Summary.CrossThreadStaleCount += s.CrossThreadStaleCount
 		report.Summary.EstWastedTokens += s.EstWastedTokens
 	}
+	if opts.StaleOnly {
+		return report, nil
+	}
 
-	reps, err := d.repeatedCommands(ctx, opts.ProjectRoot, opts.Tool, since, opts.Limit)
+	reps, err := d.repeatedCommands(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, opts.Limit)
 	if err != nil {
 		return Report{}, err
 	}
 	report.RepeatedCommands = reps
 	report.Summary.RepeatedCmdGroups = len(reps)
 
-	cross, err := d.crossToolFiles(ctx, opts.ProjectRoot, opts.Tool, since, opts.Limit)
+	cross, err := d.crossToolFiles(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, opts.Limit)
 	if err != nil {
 		return Report{}, err
 	}
 	report.CrossToolFiles = cross
 	report.Summary.CrossToolFileCount = len(cross)
 
-	nb, err := d.nativeVsBash(ctx, opts.ProjectRoot, opts.Tool, since)
+	nb, err := d.nativeVsBash(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win)
 	if err != nil {
 		return Report{}, err
 	}
@@ -219,7 +237,7 @@ func (d *Discoverer) Run(ctx context.Context, opts Options) (Report, error) {
 	return report, nil
 }
 
-func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool string, since time.Time) (int, error) {
+func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool, model string, since span) (int, error) {
 	q := `SELECT COUNT(*) FROM actions a
 	      LEFT JOIN projects p ON p.id = a.project_id`
 	var where []string
@@ -232,9 +250,13 @@ func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool string,
 		where = append(where, "a.tool = ?")
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		where = append(where, "a.timestamp >= ?")
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	if frag, margs := modelfilter.SessionsUsing("a.session_id", model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
+	if frags, wargs := since.conds("a.timestamp"); len(frags) > 0 {
+		where = append(where, frags...)
+		args = append(args, wargs...)
 	}
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -246,7 +268,7 @@ func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool string,
 	return n, nil
 }
 
-func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool string, since time.Time, limit int) ([]StaleReadFile, error) {
+func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool, model string, since span, limit int) ([]StaleReadFile, error) {
 	// Join actions to file_state for sizes. The heuristic for wasted tokens
 	// is stale_count * ceil(file_size / 4) — Claude's tokenizer averages
 	// ~4 bytes/token for typical source code. When file_size is unknown,
@@ -297,9 +319,12 @@ func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool string, s
 		q += " AND a.tool = ?"
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	mq, margs := modelfilter.AndSessionsUsing("a.session_id", model)
+	q += mq
+	args = append(args, margs...)
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += ` GROUP BY a.target, a.project_id
 	       HAVING stale_count > 0
@@ -328,7 +353,7 @@ func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool string, s
 	return out, rows.Err()
 }
 
-func (d *Discoverer) repeatedCommands(ctx context.Context, projectRoot, tool string, since time.Time, limit int) ([]RepeatedCommand, error) {
+func (d *Discoverer) repeatedCommands(ctx context.Context, projectRoot, tool, model string, since span, limit int) ([]RepeatedCommand, error) {
 	// Group run_command actions by (project, target). Pull success mix from
 	// the actions themselves. "No-change reruns" are intervals between two
 	// consecutive runs of the same command where no edit_file / write_file
@@ -350,9 +375,12 @@ func (d *Discoverer) repeatedCommands(ctx context.Context, projectRoot, tool str
 		q += " AND a.tool = ?"
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	mq, margs := modelfilter.AndSessionsUsing("a.session_id", model)
+	q += mq
+	args = append(args, margs...)
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += ` GROUP BY a.target, a.project_id
 	       HAVING total_runs > 1
@@ -403,32 +431,61 @@ type noChangeKey struct {
 // "no-change rerun" intervals across all run_command groups in the
 // window. A no-change rerun is two consecutive runs of the same
 // (session, project, command) with no edit_file / write_file in between.
-// Replaces the per-group countNoChangeReruns loop; one query, ~100ms on
-// an 81k-action DB.
-func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string, since time.Time) (map[noChangeKey]int, error) {
-	q := `WITH runs AS (
+// Replaces the per-group countNoChangeReruns loop with one query.
+//
+// The query is a single ordered pass (optimization review 2026-09-27,
+// docs/audits/optimization-review-2026-09-27.md). The previous form
+// answered "was there an edit between these two runs?" with a correlated
+// NOT EXISTS per run pair; the only index it could seek on led with
+// session_id, so every probe re-walked the WHOLE session's actions — a
+// per-session quadratic that measured 30-68s of /api/discover's ~50-107s
+// on a 936k-action corpus. Here the question is answered with running
+// counts instead:
+//
+//	edits_le(t) = # edits in the session with timestamp <= t
+//	edits_lt(t) = edits_le(t) - (# edits at exactly t)
+//	edits strictly inside (prev, cur) = edits_lt(cur) - edits_le(prev)
+//
+// A difference <= 0 is exactly the old NOT EXISTS being true (it is
+// negative only when prev == cur, the empty open interval the old
+// predicate also treated as "no edit"). Timestamps compare as TEXT in
+// both forms (BINARY collation), and the edit rows only need the window
+// lower bound because prev_ts is itself >= since, so the interval can
+// never reach below the window. TestNoChangeRerunCountsMatchesReference
+// pins byte-identical output against the old correlated form.
+func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string, since span) (map[noChangeKey]int, error) {
+	q := `WITH ev AS (
 		SELECT a.session_id, a.target, a.project_id, a.timestamp,
-		       LAG(a.timestamp) OVER (PARTITION BY a.session_id, a.target, a.project_id ORDER BY a.timestamp) AS prev_ts
+		       CASE WHEN a.action_type = 'run_command' THEN 1 ELSE 0 END AS is_run,
+		       CASE WHEN a.action_type IN ('edit_file', 'write_file') THEN 1 ELSE 0 END AS is_edit
 		FROM actions a
-		WHERE a.action_type = 'run_command' AND a.target != ''`
+		WHERE ((a.action_type = 'run_command' AND a.target != '')
+		       OR a.action_type IN ('edit_file', 'write_file'))`
 	var args []any
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += `
+	),
+	cum AS (
+		SELECT session_id, target, project_id, timestamp, is_run,
+		       SUM(is_edit) OVER (PARTITION BY session_id ORDER BY timestamp) AS edits_le,
+		       SUM(is_edit) OVER (PARTITION BY session_id, timestamp) AS edits_at
+		FROM ev
+	),
+	runs AS (
+		SELECT target, project_id,
+		       edits_le - edits_at AS edits_lt,
+		       LAG(edits_le) OVER (PARTITION BY session_id, target, project_id ORDER BY timestamp) AS prev_edits_le
+		FROM cum
+		WHERE is_run = 1
 	)
 	SELECT r.target, COALESCE(p.root_path, '') AS project_root,
-	       SUM(CASE WHEN NOT EXISTS (
-	         SELECT 1 FROM actions e
-	         WHERE e.session_id = r.session_id
-	           AND e.action_type IN ('edit_file', 'write_file')
-	           AND e.timestamp > r.prev_ts
-	           AND e.timestamp < r.timestamp
-	       ) THEN 1 ELSE 0 END) AS no_change_count
+	       SUM(CASE WHEN r.edits_lt - r.prev_edits_le <= 0 THEN 1 ELSE 0 END) AS no_change_count
 	FROM runs r
 	LEFT JOIN projects p ON p.id = r.project_id
-	WHERE r.prev_ts IS NOT NULL`
+	WHERE r.prev_edits_le IS NOT NULL`
 	if projectRoot != "" {
 		q += " AND p.root_path = ?"
 		args = append(args, projectRoot)
@@ -451,7 +508,7 @@ func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string
 	return out, rows.Err()
 }
 
-func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool string, since time.Time, limit int) ([]CrossToolFile, error) {
+func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool, model string, since span, limit int) ([]CrossToolFile, error) {
 	// Cross-tool is intentionally a multi-tool signal. When the operator
 	// scopes the dashboard to a single tool the question becomes
 	// degenerate (a single tool can't be "cross-tool"); return early
@@ -474,9 +531,12 @@ func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool strin
 		q += " AND p.root_path = ?"
 		args = append(args, projectRoot)
 	}
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	mq, margs := modelfilter.AndSessionsUsing("a.session_id", model)
+	q += mq
+	args = append(args, margs...)
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += ` GROUP BY a.target, a.project_id
 	       HAVING tool_count > 1
@@ -503,7 +563,7 @@ func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool strin
 	return out, rows.Err()
 }
 
-func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool string, since time.Time) ([]NativeBashBucket, error) {
+func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool, model string, since span) ([]NativeBashBucket, error) {
 	q := `SELECT a.action_type, COALESCE(a.is_native_tool, 0), COUNT(*)
 	      FROM actions a
 	      LEFT JOIN projects p ON p.id = a.project_id`
@@ -517,14 +577,27 @@ func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool string,
 		where = append(where, "a.tool = ?")
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		where = append(where, "a.timestamp >= ?")
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	if frag, margs := modelfilter.SessionsUsing("a.session_id", model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
+	if frags, wargs := since.conds("a.timestamp"); len(frags) > 0 {
+		where = append(where, frags...)
+		args = append(args, wargs...)
 	}
 	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
-	q += " GROUP BY a.action_type, a.is_native_tool ORDER BY COUNT(*) DESC"
+	// `+a.action_type` (a no-op on the value) stops the planner from
+	// walking idx_actions_type in full just to get groups pre-sorted: with
+	// no ANALYZE statistics it otherwise prefers that index over the
+	// window's covering timestamp index (migration 138), fetching every
+	// ~4.7 KB action row of ALL time to aggregate a 30-day window (2.2 s ->
+	// 0.45 s on the reference corpus). The explicit tiebreak pins the order
+	// of equal counts, which previously fell out of idx_actions_type's
+	// (action_type, is_native_tool) group order — the same order, now
+	// stated rather than inherited from a plan.
+	q += " GROUP BY +a.action_type, a.is_native_tool ORDER BY COUNT(*) DESC, a.action_type, a.is_native_tool"
 
 	rows, err := d.db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -542,6 +615,41 @@ func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool string,
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// span is one query window: since inclusive, until exclusive; a zero bound
+// is open.
+type span struct{ since, until time.Time }
+
+// spanOf resolves Options to a span (Since wins over Days).
+func spanOf(opts Options) span {
+	since := opts.Since
+	if since.IsZero() && opts.Days > 0 {
+		since = opts.Now().Add(-time.Duration(opts.Days) * 24 * time.Hour)
+	}
+	return span{since: since, until: opts.Until}
+}
+
+// conds renders the span as SQL conditions on col with their bound args.
+func (w span) conds(col string) (frags []string, args []any) {
+	if !w.since.IsZero() {
+		frags = append(frags, col+" >= ?")
+		args = append(args, w.since.UTC().Format(time.RFC3339Nano))
+	}
+	if !w.until.IsZero() {
+		frags = append(frags, col+" < ?")
+		args = append(args, w.until.UTC().Format(time.RFC3339Nano))
+	}
+	return frags, args
+}
+
+// and renders the span as " AND ..." conditions on col.
+func (w span) and(col string) (string, []any) {
+	frags, args := w.conds(col)
+	if len(frags) == 0 {
+		return "", nil
+	}
+	return " AND " + strings.Join(frags, " AND "), args
 }
 
 func splitAndSort(csv string) []string {

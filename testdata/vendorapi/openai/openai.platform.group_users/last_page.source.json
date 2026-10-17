@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].email": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "0b86010a106b933db0aebe02db9853bec03ce096b40f7fbbb77e41b9cf4ea85d",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/groups/{group_id}/users",
+    "query": {
+      "after": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId list-group-users. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.group_users"
+}

@@ -160,15 +160,15 @@ func TestBaselineTierEvents(t *testing.T) {
 // no-text-fields guarantee for the new baseline event.
 func TestPromptCycleAllowlist(t *testing.T) {
 	allowed := map[string]bool{
-		"model":                   true,
-		"provider":                true,
-		"input_size":              true,
-		"output_size":             true,
-		"cache_percentage":        true,
-		"end_to_end_duration_ms":  true,
-		"segment":                 true,
-		"session_span":            true,
-		"turn_id":                 true,
+		"model":                  true,
+		"provider":               true,
+		"input_size":             true,
+		"output_size":            true,
+		"cache_percentage":       true,
+		"end_to_end_duration_ms": true,
+		"segment":                true,
+		"session_span":           true,
+		"turn_id":                true,
 	}
 	if len(allowed) != 9 {
 		t.Fatal("prompt_cycle allowlist shape changed — review no-text-fields enforcement")
@@ -181,24 +181,24 @@ func TestPromptCycleAllowlist(t *testing.T) {
 // exact and reviewable.
 func TestBaselineNoPromptOrOutputText(t *testing.T) {
 	forbidden := map[string]bool{
-		"prompt_text":     true,
-		"prompt":          true,
-		"output_text":     true,
-		"output":          true,
-		"content":         true,
-		"text":            true,
-		"body":            true,
-		"message":         true,
-		"message_body":    true,
-		"request_text":    true,
-		"response_text":   true,
-		"input_text":      true,
-		"raw_prompt":      true,
-		"raw_output":      true,
-		"prompt_body":     true,
-		"response_body":   true,
-		"input_body":      true,
-		"output_body":     true,
+		"prompt_text":   true,
+		"prompt":        true,
+		"output_text":   true,
+		"output":        true,
+		"content":       true,
+		"text":          true,
+		"body":          true,
+		"message":       true,
+		"message_body":  true,
+		"request_text":  true,
+		"response_text": true,
+		"input_text":    true,
+		"raw_prompt":    true,
+		"raw_output":    true,
+		"prompt_body":   true,
+		"response_body": true,
+		"input_body":    true,
+		"output_body":   true,
 	}
 	// Baseline events include prompt_cycle plus the content-free lifecycle /
 	// tool / error / token / batch events that already had closed vocabularies.
@@ -213,15 +213,15 @@ func TestBaselineNoPromptOrOutputText(t *testing.T) {
 	// than assuming.
 	baselineFieldAllowlist := map[string]bool{
 		// prompt_cycle (full allowlist)
-		"model":                   true,
-		"provider":                true,
-		"input_size":              true,
-		"output_size":             true,
-		"cache_percentage":        true,
-		"end_to_end_duration_ms":  true,
-		"segment":                 true,
-		"session_span":            true,
-		"turn_id":                 true,
+		"model":                  true,
+		"provider":               true,
+		"input_size":             true,
+		"output_size":            true,
+		"cache_percentage":       true,
+		"end_to_end_duration_ms": true,
+		"segment":                true,
+		"session_span":           true,
+		"turn_id":                true,
 		// tool_use
 		"tool_name": true, "count": true,
 		// error
@@ -275,7 +275,7 @@ func TestContractDrift(t *testing.T) {
 	if TierAllows(TierError, EventPromptCycle) {
 		t.Fatalf("error tier must NOT allow prompt_cycle — drift gate")
 	}
-	if ! TierCovers(TierDeep, TierBaseline) {
+	if !TierCovers(TierDeep, TierBaseline) {
 		t.Fatalf("deep must cover baseline — drift gate")
 	}
 	// No-text-fields guarantee: baseline events must not admit a forbidden

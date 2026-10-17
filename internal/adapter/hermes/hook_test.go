@@ -1,6 +1,8 @@
 package hermes
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -93,6 +95,46 @@ func TestBuildToolEvent_ToolCall_FailureFromExitCode(t *testing.T) {
 	}
 	if evt.ToolOutput == "" {
 		t.Error("ToolOutput empty, want stderr-like text")
+	}
+}
+
+// TestBuildToolEvent_ToolCall_ResultFallbackScrubsJSONWithoutCorruption
+// pins MHC-4 (docs/audits/codebase-audit-2026-09-16.md): when
+// parseToolResult finds neither an "output" nor a "content" key, it
+// falls back to the WHOLE raw JSON result body — which must then be
+// scrubbed with RawJSON, not String, or a secret-shaped value sitting
+// next to another field truncates/corrupts the stored JSON instead of
+// just getting redacted.
+func TestBuildToolEvent_ToolCall_ResultFallbackScrubsJSONWithoutCorruption(t *testing.T) {
+	t.Parallel()
+	const secret = "sk_live_abcdef1234567890"
+	const sibling = "echo hi"
+	// No "output"/"content" key present, so parseToolResult's fallback
+	// (output = body) fires, handing the WHOLE object to the scrubber.
+	body := []byte(`{
+		"event": "tool_call",
+		"session_id": "s1",
+		"tool_call_id": "call_x",
+		"tool_name": "terminal",
+		"args": {"command": "` + sibling + `"},
+		"result": "{\"api_key\": \"` + secret + `\", \"exit_code\": 0, \"note\": \"` + sibling + `\"}",
+		"timestamp": 1717500000
+	}`)
+	evt, ok, err := BuildToolEvent(EventToolCall, body, scrub.New())
+	if err != nil {
+		t.Fatalf("BuildToolEvent: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if !json.Valid([]byte(evt.ToolOutput)) {
+		t.Fatalf("ToolOutput is not valid JSON after scrubbing: %q", evt.ToolOutput)
+	}
+	if strings.Contains(evt.ToolOutput, secret) {
+		t.Errorf("secret survived scrubbing: %q", evt.ToolOutput)
+	}
+	if !strings.Contains(evt.ToolOutput, sibling) {
+		t.Errorf("sibling field lost — scrubbing truncated/corrupted the JSON: %q", evt.ToolOutput)
 	}
 }
 
@@ -208,6 +250,84 @@ func TestBuildToolEvent_MalformedJSONReturnsError(t *testing.T) {
 	}
 }
 
+// TestBuildToolEvent_SubagentStart pins the subagent_start mapping —
+// forward-compatible groundwork since the bundled plugin bridge
+// doesn't fire this event today (see the BuildToolEvent doc comment).
+// The row must carry IsSidechain=true to mark the child's own
+// runtime bracket starting.
+func TestBuildToolEvent_SubagentStart(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{
+		"event": "subagent_start",
+		"session_id": "parent-sess",
+		"child_role": "code-reviewer",
+		"cwd": "/home/dev/project",
+		"timestamp": 1717500000.5
+	}`)
+	evt, ok, err := BuildToolEvent(EventSubagentStart, body, nil)
+	if err != nil {
+		t.Fatalf("BuildToolEvent: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if evt.ActionType != models.ActionSubagentStart {
+		t.Errorf("ActionType = %q, want %q", evt.ActionType, models.ActionSubagentStart)
+	}
+	if !evt.IsSidechain {
+		t.Error("IsSidechain = false, want true (child's own runtime bracket)")
+	}
+	if evt.Target != "code-reviewer" {
+		t.Errorf("Target = %q, want child_role", evt.Target)
+	}
+	if evt.SessionID != "parent-sess" {
+		t.Errorf("SessionID = %q", evt.SessionID)
+	}
+	if !evt.Success {
+		t.Error("Success = false, want true")
+	}
+	if evt.SourceEventID != "parent-sess:subagent_start:1717500000500" {
+		t.Errorf("SourceEventID = %q, want timestamp-derived key", evt.SourceEventID)
+	}
+}
+
+// TestBuildToolEvent_SubagentStop pins the existing subagent_stop
+// mapping (previously untested). IsSidechain must be true here too —
+// it already was before this change, this test just pins it.
+func TestBuildToolEvent_SubagentStop(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{
+		"event": "subagent_stop",
+		"session_id": "parent-sess",
+		"child_summary": "Reviewed the diff, found 2 issues",
+		"child_status": "completed",
+		"duration_ms": 4200,
+		"timestamp": 1717500999
+	}`)
+	evt, ok, err := BuildToolEvent(EventSubagentStop, body, nil)
+	if err != nil {
+		t.Fatalf("BuildToolEvent: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if evt.ActionType != models.ActionSubagentStop {
+		t.Errorf("ActionType = %q, want %q", evt.ActionType, models.ActionSubagentStop)
+	}
+	if !evt.IsSidechain {
+		t.Error("IsSidechain = false, want true")
+	}
+	if evt.Target != "completed" {
+		t.Errorf("Target = %q, want child_status", evt.Target)
+	}
+	if !evt.Success {
+		t.Error("Success = false, want true (child_status completed)")
+	}
+	if evt.DurationMs != 4200 {
+		t.Errorf("DurationMs = %d, want 4200", evt.DurationMs)
+	}
+}
+
 // TestBuildTokenEvent_HappyPath pins the post_api_request -> TokenEvent
 // translation. usage{input_tokens, output_tokens, cache_*} land
 // directly; model strips provider prefix; Source/Reliability are
@@ -262,6 +382,61 @@ func TestBuildTokenEvent_HappyPath(t *testing.T) {
 	}
 	if tok.Reliability != models.ReliabilityApproximate {
 		t.Errorf("Reliability = %q", tok.Reliability)
+	}
+	// No api_duration field in this payload -> no gen-timing stamp.
+	if tok.GenMs != 0 || tok.GenBasis != "" || tok.GenTimingV != 0 {
+		t.Errorf("GenMs/GenBasis/GenTimingV = %d/%q/%d, want zero (no api_duration)", tok.GenMs, tok.GenBasis, tok.GenTimingV)
+	}
+}
+
+// TestBuildTokenEvent_GenMs is table-driven over the api_duration ->
+// GenMs stamping decision. api_duration is hookPayload.APIDuration
+// float64 `json:"api_duration"` (hook.go ~L80), FLOAT SECONDS per
+// testdata/hermes/plugin-api-source.txt ~L373 ("api_duration": 1.234),
+// covering exactly the one API call this post_api_request event's usage
+// block reports on.
+func TestBuildTokenEvent_GenMs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		apiDuration string // raw JSON literal, or "" to omit the field
+		wantGenMs   int64
+		wantStamped bool
+	}{
+		{name: "positive duration stamps ms-rounded", apiDuration: `1.234`, wantGenMs: 1234, wantStamped: true},
+		{name: "sub-millisecond rounds up", apiDuration: `0.0006`, wantGenMs: 1, wantStamped: true},
+		{name: "field omitted leaves unset", apiDuration: "", wantGenMs: 0, wantStamped: false},
+		{name: "zero duration leaves unset", apiDuration: `0`, wantGenMs: 0, wantStamped: false},
+		{name: "negative duration leaves unset", apiDuration: `-1.5`, wantGenMs: 0, wantStamped: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			durField := ""
+			if tt.apiDuration != "" {
+				durField = `"api_duration": ` + tt.apiDuration + `,`
+			}
+			body := []byte(`{
+				"event": "api_request",
+				"session_id": "s1",
+				"api_call_count": 1,
+				` + durField + `
+				"usage": {"input_tokens": 100, "output_tokens": 50}
+			}`)
+			tok, ok, err := BuildTokenEvent(EventAPIRequest, body)
+			if err != nil {
+				t.Fatalf("BuildTokenEvent: %v", err)
+			}
+			if !ok {
+				t.Fatal("ok = false")
+			}
+			if tt.wantStamped {
+				if tok.GenMs != tt.wantGenMs || tok.GenBasis != models.GenBasisNative || tok.GenTimingV != 1 {
+					t.Errorf("GenMs/GenBasis/GenTimingV = %d/%q/%d, want %d/native/1", tok.GenMs, tok.GenBasis, tok.GenTimingV, tt.wantGenMs)
+				}
+			} else if tok.GenMs != 0 || tok.GenBasis != "" || tok.GenTimingV != 0 {
+				t.Errorf("GenMs/GenBasis/GenTimingV = %d/%q/%d, want zero value (no stamp)", tok.GenMs, tok.GenBasis, tok.GenTimingV)
+			}
+		})
 	}
 }
 

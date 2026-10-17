@@ -16,6 +16,7 @@ import (
 // without depending on the package-internal indexEntry type.
 type IndexEntryResolved struct {
 	ProjectRoot string
+	GitRemote   string
 	Title       string
 	ModelHint   string
 	Created     time.Time
@@ -55,7 +56,12 @@ func ResolveIndexEntry(pbPath string) (IndexEntryResolved, bool) {
 		Created:   e.created,
 	}
 	if e.workspaceURI != "" {
-		out.ProjectRoot = decodeFileURIToRoot(e.workspaceURI)
+		// ResolveIndexEntry is the backfill re-attribution path (cmd/observer
+		// backfill.go's --antigravity-project-root), which re-resolves git
+		// identity itself via a direct git.Resolve call — the richer
+		// Project Identity Resolver v2 bundle is intentionally discarded
+		// here, matching that call site's existing Root/IsGit-only usage.
+		out.ProjectRoot, out.GitRemote, _ = decodeFileURIToRoot(e.workspaceURI)
 	}
 	return out, true
 }
@@ -99,9 +105,9 @@ func FetchStructuredTrajectory(ctx context.Context, conversationID, projectRoot,
 		if err != nil {
 			return StructuredEnrichment{}, fmt.Errorf("antigravity.FetchStructuredTrajectory: bridge: %w", err)
 		}
-		return ParseStructuredTrajectory(raw, conversationID, projectRoot, sourceFile, scrubber), nil
+		return ParseStructuredTrajectory(raw, conversationID, projectRoot, "", sourceFile, scrubber), nil
 	}
-	servers, err := discoverLanguageServers()
+	servers, err := discoverLanguageServers(ctx)
 	if err != nil {
 		return StructuredEnrichment{}, fmt.Errorf("antigravity.FetchStructuredTrajectory: discover: %w", err)
 	}
@@ -116,7 +122,7 @@ func FetchStructuredTrajectory(ctx context.Context, conversationID, projectRoot,
 			lastErr = err
 			continue
 		}
-		return ParseStructuredTrajectory(raw, conversationID, projectRoot, sourceFile, scrubber), nil
+		return ParseStructuredTrajectory(raw, conversationID, projectRoot, "", sourceFile, scrubber), nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no usable language_server endpoint")
@@ -151,7 +157,7 @@ func FetchMarkdownTrajectory(ctx context.Context, conversationID string, timeout
 	if isWSL() {
 		return invokeBridgeFromWSL(ctx, conversationID, timeout)
 	}
-	servers, err := discoverLanguageServers()
+	servers, err := discoverLanguageServers(ctx)
 	if err != nil {
 		return "", fmt.Errorf("antigravity.FetchMarkdownTrajectory: discover: %w", err)
 	}
@@ -181,7 +187,7 @@ func FetchMarkdownTrajectory(ctx context.Context, conversationID string, timeout
 // the backfill to recover lost planner_response coverage on
 // gemini sessions whose 1.2.20 PLANNER_RESPONSE step is sparse.
 func ParseMarkdownPlannerResponses(path, conversationID, projectRoot string, ts time.Time, scrubber Scrubber, markdown string) []models.ToolEvent {
-	res := parseMarkdownConversation(path, conversationID, projectRoot, ts, scrubber, markdown,
+	res := parseMarkdownConversation(path, conversationID, projectRoot, "", ts, scrubber, markdown,
 		true, true, false)
 	return res.ToolEvents
 }

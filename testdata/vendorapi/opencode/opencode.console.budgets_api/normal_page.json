@@ -1,0 +1,32 @@
+[
+  {
+    "user_id": "user_...",
+    "email": "alice@example.com",
+    "limit_micro_cents": "7525000000",
+    "spent_micro_cents": "1250000000",
+    "exceeded": false,
+    "resets_at": "2026-10-01T00:00:00.000Z",
+    "source": "custom",
+    "updated_at": "2026-09-03T12:00:00.000Z"
+  },
+  {
+    "user_id": "user_synth0002",
+    "email": "bob@example.com",
+    "limit_micro_cents": "5000000000",
+    "spent_micro_cents": "5100000000",
+    "exceeded": true,
+    "resets_at": "2026-10-01T00:00:00.000Z",
+    "source": "default",
+    "updated_at": null
+  },
+  {
+    "user_id": "user_synth0003",
+    "email": "carol@example.com",
+    "limit_micro_cents": null,
+    "spent_micro_cents": "300000000",
+    "exceeded": false,
+    "resets_at": "2026-10-01T00:00:00.000Z",
+    "source": null,
+    "updated_at": null
+  }
+]

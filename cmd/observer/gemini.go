@@ -4,11 +4,13 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
 // newGeminiCmd implements `observer gemini` — sets GOOGLE_GEMINI_BASE_URL to
@@ -25,6 +27,11 @@ import (
 // GROUNDED (2026-06-27, live install): gemini-cli honors GOOGLE_GEMINI_BASE_URL
 // (confirmed in the @google/gemini-cli module). NEVER touches the API key —
 // it rides the request (header / ?key=) untouched.
+//
+// CONDITIONAL since 2026-10-04 (T-345): only the API-key and "gateway" auth
+// types read GOOGLE_GEMINI_BASE_URL; Google sign-in goes to the Code Assist
+// endpoint and Vertex reads GOOGLE_VERTEX_BASE_URL (installed 0.62.0 bundle).
+// The registry gate routes only with GEMINI_API_KEY in the environment.
 func newGeminiCmd() *cobra.Command {
 	var (
 		configPath   string
@@ -40,20 +47,29 @@ func newGeminiCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "gemini [-- gemini-args...]",
-		Short: "Launch Gemini CLI with traffic routed through the observer proxy (probe)",
-		Long: "Wraps `gemini` (Google Gemini CLI) with GOOGLE_GEMINI_BASE_URL\n" +
-			"pointed at the observer proxy root. The proxy's Gemini bridge\n" +
-			"recognizes the generateContent path, forwards to Google, and\n" +
-			"captures usageMetadata as accurate token counts.\n\n" +
-			"PROBE: confirm a turn lands an api_turns row (provider=google).\n\n" +
+		Short: "Launch Gemini CLI; routes API-key sessions through the observer proxy",
+		Long: "Wraps `gemini` (Google Gemini CLI).\n\n" +
+			"With GEMINI_API_KEY exported, the launcher points\n" +
+			"GOOGLE_GEMINI_BASE_URL at the observer proxy root. The proxy's\n" +
+			"Gemini bridge recognizes the generateContent path, forwards to\n" +
+			"Google, and captures usageMetadata as accurate token counts.\n\n" +
+			"Without GEMINI_API_KEY, Gemini uses your Google sign-in (or\n" +
+			"Vertex AI), which never reads that variable, so the launch runs\n" +
+			"UNROUTED and says so; the session is captured from Gemini's own\n" +
+			"session files instead.\n\n" +
 			"With --continue-from <session-id> the launcher distills a handover\n" +
 			"from that session and seeds it via gemini's -i/--prompt-interactive\n" +
 			"flag (delivery=inject_prompt). See docs/session-handoff.md.\n\n" +
 			"All arguments after the subcommand are forwarded to gemini. Use\n" +
 			"`--` to separate observer flags from gemini flags. NEVER touches\n" +
 			"the API key. Requires a running observer proxy (`observer start`).",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach-by-default (attach-all-launchers): hand the PTY to the
 			// daemon when attach resolves. gemini-cli self-routes via
 			// GOOGLE_GEMINI_BASE_URL in the daemon-spawned inner launcher, so
@@ -132,16 +148,32 @@ func newGeminiCmd() *cobra.Command {
 				args = seeded
 				continueDir = cwd
 			}
+			// The route is CONDITIONAL (registry ProxyRoute.Gate, T-345):
+			// Gemini's Google sign-in and Vertex lanes never read
+			// GOOGLE_GEMINI_BASE_URL, and setting it with no key makes a fresh
+			// install pick a keyless "gateway" auth instead of offering Google
+			// sign-in. Without GEMINI_API_KEY in the environment the launch
+			// runs unrouted and says so; presence only, the key is never read.
+			route := resolveGatedRoute("gemini-cli", "gemini", resolved, "", args, os.Environ())
+			if route.err != nil {
+				return route.err
+			}
+			if route.notice != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), route.notice)
+			}
 			return runEnvLauncher(envLauncherSpec{
-				tool:     "gemini",
-				bin:      bin,
-				args:     args,
-				dir:      continueDir,
-				proxyURL: resolved,
-				// Gemini base URL is the host ROOT (no /v1) — the CLI appends
-				// the /v1beta/models/<model>:generateContent path itself.
-				env:    map[string]string{"GOOGLE_GEMINI_BASE_URL": strings.TrimRight(resolved, "/")},
-				stderr: cmd.ErrOrStderr(),
+				tool:        "gemini",
+				bin:         bin,
+				args:        args,
+				configPath:  configPath,
+				dir:         continueDir,
+				proxyURL:    resolved,
+				env:         geminiLaunchEnv(route.routed, resolved),
+				dbPath:      cfg.Observer.DBPath,
+				seedTool:    models.ToolGeminiCLI, // stderr label is "gemini"; sessions.tool stores "gemini-cli"
+				unrouted:    !route.routed,        // the notice above already said why
+				routeCaveat: route.caveat,
+				stderr:      cmd.ErrOrStderr(),
 			})
 		},
 	}
@@ -154,8 +186,19 @@ func newGeminiCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "gemini-cli")
 	resume = registerResumeFlag(cmd, "gemini-cli")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+// geminiLaunchEnv is the env the launcher injects (a user's own value still
+// wins in applyBaseURLEnv). A routed launch points GOOGLE_GEMINI_BASE_URL at
+// the proxy ROOT (no /v1: the CLI appends /v1beta/models/<model>:
+// generateContent itself); an unrouted one sets nothing, so Gemini keeps its
+// own sign-in. Never a key.
+func geminiLaunchEnv(routed bool, proxyURL string) map[string]string {
+	if !routed {
+		return map[string]string{}
+	}
+	return map[string]string{"GOOGLE_GEMINI_BASE_URL": strings.TrimRight(proxyURL, "/")}
 }
 
 // geminiAttachPassthrough forwards --gemini-path to the daemon-spawned inner

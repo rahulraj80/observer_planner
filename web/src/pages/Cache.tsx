@@ -1,15 +1,34 @@
-import { useMemo, useState } from "react";
-import { ChartShell, PageHeader, Pill, StatCard } from "@/components/primitives";
+import { hasNonZero } from "@shared/lib/seriesEmpty";
+import { useMemo, useState, type ReactNode } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable } from "@/components/DataTable";
+import {
+  Button,
+  ChartShell,
+  EmptyState,
+  ErrorState,
+  Icon,
+  InfoDisclosure,
+  type IllustrationKind,
+  InlineLoading,
+  ModelId,
+  PageHeader,
+  StatCard,
+  Stagger,
+  Meter,
+  Table,
+  TabPanel,
+  TabStrip,
+  Tooltip,
+  useTabVisited,
+} from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { CACHE_TABS, defaultTab, type CacheTab } from "@/lib/nodePageTabs";
 import { ChartState } from "@/components/ChartState";
 import { CacheExpiryCard } from "@/components/CacheExpiryCard";
 import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
 import { SessionDetailPanel } from "@/components/SessionDetailPanel";
-import {
-  BoltIcon,
-  CoinsIcon,
-  DatabaseIcon,
-  DropletIcon,
-} from "@/components/icons";
 import {
   CacheEventsChart,
   CacheRatioChart,
@@ -17,12 +36,32 @@ import {
 } from "@/components/charts";
 import {
   useFilters,
+  useGranularity,
   windowDaysApprox,
   windowLabel,
   windowParams,
 } from "@/lib/filters";
+import { GranControl } from "@/components/GranControl";
+import { asGranularity, perBucketTitle } from "@shared/lib/granularity";
 import { useApi } from "@/lib/useApi";
-import { fmtCompact, fmtInt, fmtPct, fmtUSD } from "@/lib/format";
+import { gradingGateFailed } from "@/lib/cacheHealth";
+import {
+  fmtCompact,
+  fmtDateTime,
+  fmtInt,
+  fmtPct,
+  fmtShortId,
+  fmtUSD,
+  dollarsShown,
+  localeString,
+} from "@/lib/format";
+import { csvText } from "@/lib/costExport";
+import { MixCell, Td, Th } from "@/components/tableCells";
+import { CACHE_ENTRY_STATE, CACHE_EVENT_KIND, CACHE_TIER, cacheCauseTone } from "@shared/lib/cacheVocab";
+import { vocabTone } from "@shared/lib/vocabEntry";
+import { vocabIcon } from "@shared/lib/vocabIcons";
+import { VocabPill } from "@shared/lib/vocabPill";
+import type { Tone } from "@shared/lib/tone";
 import type {
   CacheEntryStatesResponse,
   CacheEventRow,
@@ -33,6 +72,36 @@ import type {
   CacheOverviewSessionRow,
   CacheTimeseriesResponse,
 } from "@/lib/types";
+import { navIcon } from "@/lib/nav";
+import { MetricIcon } from "@/components/MetricIcon";
+import {
+  Bot,
+  ChartBar,
+  ChartBarStacked,
+  ChartColumn,
+  ChartColumnStacked,
+  ChartLine,
+  Download,
+  FolderKanban,
+  List,
+  ListOrdered,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
+
+// One glyph per cache section card title (the ChartShell `icon` slot): the
+// chart or table shape the section shows, never decoration.
+const SECTION_ICONS = {
+  byModel: Bot,
+  byProject: FolderKanban,
+  trafficPerDay: ChartColumnStacked,
+  eventsPerDay: ChartColumn,
+  ratioTrajectory: ChartLine,
+  entryStates: ChartBarStacked,
+  recentEvents: List,
+  topCauses: ChartBar,
+  worstSessions: ListOrdered,
+} satisfies Record<string, LucideIcon>;
 
 // CachePage — standalone /cache route that consumes /api/cache/overview
 // in full. The Overview tile shows the headline R/W ratio; this page
@@ -44,27 +113,28 @@ import type {
 //   #1 — never itemize baseline events. The Top causes histogram is a
 //        proportional bar list with suffix_growth + hit dominating; the
 //        tally is event count, not invalidation count.
-//   #2 — render flagged causes neutrally (not alarm-red). CausePill
-//        renders Flagged=true entries with the neutral variant; real
-//        invalidation causes keep the warn tone.
+//   #2 — one tone owner for flagged causes: CausePill reads
+//        cacheCauseTone (@shared/lib/cacheVocab), so a Flagged=true
+//        entry takes CACHE_FLAG's warn, never an ad-hoc tone.
 export function CachePage() {
   // Cache page honors the global TopBar filters the same way Cost /
   // Analysis / Overview do. Backend handler (handleCacheOverview)
   // accepts the same days / tool / project query-param shape.
   // Days==0 is the "all-time" sentinel so the page is non-empty even
   // when the corpus pre-dates the operator's default window.
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   // Cache endpoints use 0 (not 36500) as their all-time sentinel.
   const winParams = windowParams(win, customRange, { allSentinel: 0 });
   // Prior-period comparison is day-grained: shift the window back by
   // its own span in whole days (sub-day / custom windows round up).
   const priorSpanDays = windowDaysApprox(win, customRange, 0);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
   const cache = useApi<CacheOverviewResponse>(
     "/api/cache/overview",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
     { refreshMs: 15000 },
   );
   // Prior-period fetch — shifts the window backward by the same
@@ -78,23 +148,27 @@ export function CachePage() {
       days: priorSpanDays,
       period_offset_days: priorSpanDays,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [win, customRange, tool, project],
+    [win, customRange, tool, model, project],
     { refreshMs: 60000 },
   );
-  // Timeseries powers sparklines on the four headline tiles. Daily
-  // bucket; defaults to days=30 when the window is "all" so the
-  // sparkline still reads as recent-trajectory rather than a flat
-  // multi-year line.
+  // Timeseries powers the three chart panels and the sparklines on the
+  // four headline tiles. It follows the global window (days=0 = all
+  // time) and the shared granularity rule + the viewer's `gran=` choice
+  // (Auto: 5 min for <= 3h, hour for <= 7d, day for <= 180d, week beyond).
+  const gran = useGranularity();
   const timeseries = useApi<CacheTimeseriesResponse>(
     "/api/cache/timeseries",
     {
-      ...(win === "all" ? { days: 30 } : winParams),
+      ...winParams,
+      ...gran.params,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [win, customRange, tool, project],
+    [win, customRange, tool, model, project, gran.params],
     { refreshMs: 30000 },
   );
   const sparks = useMemo(() => deriveSparks(timeseries.data), [timeseries.data]);
@@ -113,33 +187,44 @@ export function CachePage() {
   // summary's graded_events — if the engine has graded ANY event
   // ever, the corpus isn't empty, so the right empty-state is the
   // filter-mismatch one.
-  const filtersActive = win !== "all" || tool !== "all" || project !== "all";
+  const filtersActive = win !== "all" || tool !== "all" || project !== "all" || model !== "all";
   const corpusHasEvents = (health.data?.graded_events ?? 0) > 0;
   const winLabel = win === "all" ? "all time" : windowLabel(win, customRange);
   // Recent events — paginated drill-down below the charts. Page
   // size 50 / no page state in URL (yet); refresh 30s.
   const [eventsOffset, setEventsOffset] = useState(0);
+  // Page tabs (platform tabs plan, section 2.2): Overview (rollups, charts, entry
+  // states) / Events (recent events, top causes, worst sessions). The
+  // recent-events read runs once the Events tab has been opened.
+  const pageTabs = usePageTabs("cache", CACHE_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const eventsVisited = useTabVisited<CacheTab>("events", tab);
   const events = useApi<CacheEventsResponse>(
-    "/api/cache/events",
+    eventsVisited ? "/api/cache/events" : null,
     {
       ...winParams,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       limit: 50,
       offset: eventsOffset,
     },
-    [win, customRange, tool, project, eventsOffset],
+    [win, customRange, tool, model, project, eventsOffset],
     { refreshMs: 30000 },
   );
-  // Entry-state distribution — engine global (no window filter; the
-  // entries table is a current snapshot, not a historical series).
+  // Entry-state distribution: a current snapshot, not a historical series,
+  // so no window; it does follow the Model filter (an entry carries its own
+  // model). Only the
+  // Overview tab renders it, so it loads once that tab has been opened (an
+  // organization can hide the tab, and the daemon then refuses this read).
+  const overviewVisited = useTabVisited<CacheTab>("overview", tab);
   const entryStates = useApi<CacheEntryStatesResponse>(
-    "/api/cache/entry-states",
-    undefined,
-    [],
+    overviewVisited ? "/api/cache/entry-states" : null,
+    { model: modelParam },
+    [model],
     { refreshMs: 60000 },
   );
-  // Empty-state copy is filter-aware AND provider-aware. As of §15.3
+  // Empty-state copy is filter-aware AND provider-aware. Since implicit-cache support
   // OpenAI / codex / OpenAI-routed adapters ALSO emit implicit-cache
   // events, so an OpenAI-dominated install is no longer silently
   // empty — but events land on the separate (lower-fidelity)
@@ -149,15 +234,16 @@ export function CachePage() {
   const hasImplicit = (health.data?.implicit_cache_events ?? 0) > 0;
   const emptyHint =
     filtersActive && corpusHasEvents
-      ? "No cache events match the current filters. Try widening the window, clearing the tool / project filter, or resetting from the TopBar."
+      ? "No cache events match the current filters. Try widening the window, clearing the tool / project / model filter, or resetting from the TopBar."
       : hasUntracked && !corpusHasEvents && !hasImplicit
-        ? `Recent traffic is dominated by ${health.data?.untracked_provider_top_tool || "non-Anthropic"} sessions. These route through the implicit-cache surface, but no implicit-cache events were captured — the running binary may pre-date implicit support (restart on the current build), or retrofit history via Settings → Backfill → cache-rescan.`
+        ? `Recent traffic is dominated by ${health.data?.untracked_provider_top_tool || "non-Anthropic"} sessions. These route through the implicit-cache surface, but no implicit-cache events were captured - the running binary may pre-date implicit support (restart on the current build), or retrofit history via Settings → Backfill → cache-rescan.`
         : "No cache events recorded yet. Cache tracking is on by default (toggle under Settings → Cache tracking); to retrofit historical transcripts, run cache-rescan from Settings → Backfill.";
   const [openSessionId, setOpenSessionId] = useState<string | null>(null);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 sm:p-6">
       <PageHeader
+        icon={navIcon("cache")}
         title="Cache"
         sub="Prompt-cache observation, attribution, and forecasting across providers. Anthropic gets marker-aware grading; OpenAI / codex / OpenAI-routed adapters get implicit-cache tracking on a separate, lower-fidelity surface (graded against per-session prefix estimates, not provider markers). Local, passive, network-free."
         helpId="tab.cache"
@@ -167,7 +253,11 @@ export function CachePage() {
 
       <ChartState
         loading={cache.loading}
+        stale={cache.isStale}
+        onRetry={cache.reload}
         error={cache.error}
+        denied={cache.denied}
+        deniedPermission={cache.deniedPermission}
         empty={!cache.data || (cache.data.global.event_count ?? 0) === 0}
         emptyHint={emptyHint}
         height={120}
@@ -180,20 +270,34 @@ export function CachePage() {
             timeseries={timeseries.data ?? null}
             timeseriesLoading={timeseries.loading}
             timeseriesError={timeseries.error}
+            timeseriesDenied={timeseries.denied}
+            timeseriesDeniedPermission={timeseries.deniedPermission}
             health={health.data ?? null}
             winLabel={winLabel}
             events={events.data ?? null}
             eventsLoading={events.loading}
             eventsError={events.error}
+            eventsDenied={events.denied}
+            eventsDeniedPermission={events.deniedPermission}
             eventsOffset={eventsOffset}
             onEventsOffsetChange={setEventsOffset}
             entryStates={entryStates.data ?? null}
+            entryStatesLoading={entryStates.loading}
+            entryStatesError={entryStates.error}
+            onEntryStatesRetry={entryStates.reload}
             onOpenSession={setOpenSessionId}
+            tab={tab}
+            tabIds={pageTabs.ids}
+            onTab={setTab}
           />
         )}
       </ChartState>
 
+      {/* This drawer is opened from local state (no ?session=), so it is
+          not route state: its tab stays local. (The drawer's URL slot is
+          `?dtab=`, never this page's `?tab=`; lib/drawerTab.ts.) */}
       <SessionDetailPanel
+        urlTabState={false}
         sessionId={openSessionId}
         open={openSessionId != null}
         onClose={() => setOpenSessionId(null)}
@@ -217,15 +321,25 @@ function CacheContent({
   timeseries,
   timeseriesLoading,
   timeseriesError,
+  timeseriesDenied,
+  timeseriesDeniedPermission,
   health,
   winLabel,
   events,
   eventsLoading,
   eventsError,
+  eventsDenied,
+  eventsDeniedPermission,
   eventsOffset,
   onEventsOffsetChange,
   entryStates,
+  entryStatesLoading,
+  entryStatesError,
+  onEntryStatesRetry,
   onOpenSession,
+  tab,
+  tabIds,
+  onTab,
 }: {
   data: CacheOverviewResponse;
   priorData: CacheOverviewResponse | null;
@@ -233,21 +347,39 @@ function CacheContent({
   timeseries: CacheTimeseriesResponse | null;
   timeseriesLoading: boolean;
   timeseriesError: Error | null;
+  timeseriesDenied?: boolean;
+  timeseriesDeniedPermission?: string | null;
   health: CacheHealthSummary | null;
   winLabel: string;
   events: CacheEventsResponse | null;
   eventsLoading: boolean;
   eventsError: Error | null;
+  eventsDenied?: boolean;
+  eventsDeniedPermission?: string | null;
   eventsOffset: number;
   onEventsOffsetChange: (n: number) => void;
   entryStates: CacheEntryStatesResponse | null;
+  entryStatesLoading: boolean;
+  entryStatesError: Error | null;
+  onEntryStatesRetry: () => void;
   onOpenSession: (sid: string) => void;
+  tab: CacheTab;
+  /** The tabs the organization left visible on this machine (T-132). */
+  tabIds: readonly CacheTab[];
+  onTab: (t: CacheTab) => void;
 }) {
   const global = data.global;
   const ratio = global.efficiency?.ratio ?? 0;
+  // The chart panels' bucket (the response `bucket`); the series is
+  // zero-filled, so "empty" means no bucket carries an event.
+  const tsGran = asGranularity(timeseries?.bucket);
+  const hasTraffic = hasNonZero(timeseries?.series, ["event_count"]);
   const readTokens = global.efficiency?.read_tokens ?? 0;
   const writeTokens = global.efficiency?.written_tokens ?? 0;
-  const avoidable = global.efficiency?.avoidable_usd ?? 0;
+  // Avoidable spend is dollars only: in the org's token-usage view
+  // (format.ts cost affordances) the tile reads as cache events and the
+  // table drops its Avoidable column.
+  const avoidable = dollarsShown() ? global.efficiency?.avoidable_usd ?? 0 : 0;
   const totalTraffic = readTokens + writeTokens;
   const readShare = totalTraffic > 0 ? readTokens / totalTraffic : 0;
   const writeShare = totalTraffic > 0 ? writeTokens / totalTraffic : 0;
@@ -298,6 +430,7 @@ function CacheContent({
         key: m.model,
         display: m.model,
         title: m.model,
+        label: <ModelId model={m.model} className="max-w-[260px]" />,
         read: m.efficiency?.read_tokens ?? 0,
         write: m.efficiency?.written_tokens ?? 0,
         ratio: m.efficiency?.ratio ?? 0,
@@ -335,22 +468,22 @@ function CacheContent({
           rhythm but on the engine-coverage axis. */}
       <UntrackedProviderBanner health={health} />
 
-      {/* Engine-health WARN banner — fires when the cachetrack engine
-          surfaces a grading-gate failure, a dominant non-baseline
-          cause, an inconsistent rewrite shape, or bucket-mismatch
-          drift. Mirrors the unknown-model pill pattern on Cost. */}
-      <CacheHealthBanner health={health} />
+      {/* The one alarm this page raises about the attribution engine:
+          the cache-health grading gate failed on enough events. The
+          engine's own labelling diagnostics never alarm here; they live
+          collapsed at the bottom of the Overview tab (EngineDiagnostics). */}
+      <CacheAttributionAlarm health={health} />
 
       {/* Headline KPI row — mirrors Cost's accent-hero rhythm. The
           ratio tile is the accent hero; the three siblings render with
           the default tile gradient. Distinct icons per tile so a
           glance through the row reads like Cost's KPI strip. */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <StatCard
           label={`Cache ratio (${winLabel})`}
           helpId="tile.cache_ratio"
-          icon={<DatabaseIcon />}
-          value={ratio > 0 ? `${ratio.toFixed(1)}×` : "—"}
+          icon={<MetricIcon metric="cacheHitRate" />}
+          value={ratio > 0 ? `${ratio.toFixed(1)}×` : "-"}
           sub={
             ratio > 0
               ? `R ${fmtCompact(readTokens)} · W ${fmtCompact(writeTokens)} tokens`
@@ -365,7 +498,7 @@ function CacheContent({
         <StatCard
           label={`Cache read (${winLabel})`}
           helpId="metric.cache_read"
-          icon={<DropletIcon />}
+          icon={<MetricIcon metric="cacheRead" />}
           value={fmtCompact(readTokens)}
           sub={
             totalTraffic > 0
@@ -380,7 +513,7 @@ function CacheContent({
         <StatCard
           label={`Cache write (${winLabel})`}
           helpId="metric.cache_creation"
-          icon={<DropletIcon />}
+          icon={<MetricIcon metric="cacheWrite" />}
           value={fmtCompact(writeTokens)}
           sub={
             totalTraffic > 0
@@ -395,7 +528,7 @@ function CacheContent({
         <StatCard
           label={`${avoidable > 0 ? "Avoidable spend" : "Cache events"} (${winLabel})`}
           helpId={avoidable > 0 ? "tile.cache_avoidable" : "tile.cache_events"}
-          icon={avoidable > 0 ? <CoinsIcon /> : <BoltIcon />}
+          icon={<MetricIcon metric={avoidable > 0 ? "avoidableSpend" : "cacheEvents"} />}
           value={
             avoidable > 0 ? fmtUSD(avoidable) : fmtInt(global.event_count ?? 0)
           }
@@ -411,9 +544,9 @@ function CacheContent({
           warn={avoidable > 0}
         />
         <MispredictRateTile health={health} />
-      </div>
+      </Stagger>
 
-      {/* §15.3 implicit-cache row — renders only when implicit-cache
+      {/* Implicit-cache row — renders only when implicit-cache
           events exist in the window (OpenAI / codex / OpenAI-routed
           adapters). Surfaces prefix-survival rate + engine-consistency
           on a separate row from the Anthropic gate so the operator
@@ -425,17 +558,30 @@ function CacheContent({
             <span className="font-semibold uppercase tracking-[0.06em] text-info">
               Implicit cache scope
             </span>{" "}
-            §15.3 reduced attribution path. Anthropic-only events are graded
-            by the marker-aware §10 gate above; OpenAI / codex / cline-cli-
-            via-deepseek / opencode+kilo-on-OpenAI events grade against a
-            per-session 128-token-granule prefix estimate. The two
-            surfaces are kept disjoint by design (
+            OpenAI, Codex and other OpenAI-style providers do not mark
+            their cache, so these events are graded against an estimate of
+            each session's stable prompt prefix. That is less exact than
+            Anthropic, which marks its cache, and the two are graded
+            separately so one never skews the other.{" "}
             <HelpInd id="glossary.cachetrack_codex_limitation" />
-            ).
           </div>
         </div>
       )}
 
+      <TabStrip
+        tabs={tabIds.map((id) => ({
+          id,
+          label: CACHE_TABS.labels[id],
+          // The window's event total from the overview read already loaded.
+          count: id === "events" ? (global.event_count ?? null) : null,
+        }))}
+        value={tab}
+        onChange={onTab}
+        idPrefix="cache"
+        ariaLabel="Cache sections"
+      />
+
+      <TabPanel id="overview" active={tab} idPrefix="cache" className="space-y-6">
       {/* Two-column rollups — By model + By project — promoted from
           single-line bullets to real tables with mix bars and explicit
           Read / Write / Events / Ratio columns. Matches the Cost
@@ -443,6 +589,7 @@ function CacheContent({
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartShell
           title={<TitleWithHelp text="By model" helpId="chart.cache_by_model" />}
+          icon={SECTION_ICONS.byModel}
           sub={`Per-model cache traffic · ${fmtInt(modelCount)} model${modelCount === 1 ? "" : "s"}`}
           right={
             <ExportButton
@@ -452,7 +599,7 @@ function CacheContent({
           }
         >
           {modelRows.length === 0 ? (
-            <EmptyHint text="No model-attributed cache traffic." />
+            <EmptyHint title="No model-attributed cache traffic" />
           ) : (
             <ByDimensionTable
               keyHeader="Model"
@@ -464,6 +611,7 @@ function CacheContent({
 
         <ChartShell
           title={<TitleWithHelp text="By project" helpId="chart.cache_by_project" />}
+          icon={SECTION_ICONS.byProject}
           sub={`Per-project cache traffic · ${fmtInt(projectCount)} project${projectCount === 1 ? "" : "s"}`}
           right={
             <ExportButton
@@ -473,7 +621,7 @@ function CacheContent({
           }
         >
           {projectRows.length === 0 ? (
-            <EmptyHint text="No project-attributed cache traffic." />
+            <EmptyHint title="No project-attributed cache traffic" />
           ) : (
             <ByDimensionTable
               keyHeader="Project"
@@ -484,42 +632,50 @@ function CacheContent({
         </ChartShell>
       </div>
 
-      {/* Per-day chart panels — mirrors the Cost page's three-chart
+      {/* Per-bucket chart panels — mirrors the Cost page's three-chart
           cadence below its table. Cache traffic (R+W stacked) +
           Events (healthy + rewrites stacked) sit side by side; the
           ratio trajectory gets a full-width row underneath since
           the ratio's signal is easier to read uncluttered. */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartShell
-          title={<TitleWithHelp text="Cache traffic per day" helpId="chart.cache_traffic_per_day" />}
+          title={<TitleWithHelp text={perBucketTitle("Cache traffic", tsGran)} helpId="chart.cache_traffic_per_day" />}
+          icon={SECTION_ICONS.trafficPerDay}
           sub="Read + write tokens, stacked"
+          right={<GranControl served={timeseries} />}
         >
           <ChartState
             loading={timeseriesLoading}
             error={timeseriesError}
-            empty={!timeseries?.series?.length}
+            denied={timeseriesDenied}
+            deniedPermission={timeseriesDeniedPermission}
+            empty={!hasTraffic}
             emptyHint="No cache traffic in window."
             height={220}
           >
-            {timeseries?.series?.length ? (
-              <CacheTrafficChart data={timeseries.series} />
+            {timeseries && hasTraffic ? (
+              <CacheTrafficChart data={timeseries.series} granularity={tsGran} />
             ) : null}
           </ChartState>
         </ChartShell>
 
         <ChartShell
-          title={<TitleWithHelp text="Events per day" helpId="chart.cache_events_per_day" />}
+          title={<TitleWithHelp text={perBucketTitle("Events", tsGran)} helpId="chart.cache_events_per_day" />}
+          icon={SECTION_ICONS.eventsPerDay}
           sub="Healthy events + rewrites (warn) overlay"
+          right={<GranControl served={timeseries} />}
         >
           <ChartState
             loading={timeseriesLoading}
             error={timeseriesError}
-            empty={!timeseries?.series?.length}
+            denied={timeseriesDenied}
+            deniedPermission={timeseriesDeniedPermission}
+            empty={!hasTraffic}
             emptyHint="No events in window."
             height={220}
           >
-            {timeseries?.series?.length ? (
-              <CacheEventsChart data={timeseries.series} />
+            {timeseries && hasTraffic ? (
+              <CacheEventsChart data={timeseries.series} granularity={tsGran} />
             ) : null}
           </ChartState>
         </ChartShell>
@@ -527,17 +683,21 @@ function CacheContent({
 
       <ChartShell
         title={<TitleWithHelp text="Cache ratio trajectory" helpId="chart.cache_ratio_trajectory" />}
-        sub="Per-day point-wise R/W ratio · gaps on zero-write days"
+        icon={SECTION_ICONS.ratioTrajectory}
+        sub={`Point-wise R/W ratio ${perBucketTitle("", tsGran).trim()} · gaps on zero-write buckets`}
+        right={<GranControl served={timeseries} />}
       >
         <ChartState
           loading={timeseriesLoading}
           error={timeseriesError}
-          empty={!timeseries?.series?.length}
+          denied={timeseriesDenied}
+          deniedPermission={timeseriesDeniedPermission}
+          empty={!hasTraffic}
           emptyHint="No cache traffic in window."
           height={180}
         >
-          {timeseries?.series?.length ? (
-            <CacheRatioChart data={timeseries.series} />
+          {timeseries && hasTraffic ? (
+            <CacheRatioChart data={timeseries.series} granularity={tsGran} />
           ) : null}
         </ChartState>
       </ChartShell>
@@ -547,23 +707,43 @@ function CacheContent({
           a historical series). Compact row above Top causes. */}
       <ChartShell
         title={<TitleWithHelp text="Entry state distribution" helpId="chart.cache_entry_states" />}
+        icon={SECTION_ICONS.entryStates}
         sub="cache_entries grouped by state · live = healthy warm; unverified / expired / invalidated = engine declared stale"
       >
-        {!entryStates || entryStates.rows.length === 0 ? (
-          <EmptyHint text="No cache entries yet — the engine populates this table as it sees writes." />
+        {/* Unknown is not empty: loading and a failed read render as such,
+            the empty hint only once a response has landed. */}
+        {!entryStates && entryStatesLoading ? (
+          <InlineLoading label="Loading entry states" block />
+        ) : !entryStates && entryStatesError ? (
+          <ErrorState
+            className="py-4"
+            title="Couldn't load entry states"
+            error={entryStatesError}
+            onRetry={onEntryStatesRetry}
+          />
+        ) : !entryStates || entryStates.rows.length === 0 ? (
+          <EmptyHint
+            title="No cache entries yet"
+            body="The engine populates this table as it sees writes."
+          />
         ) : (
           <EntryStatesBar rows={entryStates.rows} total={entryStates.total} />
         )}
       </ChartShell>
 
+      <EngineDiagnostics health={health} />
+      </TabPanel>
+
+      <TabPanel id="events" active={tab} idPrefix="cache" className="space-y-6">
       {/* Recent cache events — paginated drill-down. Mirrors the
           Compression tab's recent-events list shape. */}
       <ChartShell
         title={<TitleWithHelp text="Recent cache events" helpId="chart.cache_recent_events" />}
+        icon={SECTION_ICONS.recentEvents}
         sub={
           events
             ? `Showing ${events.rows.length} of ${fmtInt(events.total)} events · newest first`
-            : "loading…"
+            : <InlineLoading label="Loading events" />
         }
         right={
           events && events.total > events.limit ? (
@@ -579,6 +759,8 @@ function CacheContent({
         <ChartState
           loading={eventsLoading}
           error={eventsError}
+          denied={eventsDenied}
+          deniedPermission={eventsDeniedPermission}
           empty={!events || events.rows.length === 0}
           emptyHint="No cache events match the current filters."
         >
@@ -593,10 +775,11 @@ function CacheContent({
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartShell
           title={<TitleWithHelp text="Top causes" helpId="chart.cache_top_causes" />}
+          icon={SECTION_ICONS.topCauses}
           sub="suffix_growth + hit dominate a healthy session; bars scale to event count"
         >
           {data.top_causes.length === 0 ? (
-            <EmptyHint text="No cause data." />
+            <EmptyHint title="No cause data" />
           ) : (
             <TopCausesBars rows={data.top_causes} />
           )}
@@ -604,10 +787,15 @@ function CacheContent({
 
         <ChartShell
           title={<TitleWithHelp text="Worst sessions" helpId="chart.cache_worst_sessions" />}
+          icon={SECTION_ICONS.worstSessions}
           sub="ranked by rewrite count · click a row to open the session's cache timeline"
         >
           {data.worst_sessions.length === 0 ? (
-            <EmptyHint text="No rewrites yet — the cache hasn't been invalidated for any session in the corpus." />
+            <EmptyHint
+              illustration="all-clear"
+              title="No rewrites yet"
+              body="The cache hasn't been invalidated for any session in the corpus."
+            />
           ) : (
             <WorstSessionsTable
               rows={data.worst_sessions}
@@ -616,6 +804,7 @@ function CacheContent({
           )}
         </ChartShell>
       </div>
+      </TabPanel>
     </>
   );
 }
@@ -638,8 +827,8 @@ function MispredictRateTile({
       <StatCard
         label="Mispredict rate"
         helpId="tile.cache_mispredict_rate"
-        icon={<BoltIcon />}
-        value="—"
+        icon={<MetricIcon metric="mispredictRate" />}
+        value="-"
         sub="loading engine health"
       />
     );
@@ -651,7 +840,7 @@ function MispredictRateTile({
   const warnNow = !belowMinimum && !health.gate_passed;
   let sub: string;
   if (belowMinimum) {
-    sub = `${fmtInt(denom)}/${fmtInt(minEvents)} graded — below grading minimum`;
+    sub = `${fmtInt(denom)}/${fmtInt(minEvents)} graded - below grading minimum`;
   } else if (warnNow) {
     sub = `${fmtInt(health.mispredicts)} mispredicts / ${fmtInt(denom)} graded · >${fmtPct(health.max_rate_threshold)} gate`;
   } else {
@@ -661,15 +850,15 @@ function MispredictRateTile({
     <StatCard
       label="Anthropic mispredict rate"
       helpId="tile.cache_mispredict_rate"
-      icon={<BoltIcon />}
-      value={denom > 0 ? fmtPct(pct) : "—"}
+      icon={<MetricIcon metric="mispredictRate" />}
+      value={denom > 0 ? fmtPct(pct) : "-"}
       sub={sub}
       warn={warnNow}
     />
   );
 }
 
-// ImplicitCacheTile renders §15.3 implicit-cache efficiency: the
+// ImplicitCacheTile renders implicit-cache efficiency: the
 // prefix-survival rate (hits / (hits + misses)) over OpenAI / codex /
 // OpenAI-routed adapter cache_events. Hidden when no implicit events
 // exist in the window. The "lower fidelity" framing is honest — the
@@ -695,8 +884,8 @@ function ImplicitCacheTile({
     <StatCard
       label="Implicit prefix-survival"
       helpId="tile.cache_implicit_prefix_survival"
-      icon={<DropletIcon />}
-      value={hits + misses > 0 ? fmtPct(churn) : "—"}
+      icon={<MetricIcon metric="prefixSurvival" />}
+      value={hits + misses > 0 ? fmtPct(churn) : "-"}
       sub={
         consistencyDenom > 0
           ? `${fmtInt(hits)}H / ${fmtInt(misses)}M · engine consistency ${fmtPct(consistency)} (lower fidelity)`
@@ -709,17 +898,17 @@ function ImplicitCacheTile({
 
 // ----------------------------------------------------- Untracked-provider banner
 
-// UntrackedProviderBanner surfaces the §15.3 implicit-cache coverage
-// reality. Before §15.3 this banner said "we saw codex but didn't
-// grade it"; with §15.3 OpenAI / codex / OpenAI-routed adapters DO
+// UntrackedProviderBanner surfaces the implicit-cache coverage
+// reality. Before implicit-cache support this banner said "we saw codex
+// but didn't grade it"; now OpenAI / codex / OpenAI-routed adapters DO
 // emit cache_events — they land on a separate (lower-fidelity)
-// implicit-cache surface, NOT the Anthropic §10 gate. The banner
+// implicit-cache surface, NOT the Anthropic grading gate. The banner
 // flips between three states:
 //
 //   1. Implicit-cache events present → "tracked via implicit cache
 //      (lower fidelity)" — informative, not a warning.
 //   2. Untracked turns but no implicit events → "proxy / binary may
-//      pre-date §15.3" — actionable hint.
+//      pre-date implicit-cache support" — actionable hint.
 //   3. Neither → hidden.
 //
 // Info-toned (not warn) in every case; not engine drift.
@@ -736,7 +925,7 @@ function UntrackedProviderBanner({
 
   if (untrackedTurns === 0 && implicitEvents === 0) return null;
 
-  // §15.3 path: implicit events present → "tracked via implicit cache"
+  // Implicit events present → "tracked via implicit cache"
   if (implicitEvents > 0) {
     const churn = health.implicit_cache_prefix_churn_rate ?? 0;
     const consistency = health.implicit_cache_consistency_rate ?? 0;
@@ -750,18 +939,18 @@ function UntrackedProviderBanner({
             {fmtInt(implicitEvents)} implicit-cache event
             {implicitEvents === 1 ? "" : "s"}
           </strong>{" "}
-          tracked via §15.3 reduced attribution (lower fidelity than the
-          Anthropic marker-aware path — graded on per-session prefix
-          estimates, not provider markers). Prefix-survival {fmtPct(churn)}
-          {consistency > 0 ? ` · engine consistency ${fmtPct(consistency)}` : ""}
-          . Anthropic §10 gate is unmoved.
+          tracked from an estimate of each session&apos;s prompt prefix, which
+          is less exact than Anthropic&apos;s marked cache. Prefix kept{" "}
+          {fmtPct(churn)}
+          {consistency > 0 ? `, engine agreement ${fmtPct(consistency)}` : ""}. The
+          Anthropic mispredict rate does not include these events.
         </span>
         <HelpInd id="glossary.cachetrack_codex_limitation" />
       </div>
     );
   }
 
-  // Pre-§15.3 binary or no implicit traffic captured yet.
+  // Binary older than implicit-cache support, or no implicit traffic captured yet.
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-3 border border-info/30 bg-info-soft/30 px-3 py-2 text-[11px] text-fg-2">
       <span className="font-semibold uppercase tracking-[0.06em] text-info">
@@ -774,81 +963,122 @@ function UntrackedProviderBanner({
           {untrackedSessions === 1 ? "" : "s"}
         </strong>{" "}
         ({fmtInt(untrackedTurns)} turn{untrackedTurns === 1 ? "" : "s"}) in the
-        last 7 days but captured zero implicit-cache events — the daemon
-        binary may pre-date §15.3 (rebuild + restart). Tokens, cost, and
-        actions are captured normally for these sessions either way.
+        last 7 days but recorded no cache events for them. The running
+        Observer may be older than its implicit-cache support: update and
+        restart it. Tokens, cost and actions are captured normally for
+        these sessions either way.
       </span>
       <HelpInd id="glossary.cachetrack_codex_limitation" />
     </div>
   );
 }
 
-// ----------------------------------------------------- Health banner
+// ----------------------------------------------------- Engine health
 
-// CacheHealthBanner surfaces the cachetrack engine's two
-// informational secondary checks (read:write consistency + cause
-// concentration) + the bucket-mispredict drift surface as small
-// pills inside one banner row. Hidden entirely
-// when every signal is clean. Mirrors Cost's unknown-model pill
-// pattern but rolls multiple signals into one banner since they're
-// all engine-health flavored.
-function CacheHealthBanner({ health }: { health: CacheHealthSummary | null }) {
-  if (!health) return null;
-  const pills: React.ReactNode[] = [];
-  if (health.dominant_cause) {
-    const c = health.dominant_cause;
-    pills.push(
-      <span
-        key="dominant"
-        className="inline-flex items-center gap-1.5 rounded-2 border border-warn/40 bg-warn-soft px-2.5 py-1 text-[10.5px] font-medium text-warn"
-        title="A non-baseline cause exceeds the 80% share threshold over graded events — likely an over-firing rule. Open the engine-health entry in the help drawer for the full check list."
-      >
-        <span aria-hidden>!</span>
-        {c.cause} dominates ({fmtPct(c.share)} of {fmtInt(c.count)} events)
-      </span>,
-    );
-  }
-  if (health.inconsistent_rewrite_count > 0) {
-    pills.push(
-      <span
-        key="inconsistent"
-        className="inline-flex items-center gap-1.5 rounded-2 border border-warn/40 bg-warn-soft px-2.5 py-1 text-[10.5px] font-medium text-warn"
-        title="Rewrite events with tokens_read > 3× tokens_written are mechanically inconsistent with a real invalidation — the cause may be mislabeled."
-      >
-        <span aria-hidden>!</span>
-        {fmtInt(health.inconsistent_rewrite_count)} inconsistent rewrite
-        {health.inconsistent_rewrite_count === 1 ? "" : "s"}
-      </span>,
-    );
-  }
-  if (health.bucket_mispredicts > 0) {
-    pills.push(
-      <span
-        key="bucket"
-        className="inline-flex items-center gap-1.5 rounded-2 border border-warn/40 bg-warn-soft px-2.5 py-1 text-[10.5px] font-medium text-warn"
-        title="bucket(predicted) ≠ bucket(observed) — engine drift the grading-rate gate is blind to (growth-turn mispredicts can land in the same hit-vs-write bucket and slip past the rate check)."
-      >
-        <span aria-hidden>!</span>
-        {fmtInt(health.bucket_mispredicts)} bucket-mismatch event
-        {health.bucket_mispredicts === 1 ? "" : "s"}
-      </span>,
-    );
-  }
-  if (pills.length === 0) return null;
+// CacheAttributionAlarm is the only engine-health banner in the page's
+// hero area. It shows when the grading gate fails and nowhere else.
+function CacheAttributionAlarm({ health }: { health: CacheHealthSummary | null }) {
+  if (!health || !gradingGateFailed(health)) return null;
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-3 border border-warn/30 bg-warn-soft/30 px-3 py-2 text-[11px] text-fg-2">
-      <span className="font-semibold uppercase tracking-[0.06em] text-warn">
-        Engine warnings
+      <Icon icon={TriangleAlert} size={12} className="shrink-0 text-warn" />
+      <span>
+        <strong className="text-fg-1">Cache attribution may be unreliable.</strong>{" "}
+        {fmtPct(health.mispredict_rate)} of {fmtInt(health.graded_events)} graded
+        events were mispredicted, above the {fmtPct(health.max_rate_threshold)} limit. Cache
+        numbers here may name the wrong cause. Engine diagnostics at the bottom of
+        the Overview tab have the detail.
       </span>
-      {pills}
     </div>
+  );
+}
+
+function share(n: number, of: number | undefined): string {
+  return of && of > 0 ? ` (${fmtPct(n / of)} of ${fmtInt(of)})` : "";
+}
+
+// EngineDiagnostics: how well the attribution engine labels its own
+// events. These counters grow with history on any install and say nothing
+// about whether the user's cache works, so they sit collapsed at the
+// bottom of the Overview tab in neutral tone. A real problem still alarms
+// above, through CacheAttributionAlarm.
+function EngineDiagnostics({ health }: { health: CacheHealthSummary | null }) {
+  if (!health) return null;
+  const dominant = health.dominant_cause;
+  const any = health.inconsistent_rewrite_count > 0 || health.bucket_mispredicts > 0 || !!dominant;
+  if (!any) return null;
+  return (
+    <InfoDisclosure summary="Engine diagnostics" persistKey="cache.engineDiagnostics">
+      <p>
+        These numbers describe how the attribution engine labels its own
+        events. They are normal on a long-running install and do not mean your
+        cache is failing. The mispredict rate tile above is the check that
+        matters, and it {gradingGateFailed(health) ? "is currently failing" : "is passing"}.
+      </p>
+      <ul className="mt-1.5 list-disc space-y-1 pl-4">
+        {health.inconsistent_rewrite_count > 0 && (
+          <li>
+            <strong className="text-fg-1">
+              {fmtInt(health.inconsistent_rewrite_count)} rewrites read mostly from cache
+            </strong>
+            {share(health.inconsistent_rewrite_count, health.rewrite_events)}. A real
+            rewrite rebuilds the cache, so it reads little. These were labelled as
+            rewrites but read more than three times what they wrote, so their cause
+            label may be wrong. Totals and cost are not affected.
+          </li>
+        )}
+        {health.bucket_mispredicts > 0 && (
+          <li>
+            <strong className="text-fg-1">
+              {fmtInt(health.bucket_mispredicts)} events landed differently than predicted
+            </strong>
+            {share(health.bucket_mispredicts, health.predicted_events)}. The engine
+            expected a cache read and saw a write, or the other way round. This
+            mostly happens while a conversation is still growing and is how the
+            engine&apos;s predictions are tuned.
+          </li>
+        )}
+        {dominant && (
+          <li>
+            <strong className="text-fg-1">
+              One cause explains {fmtPct(dominant.share)} of {fmtInt(dominant.count)} events
+            </strong>
+            . A healthy mix spreads across causes; one cause above 80% can mean a
+            rule is firing too often.
+          </li>
+        )}
+      </ul>
+      <p className="mt-1.5">
+        The full report, with the sessions involved, is the cache-health command.
+      </p>
+    </InfoDisclosure>
   );
 }
 
 // ----------------------------------------------------- Empty hint
 
-function EmptyHint({ text }: { text: string }) {
-  return <p className="px-1 py-2 text-[11px] text-fg-3">{text}</p>;
+// EmptyHint: an empty chart/table slot inside a ChartShell, through the
+// shared inline EmptyState. `all-clear` is for an empty that is good news
+// (no rewrites = nothing invalidated); the default is the chart art.
+function EmptyHint({
+  title,
+  body,
+  illustration = "chart",
+}: {
+  title: string;
+  body?: string;
+  illustration?: IllustrationKind;
+}) {
+  return (
+    <EmptyState
+      variant="inline"
+      className="py-4"
+      illustration={illustration}
+      illustrationSize={88}
+      title={title}
+      body={body}
+    />
+  );
 }
 
 // ----------------------------------------------------- By-dimension table
@@ -863,6 +1093,9 @@ type ByDimensionRow = {
   events: number;
   avoidable: number;
   mono?: boolean;
+  // Optional rich label for the key cell (e.g. ModelId with the family
+  // mark); `display` stays the plain text the CSV export uses.
+  label?: ReactNode;
 };
 
 // ByDimensionTable renders the per-model / per-project rollup as a
@@ -887,75 +1120,72 @@ function ByDimensionTable({
     [rows],
   );
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] text-left text-[11.5px]">
-        <thead className="text-[10px] uppercase tracking-[0.06em] text-fg-3">
-          <tr className="border-b border-line-2">
-            <Th>{keyHeader}<HelpInd id={keyHelpId} /></Th>
-            <Th align="right">R %<HelpInd id="metric.cache_read" /></Th>
-            <Th align="right">W %<HelpInd id="metric.cache_creation" /></Th>
-            <Th align="right">Read<HelpInd id="metric.cache_read" /></Th>
-            <Th align="right">Write<HelpInd id="metric.cache_creation" /></Th>
-            <Th align="right">Events<HelpInd id="tile.cache_events" /></Th>
-            <Th align="right">Ratio<HelpInd id="tile.cache_ratio" /></Th>
-            <Th align="right">Avoidable<HelpInd id="tile.cache_avoidable" /></Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => {
-            const total = r.read + r.write;
-            const readPct = total > 0 ? r.read / total : 0;
-            const writePct = total > 0 ? r.write / total : 0;
-            return (
-              <tr
-                key={r.key}
-                className={
-                  "border-b border-line-1 last:border-b-0 hover:bg-bg-3 " +
-                  (i % 2 === 1 ? "bg-bg-3/40" : "")
-                }
-              >
-                <Td mono={r.mono} title={r.title}>
-                  <span className="block max-w-[260px] truncate">
-                    {r.display}
+    <Table
+      minWidth={640}
+      zebra
+      head={
+        <tr>
+          <Th>{keyHeader}<HelpInd id={keyHelpId} /></Th>
+          <Th align="right">R %<HelpInd id="metric.cache_read" /></Th>
+          <Th align="right">W %<HelpInd id="metric.cache_creation" /></Th>
+          <Th align="right">Read<HelpInd id="metric.cache_read" /></Th>
+          <Th align="right">Write<HelpInd id="metric.cache_creation" /></Th>
+          <Th align="right">Events<HelpInd id="tile.cache_events" /></Th>
+          <Th align="right">Ratio<HelpInd id="tile.cache_ratio" /></Th>
+          {dollarsShown() && <Th align="right">Avoidable<HelpInd id="tile.cache_avoidable" /></Th>}
+        </tr>
+      }
+    >
+      {rows.map((r) => {
+        const total = r.read + r.write;
+        const readPct = total > 0 ? r.read / total : 0;
+        const writePct = total > 0 ? r.write / total : 0;
+        return (
+          <tr key={r.key} className="border-b border-line-1 last:border-b-0">
+            <Td mono={r.mono} title={r.title}>
+              {r.label ?? (
+                <span className="block max-w-[260px] truncate">
+                  {r.display}
+                </span>
+              )}
+            </Td>
+            <MixCell pct={readPct} color="var(--tok-read)" />
+            <MixCell pct={writePct} color="var(--tok-write)" />
+            <Td align="right" mono>
+              {fmtCompact(r.read)}
+            </Td>
+            <Td align="right" mono>
+              {fmtCompact(r.write)}
+            </Td>
+            <Td align="right" mono>
+              {fmtInt(r.events)}
+            </Td>
+            <Td align="right" mono>
+              <strong className="text-fg-0">
+                {r.ratio > 0 ? `${r.ratio.toFixed(1)}×` : "-"}
+              </strong>
+            </Td>
+            {dollarsShown() && (
+              <Td align="right" mono>
+                {r.avoidable > 0 ? (
+                  <span
+                    className={
+                      r.avoidable === maxAvoidable
+                        ? "font-semibold text-warn"
+                        : "text-fg-2"
+                    }
+                  >
+                    {fmtUSD(r.avoidable)}
                   </span>
-                </Td>
-                <MixCell pct={readPct} color="var(--tok-read)" />
-                <MixCell pct={writePct} color="var(--tok-write)" />
-                <Td align="right" mono>
-                  {fmtCompact(r.read)}
-                </Td>
-                <Td align="right" mono>
-                  {fmtCompact(r.write)}
-                </Td>
-                <Td align="right" mono>
-                  {fmtInt(r.events)}
-                </Td>
-                <Td align="right" mono>
-                  <strong className="text-fg-0">
-                    {r.ratio > 0 ? `${r.ratio.toFixed(1)}×` : "—"}
-                  </strong>
-                </Td>
-                <Td align="right" mono>
-                  {r.avoidable > 0 ? (
-                    <span
-                      className={
-                        r.avoidable === maxAvoidable
-                          ? "font-semibold text-warn"
-                          : "text-fg-2"
-                      }
-                    >
-                      {fmtUSD(r.avoidable)}
-                    </span>
-                  ) : (
-                    <span className="text-fg-3">—</span>
-                  )}
-                </Td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                ) : (
+                  <span className="text-fg-3">-</span>
+                )}
+              </Td>
+            )}
+          </tr>
+        );
+      })}
+    </Table>
   );
 }
 
@@ -967,13 +1197,7 @@ function TopCausesBars({ rows }: { rows: CacheOverviewCauseRow[] }) {
     <ul className="space-y-1.5">
       {rows.map((c) => {
         const width = (c.count / max) * 100;
-        const variant = causeVariant(c.cause, c.flagged === true);
-        const barColor =
-          variant === "info"
-            ? "var(--info)"
-            : variant === "warn"
-              ? "var(--warn)"
-              : "var(--fg-3)";
+        const barColor = TONE_BAR[causeTone(c.cause, c.flagged === true)];
         return (
           <li
             key={c.cause}
@@ -983,19 +1207,14 @@ function TopCausesBars({ rows }: { rows: CacheOverviewCauseRow[] }) {
               <CausePill cause={c.cause} flagged={c.flagged === true} />
             </span>
             <span className="relative flex-1">
-              <span
-                aria-hidden
-                className="block h-2 overflow-hidden rounded-pill bg-bg-3"
-              >
-                <span
-                  className="block h-full transition-[width] duration-200"
-                  style={{
-                    width: `${width}%`,
-                    background: barColor,
-                    opacity: 0.85,
-                  }}
-                />
-              </span>
+              {/* scaleX meter (never an animated width); the count sits
+                  beside it, so the bar itself stays aria-hidden. */}
+              <Meter
+                ratio={width / 100}
+                color={barColor}
+                trackClassName="h-2"
+                className="opacity-[0.85]"
+              />
             </span>
             <span className="w-[68px] shrink-0 text-right font-mono tabular-nums text-fg-2">
               {fmtInt(c.count)}
@@ -1009,6 +1228,75 @@ function TopCausesBars({ rows }: { rows: CacheOverviewCauseRow[] }) {
 
 // ----------------------------------------------------- Worst sessions table
 
+// WORST_SESSION_COLUMNS: rows arrive ranked by rewrite count (the card's
+// point); every column sorts by its raw value on a header click.
+const WORST_SESSION_COLUMNS: ColumnDef<CacheOverviewSessionRow, unknown>[] = [
+  {
+    id: "session",
+    header: () => <>Session<HelpInd id="column.sessions.id" /></>,
+    accessorKey: "session_id",
+    meta: { mono: true },
+    cell: ({ row }) => (
+      <span title={row.original.session_id} className="font-mono text-accent">
+        {fmtShortId(row.original.session_id, 8)}
+      </span>
+    ),
+  },
+  {
+    id: "model",
+    header: () => <>Model<HelpInd id="column.cost.model" /></>,
+    accessorFn: (s) => s.model || "",
+    meta: { mono: true },
+    cell: ({ row }) =>
+      row.original.model ? (
+        <ModelId model={row.original.model} className="max-w-[180px]" />
+      ) : (
+        "-"
+      ),
+  },
+  {
+    id: "tier",
+    header: () => <>Tier<HelpInd id="glossary.proxy_vs_jsonl" /></>,
+    accessorKey: "tier",
+    cell: ({ row }) => <TierPill tier={row.original.tier} />,
+  },
+  {
+    id: "rewrites",
+    header: () => <>Rewrites<HelpInd id="chart.cache_worst_sessions" /></>,
+    accessorFn: (s) => s.rewrite_count,
+    meta: { align: "right", mono: true },
+    cell: ({ row }) => <strong className="text-fg-0">{fmtInt(row.original.rewrite_count)}</strong>,
+  },
+  {
+    id: "read",
+    header: () => <>Read<HelpInd id="metric.cache_read" /></>,
+    accessorFn: (s) => s.tokens_read,
+    meta: { align: "right", mono: true },
+    cell: ({ row }) => fmtCompact(row.original.tokens_read),
+  },
+  {
+    id: "write",
+    header: () => <>Write<HelpInd id="metric.cache_creation" /></>,
+    accessorFn: (s) => s.tokens_written,
+    meta: { align: "right", mono: true },
+    cell: ({ row }) => fmtCompact(row.original.tokens_written),
+  },
+  {
+    id: "top_cause",
+    header: () => <>Top cause<HelpInd id="chart.cache_top_causes" /></>,
+    accessorFn: (s) => s.top_cause || "",
+    cell: ({ row }) =>
+      row.original.top_cause ? (
+        <CausePill
+          cause={row.original.top_cause}
+          flagged={row.original.top_cause === "tools_changed"}
+        />
+      ) : (
+        <span className="text-fg-3">-</span>
+      ),
+  },
+];
+
 function WorstSessionsTable({
   rows,
   onOpen,
@@ -1017,66 +1305,14 @@ function WorstSessionsTable({
   onOpen: (sid: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] text-left text-[11.5px]">
-        <thead className="text-[10px] uppercase tracking-[0.06em] text-fg-3">
-          <tr className="border-b border-line-2">
-            <Th>Session<HelpInd id="column.sessions.id" /></Th>
-            <Th>Model<HelpInd id="column.cost.model" /></Th>
-            <Th>Tier<HelpInd id="glossary.proxy_vs_jsonl" /></Th>
-            <Th align="right">Rewrites<HelpInd id="chart.cache_worst_sessions" /></Th>
-            <Th align="right">Read<HelpInd id="metric.cache_read" /></Th>
-            <Th align="right">Write<HelpInd id="metric.cache_creation" /></Th>
-            <Th>Top cause<HelpInd id="chart.cache_top_causes" /></Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s, i) => (
-            <tr
-              key={s.session_id}
-              className={
-                "cursor-pointer border-b border-line-1 last:border-b-0 transition-colors hover:bg-bg-3 " +
-                (i % 2 === 1 ? "bg-bg-3/40" : "")
-              }
-              onClick={() => onOpen(s.session_id)}
-            >
-              <Td mono title={s.session_id}>
-                <span className="font-mono text-accent">
-                  {s.session_id.slice(0, 8)}…
-                </span>
-              </Td>
-              <Td mono>
-                <span className="block max-w-[180px] truncate">
-                  {s.model || "—"}
-                </span>
-              </Td>
-              <Td>
-                <TierPill tier={s.tier} />
-              </Td>
-              <Td align="right" mono>
-                <strong className="text-fg-0">{fmtInt(s.rewrite_count)}</strong>
-              </Td>
-              <Td align="right" mono>
-                {fmtCompact(s.tokens_read)}
-              </Td>
-              <Td align="right" mono>
-                {fmtCompact(s.tokens_written)}
-              </Td>
-              <Td>
-                {s.top_cause ? (
-                  <CausePill
-                    cause={s.top_cause}
-                    flagged={s.top_cause === "tools_changed"}
-                  />
-                ) : (
-                  <span className="text-fg-3">—</span>
-                )}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable<CacheOverviewSessionRow>
+      data={rows}
+      columns={WORST_SESSION_COLUMNS}
+      rowKey={(s) => s.session_id}
+      minWidth={640}
+      zebra
+      onRowClick={(s) => onOpen(s.session_id)}
+    />
   );
 }
 
@@ -1088,94 +1324,35 @@ function WorstSessionsTable({
 // tier renders as a plain dash so the table doesn't carry a
 // misleading pill on legacy rows.
 function TierPill({ tier }: { tier?: string }) {
-  if (!tier) return <span className="text-fg-3">—</span>;
-  if (tier === "proxy") return <Pill variant="info">{tier}</Pill>;
-  if (tier === "transcript") return <Pill variant="neutral">{tier}</Pill>;
-  if (tier === "mixed") return <Pill variant="warn">{tier}</Pill>;
-  return <Pill variant="neutral">{tier}</Pill>;
-}
-
-// ----------------------------------------------------- Th / Td / MixCell
-
-function Th({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      className={
-        "px-2 py-1.5 font-medium " +
-        (align === "right" ? "text-right" : "text-left")
-      }
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  align,
-  mono,
-  title,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-  mono?: boolean;
-  title?: string;
-}) {
-  return (
-    <td
-      title={title}
-      className={
-        "px-2 py-1.5 " +
-        (align === "right" ? "text-right tabular-nums " : "") +
-        (mono ? "font-mono text-fg-2 " : "text-fg-1")
-      }
-    >
-      {children}
-    </td>
-  );
-}
-
-function MixCell({ pct, color }: { pct: number; color: string }) {
-  return (
-    <td className="px-2 py-1.5 text-right">
-      <div className="ml-auto flex max-w-[88px] items-center justify-end gap-2">
-        <div className="h-1.5 w-12 overflow-hidden rounded-pill bg-bg-3">
-          <span
-            className="block h-full"
-            style={{ width: `${pct * 100}%`, background: color }}
-          />
-        </div>
-        <span className="tabular-nums text-fg-2">{fmtPct(pct)}</span>
-      </div>
-    </td>
-  );
+  if (!tier) return <span className="text-fg-3">-</span>;
+  // Tone from the ONE CACHE_TIER table (@shared/lib/cacheVocab); this
+  // compact table keeps the raw tier id as its label.
+  return <VocabPill vocab="sourceTier" value={tier} tone={vocabTone(CACHE_TIER, tier)} />;
 }
 
 // ----------------------------------------------------- Cause pill
 
-// causeVariant maps a cause label to its visual tone. Operator UI
-// steer #2: flagged causes render neutrally (currently tools_changed
-// — legitimate MCP server toggles); suffix_growth + hit are the
-// healthy info-toned baseline; real invalidation causes go warn.
-function causeVariant(
-  cause: string,
-  flagged: boolean,
-): "info" | "neutral" | "warn" {
-  if (flagged) return "neutral";
-  if (cause === "suffix_growth" || cause === "hit") return "info";
-  if (cause === "reanchor" || cause === "below_min") return "neutral";
-  return "warn";
+// causeTone reads a cause's tone through cacheCauseTone
+// (@shared/lib/cacheVocab): the CACHE_CAUSE table (healthy baselines
+// info, by-design causes neutral, real invalidation causes warn), or
+// CACHE_FLAG's warn for a flagged cause (currently tools_changed -
+// MCP server toggles) whatever its row says.
+function causeTone(cause: string, flagged: boolean): Tone {
+  return cacheCauseTone(cause, flagged);
 }
 
+// TONE_BAR - the top-causes bar fill for each tone.
+const TONE_BAR: Readonly<Record<Tone, string>> = {
+  neutral: "var(--fg-3)",
+  success: "var(--success)",
+  warn: "var(--warn)",
+  danger: "var(--danger)",
+  info: "var(--info)",
+  accent: "var(--accent)",
+};
+
 function CausePill({ cause, flagged }: { cause: string; flagged: boolean }) {
-  const variant = causeVariant(cause, flagged);
-  return <Pill variant={variant}>{cause}</Pill>;
+  return <VocabPill vocab="cacheCause" value={cause} tone={causeTone(cause, flagged)} />;
 }
 
 // shortProjectPath compacts a long absolute path for display. Keeps
@@ -1202,17 +1379,19 @@ function EntryStatesBar({
   total: number;
 }) {
   if (total === 0) {
-    return <EmptyHint text="cache_entries table is empty." />;
+    return <EmptyHint title="The cache_entries table is empty" />;
   }
   return (
     <div className="space-y-3">
-      <div className="flex h-3 w-full overflow-hidden rounded-pill bg-bg-3">
+      {/* The stacked bar grows in once as a whole (scaleX, sb-bar-grow);
+          segment widths are static, never an animated width. */}
+      <div className="sb-bar-grow flex h-3 w-full origin-left overflow-hidden rounded-pill bg-bg-3">
         {rows.map((r) => {
           const pct = (r.count / total) * 100;
           return (
             <span
               key={r.state || "(unknown)"}
-              className="block h-full transition-[width] duration-200"
+              className="block h-full"
               style={{
                 width: `${pct}%`,
                 background: entryStateColor(r.state),
@@ -1228,10 +1407,11 @@ function EntryStatesBar({
             key={r.state || "(unknown)"}
             className="flex items-center gap-1.5"
           >
-            <span
-              aria-hidden
-              className="inline-block h-2 w-2 rounded-pill"
-              style={{ background: entryStateColor(r.state) }}
+            <Icon
+              icon={vocabIcon("cacheEntryState", r.state)}
+              size={11}
+              className="shrink-0"
+              style={{ color: entryStateColor(r.state) }}
             />
             <span className="font-mono text-fg-2">{r.state || "(empty)"}</span>
             <span className="tabular-nums text-fg-3">
@@ -1247,19 +1427,10 @@ function EntryStatesBar({
   );
 }
 
+// entryStateColor fills the entry-states bar from the ONE CACHE_ENTRY_STATE
+// tone (@shared/lib/cacheVocab); an unknown state is the faint line colour.
 function entryStateColor(state: string): string {
-  switch (state) {
-    case "live":
-      return "var(--info)";
-    case "unverified":
-      return "var(--fg-3)";
-    case "expired":
-      return "var(--warn)";
-    case "invalidated":
-      return "var(--danger)";
-    default:
-      return "var(--line-3)";
-  }
+  return state in CACHE_ENTRY_STATE ? TONE_BAR[vocabTone(CACHE_ENTRY_STATE, state)] : "var(--line-3)";
 }
 
 // ----------------------------------------------------- Pager
@@ -1294,7 +1465,7 @@ function Pager({
         ← Prev
       </button>
       <span className="px-1 text-[10.5px] tabular-nums text-fg-3">
-        {fmtInt(offset + 1)}–{fmtInt(Math.min(offset + limit, total))} of{" "}
+        {fmtInt(offset + 1)}-{fmtInt(Math.min(offset + limit, total))} of{" "}
         {fmtInt(total)}
       </span>
       <button
@@ -1311,6 +1482,112 @@ function Pager({
 
 // ----------------------------------------------------- RecentEventsTable
 
+// RECENT_EVENT_COLUMNS: the events are SERVER-paginated newest first, so no
+// column sorts (a client sort would only reorder the current page).
+const RECENT_EVENT_COLUMNS: ColumnDef<CacheEventRow, unknown>[] = [
+  {
+    id: "when",
+    header: "When",
+    enableSorting: false,
+    meta: { mono: true },
+    cell: ({ row }) => (
+      <span title={fmtDateTime(row.original.timestamp)}>
+        {fmtShortTimestamp(row.original.timestamp)}
+      </span>
+    ),
+  },
+  {
+    id: "session",
+    header: () => <>Session<HelpInd id="column.sessions.id" /></>,
+    enableSorting: false,
+    meta: { mono: true },
+    cell: ({ row }) => (
+      <span title={row.original.session_id} className="font-mono text-accent">
+        {fmtShortId(row.original.session_id, 8)}
+      </span>
+    ),
+  },
+  {
+    id: "model",
+    header: () => <>Model<HelpInd id="column.cost.model" /></>,
+    enableSorting: false,
+    meta: { mono: true },
+    cell: ({ row }) =>
+      row.original.model ? (
+        <ModelId model={row.original.model} className="max-w-[180px]" />
+      ) : (
+        "-"
+      ),
+  },
+  {
+    id: "tier",
+    header: () => <>Tier<HelpInd id="glossary.proxy_vs_jsonl" /></>,
+    enableSorting: false,
+    cell: ({ row }) => <TierPill tier={row.original.tier} />,
+  },
+  {
+    id: "kind",
+    header: "Kind",
+    enableSorting: false,
+    cell: ({ row }) => <KindPill kind={row.original.kind} />,
+  },
+  {
+    id: "cause",
+    header: "Cause",
+    enableSorting: false,
+    cell: ({ row }) =>
+      row.original.cause ? (
+        <CausePill
+          cause={row.original.cause}
+          flagged={row.original.cause === "tools_changed"}
+        />
+      ) : (
+        <span className="text-fg-3">-</span>
+      ),
+  },
+  {
+    id: "predicted",
+    header: "Predicted",
+    enableSorting: false,
+    meta: { mono: true },
+    cell: ({ row }) => {
+      const ev = row.original;
+      if (!ev.predicted_kind) return <span className="text-fg-3">-</span>;
+      const drift = ev.predicted_kind !== ev.kind;
+      return (
+        <Tooltip
+          content={
+            drift
+              ? `Predicted ${ev.predicted_kind}, observed ${ev.kind} - possible engine drift`
+              : undefined
+          }
+        >
+          <span
+            tabIndex={drift ? 0 : undefined}
+            className={drift ? "text-warn focus:outline-none" : "text-fg-3"}
+          >
+            {ev.predicted_kind}
+          </span>
+        </Tooltip>
+      );
+    },
+  },
+  {
+    id: "read",
+    header: () => <>Read<HelpInd id="metric.cache_read" /></>,
+    enableSorting: false,
+    meta: { align: "right", mono: true },
+    cell: ({ row }) => fmtCompact(row.original.tokens_read),
+  },
+  {
+    id: "write",
+    header: () => <>Write<HelpInd id="metric.cache_creation" /></>,
+    enableSorting: false,
+    meta: { align: "right", mono: true },
+    cell: ({ row }) => fmtCompact(row.original.tokens_written),
+  },
+];
+
 // RecentEventsTable renders the paginated /api/cache/events rows
 // in a slim table. Click a row to open the session's Cache panel.
 // Bucket-mismatch rows (predicted ≠ observed bucket) get a small
@@ -1324,104 +1601,21 @@ function RecentEventsTable({
   onOpen: (sid: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-left text-[11.5px]">
-        <thead className="text-[10px] uppercase tracking-[0.06em] text-fg-3">
-          <tr className="border-b border-line-2">
-            <Th>When</Th>
-            <Th>Session<HelpInd id="column.sessions.id" /></Th>
-            <Th>Model<HelpInd id="column.cost.model" /></Th>
-            <Th>Tier<HelpInd id="glossary.proxy_vs_jsonl" /></Th>
-            <Th>Kind</Th>
-            <Th>Cause</Th>
-            <Th>Predicted</Th>
-            <Th align="right">Read<HelpInd id="metric.cache_read" /></Th>
-            <Th align="right">Write<HelpInd id="metric.cache_creation" /></Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((ev, i) => (
-            <tr
-              key={ev.id}
-              className={
-                "cursor-pointer border-b border-line-1 last:border-b-0 transition-colors hover:bg-bg-3 " +
-                (i % 2 === 1 ? "bg-bg-3/40" : "")
-              }
-              onClick={() => onOpen(ev.session_id)}
-            >
-              <Td mono>{fmtShortTimestamp(ev.timestamp)}</Td>
-              <Td mono title={ev.session_id}>
-                <span className="font-mono text-accent">
-                  {ev.session_id.slice(0, 8)}…
-                </span>
-              </Td>
-              <Td mono>
-                <span className="block max-w-[180px] truncate">
-                  {ev.model || "—"}
-                </span>
-              </Td>
-              <Td>
-                <TierPill tier={ev.tier} />
-              </Td>
-              <Td>
-                <KindPill kind={ev.kind} />
-              </Td>
-              <Td>
-                {ev.cause ? (
-                  <CausePill
-                    cause={ev.cause}
-                    flagged={ev.cause === "tools_changed"}
-                  />
-                ) : (
-                  <span className="text-fg-3">—</span>
-                )}
-              </Td>
-              <Td mono>
-                {ev.predicted_kind ? (
-                  <span
-                    className={
-                      ev.predicted_kind !== ev.kind ? "text-warn" : "text-fg-3"
-                    }
-                    title={
-                      ev.predicted_kind !== ev.kind
-                        ? `Predicted ${ev.predicted_kind}, observed ${ev.kind} — possible engine drift`
-                        : undefined
-                    }
-                  >
-                    {ev.predicted_kind}
-                  </span>
-                ) : (
-                  <span className="text-fg-3">—</span>
-                )}
-              </Td>
-              <Td align="right" mono>
-                {fmtCompact(ev.tokens_read)}
-              </Td>
-              <Td align="right" mono>
-                {fmtCompact(ev.tokens_written)}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable<CacheEventRow>
+      data={rows}
+      columns={RECENT_EVENT_COLUMNS}
+      rowKey={(ev) => String(ev.id)}
+      minWidth={860}
+      zebra
+      onRowClick={(ev) => onOpen(ev.session_id)}
+    />
   );
 }
 
-// KindPill maps the cache_events.kind label to a tonal pill.
-// hit/write are healthy (info); rewrites are warn-toned;
-// mispredict / reanchor / below_min are neutral diagnostic kinds.
+// KindPill renders cache_events.kind from the ONE CACHE_EVENT_KIND table
+// (@shared/lib/cacheVocab), the same tones as the session Cache timeline.
 function KindPill({ kind }: { kind: string }) {
-  if (kind === "hit" || kind === "write") return <Pill variant="info">{kind}</Pill>;
-  if (
-    kind === "invalidation_rewrite" ||
-    kind === "expiry_rewrite" ||
-    kind === "model_switch_rewrite" ||
-    kind === "compaction_reset"
-  ) {
-    return <Pill variant="warn">{kind}</Pill>;
-  }
-  return <Pill variant="neutral">{kind}</Pill>;
+  return <VocabPill vocab="cacheEventKind" table={CACHE_EVENT_KIND} value={kind} />;
 }
 
 // fmtShortTimestamp truncates an ISO timestamp to "MMM dd HH:MM"
@@ -1431,7 +1625,7 @@ function KindPill({ kind }: { kind: string }) {
 function fmtShortTimestamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-US", {
+  return localeString(d, "en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -1462,15 +1656,15 @@ function ExportButton({
   disabled: boolean;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      size="sm"
+      iconLeft={Download}
       onClick={onClick}
       disabled={disabled}
-      className="rounded-2 border border-line-2 bg-bg-2 px-2 py-1 text-[10.5px] text-fg-2 hover:bg-bg-3 disabled:opacity-40"
       title="Download this rollup as CSV"
     >
       Export
-    </button>
+    </Button>
   );
 }
 
@@ -1485,32 +1679,22 @@ function exportByDimensionCsv(
   rows: ByDimensionRow[],
 ) {
   if (rows.length === 0) return;
-  const header = [
-    dimension,
-    "read_tokens",
-    "write_tokens",
-    "read_pct",
-    "write_pct",
-    "events",
-    "ratio",
-    "avoidable_usd",
-  ].join(",");
-  const lines = rows.map((r) => {
+  // The export follows the developer cost display through lib/costExport
+  // (T-204): avoidable_usd is left out in the token-usage view.
+  const share = (r: ByDimensionRow, part: number) => {
     const total = r.read + r.write;
-    const readPct = total > 0 ? r.read / total : 0;
-    const writePct = total > 0 ? r.write / total : 0;
-    return [
-      escapeCsv(r.title || r.display),
-      r.read,
-      r.write,
-      readPct.toFixed(4),
-      writePct.toFixed(4),
-      r.events,
-      r.ratio.toFixed(4),
-      r.avoidable.toFixed(6),
-    ].join(",");
-  });
-  const csv = [header, ...lines].join("\n");
+    return (total > 0 ? part / total : 0).toFixed(4);
+  };
+  const csv = csvText<ByDimensionRow>(rows, [
+    { header: dimension, value: (r) => r.title || r.display },
+    { header: "read_tokens", value: (r) => r.read },
+    { header: "write_tokens", value: (r) => r.write },
+    { header: "read_pct", value: (r) => share(r, r.read) },
+    { header: "write_pct", value: (r) => share(r, r.write) },
+    { header: "events", value: (r) => r.events },
+    { header: "ratio", value: (r) => r.ratio.toFixed(4) },
+    { header: "avoidable_usd", value: (r) => r.avoidable.toFixed(6) },
+  ]);
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1522,14 +1706,8 @@ function exportByDimensionCsv(
   URL.revokeObjectURL(url);
 }
 
-function escapeCsv(s: string): string {
-  if (!s) return "";
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
 // isoDateStamp returns today's date as YYYY-MM-DD without pulling
-// a date library — used to disambiguate exported CSV file names.
+// a date library - used to disambiguate exported CSV file names.
 function isoDateStamp(): string {
   return new Date().toISOString().slice(0, 10);
 }

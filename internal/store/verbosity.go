@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/verbosity"
 )
@@ -243,6 +245,40 @@ var verbosityKeyExpr = map[string]struct {
 // in Go — the visible bodies are segmented at read time, so a very wide
 // window does one SegmentVisible per assistant-text row (bounded, ~µs each).
 func (s *Store) LoadVerbosityAggregate(ctx context.Context, dimension string, sinceDays int) ([]VerbosityGroup, error) {
+	return s.LoadVerbosityAggregateScoped(ctx, dimension, sinceDays, VerbosityScope{})
+}
+
+// VerbosityScope narrows the verbosity rollups to the dashboard's global
+// filters. Every field is SESSION grain (the rollups are built from a
+// session's actions): Tool matches sessions.tool, ProjectRoot the session's
+// project root, Model the sessions that used the model
+// (modelfilter.SessionsUsing). The zero value is no narrowing.
+type VerbosityScope struct {
+	Tool, ProjectRoot, Model string
+}
+
+// where returns the " AND ..." suffix over the `s` sessions alias and its
+// bound args.
+func (sc VerbosityScope) where() (string, []any) {
+	var b strings.Builder
+	var args []any
+	if sc.Tool != "" {
+		b.WriteString(" AND s.tool = ?")
+		args = append(args, sc.Tool)
+	}
+	if sc.ProjectRoot != "" {
+		b.WriteString(" AND s.project_id = (SELECT id FROM projects WHERE root_path = ?)")
+		args = append(args, sc.ProjectRoot)
+	}
+	if frag, margs := modelfilter.AndSessionsUsing("s.id", sc.Model); frag != "" {
+		b.WriteString(frag)
+		args = append(args, margs...)
+	}
+	return b.String(), args
+}
+
+// LoadVerbosityAggregateScoped is LoadVerbosityAggregate narrowed by scope.
+func (s *Store) LoadVerbosityAggregateScoped(ctx context.Context, dimension string, sinceDays int, scope VerbosityScope) ([]VerbosityGroup, error) {
 	ke, ok := verbosityKeyExpr[dimension]
 	if !ok {
 		return nil, fmt.Errorf("store.LoadVerbosityAggregate: unknown dimension %q", dimension)
@@ -254,6 +290,9 @@ func (s *Store) LoadVerbosityAggregate(ctx context.Context, dimension string, si
 		where = " AND s.started_at >= ?"
 		args = append(args, isoSinceDays(sinceDays))
 	}
+	scopeWhere, scopeArgs := scope.where()
+	where += scopeWhere
+	args = append(args, scopeArgs...)
 
 	groups := map[string]*verbosity.Breakdown{}
 	getGroup := func(k string) *verbosity.Breakdown {
@@ -324,6 +363,12 @@ var verbosityTokenKeyExpr = map[string]struct {
 // rate for the aggregate's est $ total. Unpriced models simply contribute no
 // dollars (honest — never fabricated).
 func (s *Store) LoadVerbosityGroupTokens(ctx context.Context, dimension string, sinceDays int) ([]VerbosityGroupTokens, error) {
+	return s.LoadVerbosityGroupTokensScoped(ctx, dimension, sinceDays, VerbosityScope{})
+}
+
+// LoadVerbosityGroupTokensScoped is LoadVerbosityGroupTokens narrowed by
+// scope (session grain, the same sessions LoadVerbosityAggregateScoped reads).
+func (s *Store) LoadVerbosityGroupTokensScoped(ctx context.Context, dimension string, sinceDays int, scope VerbosityScope) ([]VerbosityGroupTokens, error) {
 	ke, ok := verbosityTokenKeyExpr[dimension]
 	if !ok {
 		return nil, fmt.Errorf("store.LoadVerbosityGroupTokens: unknown dimension %q", dimension)
@@ -334,6 +379,9 @@ func (s *Store) LoadVerbosityGroupTokens(ctx context.Context, dimension string, 
 		where = " AND s.started_at >= ?"
 		args = append(args, isoSinceDays(sinceDays))
 	}
+	scopeWhere, scopeArgs := scope.where()
+	where += scopeWhere
+	args = append(args, scopeArgs...)
 	//nolint:gosec // G201: ke.expr/join from the in-package whitelist above; values are bound params.
 	q := `SELECT ` + ke.expr + ` AS k,
 	             COALESCE(NULLIF(s.model, ''), NULLIF(tu.model, ''), '(unknown)') AS m,

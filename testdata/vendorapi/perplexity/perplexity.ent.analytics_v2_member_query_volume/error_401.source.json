@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial",
+    "error.type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "69d8c947b1b250606efb852f2c06e9a9505ecc482aec50f5485477cf567ce472",
+  "http": {
+    "method": "GET",
+    "path": "/v2/analytics/computer/usage",
+    "status": 401
+  },
+  "notes": "The documented AnalyticsErrorResponse with type unauthorized; the message is synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Perplexity Computer Analytics API v2 OpenAPI (getComputerUsageAnalyticsV2), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "29ecd7d855d64790edcb5301b3fc399b6a8eb00e6cca02478e26460a25e9f68a",
+  "source_url": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-v2-get.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "perplexity.ent.analytics_v2_member_query_volume"
+}

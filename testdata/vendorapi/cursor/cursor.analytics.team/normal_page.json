@@ -1,0 +1,38 @@
+{
+  "data": [
+    {
+      "event_date": "2025-01-15",
+      "total_suggested_diffs": 145,
+      "total_accepted_diffs": 98,
+      "total_rejected_diffs": 47,
+      "total_green_lines_accepted": 820,
+      "total_red_lines_accepted": 160,
+      "total_green_lines_rejected": 210,
+      "total_red_lines_rejected": 60,
+      "total_green_lines_suggested": 1030,
+      "total_red_lines_suggested": 220,
+      "total_lines_suggested": 1250,
+      "total_lines_accepted": 980
+    },
+    {
+      "event_date": "2025-01-16",
+      "total_suggested_diffs": 132,
+      "total_accepted_diffs": 89,
+      "total_rejected_diffs": 43,
+      "total_green_lines_accepted": 740,
+      "total_red_lines_accepted": 150,
+      "total_green_lines_rejected": 185,
+      "total_red_lines_rejected": 55,
+      "total_green_lines_suggested": 925,
+      "total_red_lines_suggested": 175,
+      "total_lines_suggested": 1100,
+      "total_lines_accepted": 890
+    }
+  ],
+  "params": {
+    "metric": "agent-edits",
+    "teamId": 12345,
+    "startDate": "2025-01-01",
+    "endDate": "2025-01-31"
+  }
+}

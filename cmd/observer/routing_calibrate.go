@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing && !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -7,7 +9,6 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
 	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -72,7 +73,7 @@ func runRoutingCalibration(ctx context.Context, st *store.Store, cfg config.Conf
 	if err != nil {
 		return fmt.Errorf("load facts: %w", err)
 	}
-	facts.Price = routingPriceFn(cost.NewEngine(cfg.Intelligence))
+	facts.Price = routingPriceFn(acquireProcessCostEngine(ctx, cfg, nil, logger))
 	rep := modelvalue.Build(facts, modelvalue.Options{
 		MinSample: int64(cfg.Routing.Calibration.MinSamples),
 	})
@@ -87,7 +88,7 @@ func runRoutingCalibration(ctx context.Context, st *store.Store, cfg config.Conf
 	if err != nil {
 		return fmt.Errorf("escalation counts: %w", err)
 	}
-	demotions := computeRuleDemotions(lr.policy, rep, escalations)
+	demotions := computeRuleDemotions(*lr.policy.Load(), rep, escalations)
 	lr.SetDemotedRules(demotions)
 	for rule, why := range demotions {
 		// The loud surface (§R18.3): every demotion is a WARN the

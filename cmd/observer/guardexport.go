@@ -61,7 +61,7 @@ func newGuardExportCmd() *cobra.Command {
 		Use:   "export",
 		Short: "Export guard audit events as JSONL or CEF (SIEM ingestion)",
 		Long: "Streams guard_events in chain (insert) order. File-based and\n" +
-			"pull-based by design — this command never makes a network call\n" +
+			"pull-based by design - this command never makes a network call\n" +
 			"(spec §11.4); ship the output to your SIEM with its own collector.\n\n" +
 			"  observer guard export --format jsonl --since 168h\n" +
 			"  observer guard export --format cef --period 2026-05 --out may.cef\n\n" +
@@ -136,7 +136,7 @@ func buildExportFilter(sinceStr, periodStr, minSeverity string) (export.Filter, 
 		f.MinSeverity = minSeverity
 	}
 	if sinceStr != "" && periodStr != "" {
-		return f, fmt.Errorf("--since and --period are exclusive — pick one window form")
+		return f, fmt.Errorf("--since and --period are exclusive - pick one window form")
 	}
 	if sinceStr != "" {
 		d, err := parseSinceFlag(sinceStr)
@@ -210,11 +210,11 @@ func newGuardReportCmd() *cobra.Command {
 		Use:   "report",
 		Short: "Render the §14.4 compliance evidence pack for a period",
 		Long: "Assembles the audit evidence an assessor asks for (SOC 2 CC-series,\n" +
-			"NIST 800-53 AU-2/AU-3/AU-9/AC-6 — field mapping in\n" +
+			"NIST 800-53 AU-2/AU-3/AU-9/AC-6 - field mapping in\n" +
 			"docs/guard-compliance.md): effective policy at period start/end,\n" +
 			"policy-change log, verdict statistics, audit-chain verification,\n" +
 			"coverage matrix, and the active-approval exception register.\n\n" +
-			"A broken audit chain is REPORTED, not an error — the evidence pack\n" +
+			"A broken audit chain is REPORTED, not an error - the evidence pack\n" +
 			"documents reality; use `observer guard verify-audit` for a gating\n" +
 			"exit code.\n\n" +
 			"--period accepts a duration (720h), a month (2026-05), or a day\n" +

@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].content": "VerifiedOfficial",
+    "data[].content[]": "VerifiedOfficial",
+    "data[].content[].text": "VerifiedOfficial",
+    "data[].content[].type": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].processed_at": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "f1b8d5a3688dbb76eb0d7bfcdac0614c5aed1efb8dd0bdfe85a786b768196add",
+  "http": {
+    "method": "GET",
+    "path": "/v1/sessions/{session_id}/events",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/sessions/{session_id}/events.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Managed Agents API reference (sessions), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "668d4a810af48812ea11f715a06f6673d4c57a9a019612c5d46719b3cadba1d9",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/sessions.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.managed_agents.events"
+}

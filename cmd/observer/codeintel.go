@@ -1,12 +1,16 @@
+//go:build !sbo_omit_codeintel
+
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"path/filepath"
+	"io"
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +19,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/codeintel/parse"
 	"github.com/marmutapp/superbased-observer/internal/codeintel/surface"
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -45,7 +48,7 @@ func newIndexCmd() *cobra.Command {
 			defer cleanup()
 			st := store.New(database)
 			if !cfg.CodeIntel.Enabled {
-				fmt.Fprintln(cmd.OutOrStdout(), "codeintel is disabled ([codeintel].enabled=false)")
+				fmt.Fprintln(cmd.OutOrStdout(), codeIntelOffMessage)
 				return nil
 			}
 			ix := index.New(codeIntelIndexOptions(cfg, st))
@@ -57,7 +60,7 @@ func newIndexCmd() *cobra.Command {
 			for _, project := range projects {
 				if index.IsIgnored(project, cfg.CodeIntel.IgnorePaths) {
 					fmt.Fprintf(cmd.OutOrStdout(),
-						"note: %s is in [codeintel].ignore_paths — indexing anyway because this is an explicit request; remove it there to stop auto-index.\n",
+						"note: %s is in [codeintel].ignore_paths - indexing anyway because this is an explicit request; remove it there to stop auto-index.\n",
 						project)
 				}
 				if rescan {
@@ -126,7 +129,7 @@ func newIndexIgnoreCmd() *cobra.Command {
 			}
 
 			if index.IsIgnored(root, cfg.CodeIntel.IgnorePaths) {
-				fmt.Fprintf(w, "\n%s is already covered by [codeintel].ignore_paths — nothing to add.\n", root)
+				fmt.Fprintf(w, "\n%s is already covered by [codeintel].ignore_paths - nothing to add.\n", root)
 				return nil
 			}
 			paths := make([]string, 0, len(cfg.CodeIntel.IgnorePaths)+1)
@@ -175,19 +178,6 @@ func indexTargets(cmd *cobra.Command, st *store.Store, args []string, all bool) 
 	return []string{root}, nil
 }
 
-// resolveProjectRoot maps a directory to its git root (the project
-// identity sessions/turns already carry), falling back to the absolute
-// directory for non-git trees.
-func resolveProjectRoot(dir string) string {
-	if root, ok := git.FindRoot(dir); ok {
-		return root
-	}
-	if abs, err := absPath(dir); err == nil {
-		return abs
-	}
-	return dir
-}
-
 func newIndexStatusCmd() *cobra.Command {
 	var configPath string
 	cmd := &cobra.Command{
@@ -204,9 +194,23 @@ func newIndexStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(projects) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no indexed projects — run `observer index <path>`")
+			// Corpus archival P2.3: an archived project has ZERO rows in
+			// codeintel_files, so it vanishes from the list above entirely —
+			// and if every project is archived, the message below would tell
+			// an operator to index repositories that are already indexed and
+			// sitting in cold storage. The marker table is the only thing that
+			// can say otherwise, and it costs one indexed read.
+			archived, aerr := st.CodeIntelArchivedProjects(cmd.Context(), 0)
+			if aerr != nil {
+				return aerr
+			}
+			if len(projects) == 0 && len(archived) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no indexed projects - run `observer index <path>`")
 				return nil
+			}
+			if len(projects) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(),
+					"no HOT indexed projects - every indexed project is in cold storage")
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 			fmt.Fprintln(tw, "PROJECT\tINDEXED\tSTALE\tPENDING\tNEEDS_CONSENT\tFAILED")
@@ -218,6 +222,17 @@ func newIndexStatusCmd() *cobra.Command {
 				fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\n", p,
 					counts["indexed"], counts["stale"], counts["pending"],
 					counts["needs_consent"], counts["failed"])
+			}
+			for _, m := range archived {
+				when := "unknown"
+				if m.LastIndexedAt > 0 {
+					when = time.Unix(m.LastIndexedAt, 0).UTC().Format("2006-01-02")
+				}
+				fmt.Fprintf(tw, "%s\tarchived\t-\t-\t-\t-\t(last indexed %s, %d rows in cold storage)\n",
+					m.Project, when, m.RowsArchived)
+			}
+			if len(archived) > 0 {
+				fmt.Fprintln(tw, "\nrestore an archived project with `observer archive rehydrate <path>`")
 			}
 			return tw.Flush()
 		},
@@ -236,7 +251,7 @@ func newIndexDeleteCmd() *cobra.Command {
 		Short: "Remove a project's code-intelligence index",
 		Long: "Removes the code-intelligence index for a project root.\n\n" +
 			"With --recursive, also removes every indexed project nested under\n" +
-			"that path — the one-command way to un-index a whole tree you never\n" +
+			"that path - the one-command way to un-index a whole tree you never\n" +
 			"meant to index (a folder can hold several nested project keys). Run\n" +
 			"`observer index status` first to see what is currently indexed.",
 		Args: cobra.ExactArgs(1),
@@ -341,12 +356,12 @@ func newCodeIntelExplainCmd() *cobra.Command {
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "%s\n", abs)
 			if !langOK {
-				fmt.Fprintln(w, "  (unsupported file extension — not indexed)")
+				fmt.Fprintln(w, "  (unsupported file extension - not indexed)")
 				return nil
 			}
 			fmt.Fprintf(w, "  language %s · exact-spans %v · collapsible %v\n\n", lang, capab.ExactSpans, capab.CanCollapse())
 			if len(syms) == 0 {
-				fmt.Fprintln(w, "  no symbols indexed — run `observer index` on this project first")
+				fmt.Fprintln(w, "  no symbols indexed - run `observer index` on this project first")
 				return nil
 			}
 			tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
@@ -378,16 +393,51 @@ func newCodeIntelExplainCmd() *cobra.Command {
 // is best-effort and NEVER blocks/aborts the daemon: any error is logged
 // and swallowed (ADR-0002 — index time only, off the proxy hot path).
 // New projects over auto_index_limit are consent-gated (force=false).
-func runCodeIntelOnStart(ctx context.Context, configPath string) {
+//
+// T2.4 (2026-08-26 disk/compute remediation plan, P2-H): the whole loop
+// is bounded by an aggregate wall-clock deadline
+// ([codeintel.index].on_start_timeout_minutes, default 10) so a huge
+// discovered project set (historically 384K files across a Windows home
+// directory's worth of roots) can't run unbounded on every boot — any
+// projects not reached by the deadline are simply left for next start or
+// an explicit `observer index`. This is orthogonal to (and doesn't
+// weaken) the existing per-project isAutoIndexBlocked home/drive-root
+// gate inside index.IndexProject, nor the per-project auto_index_limit
+// consent gate below.
+//
+// T2.3 (P1-F): guarded by the "codeintel-index" dblease so only one
+// observer process on this machine runs this pass per boot.
+//
+// D-307: with the module off (the default) it indexes nothing; notes
+// receives the one-line upgrade note for an install that default change
+// turned off (printCodeIntelOffUpgradeNote). A nil notes prints nothing.
+func runCodeIntelOnStart(ctx context.Context, configPath string, notes io.Writer) {
 	cfg, database, cleanup, err := loadConfigAndDB(ctx, configPath)
 	if err != nil {
 		return
 	}
 	defer cleanup()
-	if !cfg.CodeIntel.Enabled || !cfg.CodeIntel.Index.OnStart || cfg.CodeIntel.Index.Mode == "manual" {
+	if !cfg.CodeIntel.Enabled {
+		printCodeIntelOffUpgradeNote(ctx, notes, cfg, configPath, store.New(database))
+		return
+	}
+	if !cfg.CodeIntel.Index.OnStart || cfg.CodeIntel.Index.Mode == "manual" {
 		return
 	}
 	logger := newLogger(cfg.Observer.LogLevel)
+
+	release, proceed := acquireMaintenanceLease(cfg, "codeintel-index", logger)
+	defer release()
+	if !proceed {
+		return
+	}
+
+	if minutes := cfg.CodeIntel.Index.OnStartTimeoutMinutes; minutes > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(minutes)*time.Minute)
+		defer cancel()
+	}
+
 	st := store.New(database)
 
 	// Union of already-indexed projects and every project Observer knows
@@ -413,6 +463,10 @@ func runCodeIntelOnStart(ctx context.Context, configPath string) {
 	ix := index.New(codeIntelIndexOptions(cfg, st))
 	for _, project := range projects {
 		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				logger.Info("codeintel: index-on-start aggregate deadline reached - remaining projects deferred to next start",
+					"timeout_minutes", cfg.CodeIntel.Index.OnStartTimeoutMinutes)
+			}
 			return
 		}
 		rep, err := ix.IndexProject(ctx, project, false)
@@ -432,17 +486,58 @@ func runCodeIntelOnStart(ctx context.Context, configPath string) {
 	}
 }
 
-// aggressiveExtsFor expands the [codeintel.compression].aggressive_languages
-// list into the concrete set of file extensions the proxy's collapse hook
-// checks. Unknown language names contribute nothing (no extensions).
-func aggressiveExtsFor(langs []string) map[string]bool {
-	out := map[string]bool{}
-	for _, l := range langs {
-		for _, ext := range parse.Extensions(codeintel.Language(l)) {
-			out[ext] = true
-		}
+// codeIntelOffMessage is what `observer index` prints when the module is
+// off: the shared codeintel.DisabledNote, so the CLI, MCP and doctor say
+// the same thing.
+const codeIntelOffMessage = "observer index: " + codeintel.DisabledNote
+
+// codeIntelOffUpgradeNote is the one line `observer start` prints for an
+// install that D-307 (code intelligence off by default, 2026-10-05) turned
+// off on upgrade: the config never set [codeintel].enabled, so it used to
+// inherit "on", and an index already exists, so indexing really did run
+// before. Every other install gets "": an explicit choice either way is
+// untouched by the default change, and a fresh install (no index yet) has
+// nothing to be told. The rows are evaluated top-down.
+func codeIntelOffUpgradeNote(enabled, enabledDefined bool, indexedProjects int) string {
+	switch {
+	case enabled:
+		return ""
+	case enabledDefined:
+		return ""
+	case indexedProjects <= 0:
+		return ""
 	}
-	return out
+	return fmt.Sprintf("note: code intelligence is now off by default and this config never set it, so code indexing has stopped "+
+		"(the index already built for %d project(s) is kept until [codeintel].retention_days prunes it). "+
+		"To keep using it, turn it on in the dashboard under Settings > Intelligence > Code intelligence.",
+		indexedProjects)
+}
+
+// printCodeIntelOffUpgradeNote gathers the inputs for codeIntelOffUpgradeNote
+// and prints the note to w. Best-effort and quiet: any error reading the
+// config file or the index means "unknown", and unknown prints nothing.
+func printCodeIntelOffUpgradeNote(ctx context.Context, w io.Writer, cfg config.Config, configPath string, st *store.Store) {
+	if w == nil || cfg.CodeIntel.Enabled {
+		return
+	}
+	path, err := config.ResolveGlobalPath(configPath)
+	if err != nil {
+		return
+	}
+	defined, err := config.FileDefinesKey(path, "codeintel", "enabled")
+	if err != nil {
+		return
+	}
+	if defined {
+		return
+	}
+	projects, err := st.CodeIntelListProjects(ctx)
+	if err != nil {
+		return
+	}
+	if note := codeIntelOffUpgradeNote(cfg.CodeIntel.Enabled, defined, len(projects)); note != "" {
+		fmt.Fprintln(w, note)
+	}
 }
 
 // codeIntelIndexOptions maps [codeintel] config onto the indexer's
@@ -465,23 +560,18 @@ func codeIntelIndexOptions(cfg config.Config, st *store.Store) index.Options {
 func printIndexReport(cmd *cobra.Command, rep index.Report) {
 	w := cmd.OutOrStdout()
 	if rep.Ignored {
-		fmt.Fprintf(w, "%s\n  skipped — in [codeintel].ignore_paths\n", rep.Project)
+		fmt.Fprintf(w, "%s\n  skipped - in [codeintel].ignore_paths\n", rep.Project)
 		return
 	}
 	if rep.NeedsConsent {
-		fmt.Fprintf(w, "%s\n  %d files exceed auto_index_limit — run `observer index %s` to consent (already done if you see this from an explicit run).\n",
+		fmt.Fprintf(w, "%s\n  %d files exceed auto_index_limit - run `observer index %s` to consent (already done if you see this from an explicit run).\n",
 			rep.Project, rep.Scanned, rep.Project)
 		return
 	}
-	fmt.Fprintf(w, "%s\n  scanned %d · indexed %d · unchanged %d · skipped %d · failed %d\n",
-		rep.Project, rep.Scanned, rep.Indexed, rep.Unchanged, rep.Skipped, rep.Failed)
-}
-
-// absPath resolves p to an absolute path (cwd-relative when p is
-// relative or empty).
-func absPath(p string) (string, error) {
-	if p == "" {
-		p = "."
+	derived := "rebuilt"
+	if rep.DerivedSkipped {
+		derived = "unchanged (skipped)"
 	}
-	return filepath.Abs(p)
+	fmt.Fprintf(w, "%s\n  scanned %d · indexed %d · unchanged %d · skipped %d · failed %d\n  search index: %s\n",
+		rep.Project, rep.Scanned, rep.Indexed, rep.Unchanged, rep.Skipped, rep.Failed, derived)
 }

@@ -2,6 +2,7 @@ package notify
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -109,4 +110,74 @@ func fmtDay(t time.Time) string {
 		return "unknown"
 	}
 	return t.UTC().Format("2006-01-02")
+}
+
+// YoungPackageDays is the age under which a lookup warns: a package this new
+// deserves a review before an MCP server from it is trusted.
+const YoungPackageDays = 14
+
+// YoungPackageWarning is the operator-facing warning for a young package.
+const YoungPackageWarning = "package is less than 14 days old - review before trusting an MCP server from it"
+
+// Young reports whether the package is younger than YoungPackageDays.
+func (i NPMPackageInfo) Young() bool { return i.AgeDays < YoungPackageDays }
+
+// ErrReputationOff is the D1 double opt-in refusal: reputation lookups are a
+// cloud feature, off until both [guard.cloud] and [guard.cloud.reputation]
+// are enabled.
+var ErrReputationOff = errors.New("reputation lookups are a cloud feature and are OFF by default (D1): set [guard.cloud] enabled = true and [guard.cloud.reputation] enabled = true to opt in - a lookup makes ONE outbound HTTPS request to registry.npmjs.org")
+
+// ErrPackageNotFound is a 404 from the registry.
+var ErrPackageNotFound = errors.New("package not found on the npm registry")
+
+// ReputationLookupOptions configures LookupNPMReputation.
+type ReputationLookupOptions struct {
+	// CloudEnabled and ReputationEnabled are [guard.cloud].enabled and
+	// [guard.cloud.reputation].enabled: both must be true (D1).
+	CloudEnabled, ReputationEnabled bool
+	// MaxBodyBytes is [guard.cloud].payload_max_bytes.
+	MaxBodyBytes int
+	// Doer overrides the HTTP client (tests); nil = the egress default.
+	Doer Doer
+	// Now stamps the package age; zero = time.Now().UTC().
+	Now time.Time
+}
+
+// LookupNPMReputation is THE on-demand reputation lookup (guard spec
+// section 15.3), shared by `observer guard mcp reputation` and the
+// dashboard's Security > MCP control (T-496) so the two cannot drift: the
+// D1 opt-in gate, ONE request through the Egress worker (allowlist,
+// redaction, size cap), and the metadata parse. Nothing calls it on its
+// own; every call is an explicit operator action.
+func LookupNPMReputation(pkg string, opts ReputationLookupOptions) (NPMPackageInfo, error) {
+	if !opts.CloudEnabled || !opts.ReputationEnabled {
+		return NPMPackageInfo{}, ErrReputationOff
+	}
+	req, err := BuildNPMLookup(pkg)
+	if err != nil {
+		return NPMPackageInfo{}, err
+	}
+	done := make(chan Result, 1)
+	e := NewEgress(EgressOptions{
+		Allow:        []string{NPMRegistryBase},
+		MaxBodyBytes: opts.MaxBodyBytes,
+		OnResult:     func(r Result) { done <- r },
+		Doer:         opts.Doer,
+	})
+	e.Submit(req)
+	e.Close() // drains: the result lands before Close returns
+	res := <-done
+	switch {
+	case res.Refused || res.Err != "":
+		return NPMPackageInfo{}, fmt.Errorf("lookup failed: %s", res.Err)
+	case res.Status == http.StatusNotFound:
+		return NPMPackageInfo{}, fmt.Errorf("%w: %q", ErrPackageNotFound, pkg)
+	case res.Status != http.StatusOK:
+		return NPMPackageInfo{}, fmt.Errorf("registry returned HTTP %d", res.Status)
+	}
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return ParseNPMMetadata(res.Body, now)
 }

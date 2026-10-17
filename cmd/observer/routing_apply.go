@@ -1,8 +1,11 @@
+//go:build !sbo_omit_proxy_routing
+
 package main
 
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
 	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/routingapply"
@@ -110,7 +112,7 @@ func printApplyHistory(cmd *cobra.Command, configPath string) error {
 		return err
 	}
 	if len(events) == 0 {
-		fmt.Fprintln(out, "no Channel A writes recorded — the ledger starts with the first `routing apply --yes` (or dashboard apply).")
+		fmt.Fprintln(out, "no Channel A writes recorded - the ledger starts with the first `routing apply --yes` (or dashboard apply).")
 		return nil
 	}
 	fmt.Fprintf(out, "Channel A apply history (%s):\n\n", ledger.Path())
@@ -153,7 +155,7 @@ func applyModelValueReport(cmd *cobra.Command, configPath string, days int) (*mo
 	if err != nil {
 		return nil, err
 	}
-	facts.Price = routingPriceFn(cost.NewEngine(cfg.Intelligence))
+	facts.Price = routingPriceFn(acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default()))
 	rep := modelvalue.Build(facts, modelvalue.Options{})
 	return &rep, nil
 }
@@ -166,7 +168,7 @@ func applyClaudeCode(cmd *cobra.Command, configPath string, days int, write, sho
 	}
 	changes, skipped := routingapply.Plan(agentDirs(), rep.Subagents)
 	if len(changes) == 0 {
-		fmt.Fprintln(out, "no actionable per-subagent changes — every evidence-backed persona is already at its target (or no evidence yet).")
+		fmt.Fprintln(out, "no actionable per-subagent changes - every evidence-backed persona is already at its target (or no evidence yet).")
 		for _, s := range skipped {
 			fmt.Fprintf(out, "  note: %s\n", s)
 		}
@@ -191,7 +193,7 @@ func applyClaudeCode(cmd *cobra.Command, configPath string, days int, write, sho
 		fmt.Fprintf(out, "  note: %s\n", s)
 	}
 	if !write {
-		fmt.Fprintln(out, "\ndry run — pass --yes to write (a .bak-observer-<stamp> backup lands next to each file; --revert restores).")
+		fmt.Fprintln(out, "\ndry run - pass --yes to write (a .bak-observer-<stamp> backup lands next to each file; --revert restores).")
 		return nil
 	}
 	stamp := routingapply.Stamp(time.Now())
@@ -219,7 +221,7 @@ func applyClaudeCode(cmd *cobra.Command, configPath string, days int, write, sho
 // is the whole basis, stated as such.
 func printChangeEvidence(out io.Writer, rec routing.SubagentRecommendation, rep *modelvalue.Report) {
 	ev := rec.Evidence
-	fmt.Fprintf(out, "    evidence: %d sidechain actions / %d session(s) — %d reads, %d mutations, %d commands, %.0f%% failures\n",
+	fmt.Fprintf(out, "    evidence: %d sidechain actions / %d session(s) - %d reads, %d mutations, %d commands, %.0f%% failures\n",
 		ev.Actions, ev.Sessions, ev.Reads, ev.Mutations, ev.Commands, ev.FailureRate()*100)
 	printModelDeltas(out, rep, rec.SuggestedModel)
 }
@@ -232,7 +234,7 @@ func printModelDeltas(out io.Writer, rep *modelvalue.Report, candidate string) {
 	}
 	deltas := rep.GlobalDeltasFor(candidate)
 	if len(deltas) == 0 {
-		fmt.Fprintf(out, "    parity: no graded deltas for %s in this window — the observed profile above is the whole basis\n", candidate)
+		fmt.Fprintf(out, "    parity: no graded deltas for %s in this window - the observed profile above is the whole basis\n", candidate)
 		return
 	}
 	for _, d := range deltas {

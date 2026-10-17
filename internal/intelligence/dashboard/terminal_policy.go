@@ -6,7 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/marmutapp/superbased-observer/internal/termsvc"
+	"github.com/marmutapp/superbased-observer/internal/termcore"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/diag"
 )
 
 // terminal_policy.go is the Terminal launch-policy management surface
@@ -25,11 +28,36 @@ import (
 // canonicalizes allowed_project_roots through the SAME internal/termsvc
 // validator the spawn path uses — no reimplementation.
 
+// terminalPolicyLive is the OPTIONAL LaunchManager seam (the same additive
+// pattern as terminalLimitsSetter) through which the daemon says it reads the
+// launch policy live from config.toml (T-489). A launcher that lacks it (a
+// test fake, an embedder) keeps the honest "restart required" answer.
+type terminalPolicyLive interface {
+	TerminalPolicyLive() bool
+}
+
+// launchPolicyRestartRequired reports whether a [terminal.launch] or
+// [terminal.ssh] save needs a daemon restart to bind: false only when the
+// launch manager reads them live.
+func (s *Server) launchPolicyRestartRequired() bool {
+	live, ok := s.opts.LaunchManager.(terminalPolicyLive)
+	return !ok || !live.TerminalPolicyLive()
+}
+
 // terminalPolicyPayload is the read/write shape of [terminal.launch].
 type terminalPolicyPayload struct {
 	AllowFreshAgent     bool     `json:"allow_fresh_agent"`
 	AllowedTools        []string `json:"allowed_tools"`
 	AllowedProjectRoots []string `json:"allowed_project_roots"`
+	// AllowShell is the SEPARATE default-OFF opt-in for a fresh plain-shell
+	// launch — independent of AllowFreshAgent/AllowedTools (a bare shell is
+	// not a member of the tool allow-list).
+	AllowShell bool `json:"allow_shell"`
+	// AllowInstall is [terminal.launch].allow_install, the guided install /
+	// uninstall kill-switch (default true; read live by the install route).
+	// A POINTER so a client that predates the key (it omits the field) keeps
+	// the saved value instead of silently switching guided install off.
+	AllowInstall *bool `json:"allow_install,omitempty"`
 }
 
 // handleTerminalPolicy serves GET/PUT /api/terminal/policy (whole-route Local).
@@ -48,8 +76,17 @@ func (s *Server) handleTerminalPolicy(w http.ResponseWriter, r *http.Request) {
 // launchable-tool SOURCE for the picker (from the capability registry, never a
 // free-text field), and honest state flags. It mints a fresh confirm token so
 // the PUT can echo it (§10).
+//
+// It ALSO reports the second, independent allow-list that decides whether a
+// launched tool is ever captured — [observer.watch].enabled_adapters — plus the
+// server-derived cross-check unwatched_allowed_tools (audit DI-07). Both are
+// READ-ONLY here: enabled_adapters belongs to a different config section and is
+// NOT part of the PUT payload. The cross-check is derived server-side by
+// diag.AllowedToolsNotWatched so the SPA never reimplements the list's
+// nil-vs-empty rule (nil = every adapter watched; non-nil empty = watch
+// nothing) — one owner, two readers (this route and /api/terminal/sessions).
 func (s *Server) handleTerminalPolicyGet(w http.ResponseWriter, r *http.Request) {
-	confirmTok := setConfirmCookie(w)
+	confirmTok := setConfirmCookie(w, r)
 	resp := map[string]any{
 		"confirm_token":         confirmTok,
 		"config_writable":       s.opts.ConfigPath != "",
@@ -57,6 +94,8 @@ func (s *Server) handleTerminalPolicyGet(w http.ResponseWriter, r *http.Request)
 		"allow_fresh_agent":     false,
 		"allowed_tools":         []string{},
 		"allowed_project_roots": []string{},
+		"allow_shell":           false,
+		"allow_install":         true,
 		// Runtime bounds (read-only here; written by the live-applying
 		// /api/terminal/limits verb). Surfaced from this same GET so the UI has
 		// both the current values and the confirm token from one fetch.
@@ -66,11 +105,19 @@ func (s *Server) handleTerminalPolicyGet(w http.ResponseWriter, r *http.Request)
 		// from the capability registry (dispatch on capability shape, never a
 		// hardcoded tool list).
 		"launchable_tools": launchableTools(),
-		// A [terminal.launch] write binds only on the next daemon start: the
-		// launch policy is captured into the termsvc service at construction
-		// (cmd terminalLaunchPolicy), never hot-reloaded — so the UI states the
-		// restart honestly.
-		"restart_required_on_save": true,
+		// [observer.watch].enabled_adapters AS LOADED: null = the key is absent
+		// (default: every adapter watched), [] = the explicit "watch nothing"
+		// intent. The distinction is load-bearing, so it is carried onto the
+		// wire rather than normalized away.
+		"enabled_adapters": []string(nil),
+		// The DI-07 cross-check: allow-listed launchable tools an explicit
+		// enabled_adapters list omits. They launch happily and record nothing.
+		"unwatched_allowed_tools": []string{},
+		// A [terminal.launch] write binds on the next launch when the daemon
+		// reads the policy live (T-489, cmd terminal_config_live.go); only a
+		// launch manager without that seam still needs a restart, and the UI
+		// states whichever is true.
+		"restart_required_on_save": s.launchPolicyRestartRequired(),
 	}
 	if cfg, err := loadConfigForDashboard(s.opts.ConfigPath); err == nil {
 		resp["terminal_enabled"] = cfg.Terminal.Enabled
@@ -83,6 +130,12 @@ func (s *Server) handleTerminalPolicyGet(w http.ResponseWriter, r *http.Request)
 		}
 		resp["max_concurrent"] = cfg.Terminal.MaxConcurrent
 		resp["idle_timeout"] = cfg.Terminal.IdleTimeout
+		resp["allow_shell"] = cfg.Terminal.Launch.AllowShell
+		resp["allow_install"] = cfg.Terminal.Launch.AllowInstall
+		resp["enabled_adapters"] = cfg.Observer.Watch.EnabledAdapters
+		if gap := diag.AllowedToolsNotWatched(cfg); len(gap) > 0 {
+			resp["unwatched_allowed_tools"] = gap
+		}
 	}
 	writeJSON(w, resp)
 }
@@ -103,7 +156,7 @@ func (s *Server) handleTerminalPolicyPut(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no file to save to", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no file to save to", http.StatusConflict)
 		return
 	}
 	var body terminalPolicyPayload
@@ -137,38 +190,38 @@ func (s *Server) handleTerminalPolicyPut(w http.ResponseWriter, r *http.Request)
 	// domain) so a policy PUT and a section save can't clobber one another.
 	// Lock order is remoteManageMu (outer) → configWriteMu (inner), released in
 	// reverse — the same order every manage verb uses (see remoteManageMu decl).
-	remoteManageMu.Lock()
-	s.configWriteMu.Lock()
-	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
-	if err != nil {
-		s.configWriteMu.Unlock()
-		remoteManageMu.Unlock()
-		writeErr(w, fmt.Errorf("load current config: %w", err))
-		return
-	}
-	cfg.Terminal.Launch.AllowFreshAgent = body.AllowFreshAgent
-	cfg.Terminal.Launch.AllowedTools = tools
-	cfg.Terminal.Launch.AllowedProjectRoots = roots
-	werr := writeConfigToml(s.opts.ConfigPath, cfg)
-	s.configWriteMu.Unlock()
-	remoteManageMu.Unlock()
-	if werr != nil {
-		writeErr(w, werr)
-		return
-	}
-	s.notifyConfigSaved()
-	// Record the privilege-expanding write in the metadata-only remote_audit
-	// tail (plan §4), so the Remote panel's audit shows who changed launch
-	// policy — reuses the existing seam, no new table.
-	s.recordManageAudit(r, "terminal_policy", fmt.Sprintf("allow_fresh_agent=%v tools=%d roots=%d", body.AllowFreshAgent, len(tools), len(roots)))
-	writeJSON(w, map[string]any{
-		"saved":                 true,
-		"allow_fresh_agent":     body.AllowFreshAgent,
-		"allowed_tools":         tools,
-		"allowed_project_roots": roots,
-		"config_path":           s.opts.ConfigPath,
-		"backup_path":           s.opts.ConfigPath + ".bak",
-		"restart_required":      true,
+	//
+	// REVIEW-3 P3-18: the write goes through the ONE save pipeline
+	// (commitConfigEdit takes both locks in that order): ?dry_run=1 previews
+	// the masked diff, ?base_etag= refuses a file changed since the preview,
+	// and the write is read back. The audit row stays in the metadata-only
+	// remote_audit tail (plan §4), so the Remote panel's audit shows who
+	// changed launch policy.
+	allowInstall := false
+	s.commitConfigEdit(w, r, configEdit{
+		section: "terminal.launch",
+		apply: func(cfg *config.Config) {
+			cfg.Terminal.Launch.AllowFreshAgent = body.AllowFreshAgent
+			cfg.Terminal.Launch.AllowedTools = tools
+			cfg.Terminal.Launch.AllowedProjectRoots = roots
+			cfg.Terminal.Launch.AllowShell = body.AllowShell
+			if body.AllowInstall != nil {
+				cfg.Terminal.Launch.AllowInstall = *body.AllowInstall
+			}
+			allowInstall = cfg.Terminal.Launch.AllowInstall
+		},
+		auditAction: "terminal_policy",
+		auditDetail: fmt.Sprintf("allow_fresh_agent=%v tools=%d roots=%d allow_shell=%v", body.AllowFreshAgent, len(tools), len(roots), body.AllowShell),
+		extra: func(cfg config.Config) map[string]any {
+			return map[string]any{
+				"allow_fresh_agent":     body.AllowFreshAgent,
+				"allowed_tools":         tools,
+				"allowed_project_roots": roots,
+				"allow_shell":           body.AllowShell,
+				"allow_install":         allowInstall,
+				"restart_required":      s.launchPolicyRestartRequired(),
+			}
+		},
 	})
 }
 
@@ -189,7 +242,7 @@ func validateLaunchableTools(requested []string) ([]string, error) {
 			continue
 		}
 		if _, ok := launchable[t]; !ok {
-			return nil, fmt.Errorf("tool %q is not launchable in the embedded terminal — pick from the launchable set", t)
+			return nil, fmt.Errorf("tool %q is not launchable in the embedded terminal - pick from the launchable set", t)
 		}
 		if _, dup := seen[t]; dup {
 			continue
@@ -215,7 +268,7 @@ func canonicalizeProjectRoots(requested []string) ([]string, error) {
 		if entry == "" {
 			continue
 		}
-		canonical, err := termsvc.ValidateProjectRoot(entry, []string{entry})
+		canonical, err := termcore.ValidateProjectRoot(entry, []string{entry})
 		if err != nil {
 			return nil, fmt.Errorf("project root %q rejected: %w", entry, err)
 		}

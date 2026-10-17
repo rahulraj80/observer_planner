@@ -1,0 +1,36 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].claude_code_metrics": "VerifiedOfficial",
+    "data[].claude_code_metrics.distinct_session_plugin_used_count": "VerifiedOfficial",
+    "data[].cowork_metrics": "VerifiedOfficial",
+    "data[].cowork_metrics.distinct_session_plugin_used_count": "VerifiedOfficial",
+    "data[].distinct_user_count": "VerifiedOfficial",
+    "data[].install_count": "VerifiedOfficial",
+    "data[].invocation_count": "VerifiedOfficial",
+    "data[].plugin_id": "VerifiedOfficial",
+    "data[].plugin_name": "VerifiedOfficial",
+    "data[].product": "VerifiedOfficial",
+    "data[].rbac_group_id": "VerifiedOfficial",
+    "data[].rbac_group_name": "VerifiedOfficial",
+    "data[].user_id": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b6745317799384addf663404402037eb82686e277a974440e07c5ca011d846db",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/analytics/plugins",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/organizations/analytics/plugins.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.analytics.plugins"
+}

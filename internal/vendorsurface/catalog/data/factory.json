@@ -1,0 +1,3785 @@
+{
+ "group": "factory",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/factory-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "factory.analytics.activity",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Factory API key (fk-, Manager or Owner role) as Authorization: Bearer"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REF GET .../activity `group_by=client`; DAU/WAU/MAU, daily_active_users_by_client (terminal-ui, web, non-interactive-cli), sessions, messages, user_messages",
+   "read_write_doc": "R",
+   "class_doc": "Adoption, Sessions counts (OrgDay)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics.md",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/factory Activity (GET /api/v1/analytics/activity, startDate / endDate YYYY-MM-DD UTC ending yesterday because today is a documented 400, the first day re-read; group_by is never sent, so the documented ungrouped shape is the contract and a grouped row is schema drift; at most 31 days per run), conformance against the vendormock mock (no paging), landed as org facts for droid per UTC day: daily_active_users (unit users), sessions, messages and user_messages (count), and daily_active_users per client type (Feature = the client; never added to the total). Weekly and monthly active users are trailing-window distinct counts and are not landed. Synthetic only, no vendor response observed. assumption_tested: the fixture is the reference's ungrouped example. Secret class reviewed: counts and client type names only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/factory Activity (ungrouped), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Factory Analytics API analytics.md Authentication: Factory API key as Authorization: Bearer; organization-level endpoints need Manager or Owner"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.analytics.cost_me",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; User role, self only (no user selector)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "\"Enterprise organizations with Analytics enabled\""
+   },
+   "freshness_doc": "as above; max 90-day range",
+   "lookback_doc": "",
+   "per_user_doc": "per-user (self)",
+   "mechanism_doc": "REF GET .../cost/me/query `queryKey` in headline_daily, cost_summary, top_sessions, by_model, fsc_by_model_daily, fsc_by_multiplier_daily, by_ticket, by_pr, my_activity_summary, my_time_spent, my_intent_breakdown, my_completed_tickets_daily, my_completed_tickets, my_merged_prs_daily, my_merged_pr_detail",
+   "read_write_doc": "R",
+   "class_doc": "Cost, Sessions, Commits, Adoption (UserDay, caller only)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (only per-user key holder; not an admin pull)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "usd_micros",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.analytics.productivity",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Factory API key (fk-, Manager or Owner role) as Authorization: Bearer"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REF GET .../productivity; files_created, files_edited, by_extension, by_language, git_commits, git_prs_created (no line counts)",
+   "read_write_doc": "R",
+   "class_doc": "Commits, LOC (files only) (OrgDay)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Commits",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "org_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics.md",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/factory Productivity (GET /api/v1/analytics/productivity, startDate / endDate ending yesterday, at most 31 days per run), conformance against the vendormock mock (no paging), landed as org facts for droid per UTC day: files_created, files_edited, git_commits and git_prs_created (count). The per-extension and per-language breakdowns are not landed. Synthetic only, no vendor response observed. assumption_tested: the fixture is the reference's example. Secret class reviewed: counts, extension and language names only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/factory Productivity, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Factory Analytics API analytics.md Authentication: Factory API key as Authorization: Bearer; organization-level endpoints need Manager or Owner"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.analytics.tokens",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer fk- key; Manager or Owner"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none; rate \"varies by plan\", unpublished"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated (403 may mean tier or Analytics access)"
+   },
+   "freshness_doc": "daily batch, through yesterday UTC (today = 400); history from 2026-01-14",
+   "lookback_doc": "",
+   "per_user_doc": "aggregate + by_user nested",
+   "mechanism_doc": "REF GET https://api.factory.ai/api/v1/analytics/tokens `startDate,endDate,group_by=model`; fields date, billable_tokens (FSC credits), input/output/cache_read/cache_write tokens",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost (OrgDay; nested by_model, by_user)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16, T-619): driver internal/vendorapi/factory Tokens (GET /api/v1/analytics/tokens, startDate and endDate YYYY-MM-DD UTC ending yesterday because today is a documented 400, group_by=model; at most 31 days per run), conformance against the vendormock mock, landed as org facts for droid per model per UTC day: standard_credits (unit credits, Factory Standard Credits, a billing unit) and input, output, cache read and cache write tokens (a null cache count is not reported and never lands as zero). Synthetic only, no vendor response observed. assumption_tested: the reference documents group_key on grouped rows but no grouped example, so that a grouped row keeps its date is Inferred. Secret class reviewed: counts, dates and model names, never a credential.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16: driver internal/vendorapi/factory Tokens, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Factory Analytics API reference: Authorization: Bearer fk- API key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.analytics.tools",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Factory API key (fk-, Manager or Owner role) as Authorization: Bearer"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REF GET .../tools `group_by=tool_name`; tool_calls, by_tool, mcp_by_server, mcp_users_with_mcp, skills_*, slash_commands_*, hooks_by_event (event, matcher, command), web_users, autonomy_ratio avg/p50/p90, per-session avgs, tool_autonomy_level_ratio",
+   "read_write_doc": "R",
+   "class_doc": "Adoption (OrgDay or tool rows)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics.md",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/factory Tools (GET /api/v1/analytics/tools, startDate / endDate ending yesterday, no group_by, at most 31 days per run), conformance against the vendormock mock (no paging), landed as org facts for droid per UTC day: tool_calls, skills_invocations, slash_commands_invocations and hooks_invocations (count), mcp_users and web_users (users), and tool_calls per built-in tool name (Feature; never added to the total). Averages, percentiles and autonomy ratios are derived and not landed; MCP server, skill and slash command names are organization-authored and not landed. Secret class may_return_secret: hooks_by_event names the configured hook command (free text that can hold a credential), so the driver is closed-DTO and never decodes it. Synthetic only, no vendor response observed. assumption_tested: the fixture is the reference's ungrouped example.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/factory Tools (ungrouped, closed DTO), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Factory Analytics API analytics.md Authentication: Factory API key as Authorization: Bearer; organization-level endpoints need Manager or Owner"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.analytics.users",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Factory API key (fk-), Manager or Owner role, Analytics access"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor: limit 1-100 (default 20), meta.next_cursor/has_more"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "REF GET .../users; user_id, user_email (nullable), date, tool_calls, billable_tokens, primary_model, primary_model_tier, files_created/edited, git_commits, git_prs_created, mcp_calls, skill_calls, slash_commands, hooks, sessions, messages, user/assistant_messages, autonomy_ratio, delegation_level, languages",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Adoption, Commits, Sessions counts (UserDay)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/factory Users (GET /api/v1/analytics/users, startDate and endDate YYYY-MM-DD UTC ending yesterday because today is a documented 400, limit=100, cursor = meta.next_cursor; at most 31 days per run), conformance against the vendormock mock (nested_cursor paging family), landed as per-user facts for droid per UTC day under the user's email (a null email keeps the vendor user id, held): standard_credits (unit credits) and the documented event counts (tool calls, files created and edited, commits, PRs created, MCP, skill, slash command and hook calls, sessions, messages by role; unit count). The primary model, its tier, the autonomy ratio, the delegation level and the languages are descriptive and not landed. Synthetic only, no vendor response observed. assumption_tested: the first page is the reference's own example, but that next_cursor is null (not absent) on the last page is this lane's reading. Secret class reviewed: ids, emails and counts, never a credential.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/factory Users, synthetic gate passed",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "plane: Factory Analytics API reference: Authorization: Bearer fk- API key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.automations_ci",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "OAS /api/v0/automations/ci/{edit,jobs,repositories,repository-owners,runs,scan}",
+   "read_write_doc": "R/W",
+   "class_doc": "(out of class: CI workflow automation)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (not mapped)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/automations-ci",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "factory.api.computers",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per computer (SA- or user-owned)",
+   "mechanism_doc": "OAS /api/v0/computers (list/create/bulk/get/by name/providers/patch/delete/activity/files/install-deps/refresh/restart) + GET /{id}/metrics `start`",
+   "read_write_doc": "R/W",
+   "class_doc": "(out of class: agent execution compute)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (not mapped)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/computers",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "factory.api.enterprise_controls_history",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; role not stated"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor 1-100"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Business/Enterprise (Enterprise Controls)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "OAS GET /api/v0/organization/enterprise-controls/history `limit,cursor`; changes[{revision, settings (full managed-settings object, generic JSON), user{id,email,name}, updatedAt}] ordered revision desc",
+   "read_write_doc": "R",
+   "class_doc": "Policy, Retention, Telemetry config, partial Audit (Event + Snapshot per revision)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MCPAllowList",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialCreationPolicy",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ContentExclusion",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/organization",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.limits_global",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; role not stated"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "org default per user",
+   "mechanism_doc": "OAS GET/PUT /api/v0/organization/usage/limits/global {limit int credits, min 1,000,000, null clears}",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/organization",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.limits_users",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; role not stated"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "OAS GET/PUT /api/v0/organization/usage/limits/users; GET {globalLimit, userLimits[{email,limit}]}; PUT bulk up to 100 users, min 1,000,000, null clears",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits (Snapshot)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/organization",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/openapi.json",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/factory LimitsUsers (OpenAPI getUserLimits: GET /api/v0/organization/usage/limits/users, not paged), conformance against the vendormock mock, landed as Limit/factory.credit_limit/v1 resources: the global per-user limit (key global) and each override (key user:<email>), limit in credits, state set, unset or inherits_global (a null limit is absent, never zero); authoritative. This read also carries the global limit, so factory.api.limits_global needs no driver of its own. Read only: the PUT writes are not built and nothing here feeds a budget. Synthetic only, no vendor response observed. assumption_tested: synthesized from the OpenAPI schema, no published example. Secret class reviewed: emails and integers.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/factory LimitsUsers, synthetic gate passed",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "plane: Factory Public API OpenAPI securitySchemes.BearerAuth: Factory API key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.org_users",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; role not stated"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor limit 1-100, pagination.hasMore/nextCursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "OAS GET /api/v0/organization/users `limit,cursor`; id (WorkOS user id), email, firstName, lastName, createdAt, lastSignInAt, metadata. NO role field",
+   "read_write_doc": "R",
+   "class_doc": "Identity (Snapshot)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.factory.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/organization",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/openapi.json",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/factory OrgUsers (OpenAPI listOrganizationUsers: GET /api/v0/organization/users, limit=100, cursor = pagination.nextCursor), conformance against the vendormock mock (nested_cursor paging family), landed as User/factory.org_user/v1 resources keyed factory.user = the WorkOS user id: email, created and last sign-in times, first and last name as the display name; a complete page set is authoritative. may_return_secret: users[].metadata is open custom data, so the driver is closed-DTO and never decodes it. The schema has no role field. Synthetic only, no vendor response observed. assumption_tested: synthesized from the OpenAPI schema, no published example. The invite and remove writes are not built.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/factory OrgUsers, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Factory Public API OpenAPI securitySchemes.BearerAuth: Factory API key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.org_users_invite",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; role not stated"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "OAS POST /api/v0/organization/users/invite {email, role user/manager/owner}; status invited/already_member/role_updated/already_invited/error (seat limit)",
+   "read_write_doc": "W",
+   "class_doc": "Identity, Roles, Seats (write)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/organization",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.org_users_remove",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; role not stated"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "OAS DELETE /api/v0/organization/users?email= (member removal or invite revoke), 204",
+   "read_write_doc": "W",
+   "class_doc": "Identity (write)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/organization",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.service_account_keys",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manager+ (same)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-key",
+   "mechanism_doc": "OAS GET/POST /api/v0/service-accounts/{id}/api-keys; POST .../{keyId}/revoke; POST .../{keyId}/rotate {expiresAt, gracePeriodMinutes 0-10}; fields id, name, fingerprint, createdAt, expiresAt, isRevoked, revokedAt",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/service-accounts",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.service_accounts",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "human auth, Manager or higher; SA credentials rejected"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "no paging documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated (402 response exists)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-SA",
+   "mechanism_doc": "OAS GET/POST /api/v0/service-accounts; GET/PATCH/DELETE /{id}; fields id, name (immutable), description, status active/inactive/deleted, createdBy, teamIds[], createdAt, updatedAt",
+   "read_write_doc": "R/W",
+   "class_doc": "ServiceAccounts (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/service-accounts",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.session_messages",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "selected orgs"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "own sessions",
+   "mechanism_doc": "OAS GET /api/v0/sessions/{id}/messages `limit,cursor,role`; GET .../messages/{messageId}; POST message; fields id, role, content[], createdAt, parentId, userMessageSource (web, desktop, cli_tui, cli_exec, cli_acp, slack, jira, linear, microsoft-teams, sessions_api, api, sdk, automation, readiness-*, wiki-*), interactionMode, modelId, apiProvider, routerId, reasoningEffort, hook* fields, isError. No token counts",
+   "read_write_doc": "R/W",
+   "class_doc": "Content (PerCall)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/sessions",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.sessions",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer; \"the authenticated user\" only"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "\"enabled for selected organizations only\""
+   },
+   "freshness_doc": "live; soft-delete restorable within retention",
+   "lookback_doc": "",
+   "per_user_doc": "own sessions only (no admin-wide list)",
+   "mechanism_doc": "OAS GET /api/v0/sessions `limit,cursor,computerId`; GET/PATCH/DELETE /{sessionId}; POST create; POST /{id}/interrupt; fields sessionId, parent_session_id, title, status, messageCount, created/updated/completedAt, computerId, sessionSettings (model, reasoningEffort, interactionMode, autonomyLevel, providerLock, tags, worktree, tool ids), factoryCredits (session + subagents)",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions (PerSession)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (per-user key)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/sessions",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.api.wiki",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per run",
+   "mechanism_doc": "OAS /api/v0/wiki (list, create, history/{repoUrl}, {id}, export zip, pages, privacy, search, video-upload-url)",
+   "read_write_doc": "R/W",
+   "class_doc": "(out of class: AutoWiki runs)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (not mapped)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/wiki",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "factory.app.readiness_reports",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.app",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer fk-; role not documented"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "startAfter cursor; no max"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "org-wide per repo",
+   "mechanism_doc": "REF GET https://app.factory.ai/api/organization/agent-readiness-reports `repoId,limit,startAfter`; reportId, createdAt, repoUrl, apps, report{criterion:{numerator,denominator,rationale}}, commitHash, branch, modelUsed, droidVersion",
+   "read_write_doc": "R",
+   "class_doc": "Adoption (repo agent-readiness, Event per report)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/readiness-reports",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.automations.delivery_feed",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.automations",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "30-day automation delivery event feed (no read API documented)",
+   "read_write_doc": "UI",
+   "class_doc": "Audit",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.ai/software-factory/automations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Added by the full v5 review (R-D-14), plan section 4.3.3.",
+   "derivation": {
+    "reach_rule": "review R-D-14",
+    "build_rule": "review R-D-14",
+    "source_rule": "review R-D-14",
+    "auth_rule": "review R-D-14"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.automations.webhook_trigger",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.automations",
+   "reach": "invoke_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST https://api.factory.ai/api/webhooks/automations/<id>; X-Webhook-Secret; 200 KiB; 60 per minute; private preview (Observer calls a Factory trigger; not a data source)",
+   "read_write_doc": "W (invoke)",
+   "class_doc": "Sessions, Policy",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.ai/software-factory/automations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Added by the full v5 review (R-D-14), plan section 4.3.3.",
+   "derivation": {
+    "reach_rule": "review R-D-14",
+    "build_rule": "review R-D-14",
+    "source_rule": "review R-D-14",
+    "auth_rule": "review R-D-14"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.audit_export",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "\"No self-serve audit-log export\"; SIEM/export path arranged in enterprise engagement",
+   "read_write_doc": "R",
+   "class_doc": "Audit (bulk)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/compliance-audit-and-monitoring",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.audit_log",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Enterprise Owners"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise (pricing also lists Business \"audit logging and activity trails\")"
+   },
+   "freshness_doc": "retention not stated",
+   "lookback_doc": "",
+   "per_user_doc": "event",
+   "mechanism_doc": "UI Team Settings; page says reachable \"via the public API\" but no endpoint in openapi.json or reference; categories: usage limits, usage alerts, membership, API keys, service accounts, integrations, org lifecycle, managed settings (revisions), analytics settings; fields actor, source, target ids, payload, ISO timestamp; one named event `organization_monthly_usage_settings_change`; filter by scope (v0.182.0); records who started a session from a connected tool (v0.228.0)",
+   "read_write_doc": "R",
+   "class_doc": "Audit (Event)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/audit-log",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/changelog/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.billing",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "Billing settings, centralized invoices at enterprise root; vouchers / account credit",
+   "read_write_doc": "R",
+   "class_doc": "BillingExport",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/enterprise-admin-console",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/pricing/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.compliance_restrictions",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "written request to Factory only; enforced at backend",
+   "read_write_doc": "none",
+   "class_doc": "Policy (managed inference / compute / cloud sync restrictions)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/compliance-audit-and-monitoring",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.credit_usage",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "member / admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "all plans"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "both",
+   "mechanism_doc": "Settings > Usage, separate credit usage page (v0.196.0), `/limits` in droid",
+   "read_write_doc": "R",
+   "class_doc": "Cost (UI)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/pricing/individuals",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.directory",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "enterprise owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "Admin Console > Directory: members across orgs, UI- vs Directory-Sync-managed flag",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Identity, Groups (cross-org membership)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/enterprise-admin-console",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.enterprise_controls",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Manager/Owner; root owner for locks"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Business/Enterprise"
+   },
+   "freshness_doc": "startup read by clients",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI editor (draft, Review Changes, save) per org; root can lock fields read-only for sub-orgs; no write API",
+   "read_write_doc": "W UI",
+   "class_doc": "Policy, Retention (write)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (read side = enterprise_controls_history)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/hierarchical-settings-and-org-control",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.integrations_secrets",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "Manager/Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: connector availability (v0.213.0), org-managed ServiceNow/Databricks apps, personal vs organization secrets (v0.224.0)",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Policy (connector availability), Credentials (org secrets)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/changelog/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.organizations",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "enterprise account owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise (sub-orgs Enterprise only)"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "Admin Console > Organizations: create nested orgs, choose region, copy root controls/limits, lock local edits; no API",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Projects (sub-orgs, regions)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/organization-model",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/structuring-and-managing-organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.usage_alerts",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner/Manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "not stated"
+   },
+   "freshness_doc": "email",
+   "lookback_doc": "",
+   "per_user_doc": "org / per-user",
+   "mechanism_doc": "UI: monthly org alert threshold in FSC (informational, not enforced) + alert emails toggle; admin email alerts as usage approaches caps (v0.176.0); weekly summary email of users/SAs at or above 80% of monthly cap (`disableWeeklyUsageSummary`)",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Limits (alert state)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/audit-log",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/hierarchical-settings-and-org-control",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.usage_view",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "enterprise account owner / org admins"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "",
+   "per_user_doc": "both",
+   "mechanism_doc": "Admin Console > Organizations > View usage; group by org, model, user, user type (Human / Service Account), source, product; top 50 + Other; CSV export of current view",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost (custom range, UTC)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/enterprise-admin-console",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/structuring-and-managing-organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.console.user_api_keys",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "member; creation restrictable to Managers"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "per-key",
+   "mechanism_doc": "UI app.factory.ai/settings/api-keys; no list/revoke API for human keys",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Credentials (personal and legacy org-scoped keys)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/api-reference/analytics",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/structuring-and-managing-organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.idp.scim",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.idp",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "IdP admin; SCIM token in IdP"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Business/Enterprise"
+   },
+   "freshness_doc": "IdP-driven",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "WorkOS Directory Sync, INBOUND from IdP: users + groups; group slug owner -> Owner, admin/manager -> Manager, else User; soft delete; email match; Admin Console > Security & Identity group mappings",
+   "read_write_doc": "inbound only",
+   "class_doc": "Identity, Groups, Roles",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly for Observer (Observer is not the IdP)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/structuring-and-managing-organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.idp.sso",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.idp",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "IdP admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Business/Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "WorkOS SAML/OIDC; domain verification (TXT); JIT; require-invite for verified domains (v0.208.0); setup link from Factory support",
+   "read_write_doc": "config",
+   "class_doc": "Identity",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/identity-and-access",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.node.factory_dirs",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "repo / user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "startup",
+   "lookback_doc": "",
+   "per_user_doc": "project / user",
+   "mechanism_doc": "`.factory/` settings.json, settings.local.json, hooks.json, mcp.json, droids/, commands/, skills/, output-styles/ at folder, `<git-root>/.factory/`, `~/.factory/`",
+   "read_write_doc": "file",
+   "class_doc": "Policy (folder/project/user levels)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/hierarchical-settings-and-org-control",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.node.mdm_settings",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin / MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Business/Enterprise"
+   },
+   "freshness_doc": "read at startup",
+   "lookback_doc": "",
+   "per_user_doc": "device",
+   "mechanism_doc": "FileProjection: macOS /Library/Application Support/Factory/settings.json; Linux/WSL /etc/factory/settings.json; Windows C:\\Program Files\\Factory\\settings.json; authoritative, short-circuits API fetch; malformed = empty policy",
+   "read_write_doc": "file write",
+   "class_doc": "ManagedSettings, Policy",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (file contract documented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/hierarchical-settings-and-org-control",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.node.msix",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "IT"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "device",
+   "mechanism_doc": "MSIX x64/ARM64 from app.factory.ai/api/desktop; Intune / ConfigMgr generic MSIX; no registry/ADMX; auto-update off only via Enterprise Controls `disableAutoUpdate`",
+   "read_write_doc": "deploy",
+   "class_doc": "Policy (auto-update)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/windows-msix-deployment",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.node.otel_genai",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any org"
+   },
+   "freshness_doc": "60 s",
+   "lookback_doc": "",
+   "per_user_doc": "per-user or aggregate",
+   "mechanism_doc": "same transport, `format=genai`: histograms gen_ai.client.operation.duration, time_to_first_chunk, execute_tool.duration, invoke_agent.duration, invoke_agent.inference_calls, invoke_agent.tool_calls; spans invoke_agent droid > chat <model> / execute_tool <tool> with gen_ai.conversation.id, session.id, tool.call.id, messages/arguments/results only with logMessageContent. Spans never reach Factory",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry, Content (opt-in spans)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "unspecified",
+     "unit": "text",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/telemetry",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/telemetry/data-reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.node.otel_legacy",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "collector headers (`OTEL_TELEMETRY_HEADERS` / org `telemetry.headers`)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any org (org block pinnable)"
+   },
+   "freshness_doc": "60 s",
+   "lookback_doc": "",
+   "per_user_doc": "per-user or aggregate (`granularity`)",
+   "mechanism_doc": "PushOTLP HTTP `{endpoint}/v1/metrics`, delta temporality, 60 s default; droid.code.files_modified, files_read, lines_modified (operation), git.commits, git.pull_requests, tool.invocations, tool.execution_time (hist), command.blocked, mcp.tool_invocations, skill.invocations, skill.installed, hook.invocations, slash_command.invocations, auth.login_success, session.count, repo.metadata; attrs user.id, user.email, organization.id, session.id, model.id, parent_session.id. No tokens, no cost",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry, LOC, Commits, Adoption, Sessions counts (delta counters)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/telemetry",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/telemetry/data-reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.node.session_store",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "",
+   "per_user_doc": "per-session",
+   "mechanism_doc": "`~/.factory/sessions` JSONL + `<uuid>.settings.json` (existing Observer adapter `droid`)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Usage (node), Content",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (Observer-owned)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "unspecified",
+     "unit": "text",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "repo_path": "CLAUDE.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "observer_repo_doc",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "factory.trust.retention_residency",
+   "vendor_group": "factory",
+   "vendor": "factory",
+   "plane": "factory.trust",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "ZDR Business+Enterprise; residency Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "org",
+   "mechanism_doc": "Trust Center (trust.factory.com) for hosted log retention and residency, tunable per engagement; EU region (session content in EU DB; profiles and billing in US); ZDR via enterprise provider endpoints",
+   "read_write_doc": "R",
+   "class_doc": "Retention",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.factory.com/enterprise/privacy-and-data-flows",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/enterprise/network-and-deployment",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.factory.com/pricing/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

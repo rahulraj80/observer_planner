@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "actor": {
+        "deleted": true,
+        "email": "jane@example.com",
+        "email_address": "jane@example.com",
+        "name": "Jane Smith",
+        "type": "user_actor",
+        "user_id": "user_01AbCdEfGhIjKlMnOpQrSt"
+      },
+      "amount": "41280.000000",
+      "claude_tag_category": null,
+      "claude_tag_user_id": null,
+      "context_window": null,
+      "cost_type": null,
+      "currency": "USD",
+      "ending_at": "2026-10-07T00:00:00Z",
+      "inference_geo": null,
+      "list_amount": "51600.000000",
+      "model": null,
+      "product": "chat",
+      "rbac_group_id": null,
+      "requests": 128,
+      "slack_channel_id": null,
+      "speed": null,
+      "starting_at": "2026-10-06T00:00:00Z",
+      "token_type": null
+    }
+  ],
+  "data_refreshed_at": "2019-12-27T18:11:19.117Z",
+  "has_more": false,
+  "next_page": null,
+  "organization_id": "org_013FP9SaFPBg7Kw7fetjn6cF"
+}

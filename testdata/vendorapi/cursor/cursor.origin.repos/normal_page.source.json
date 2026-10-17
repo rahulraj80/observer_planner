@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "repositories": "VerifiedOfficial",
+    "repositories[]": "VerifiedOfficial",
+    "repositories[].cloneUrl": "VerifiedOfficial",
+    "repositories[].createdAt": "VerifiedOfficial",
+    "repositories[].defaultBranch": "VerifiedOfficial",
+    "repositories[].fullName": "VerifiedOfficial",
+    "repositories[].id": "VerifiedOfficial",
+    "repositories[].name": "VerifiedOfficial",
+    "repositories[].owner": "VerifiedOfficial",
+    "repositories[].owner.id": "VerifiedOfficial",
+    "repositories[].owner.slug": "VerifiedOfficial",
+    "repositories[].owner.type": "VerifiedOfficial",
+    "repositories[].pushedAt": "VerifiedOfficial",
+    "repositories[].updatedAt": "VerifiedOfficial",
+    "repositories[].webUrl": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ce2868c7011b3c2c62861fff5ff130036d8c226172ae0b5b58f1c66c0523bae6",
+  "http": {
+    "method": "GET",
+    "path": "/v1/origin/repos/{ownerSlug}",
+    "status": 200
+  },
+  "notes": "Verbatim example listRepos of GET /v1/origin/repos/{ownerSlug} (operationId OriginService_ListRepos).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Origin OpenAPI description (protoc-gen-openapi), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "b03508286077cd57cf76356c395b50b38eaa54d07b6bddd4989222df6781adf4",
+  "source_url": "https://cursor.com/docs/api/origin/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.origin.repos"
+}

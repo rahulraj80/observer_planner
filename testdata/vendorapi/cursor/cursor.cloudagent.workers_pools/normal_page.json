@@ -1,0 +1,18 @@
+{
+  "workers": [
+    {
+      "workerId": "a8574fe8-248e-424a-a078-7584a2b93724",
+      "repoOwner": "acme",
+      "repoName": "payments-service",
+      "repoUrl": "https://github.com/acme/payments-service",
+      "workspaceRootPath": "/home/agent/payments-service",
+      "connectedAtMs": 1737306880000,
+      "userId": 0,
+      "teamId": 456,
+      "serviceAccountId": "sa_abc123",
+      "isInUse": false,
+      "name": "gpu-worker-1"
+    }
+  ],
+  "totalCount": 1
+}

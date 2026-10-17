@@ -1,0 +1,33 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "pagination": "VerifiedOfficial",
+    "pagination.hasMore": "VerifiedOfficial",
+    "pagination.nextCursor": "VerifiedOfficial",
+    "users": "VerifiedOfficial",
+    "users[]": "VerifiedOfficial",
+    "users[].createdAt": "VerifiedOfficial",
+    "users[].email": "VerifiedOfficial",
+    "users[].id": "VerifiedOfficial",
+    "users[].metadata": "VerifiedOfficial"
+  },
+  "fixture_sha256": "8abc1bcbdd351f59e36caf7841398fd70421237f59c009e65ab7818b2cb1ed6d",
+  "http": {
+    "method": "GET",
+    "path": "/api/v0/organization/users",
+    "query": {
+      "limit": "100",
+      "cursor": "synthcursor0002"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: hasMore false, nextCursor null (documented as null when there are no more pages).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Factory Public API OpenAPI 3.0.1 (info.version 0.1.0), openapi.json fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "175733226aee49800589391733956664b42d384051cb4d28f845c123c6968d05",
+  "source_url": "https://docs.factory.com/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.api.org_users"
+}

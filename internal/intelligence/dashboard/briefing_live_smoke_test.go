@@ -13,7 +13,7 @@ import (
 )
 
 // postJSON performs one request against the live server and returns status + body.
-func postJSON(t *testing.T, s *Server, path, body string) (int, string) {
+func postBriefingJSON(t *testing.T, s *Server, path, body string) (int, string) {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -59,7 +59,7 @@ func TestLiveSmokeTriageAndDiagnose(t *testing.T) {
 	runner, conns := llmRunnerFor(t, ft)
 	s.opts.LLMRunner, s.opts.LLMConns = runner, conns
 
-	code, body := postJSON(t, s, "/api/briefing/triage", `{"date":"2026-08-01"}`)
+	code, body := postBriefingJSON(t, s, "/api/briefing/triage", `{"date":"2026-08-01"}`)
 	fmt.Printf("  status=%d\n  body=%s\n", code, body)
 	if code != http.StatusOK {
 		t.Fatalf("triage happy path → %d", code)
@@ -95,7 +95,7 @@ func TestLiveSmokeTriageAndDiagnose(t *testing.T) {
 	runner2, conns2 := llmRunnerFor(t, fd)
 	s.opts.LLMRunner, s.opts.LLMConns = runner2, conns2
 
-	code, body = postJSON(t, s, "/api/briefing/diagnose", `{}`)
+	code, body = postBriefingJSON(t, s, "/api/briefing/diagnose", `{}`)
 	fmt.Printf("  status=%d\n  body=%s\n", code, body)
 	if code != http.StatusOK {
 		t.Fatalf("diagnose happy path → %d", code)
@@ -130,12 +130,12 @@ func TestLiveSmokeTriageAndDiagnose(t *testing.T) {
 	runner3, conns3 := llmRunnerFor(t, fz)
 	s.opts.LLMRunner, s.opts.LLMConns = runner3, conns3
 
-	code, body = postJSON(t, s, "/api/briefing/triage", `{"date":"2026-01-01"}`)
+	code, body = postBriefingJSON(t, s, "/api/briefing/triage", `{"date":"2026-01-01"}`)
 	fmt.Printf("  triage date=2026-01-01 (no data): status=%d body=%s\n", code, body)
 	if code != http.StatusOK || !strings.Contains(body, `"order":[]`) || !strings.Contains(body, `"opportunities":[]`) {
 		t.Fatalf("empty triage: %d %s", code, body)
 	}
-	code, body = postJSON(t, s, "/api/briefing/diagnose", `{"project":"/definitely/not/seeded"}`)
+	code, body = postBriefingJSON(t, s, "/api/briefing/diagnose", `{"project":"/definitely/not/seeded"}`)
 	fmt.Printf("  diagnose project-filter (no patterns): status=%d body=%s\n", code, body)
 	if code != http.StatusOK || !strings.Contains(body, `"diagnoses":[]`) {
 		t.Fatalf("empty diagnose: %d %s", code, body)
@@ -173,12 +173,12 @@ func TestLiveSmokeTriageAndDiagnose(t *testing.T) {
 	// no runner → 404
 	noRunner := newBriefingTestEnv(t)
 	s2, _ := newBriefingServer(t, noRunner)
-	code, _ = postJSON(t, s2, "/api/briefing/triage", `{}`)
+	code, _ = postBriefingJSON(t, s2, "/api/briefing/triage", `{}`)
 	fmt.Printf("  triage no runner            → %d (want 404)\n", code)
 	if code != http.StatusNotFound {
 		t.Errorf("triage no runner → %d", code)
 	}
-	code, _ = postJSON(t, s2, "/api/briefing/diagnose", `{}`)
+	code, _ = postBriefingJSON(t, s2, "/api/briefing/diagnose", `{}`)
 	fmt.Printf("  diagnose no runner          → %d (want 404)\n", code)
 	if code != http.StatusNotFound {
 		t.Errorf("diagnose no runner → %d", code)
@@ -189,7 +189,7 @@ func TestLiveSmokeTriageAndDiagnose(t *testing.T) {
 	fg.content = "not json"
 	runner4, conns4 := llmRunnerFor(t, fg)
 	s.opts.LLMRunner, s.opts.LLMConns = runner4, conns4
-	code, _ = postJSON(t, s, "/api/briefing/triage", `{"date":"2026-08-01"}`)
+	code, _ = postBriefingJSON(t, s, "/api/briefing/triage", `{"date":"2026-08-01"}`)
 	fmt.Printf("  triage garbage reply        → %d (want 502)\n", code)
 	if code != http.StatusBadGateway {
 		t.Errorf("triage garbage → %d", code)
@@ -198,7 +198,7 @@ func TestLiveSmokeTriageAndDiagnose(t *testing.T) {
 	fg2.content = `{"diagnoses":[]}`
 	runner5, conn5 := llmRunnerFor(t, fg2)
 	s.opts.LLMRunner, s.opts.LLMConns = runner5, conn5
-	code, _ = postJSON(t, s, "/api/briefing/diagnose", `{}`)
+	code, _ = postBriefingJSON(t, s, "/api/briefing/diagnose", `{}`)
 	fmt.Printf("  diagnose empty diagnoses    → %d (want 502)\n", code)
 	if code != http.StatusBadGateway {
 		t.Errorf("diagnose empty → %d", code)

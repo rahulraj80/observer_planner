@@ -27,7 +27,7 @@ func newEvidenceServer(t *testing.T, fake backfillExecFn) (*Server, string) {
 	if err := os.WriteFile(cfgPath, []byte(cfgToml), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestAPIGuardEvidence_ExportArtifact(t *testing.T) {
 // (job "failed"), but the divergence detail IS the evidence — the
 // download must still serve it.
 func TestAPIGuardEvidence_VerifyAuditFailureStillDownloads(t *testing.T) {
-	res := &fakeExecResult{out: []byte("audit chain BROKEN — first divergence at id 5\n"), exit: 1}
+	res := &fakeExecResult{out: []byte("audit chain BROKEN - first divergence at id 5\n"), exit: 1}
 	s, _ := newEvidenceServer(t, newFakeExec(res))
 
 	id := kickEvidence(t, s, `{"kind":"verify-audit"}`)

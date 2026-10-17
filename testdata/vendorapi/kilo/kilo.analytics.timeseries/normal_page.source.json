@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "result": "VerifiedOfficial",
+    "result.data": "VerifiedOfficial",
+    "result.data.effectiveGranularity": "VerifiedOfficial",
+    "result.data.timeseries": "VerifiedOfficial",
+    "result.data.timeseries[]": "VerifiedOfficial",
+    "result.data.timeseries[].datetime": "Inferred",
+    "result.data.timeseries[].value": "VerifiedOfficial"
+  },
+  "fixture_sha256": "339a5e25bb379d792d5b4bdc45d96bb686ce45fd1c549cace7cdb370d5614e77",
+  "http": {
+    "method": "GET",
+    "path": "/api/trpc/usageAnalytics.getTimeseries",
+    "query": {
+      "input": "{\"startDate\":\"2026-10-06T00:00:00Z\",\"endDate\":\"2026-10-07T12:00:00Z\",\"granularity\":\"day\",\"costSource\":\"cost\",\"organizationId\":\"6f1e0c2a-3b4d-4e5f-8a9b-0c1d2e3f4a5b\",\"personalScope\":\"personal-only\",\"viewAs\":\"org-wide\",\"metric\":\"tokens\"}"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the usageAnalytics_getTimeseries 200 schema (tRPC envelope result.data); the schema gives no example. The datetime format of a bucket is not stated: RFC 3339 at UTC midnight is Inferred.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Kilo Code API 1.0.0 (openapi.json), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "f0b9556c39ea4454732029afcc4c985077e96c173185b92c84708b640af51180",
+  "source_url": "https://app.kilo.ai/api/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "kilo.analytics.timeseries"
+}

@@ -1,12 +1,12 @@
 package main
 
-import "github.com/marmutapp/superbased-observer/internal/routing"
+import "github.com/marmutapp/superbased-observer/internal/routingcore"
 
 // handoffTargetShapes maps a canonical target-tool name to the provider
 // wire shape its default models speak. This is DATA, not control flow
 // (CLAUDE.md rule #5): the resolver walks the table, it never switches on
 // tool name. There is no tool→shape field on the integration registry
-// today (routing.ShapeForModel is model→shape), so this small local table
+// today (routingcore.ShapeForModel is model→shape), so this small local table
 // grounds the mapping at the cmd boundary.
 //
 // Only tools whose default model family is confidently grounded appear
@@ -16,17 +16,17 @@ import "github.com/marmutapp/superbased-observer/internal/routing"
 // router-fronted tools (opencode, kilo-code*, hermes, cowork, openclaw,
 // pi) are deliberately omitted — a router is not a quality class, and an
 // absent tool honestly degrades to the source-model fallback.
-var handoffTargetShapes = map[string]routing.ProviderShape{
-	"claude-code":     routing.ShapeAnthropic,
-	"cline":           routing.ShapeAnthropic,
-	"cline-cli":       routing.ShapeAnthropic,
-	"cursor":          routing.ShapeAnthropic,
-	"codex":           routing.ShapeOpenAI,
-	"copilot":         routing.ShapeOpenAI,
-	"copilot-cli":     routing.ShapeOpenAI,
-	"gemini-cli":      routing.ShapeGoogle,
-	"antigravity":     routing.ShapeGoogle,
-	"antigravity-cli": routing.ShapeGoogle,
+var handoffTargetShapes = map[string]routingcore.ProviderShape{
+	"claude-code":     routingcore.ShapeAnthropic,
+	"cline":           routingcore.ShapeAnthropic,
+	"cline-cli":       routingcore.ShapeAnthropic,
+	"cursor":          routingcore.ShapeAnthropic,
+	"codex":           routingcore.ShapeOpenAI,
+	"copilot":         routingcore.ShapeOpenAI,
+	"copilot-cli":     routingcore.ShapeOpenAI,
+	"gemini-cli":      routingcore.ShapeGoogle,
+	"antigravity":     routingcore.ShapeGoogle,
+	"antigravity-cli": routingcore.ShapeGoogle,
 }
 
 // resolveTargetModelViaTier is the pure target-model resolver: given a
@@ -38,16 +38,16 @@ var handoffTargetShapes = map[string]routing.ProviderShape{
 //     already the right one — e.g. cline → claude-code, both Anthropic);
 //   - the source model's tier is unknown (TierUnclassified);
 //   - the (target shape, tier) cell has no curated representative.
-func resolveTargetModelViaTier(table *routing.TierTable, targetShapes map[string]routing.ProviderShape, sourceModel, targetTool string) string {
+func resolveTargetModelViaTier(table *routingcore.TierTable, targetShapes map[string]routingcore.ProviderShape, sourceModel, targetTool string) string {
 	targetShape, ok := targetShapes[targetTool]
 	if !ok {
 		return "" // unknown target family → source-model fallback
 	}
-	if routing.ShapeForModel(sourceModel) == targetShape {
+	if routingcore.ShapeForModel(sourceModel) == targetShape {
 		return "" // same provider shape → source model is correct as-is
 	}
 	tier, _ := table.Lookup(sourceModel)
-	if tier == routing.TierUnclassified {
+	if tier == routingcore.TierUnclassified {
 		return "" // unknown source tier → honest source-model fallback
 	}
 	rep, ok := table.Representative(targetShape, tier)
@@ -62,7 +62,7 @@ func resolveTargetModelViaTier(table *routing.TierTable, targetShapes map[string
 // off-hot-path computation, so the cheap seed resolver (no live [routing]
 // overrides) is sufficient for the Lookup/Representative reads.
 func newHandoffTargetResolver() func(sourceModel, targetTool string) string {
-	table := routing.NewTierResolver().Table()
+	table := routingcore.NewTierResolver().Table()
 	return func(sourceModel, targetTool string) string {
 		return resolveTargetModelViaTier(table, handoffTargetShapes, sourceModel, targetTool)
 	}

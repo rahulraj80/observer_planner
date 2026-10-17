@@ -3,14 +3,19 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/codextrust"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
 // withFakeHome redirects $HOME so the snapshot reads our test fixture
@@ -38,7 +43,7 @@ func withFakeHome(t *testing.T, contents string) string {
 func newSetupServer(t *testing.T, port int) *Server {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,35 +693,106 @@ func TestSetupCodexHooks_FeatureDisabled(t *testing.T) {
 	}
 }
 
+// codexRegistryEvents is every Codex event Observer registers.
+func codexRegistryEvents(t *testing.T) []string {
+	t.Helper()
+	c, ok := integration.For(models.ToolCodex)
+	if !ok {
+		t.Fatal("no codex registry row")
+	}
+	return c.Hook.RegisteredEvents()
+}
+
+// codexStateTOML renders one [hooks.state] entry per event.
+func codexStateTOML(hooksPath string, hashes map[string]string) string {
+	keys := make([]string, 0, len(hashes))
+	for k := range hashes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, e := range keys {
+		fmt.Fprintf(&b, "[hooks.state.\"%s:%s:0:0\"]\ntrusted_hash = %q\n\n", hooksPath, codextrust.CamelToSnake(e), hashes[e])
+	}
+	return b.String()
+}
+
 func TestSetupCodexHooks_AllTrusted(t *testing.T) {
-	home, hooksPathRaw := withFakeCodexHooks(t, "SessionStart", "Stop")
-	hooksPath := tomlKeyPath(hooksPathRaw)
-	cfg := `[features]
-hooks = true
-
-[hooks.state."` + hooksPath + `:session_start:0:0"]
-trusted_hash = "sha256:abc"
-
-[hooks.state."` + hooksPath + `:stop:0:0"]
-trusted_hash = "sha256:def"
-`
+	events := codexRegistryEvents(t)
+	home, hooksPathRaw := withFakeCodexHooks(t, events...)
+	hashes := map[string]string{}
+	for _, e := range events {
+		hashes[e] = "sha256:recorded-" + e
+	}
+	cfg := "[features]\nhooks = true\n\n" + codexStateTOML(tomlKeyPath(hooksPathRaw), hashes)
 	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := newSetupServer(t, 8820)
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/setup/codex-hooks", nil)
-	srv.Handler().ServeHTTP(rr, req)
-	var got codexHookTrustSnapshot
-	decodeJSON(t, rr, &got)
+	got := getCodexHooks(t)
 	if got.Status != "all_trusted" {
 		t.Errorf("status=%q want all_trusted (got: %+v)", got.Status, got)
 	}
-	if len(got.UntrustedEvents) != 0 {
-		t.Errorf("UntrustedEvents=%v want empty", got.UntrustedEvents)
+	if len(got.UntrustedEvents) != 0 || len(got.MissingEvents) != 0 {
+		t.Errorf("Untrusted=%v Missing=%v want both empty", got.UntrustedEvents, got.MissingEvents)
 	}
-	if len(got.TrustedEvents) != 2 {
-		t.Errorf("TrustedEvents=%v want 2", got.TrustedEvents)
+	if len(got.TrustedEvents) != len(events) || len(got.Entries) != len(events) {
+		t.Errorf("TrustedEvents=%v Entries=%d want %d", got.TrustedEvents, len(got.Entries), len(events))
+	}
+	if got.HashVerified {
+		t.Error("fake recorded hashes must not count as verified")
+	}
+}
+
+func getCodexHooks(t *testing.T) codexHookTrustSnapshot {
+	t.Helper()
+	srv := newSetupServer(t, 8820)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/setup/codex-hooks", nil))
+	var got codexHookTrustSnapshot
+	decodeJSON(t, rr, &got)
+	return got
+}
+
+// TestSetupCodexHooks_ModifiedAndMissing: a recomputed trust hash proves
+// one entry changed after it was trusted; an event the registry expects
+// but hooks.json lacks is listed as missing (T-039).
+func TestSetupCodexHooks_ModifiedAndMissing(t *testing.T) {
+	events := codexRegistryEvents(t)
+	present := events[:len(events)-1]
+	home, hooksPathRaw := withFakeCodexHooks(t, present...)
+	star := "*"
+	hashes := map[string]string{}
+	for _, e := range present {
+		cmd := "/usr/local/bin/observer hook codex " + e
+		m := &star
+		if e == "UserPromptSubmit" || e == "Stop" {
+			m = nil
+		}
+		// SessionEnd (registered since hook-parity Lane C) defaults to
+		// Codex's short 1 s hook timeout, every other event to 600 s.
+		timeout := int64(600)
+		if e == "SessionEnd" {
+			timeout = 1
+		}
+		hashes[e] = codextrust.Hash(codextrust.CamelToSnake(e), m, cmd, timeout, false, nil)
+	}
+	hashes[present[0]] = "sha256:stale"
+	cfg := "[features]\nhooks = true\n\n" + codexStateTOML(tomlKeyPath(hooksPathRaw), hashes)
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := getCodexHooks(t)
+	if got.Status != "needs_trust" || !got.HashVerified {
+		t.Fatalf("status=%q verified=%v, want needs_trust + verified", got.Status, got.HashVerified)
+	}
+	if fmt.Sprint(got.ModifiedEvents) != fmt.Sprint([]string{present[0]}) {
+		t.Errorf("ModifiedEvents=%v want [%s]", got.ModifiedEvents, present[0])
+	}
+	if fmt.Sprint(got.MissingEvents) != fmt.Sprint([]string{events[len(events)-1]}) {
+		t.Errorf("MissingEvents=%v want [%s]", got.MissingEvents, events[len(events)-1])
+	}
+	if !strings.Contains(got.Instruction, "re-trust") || !strings.Contains(got.Instruction, "/hooks") {
+		t.Errorf("instruction must say how to re-trust: %q", got.Instruction)
 	}
 }
 

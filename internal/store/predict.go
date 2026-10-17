@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/predict"
+	"github.com/marmutapp/superbased-observer/internal/sessiongauge"
+	"github.com/marmutapp/superbased-observer/internal/spendverdict"
 )
 
 // PredictShape is the session's assembled cost-estimate substrate — the
@@ -28,17 +31,101 @@ type PredictShape struct {
 	ObservedMessages int
 }
 
-// LoadSessionShape assembles the predictor's per-session input from
-// token_usage (+ user_prompt action boundaries for the turns-per-message
-// fan-out). Returns sql.ErrNoRows when the session doesn't exist.
+// predictTurnRow is one row of the predictor's turn substrate: the per-turn
+// union of the proxy's api_turns and the adapters' token_usage, deduped so a
+// turn captured by BOTH is counted once.
 //
-//   - Model: sessions.model, falling back to the dominant token_usage.model
+// WHY A UNION AND NOT token_usage ALONE. The original seam read
+// token_usage exclusively, on the §0 finding that it is the broader
+// substrate. That silently zeroed every session the proxy captured but
+// no adapter ever transcribed — e.g. a claude-code session launched from
+// the dashboard terminal in a directory that has no
+// ~/.claude/projects/<slug>/ transcript. Such a session has real,
+// proxy-accurate api_turns rows (model, cache_read, input, output) while
+// token_usage is permanently empty, so the predictor reported
+// "no model observed" on a session the SAME panel was simultaneously
+// rendering as 7 turns / 416K tokens / $0.25 from api_turns. That
+// contradiction is the bug the union fixes.
+//
+// WHICH ROWS SURVIVE is the one session rule, sessionmsg.DeriveVerdicts
+// (over spendverdict.LoadSession's rows) — the rule the session detail
+// header on the same panel uses. It replaced a SQL `source_event_id NOT IN request_id` +
+// `NOT EXISTS (same raw-output shape)` pair (lane R2-PARITY-2) that missed
+// every reasoning-split twin (a codex / OpenCode transcript reports output
+// NET of reasoning, the proxy GROSS) and dropped EVERY same-shape transcript
+// row rather than one twin per proxy row. A twinned proxy row carries its
+// twin's visible output (Output), exactly as the header's output bucket does.
+type predictTurnRow struct {
+	ts        string
+	model     string
+	input     int64
+	output    int64
+	cacheRead int64
+}
+
+// loadPredictTurnRows loads one session's deduped turn rows, ordered by
+// timestamp (text order, the same order the SQL substrate used): the rows
+// spendverdict.LoadSession loads for every node reader of a session, kept
+// or dropped by sessionmsg.DeriveVerdicts - the rule the session header on
+// the same panel applies (a proxy row the session-cumulative reconciliation
+// dropped, and a transcript row that is a second capture, are not turns).
+func loadPredictTurnRows(ctx context.Context, db *sql.DB, sessionID string) ([]predictTurnRow, error) {
+	rows, err := spendverdict.LoadSession(ctx, db, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("predict turn rows: %w", err)
+	}
+	v := rows.Verdicts()
+	out := make([]predictTurnRow, 0, len(rows.Proxies)+len(rows.Tokens))
+	for i, p := range rows.Proxies {
+		if v.ProxyCounted[i] {
+			out = append(out, predictTurnRow{ts: p.Timestamp, model: p.Model, input: p.Input, output: v.ProxyOutput[i], cacheRead: p.CacheRead})
+		}
+	}
+	for i, t := range rows.Tokens {
+		if v.TokenCounted[i] {
+			out = append(out, predictTurnRow{ts: t.Timestamp, model: t.Model, input: t.Input, output: t.Output, cacheRead: t.CacheRead})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ts < out[j].ts })
+	return out, nil
+}
+
+// gaugeTurns maps the predictor's turn rows onto the shared gauge
+// derivation's input (internal/sessiongauge), so the prefix and the model
+// fallback here are the SAME arithmetic the org drawer runs.
+func gaugeTurns(rows []predictTurnRow) []sessiongauge.Turn {
+	out := make([]sessiongauge.Turn, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, sessiongauge.Turn{Timestamp: r.ts, Model: r.model, Input: r.input, Output: r.output, CacheRead: r.cacheRead})
+	}
+	return out
+}
+
+// LoadSessionGaugeTurns returns one session's counted turn rows (the rows
+// the one session rule keeps, see loadPredictTurnRows) as the context
+// gauge's input. The org drawer builds the same slice from its own copy of
+// the rows (rollup.loadSessionSpendTurns), so both dashboards feed
+// sessiongauge.Context identical turns.
+func (s *Store) LoadSessionGaugeTurns(ctx context.Context, sessionID string) ([]sessiongauge.Turn, error) {
+	rows, err := loadPredictTurnRows(ctx, s.db, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store.LoadSessionGaugeTurns: %w", err)
+	}
+	return gaugeTurns(rows), nil
+}
+
+// LoadSessionShape assembles the predictor's per-session input from the
+// deduped api_turns ∪ token_usage turn substrate (+ user_prompt action
+// boundaries for the turns-per-message fan-out). Returns sql.ErrNoRows
+// when the session doesn't exist.
+//
+//   - Model: sessions.model, falling back to the dominant turn-row model
 //     (the same fallback handleSessionDetail uses, since sessions.model is
 //     empty for ~89% of claude-code sessions).
 //   - PrefixTokens (P "now"): the most-recent turn's cache_read_tokens —
 //     the running cache prefix re-read every turn. 0 for an uncached
 //     provider.
-//   - TurnSamples: per-turn (fresh-input, output) over the session's token
+//   - TurnSamples: per-turn (fresh-input, output) over the session's turn
 //     rows. Fresh = max(input − cache_read, 0).
 //   - TurnsPerMessage / ObservedMessages: agent turns bucketed between
 //     consecutive user_prompt timestamps (only messages with ≥1 captured
@@ -55,119 +142,118 @@ func (s *Store) LoadSessionShape(ctx context.Context, sessionID string) (Predict
 	}
 	shape.Model = model.String
 
-	// Model fallback: dominant token_usage.model by token volume.
-	if shape.Model == "" {
-		var fallback sql.NullString
-		ferr := s.db.QueryRowContext(ctx, `
-			SELECT model FROM token_usage
-			 WHERE session_id = ? AND model IS NOT NULL AND model <> ''
-			 GROUP BY model
-			 ORDER BY SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) DESC
-			 LIMIT 1`, sessionID).Scan(&fallback)
-		if ferr != nil && !errors.Is(ferr, sql.ErrNoRows) {
-			return shape, fmt.Errorf("model fallback: %w", ferr)
-		}
-		shape.Model = fallback.String
+	turns, err := loadPredictTurnRows(ctx, s.db, sessionID)
+	if err != nil {
+		return shape, err
 	}
 
-	// P "now" — latest non-zero cache_read prefix.
-	var prefix sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT cache_read_tokens FROM token_usage
-		 WHERE session_id = ? AND COALESCE(cache_read_tokens,0) > 0
-		 ORDER BY timestamp DESC, id DESC LIMIT 1`, sessionID).Scan(&prefix); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return shape, fmt.Errorf("prefix tokens: %w", err)
-		}
+	// Model fallback: dominant turn-row model by token volume, and P "now"
+	// (the latest non-zero cache_read prefix), both through the shared
+	// gauge derivation so the org drawer computes the same numbers.
+	gt := gaugeTurns(turns)
+	if shape.Model == "" {
+		shape.Model = sessiongauge.DominantModel(gt)
 	}
-	shape.PrefixTokens = prefix.Int64
+	shape.PrefixTokens = sessiongauge.LatestPrefix(gt)
 
 	// Per-turn (fresh-input, output) samples + the turn timestamps used
 	// for the user-message bucketing.
-	turnTimes, samples, err := loadTurnSamples(ctx, s.db, sessionID)
-	if err != nil {
-		return shape, err
-	}
+	turnTimes, samples := turnSamples(turns)
 	shape.TurnSamples = samples
 
-	// user_prompt boundaries → turns-per-message fan-out.
-	promptTimes, err := loadUserPromptTimes(ctx, s.db, sessionID)
+	// Turns-per-message fan-out. An EXACT grouping wins: when the client
+	// tagged its proxied requests with a prompt id (api_turns.prompt_id,
+	// migration 139), each distinct id is one user message. Otherwise fall
+	// back to bucketing turn timestamps between user_prompt actions.
+	byPromptID, err := loadPromptIDFanOut(ctx, s.db, sessionID)
 	if err != nil {
 		return shape, err
 	}
-	shape.TurnsPerMessage = bucketTurnsPerMessage(promptTimes, turnTimes)
+	if len(byPromptID) > 0 {
+		shape.TurnsPerMessage = byPromptID
+	} else {
+		promptTimes, err := loadUserPromptTimes(ctx, s.db, sessionID)
+		if err != nil {
+			return shape, err
+		}
+		shape.TurnsPerMessage = bucketTurnsPerMessage(promptTimes, turnTimes)
+	}
 	shape.ObservedMessages = len(shape.TurnsPerMessage)
 
 	return shape, nil
 }
 
-// loadTurnSamples reads the session's token rows in time order, returning
-// the parsed turn timestamps (for bucketing) and the (fresh-input,
-// output) samples. Rows with no input and no output are skipped.
-func loadTurnSamples(ctx context.Context, db *sql.DB, sessionID string) ([]time.Time, []predict.TurnSample, error) {
+// promptTurnFilter selects the api_turns rows that count toward a prompt's
+// fan-out: tagged with a prompt id and carrying usage (the same "no input
+// and no output is not a turn" rule loadTurnSamples applies).
+const promptTurnFilter = `prompt_id IS NOT NULL AND prompt_id != ''
+	AND (COALESCE(input_tokens, 0) > 0 OR COALESCE(output_tokens, 0) > 0)`
+
+// loadPromptIDFanOut returns the session's per-user-message turn counts
+// from the proxy's prompt-id tags, one entry per distinct prompt id in
+// first-seen order. Empty when no proxied turn carried a prompt id.
+func loadPromptIDFanOut(ctx context.Context, db *sql.DB, sessionID string) ([]int, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT timestamp,
-		       COALESCE(input_tokens,0),
-		       COALESCE(output_tokens,0),
-		       COALESCE(cache_read_tokens,0)
-		  FROM token_usage
-		 WHERE session_id = ?
-		 ORDER BY timestamp ASC, id ASC`, sessionID)
+		SELECT COUNT(*) FROM api_turns
+		 WHERE session_id = ? AND `+promptTurnFilter+`
+		 GROUP BY prompt_id
+		 ORDER BY MIN(timestamp) ASC, prompt_id ASC`, sessionID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("turn samples: %w", err)
+		return nil, fmt.Errorf("prompt-id fan-out: %w", err)
 	}
 	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("scan prompt-id fan-out: %w", err)
+		}
+		out = append(out, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("prompt-id fan-out rows: %w", err)
+	}
+	return out, nil
+}
 
+// turnSamples returns, in time order, the parsed turn timestamps (for
+// bucketing) and the (fresh-input, output) samples of the session's deduped
+// turn rows. Rows with no input and no output are skipped.
+func turnSamples(rows []predictTurnRow) ([]time.Time, []predict.TurnSample) {
 	var times []time.Time
 	var samples []predict.TurnSample
-	for rows.Next() {
-		var ts string
-		var in, out, cacheRead int64
-		if err := rows.Scan(&ts, &in, &out, &cacheRead); err != nil {
-			return nil, nil, fmt.Errorf("scan turn sample: %w", err)
-		}
-		if in == 0 && out == 0 {
+	for _, r := range rows {
+		if r.input == 0 && r.output == 0 {
 			continue
 		}
-		fresh := in - cacheRead
+		fresh := r.input - r.cacheRead
 		if fresh < 0 {
 			fresh = 0
 		}
-		samples = append(samples, predict.TurnSample{FreshInput: fresh, Output: out})
-		if t, ok := parseDBTime(ts); ok {
+		samples = append(samples, predict.TurnSample{FreshInput: fresh, Output: r.output})
+		if t, ok := parseDBTime(r.ts); ok {
 			times = append(times, t)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("turn sample rows: %w", err)
-	}
-	return times, samples, nil
+	return times, samples
 }
 
 // loadUserPromptTimes returns the session's user_prompt action timestamps
-// in ascending order — the user-message boundaries.
+// in ascending order: the user-message boundaries. A prompt both the
+// tool's hook and its transcript recorded is one boundary (T-570, the
+// prompt-shadow fold via canonicalPromptsBySession).
 func loadUserPromptTimes(ctx context.Context, db *sql.DB, sessionID string) ([]time.Time, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT timestamp FROM actions
-		 WHERE session_id = ? AND action_type = 'user_prompt'
-		 ORDER BY timestamp ASC`, sessionID)
+	bySession, err := canonicalPromptsBySession(ctx, db, `a.session_id = ?`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("user_prompt times: %w", err)
 	}
-	defer rows.Close()
 	var out []time.Time
-	for rows.Next() {
-		var ts string
-		if err := rows.Scan(&ts); err != nil {
-			return nil, fmt.Errorf("scan user_prompt: %w", err)
-		}
-		if t, ok := parseDBTime(ts); ok {
+	for _, p := range bySession[sessionID] {
+		if t, ok := parseDBTime(p.Timestamp); ok {
 			out = append(out, t)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("user_prompt rows: %w", err)
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
 	return out, nil
 }
 
@@ -212,8 +298,9 @@ func bucketTurnsPerMessage(prompts, turns []time.Time) []int {
 // LoadToolProjectPrior returns the cross-session turns-per-message prior
 // for (tool, projectID) — the tier-2 fallback when the current session
 // has no user_prompt boundaries. Each sample is one comparable session's
-// average turns-per-user-message (turn rows ÷ user_prompt count), a cheap
-// approximation that avoids per-session bucketing across the corpus.
+// average turns-per-user-message (turn rows ÷ canonical prompt count, a
+// hook and transcript pair counted once, T-635), a cheap approximation that
+// avoids per-session bucketing across the corpus.
 //
 // Scopes to the project first; widens to the tool when the project yields
 // fewer than 3 comparable sessions. windowDays bounds recency (0 = no
@@ -253,15 +340,52 @@ const minPriorSessions = 3
 
 func (s *Store) loadPriorScoped(ctx context.Context, tool string, projectID int64, windowDays int) ([]int, error) {
 	args := []any{tool}
+	// A comparable session's turn count is its DEDUPLICATED turn rows - the
+	// api_turns and token_usage rows the stored sessionmsg dedup verdicts
+	// count (internal/spendverdict), each with some input or output - which
+	// is exactly the turn set LoadSessionShape samples for the session
+	// itself (loadPredictTurnRows + turnSamples). It replaced a
+	// MAX(COUNT(token_usage), COUNT(api_turns)) approximation (lane
+	// R2-ONERULE) that counted a proxied session's turns the proxy missed or
+	// the transcript missed as absent, and every output-only shadow row as a
+	// turn.
+	//
+	// A session whose proxied turns carry prompt ids (migration 139) uses
+	// the exact ratio instead: tagged turns ÷ distinct prompt ids. That also
+	// admits prompt-id sessions with no user_prompt actions into the prior.
+	//
+	// The divisor of every other session is its CANONICAL prompt count
+	// (T-635): a prompt both the tool's hook and its transcript recorded is
+	// one message, through the one pairing table (canonicalPromptCounts over
+	// sessionmsg.CanonicalPrompts), never a SQL copy of it. Hook rows are only
+	// identifiable in Go (hooklifecycle.IsHookSource), so SQL returns each
+	// session's turn count and the division happens here.
+	s.refreshSpendVerdictsBounded(ctx)
+	//nolint:gosec // G202: the verdict fragments are closed constant SQL; values bind via args.
 	q := `
-		SELECT CAST(ROUND(
-		         (SELECT COUNT(*) FROM token_usage k WHERE k.session_id = s.id) * 1.0 /
-		         (SELECT COUNT(*) FROM actions a WHERE a.session_id = s.id AND a.action_type = 'user_prompt')
-		       ) AS INTEGER) AS avg_t
+		SELECT s.id,
+		       CASE
+		         WHEN EXISTS (SELECT 1 FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `)
+		         THEN CAST(ROUND(
+		           (SELECT COUNT(*) FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `) * 1.0 /
+		           (SELECT COUNT(DISTINCT prompt_id) FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `)
+		         ) AS INTEGER)
+		       END AS prompt_id_avg,
+		       CASE
+		         WHEN NOT EXISTS (SELECT 1 FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `)
+		         THEN (SELECT COUNT(*) FROM api_turns t WHERE t.session_id = s.id
+		                 AND ` + spendverdict.CountedProxyRowOf("t") + `
+		                 AND (COALESCE(t.input_tokens, 0) > 0 OR ` + spendverdict.ProxyOutputOf("t") + ` > 0))
+		              + (SELECT COUNT(*) FROM token_usage k WHERE k.session_id = s.id
+		                 AND ` + spendverdict.CountedTokenRow("k") + `
+		                 AND (COALESCE(k.input_tokens, 0) > 0 OR COALESCE(k.output_tokens, 0) > 0))
+		       END AS turns
 		  FROM sessions s
 		 WHERE s.tool = ?
-		   AND EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.action_type = 'user_prompt')
-		   AND EXISTS (SELECT 1 FROM token_usage k WHERE k.session_id = s.id)`
+		   AND (EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.action_type = 'user_prompt')
+		        OR EXISTS (SELECT 1 FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `))
+		   AND (EXISTS (SELECT 1 FROM token_usage k WHERE k.session_id = s.id)
+		        OR EXISTS (SELECT 1 FROM api_turns t WHERE t.session_id = s.id))`
 	if projectID > 0 {
 		q += ` AND s.project_id = ?`
 		args = append(args, projectID)
@@ -272,23 +396,52 @@ func (s *Store) loadPriorScoped(ctx context.Context, tool string, projectID int6
 	}
 	q += ` ORDER BY s.started_at DESC LIMIT 100`
 
+	type priorRow struct {
+		id          string
+		promptIDAvg sql.NullInt64
+		turns       sql.NullInt64
+	}
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("prior scoped: %w", err)
 	}
-	defer rows.Close()
-	var out []int
+	var scanned []priorRow
+	var needPrompts []string
 	for rows.Next() {
-		var t sql.NullInt64
-		if err := rows.Scan(&t); err != nil {
+		var r priorRow
+		if err := rows.Scan(&r.id, &r.promptIDAvg, &r.turns); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scan prior: %w", err)
 		}
-		if t.Valid && t.Int64 >= 1 {
-			out = append(out, int(t.Int64))
+		scanned = append(scanned, r)
+		if !r.promptIDAvg.Valid {
+			needPrompts = append(needPrompts, r.id)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, fmt.Errorf("prior rows: %w", err)
+	}
+	rows.Close()
+
+	prompts, err := canonicalPromptCounts(ctx, s.db, needPrompts)
+	if err != nil {
+		return nil, fmt.Errorf("prior scoped: %w", err)
+	}
+	var out []int
+	for _, r := range scanned {
+		avg := r.promptIDAvg.Int64
+		if !r.promptIDAvg.Valid {
+			n := prompts[r.id]
+			if n == 0 {
+				continue
+			}
+			// math.Round rounds half away from zero, as SQLite ROUND did.
+			avg = int64(math.Round(float64(r.turns.Int64) / float64(n)))
+		}
+		if avg >= 1 {
+			out = append(out, int(avg))
+		}
 	}
 	return out, nil
 }

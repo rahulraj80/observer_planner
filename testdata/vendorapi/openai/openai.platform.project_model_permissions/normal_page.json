@@ -1,0 +1,8 @@
+{
+  "object": "project.model_permissions",
+  "mode": "allow_list",
+  "model_ids": [
+    "gpt-6-astra",
+    "o3"
+  ]
+}

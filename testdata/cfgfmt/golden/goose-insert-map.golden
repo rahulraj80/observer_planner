@@ -1,0 +1,50 @@
+# Model Configuration
+active_provider: anthropic
+providers:
+  anthropic:
+    enabled: true
+    model: claude-sonnet-4-5-20250929
+    configured: true
+GOOSE_TEMPERATURE: 0.7
+
+# Tool Configuration
+GOOSE_MODE: "smart_approve"
+GOOSE_TOOLSHIM: true
+GOOSE_CLI_MIN_PRIORITY: 0.2
+
+# Recipe Configuration
+GOOSE_RECIPE_GITHUB_REPO: "aaif-goose/goose-recipes"
+
+# Documentation Configuration
+GOOSE_DOCS_ROOT: "/path/to/goose-docs"
+
+# Search Path Configuration
+GOOSE_SEARCH_PATHS:
+  - "/usr/local/bin"
+  - "~/custom/tools"
+  - "/opt/homebrew/bin"
+
+# Security Configuration
+SECURITY_PROMPT_ENABLED: true
+
+# Extensions Configuration
+extensions:
+  developer:
+    bundled: true
+    enabled: true
+    name: developer
+    timeout: 300
+    type: builtin
+  
+  memory:
+    bundled: true
+    enabled: true
+    name: memory
+    timeout: 300
+    type: builtin
+  observer:
+    args:
+      - mcp
+    cmd: observer
+    enabled: true
+    type: stdio

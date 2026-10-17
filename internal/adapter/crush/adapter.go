@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
+	"github.com/marmutapp/superbased-observer/internal/adapter/mirrorbase"
 	"github.com/marmutapp/superbased-observer/internal/contentcap"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -104,18 +105,19 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 	defer database.Close()
 
-	projectRoot := a.resolveProjectRoot(dbPath)
+	projectRoot, gitRemote, projectIdentity := a.resolveProjectRoot(dbPath)
 
-	tools, err := a.loadMessageEvents(ctx, database, dbPath, projectRoot, fromOffset)
+	tools, err := a.loadMessageEvents(ctx, database, dbPath, projectRoot, gitRemote, fromOffset)
 	if err != nil {
 		return adapter.ParseResult{}, fmt.Errorf("crush.ParseSessionFile: messages: %w", err)
 	}
-	tokens, err := a.loadTokenEvents(ctx, database, dbPath, projectRoot, fromOffset)
+	tokens, err := a.loadTokenEvents(ctx, database, dbPath, projectRoot, gitRemote, fromOffset)
 	if err != nil {
 		return adapter.ParseResult{}, fmt.Errorf("crush.ParseSessionFile: tokens: %w", err)
 	}
 	res.ToolEvents = append(res.ToolEvents, tools...)
 	res.TokenEvents = append(res.TokenEvents, tokens...)
+	adapter.ApplyProjectIdentity(&res, projectIdentity)
 	return res, nil
 }
 
@@ -187,16 +189,18 @@ type toolResult struct {
 
 // loadMessageEvents reads every message whose updated_at exceeds
 // fromOffset, pairs tool_call parts with their tool_result siblings, and
-// emits one ToolEvent per user-prompt / assistant-text / reasoning /
-// tool-call part. tool_result parts are consumed into the pairing map and
-// never emitted on their own.
-func (a *Adapter) loadMessageEvents(ctx context.Context, db *sql.DB, sourceFile, projectRoot string, fromOffset int64) ([]models.ToolEvent, error) {
+// emits one ToolEvent per user-prompt / assistant-text / tool-call part.
+// tool_result parts are consumed into the pairing map and never emitted
+// on their own; `reasoning` parts never mint a row of their own either —
+// they ride the next event as PrecedingReasoning (see threadState).
+func (a *Adapter) loadMessageEvents(ctx context.Context, db *sql.DB, sourceFile, projectRoot, gitRemote string, fromOffset int64) ([]models.ToolEvent, error) {
 	if !tableExists(ctx, db, "messages") {
 		return nil, nil
 	}
+	/* #nosec G202 -- messageModelExpr returns one of two compile-time literals */
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, session_id, role, parts,
-		       COALESCE(model, ''), COALESCE(provider, ''),
+		       `+messageModelExpr(ctx, db)+`, COALESCE(provider, ''),
 		       created_at, updated_at, COALESCE(finished_at, 0)
 		  FROM messages
 		 WHERE updated_at > ?
@@ -222,14 +226,64 @@ func (a *Adapter) loadMessageEvents(ctx context.Context, db *sql.DB, sourceFile,
 	results := collectToolResults(msgs)
 
 	var out []models.ToolEvent
+	var pending threadState
 	for _, m := range msgs {
 		var parts []crushPart
 		if err := json.Unmarshal([]byte(m.Parts), &parts); err != nil {
 			continue // malformed parts blob — skip, don't fail the batch
 		}
-		out = append(out, a.eventsForMessage(sourceFile, projectRoot, m, parts, results)...)
+		out = append(out, a.eventsForMessage(sourceFile, projectRoot, gitRemote, m, parts, results, &pending)...)
 	}
 	return out, nil
+}
+
+// threadState carries the reasoning text a `reasoning` part produced
+// until the next assistant-text / tool-call event consumes it.
+//
+// Semantics (grok-style, adopted by B3 — see the package doc):
+//
+//   - CONSUMED-ONCE: the first successor event to carry it clears it, so
+//     one block of thinking is never stamped onto a whole session.
+//
+//   - LAST-WINS: a second `reasoning` part before any successor replaces
+//     the first (Crush emits interleaved reasoning/tool_call parts, and
+//     the nearest thinking is the one that introduced the call).
+//
+//   - TURN-BOUNDARY DISCARD: a user prompt clears it — reasoning never
+//     crosses into the next user turn.
+//
+//   - SESSION-SCOPED: one crush.db holds every session of a project and
+//     the message scan orders by created_at across all of them, so two
+//     sessions can interleave. Reasoning never crosses a session id.
+//
+// The state lives for one ParseSessionFile call and spans messages,
+// because Crush's reasoning part and the tool_call it introduces can
+// land on different `messages` rows.
+type threadState struct {
+	sessionID string
+	text      string
+}
+
+// set records a reasoning body for a session (last-wins).
+func (t *threadState) set(sessionID, body string) {
+	t.sessionID, t.text = sessionID, body
+}
+
+// clear drops any pending reasoning (turn boundary).
+func (t *threadState) clear() { t.sessionID, t.text = "", "" }
+
+// take returns the pending reasoning and consumes it, or "" when the
+// pending reasoning belongs to a different session. Scrubbing + capping
+// happen HERE (at flush), not at capture, so the 200-char preview
+// convention the retired `crush.reasoning` row used is preserved
+// byte-for-byte on the successor's PrecedingReasoning.
+func (t *threadState) take(a *Adapter, sessionID string) string {
+	if t.text == "" || t.sessionID != sessionID {
+		return ""
+	}
+	out := a.scrub(truncate(t.text, 200))
+	t.clear()
+	return out
 }
 
 // collectToolResults walks every role="tool" message's tool_result parts
@@ -262,7 +316,9 @@ func collectToolResults(msgs []messageRow) map[string]toolResult {
 }
 
 // eventsForMessage converts one message's parts into ToolEvents.
-func (a *Adapter) eventsForMessage(sourceFile, projectRoot string, m messageRow, parts []crushPart, results map[string]toolResult) []models.ToolEvent {
+// `pending` carries reasoning across parts AND across messages; see
+// threadState for the consumption semantics.
+func (a *Adapter) eventsForMessage(sourceFile, projectRoot, gitRemote string, m messageRow, parts []crushPart, results map[string]toolResult, pending *threadState) []models.ToolEvent {
 	var out []models.ToolEvent
 	when := secondsToTime(m.CreatedAt)
 	for i, p := range parts {
@@ -277,36 +333,44 @@ func (a *Adapter) eventsForMessage(sourceFile, projectRoot string, m messageRow,
 				continue
 			}
 			if strings.EqualFold(m.Role, "user") {
-				out = append(out, a.userPromptEvent(sourceFile, projectRoot, m, i, body))
+				out = append(out, a.userPromptEvent(sourceFile, projectRoot, gitRemote, m, i, body, pending))
 			} else if strings.EqualFold(m.Role, "assistant") {
-				out = append(out, a.assistantTextEvent(sourceFile, projectRoot, m, i, body))
+				out = append(out, a.assistantTextEvent(sourceFile, projectRoot, gitRemote, m, i, body, pending))
 			}
 		case "reasoning":
+			// B3: a reasoning part mints NO action row of its own. Its
+			// body is held and threaded onto the next assistant-text /
+			// tool-call event as PrecedingReasoning.
 			var d crushReasoningData
 			if err := json.Unmarshal(p.Data, &d); err != nil {
 				continue
 			}
-			if ev, ok := a.reasoningEvent(sourceFile, projectRoot, m, i, d); ok {
-				out = append(out, ev)
+			if body := strings.TrimSpace(d.Thinking); body != "" {
+				pending.set(m.SessionID, body)
 			}
 		case "tool_call":
 			var d crushToolCallData
 			if err := json.Unmarshal(p.Data, &d); err != nil {
 				continue
 			}
-			out = append(out, a.toolCallEvent(sourceFile, projectRoot, m, when, d, results))
+			out = append(out, a.toolCallEvent(sourceFile, projectRoot, gitRemote, m, when, d, results, pending))
 		}
 	}
 	return out
 }
 
-func (a *Adapter) userPromptEvent(sourceFile, projectRoot string, m messageRow, idx int, body string) models.ToolEvent {
+// userPromptEvent emits the operator's prompt. A user turn is a reasoning
+// boundary: any thinking still pending from the previous turn is dropped
+// rather than stamped onto the new turn's rows.
+func (a *Adapter) userPromptEvent(sourceFile, projectRoot, gitRemote string, m messageRow, idx int, body string, pending *threadState) models.ToolEvent {
+	pending.clear()
 	preview := a.scrub(truncate(body, 500))
 	return models.ToolEvent{
 		SourceFile:    sourceFile,
 		SourceEventID: fmt.Sprintf("prompt:%s:%d", m.ID, idx),
 		SessionID:     m.SessionID,
 		ProjectRoot:   projectRoot,
+		GitRemote:     gitRemote,
 		Timestamp:     secondsToTime(m.CreatedAt),
 		Tool:          models.ToolCrush,
 		ActionType:    models.ActionUserPrompt,
@@ -317,7 +381,7 @@ func (a *Adapter) userPromptEvent(sourceFile, projectRoot string, m messageRow, 
 	}
 }
 
-func (a *Adapter) assistantTextEvent(sourceFile, projectRoot string, m messageRow, idx int, body string) models.ToolEvent {
+func (a *Adapter) assistantTextEvent(sourceFile, projectRoot, gitRemote string, m messageRow, idx int, body string, pending *threadState) models.ToolEvent {
 	preview := a.scrub(truncate(body, 200))
 	output := a.scrub(contentcap.Cap(body, contentcap.DefaultMaxBytes))
 	return models.ToolEvent{
@@ -325,57 +389,28 @@ func (a *Adapter) assistantTextEvent(sourceFile, projectRoot string, m messageRo
 		SourceEventID: fmt.Sprintf("text:%s:%d", m.ID, idx),
 		SessionID:     m.SessionID,
 		ProjectRoot:   projectRoot,
+		GitRemote:     gitRemote,
 		Timestamp:     secondsToTime(m.CreatedAt),
 		Model:         m.Model,
 		Tool:          models.ToolCrush,
-		ActionType:    models.ActionTaskComplete,
-		Target:        preview,
-		Success:       true,
-		RawToolName:   "crush.assistant_text",
-		ToolOutput:    output,
-		MessageID:     m.ID,
-	}
-}
-
-// reasoningEvent surfaces a Crush reasoning part as a ToolEvent. Crush
-// stores no reasoning TOKEN count (its token bundle is session-cumulative
-// prompt/completion only), so the reasoning is carried as text —
-// mirroring the opencode adapter's reasoning convention.
-func (a *Adapter) reasoningEvent(sourceFile, projectRoot string, m messageRow, idx int, d crushReasoningData) (models.ToolEvent, bool) {
-	body := strings.TrimSpace(d.Thinking)
-	if body == "" {
-		return models.ToolEvent{}, false
-	}
-	when := secondsToTime(d.StartedAt)
-	if when.IsZero() {
-		when = secondsToTime(m.CreatedAt)
-	}
-	var durationMs int64
-	if d.StartedAt > 0 && d.FinishedAt > d.StartedAt {
-		durationMs = (d.FinishedAt - d.StartedAt) * 1000
-	}
-	preview := a.scrub(truncate(body, 200))
-	output := a.scrub(contentcap.Cap(body, contentcap.DefaultMaxBytes))
-	return models.ToolEvent{
-		SourceFile:         sourceFile,
-		SourceEventID:      fmt.Sprintf("reasoning:%s:%d", m.ID, idx),
-		SessionID:          m.SessionID,
-		ProjectRoot:        projectRoot,
-		Timestamp:          when,
-		Model:              m.Model,
-		Tool:               models.ToolCrush,
-		ActionType:         models.ActionTaskComplete,
+		// One row per text part of a message — per-message assistant
+		// text, not a turn terminus.
+		ActionType:         models.ActionAssistantMessage,
 		Target:             preview,
 		Success:            true,
-		DurationMs:         durationMs,
-		PrecedingReasoning: preview,
-		RawToolName:        "crush.reasoning",
+		PrecedingReasoning: pending.take(a, m.SessionID),
+		RawToolName:        "crush.assistant_text",
 		ToolOutput:         output,
 		MessageID:          m.ID,
-	}, true
+	}
 }
 
-func (a *Adapter) toolCallEvent(sourceFile, projectRoot string, m messageRow, when time.Time, d crushToolCallData, results map[string]toolResult) models.ToolEvent {
+// Crush stores no reasoning TOKEN count (its token bundle is
+// session-cumulative prompt/completion only), so a `reasoning` part is
+// pure text. Pre-B3 it minted its own ActionTaskComplete row
+// (`crush.reasoning`) — a phantom action for something the model never
+// did. It is now threaded onto the successor event instead (threadState).
+func (a *Adapter) toolCallEvent(sourceFile, projectRoot, gitRemote string, m messageRow, when time.Time, d crushToolCallData, results map[string]toolResult, pending *threadState) models.ToolEvent {
 	actionType, target := mapTool(d.Name, []byte(d.Input))
 
 	success := true
@@ -396,32 +431,57 @@ func (a *Adapter) toolCallEvent(sourceFile, projectRoot string, m messageRow, wh
 		sourceID = "tool:" + m.ID + ":" + d.Name
 	}
 	return models.ToolEvent{
-		SourceFile:    sourceFile,
-		SourceEventID: sourceID,
-		SessionID:     m.SessionID,
-		ProjectRoot:   projectRoot,
-		Timestamp:     when,
-		Model:         m.Model,
-		Tool:          models.ToolCrush,
-		ActionType:    actionType,
-		Target:        truncate(target, 200),
-		Success:       success,
-		ErrorMessage:  a.scrub(truncate(errMsg, 500)),
-		RawToolName:   d.Name,
-		RawToolInput:  rawInput,
-		ToolOutput:    output,
-		MessageID:     m.ID,
+		SourceFile:         sourceFile,
+		SourceEventID:      sourceID,
+		SessionID:          m.SessionID,
+		ProjectRoot:        projectRoot,
+		GitRemote:          gitRemote,
+		Timestamp:          when,
+		Model:              m.Model,
+		Tool:               models.ToolCrush,
+		ActionType:         actionType,
+		Target:             truncate(target, 200),
+		Success:            success,
+		ErrorMessage:       a.scrub(truncate(errMsg, 500)),
+		PrecedingReasoning: pending.take(a, m.SessionID),
+		RawToolName:        d.Name,
+		RawToolInput:       rawInput,
+		ToolOutput:         output,
+		MessageID:          m.ID,
 	}
 }
 
 // loadTokenEvents emits one TokenEvent per session whose updated_at
-// exceeds fromOffset. Crush stores token counts and its own dollar cost
-// at the SESSION level (cumulative), not per message, so the SourceEventID
-// is stable across parses and the store's MAX-upgrade ON CONFLICT keeps
-// the monotonically-growing counts correct. Model+provider come from the
-// newest assistant message in the session (so a provider-failover session
-// reports the provider that finished the turn).
-func (a *Adapter) loadTokenEvents(ctx context.Context, db *sql.DB, sourceFile, projectRoot string, fromOffset int64) ([]models.TokenEvent, error) {
+// exceeds fromOffset. Crush keeps usage only at the SESSION level, and
+// the two kinds of column there mean different things:
+//
+//   - sessions.cost IS cumulative: updateSessionUsage does
+//     `session.Cost += cost` on every step.
+//   - sessions.prompt_tokens / completion_tokens are NOT cumulative:
+//     updateSessionTokenCounters OVERWRITES them with the LAST step's
+//     (input + cache-read) and output - they are the context-window
+//     occupancy the TUI header renders ("ContextUsed"), not billed
+//     tokens. Grounded in charmbracelet/crush internal/agent/agent.go at
+//     both v0.83.0 (the grounding install) and v0.96.1.
+//
+// So the token counters are reported only when they provably equal the
+// session total - a session with at most ONE usage-bearing step (Crush's
+// PrepareStep creates exactly one assistant message per step; steps that
+// ended in error/canceled never touched the counters - see
+// assistantStepCount and sessionTokenCounts). Every other non-vacant
+// session STILL gets its row (full coverage: the model and Crush's own
+// cost are known even when the counts are not), carrying zero counts
+// marked Reliability = unknown - "unknown means unknown", never a
+// context-window size passed off as billed tokens (the freebuff
+// contextTokenCount rule). That includes a zero-cost multi-step session,
+// whose row carries only its model and $0. The prompt counter is gross
+// of cache reads - see sessionTokenCounts for the zero-cost re-pricing
+// limitation. The SourceEventID is stable across parses and the store's
+// MAX-upgrade ON CONFLICT keeps the growing cost correct. Model+provider
+// come from the newest assistant message in the session (so a
+// provider-failover session reports the provider that finished the
+// turn).
+func (a *Adapter) loadTokenEvents(ctx context.Context, db *sql.DB, sourceFile, projectRoot, gitRemote string, fromOffset int64) ([]models.TokenEvent, error) {
 	if !tableExists(ctx, db, "sessions") {
 		return nil, nil
 	}
@@ -457,48 +517,167 @@ func (a *Adapter) loadTokenEvents(ctx context.Context, db *sql.DB, sourceFile, p
 
 	var out []models.TokenEvent
 	for _, s := range sessions {
-		// Skip observationally-vacant sessions (no tokens, no cost) —
-		// a fresh session with nothing but a title.
+		// Skip observationally-vacant sessions: the session row carries
+		// no usage evidence at all (no counters, no cost) - a fresh
+		// session with nothing but a title, or one whose first step is
+		// still in flight (Crush writes the counters and the cost
+		// together when a step finishes).
 		if s.Prompt == 0 && s.Completion == 0 && s.Cost == 0 {
 			continue
 		}
 		model, _ := newestAssistantModel(ctx, db, s.ID)
+		u := sessionTokenCounts(s.Prompt, s.Completion, assistantStepCount(ctx, db, s.ID))
 		out = append(out, models.TokenEvent{
 			SourceFile:       sourceFile,
 			SourceEventID:    "tokens:" + s.ID,
 			SessionID:        s.ID,
 			ProjectRoot:      projectRoot,
+			GitRemote:        gitRemote,
 			Timestamp:        secondsToTime(s.UpdatedAt),
 			Tool:             models.ToolCrush,
 			Model:            model,
-			InputTokens:      s.Prompt,
-			OutputTokens:     s.Completion,
+			InputTokens:      u.In,
+			OutputTokens:     u.Out,
 			EstimatedCostUSD: s.Cost,
 			// Crush persists the upstream usage envelope + its own cost
-			// into the session store; trustworthy but not invoice-
-			// verified — approximate, JSONL-class source.
+			// into the session store: a JSONL-class source. Reliability
+			// is approximate when the counts are reported (trustworthy
+			// but not invoice-verified) and unknown when they are not.
 			Source:      models.TokenSourceJSONL,
-			Reliability: models.ReliabilityApproximate,
+			Reliability: u.Reliability,
 		})
 	}
 	return out, nil
 }
 
+// sessionUsage is what one Crush session row can honestly report.
+type sessionUsage struct {
+	// In / Out are the reported prompt / completion counts; both are 0
+	// when the counts are not reportable.
+	In, Out int64
+	// Reliability is models.ReliabilityApproximate when In/Out are the
+	// session's real totals and models.ReliabilityUnknown when they are
+	// not measured (the zeros then mean "not reported", never "zero
+	// tokens").
+	Reliability string
+}
+
+// tokenReportRules is the ordered reportability table sessionTokenCounts
+// walks top-down; the first matching row decides. steps is the session's
+// usage-bearing step count (assistantStepCount).
+var tokenReportRules = []struct {
+	name     string
+	match    func(prompt, completion int64, steps int) bool
+	reported bool
+}{
+	// The counters hold the LAST step's context size (see
+	// loadTokenEvents): a snapshot, not the session total.
+	{"multi-step: last-step snapshot", func(_, _ int64, steps int) bool { return steps > 1 }, false},
+	// Crush never wrote the counters (only a cost): zero counters are
+	// "not recorded", not "zero tokens".
+	{"no counters recorded", func(prompt, completion int64, _ int) bool { return prompt == 0 && completion == 0 }, false},
+	// At most one step: the counters ARE the total.
+	{"at most one step: counters are the total", func(int64, int64, int) bool { return true }, true},
+}
+
+// sessionTokenCounts decides which of a Crush session row's token
+// counters are reportable by walking tokenReportRules. The counters hold
+// the LAST step's usage (see loadTokenEvents), so they equal the session
+// total only when the session has had at most one step. steps is the
+// session's usage-bearing step count (assistantStepCount).
+//
+//	steps > 1          -> last-step context snapshot: 0/0, reliability unknown
+//	both counters zero -> nothing recorded:           0/0, reliability unknown
+//	otherwise          -> the counters ARE the total: reported, approximate
+//
+// KNOWN LIMITATION (zero-cost one-step sessions). The prompt counter is
+// GROSS: updateSessionTokenCounters stores InputTokens + CacheReadTokens
+// and crush.db persists the cache split nowhere. A positive Crush cost
+// always wins over a read-side re-price (cost.Engine.priceRow), so that
+// is harmless there; but a session whose own cost is 0 (a flat-rate
+// provider, a zero-priced model, estimated usage) is re-priced from its
+// tokens, and the cached share is then billed as fresh input. The counts
+// are real usage and are kept (full coverage); no existing TokenEvent
+// field lets an adapter say "cost authoritative at 0, do not re-price"
+// without a schema change, so the estimate may over-bill. An UNREPORTED
+// row carries zero counts, so a re-price of it is $0 and its stored cost
+// (zero or Crush's own positive figure) is never misstated. See
+// docs/crush-adapter.md.
+func sessionTokenCounts(prompt, completion int64, steps int) sessionUsage {
+	for _, r := range tokenReportRules {
+		if !r.match(prompt, completion, steps) {
+			continue
+		}
+		if r.reported {
+			return sessionUsage{In: prompt, Out: completion, Reliability: models.ReliabilityApproximate}
+		}
+		break
+	}
+	return sessionUsage{Reliability: models.ReliabilityUnknown}
+}
+
+// assistantStepCount returns how many USAGE-BEARING agent steps a
+// session holds: its assistant messages (Crush creates one per step in
+// PrepareStep) minus those finished with reason "error" or "canceled".
+// Those two are written on the stream's error path, where OnStepFinish
+// - the only caller of updateSessionUsage - never runs, so they never
+// touched the counters (grounded: the live windows_failover capture is
+// a Forbidden bedrock step followed by one successful openai step, and
+// its counters are that one step's). Returns a sentinel above 1 on a
+// query error (e.g. a malformed parts blob) so an unreadable count never
+// promotes a snapshot to "total".
+func assistantStepCount(ctx context.Context, db *sql.DB, sessionID string) int {
+	if !tableExists(ctx, db, "messages") {
+		return 0
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM messages m
+		 WHERE m.session_id = ? AND m.role = 'assistant'
+		   AND NOT EXISTS (
+		       SELECT 1 FROM json_each(m.parts) p
+		        WHERE json_extract(p.value, '$.type') = 'finish'
+		          AND json_extract(p.value, '$.data.reason') IN ('error', 'canceled'))`,
+		sessionID).Scan(&n); err != nil {
+		return 2
+	}
+	return n
+}
+
 // newestAssistantModel returns the model (and provider) of the most
 // recent assistant message in a session. Empty strings when the session
-// has no assistant message yet.
+// has no assistant message yet. The model resolves through
+// messageModelExpr, so a Hyper turn routed by Prism reports the model
+// that actually served it.
 func newestAssistantModel(ctx context.Context, db *sql.DB, sessionID string) (model, provider string) {
 	if !tableExists(ctx, db, "messages") {
 		return "", ""
 	}
+	/* #nosec G202 -- messageModelExpr returns one of two compile-time literals */
 	row := db.QueryRowContext(ctx, `
-		SELECT COALESCE(model, ''), COALESCE(provider, '')
+		SELECT `+messageModelExpr(ctx, db)+`, COALESCE(provider, '')
 		  FROM messages
 		 WHERE session_id = ? AND role = 'assistant'
 		 ORDER BY created_at DESC, id DESC
 		 LIMIT 1`, sessionID)
 	_ = row.Scan(&model, &provider)
 	return model, provider
+}
+
+// messageModelExpr is the SQL expression a messages query selects the
+// model through. Crush v0.96 (migration 20260902000000) added
+// messages.prism_model_id: on a Hyper turn served through a Prism
+// router model, messages.model holds the configured ROUTER model while
+// prism_model_id holds "the model that actually served the turn"
+// (internal/agent/agent.go extractPrismModel, from the X-Prism-Model-Id
+// response header). The served model is what prices the turn, so it
+// wins when present; older stores without the column keep reading
+// messages.model unchanged. Both branches are compile-time literals.
+func messageModelExpr(ctx context.Context, db *sql.DB) string {
+	if columnExists(ctx, db, "messages", "prism_model_id") {
+		return `COALESCE(NULLIF(prism_model_id, ''), model, '')`
+	}
+	return `COALESCE(model, '')`
 }
 
 // mapTool resolves a Crush built-in tool name onto the normalized action
@@ -543,17 +722,20 @@ func mapTool(name string, input []byte) (actionType, target string) {
 // crush.db) — Crush does not store cwd anywhere. Foreign-mount Windows
 // paths are translated to their /mnt/c equivalent before git.Resolve so a
 // Windows-side project doesn't misfile under the observer's own repo.
-func (a *Adapter) resolveProjectRoot(dbPath string) string {
+// Returns (root, gitRemote); gitRemote is "" when the project isn't
+// inside a git repo.
+func (a *Adapter) resolveProjectRoot(dbPath string) (root, gitRemote string, id git.Identity) {
 	proj := filepath.Dir(filepath.Dir(dbPath))
 	if proj == "" || proj == "." || proj == string(filepath.Separator) {
-		return "[crush]"
+		return "[crush]", "", git.Identity{}
 	}
 	proj = crossmount.TranslateForeignPath(proj)
-	info, err := git.Resolve(proj)
+	identity, err := git.ResolveIdentity(proj, git.IdentityOptions{})
 	if err != nil {
-		return proj
+		return proj, "", git.Identity{}
 	}
-	return info.Root
+	// identity.Remote is already NormalizeRemote'd by ResolveIdentity.
+	return identity.Root, identity.Remote, identity
 }
 
 // scrub applies the plaintext scrubber, tolerating a nil scrubber.
@@ -627,12 +809,12 @@ func stageMirrorIfForeign(srcDB string) (string, error) {
 	if !isForeignMountPath(srcDB) {
 		return srcDB, nil
 	}
-	cache, err := os.UserCacheDir()
-	if err != nil || cache == "" {
-		cache = os.TempDir()
+	base, err := mirrorbase.Base()
+	if err != nil || base == "" {
+		base = filepath.Join(os.TempDir(), "superbased-observer")
 	}
 	sum := sha256.Sum256([]byte(srcDB))
-	mirrorDir := filepath.Join(cache, "superbased-observer", "crush-mirror", hex.EncodeToString(sum[:8]))
+	mirrorDir := filepath.Join(base, "crush-mirror", hex.EncodeToString(sum[:8]))
 	if err := os.MkdirAll(mirrorDir, 0o700); err != nil {
 		return "", fmt.Errorf("mkdir mirror: %w", err)
 	}
@@ -651,7 +833,7 @@ func stageMirrorIfForeign(srcDB string) (string, error) {
 			}
 			return "", fmt.Errorf("read %s: %w", src, err)
 		}
-		if err := os.WriteFile(dst, data, 0o600); err != nil {
+		if err := os.WriteFile(dst, data, 0o600); err != nil { //nolint:gosec // G703: dst is a private staging copy under the adapter's own temp dir
 			return "", fmt.Errorf("write %s: %w", dst, err)
 		}
 	}
@@ -723,6 +905,17 @@ func tableExists(ctx context.Context, db *sql.DB, name string) bool {
 	var n int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
+}
+
+// columnExists reports whether table has the named column. False on any
+// query error, so a caller falls back to the pre-column query shape.
+func columnExists(ctx context.Context, db *sql.DB, table, column string) bool {
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&n); err != nil {
 		return false
 	}
 	return n > 0

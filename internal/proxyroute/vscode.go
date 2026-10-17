@@ -24,10 +24,10 @@ func VSCodeBaseURLHint(port int, tool string) string {
 		tool = "the extension"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "next: route %s through the observer proxy (manual — paste into the extension UI).\n", tool)
+	fmt.Fprintf(&b, "next: route %s through the observer proxy (manual - paste into the extension UI).\n", tool)
 	fmt.Fprintln(&b, "  In the provider settings, choose \"OpenAI Compatible\" and set:")
 	fmt.Fprintf(&b, "    Base URL: http://127.0.0.1:%d/v1\n", port)
-	fmt.Fprintln(&b, "    API Key:  (leave your existing key — observer never reads it)")
+	fmt.Fprintln(&b, "    API Key:  (leave your existing key - observer never reads it)")
 	fmt.Fprintln(&b, "    Model ID: your usual model")
 	fmt.Fprintln(&b, "  Why manual: the base URL lives in VS Code globalState (state.vscdb),")
 	fmt.Fprintln(&b, "  not a writable config file, and editing it while VS Code runs is unsafe.")

@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 )
 
@@ -51,7 +53,7 @@ func newCostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			engine := cost.NewEngine(cfg.Intelligence)
+			engine := acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default())
 			summary, err := engine.Summary(cmd.Context(), database, cost.Options{
 				Days:        days,
 				GroupBy:     groupBy,
@@ -68,7 +70,7 @@ func newCostCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), string(body))
 				return nil
 			}
-			printCostSummary(cmd.OutOrStdout(), summary)
+			printCostSummaryAs(cmd.OutOrStdout(), summary, costModeFrom(cmd.Context()))
 			return nil
 		},
 	}
@@ -145,6 +147,14 @@ func parseSource(s string) (cost.Source, error) {
 // appended — bytes saved with the percent reduction. Groups with no
 // compression data show a blank cell.
 func printCostSummary(w io.Writer, s cost.Summary) {
+	printCostSummaryAs(w, s, costtext.ModeUSD)
+}
+
+// printCostSummaryAs is printCostSummary under a developer cost display
+// (T-204): under token usage the COST_USD column is left out (the token
+// columns carry the usage) and a note says why.
+func printCostSummaryAs(w io.Writer, s cost.Summary, mode string) {
+	tokens := costtext.Tokens(mode)
 	if len(s.Rows) == 0 {
 		fmt.Fprintln(w, "no cost data in range")
 		return
@@ -160,7 +170,10 @@ func printCostSummary(w io.Writer, s cost.Summary) {
 		}
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	header := "KEY\tIN\tOUT\tCACHE_R\tCACHE_W\tTURNS\tSRC\tRELIAB\tCOST_USD"
+	header := "KEY\tIN\tOUT\tCACHE_R\tCACHE_W\tTURNS\tSRC\tRELIAB"
+	if !tokens {
+		header += "\tCOST_USD"
+	}
 	if showLatency {
 		header += "\tLATENCY_MS"
 	}
@@ -170,7 +183,7 @@ func printCostSummary(w io.Writer, s cost.Summary) {
 	fmt.Fprintln(tw, header)
 	for _, r := range s.Rows {
 		line := fmt.Sprintf(
-			"%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t$%.4f",
+			"%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s",
 			truncate(r.Key, 42),
 			formatTokens(r.Tokens.Input),
 			formatTokens(r.Tokens.Output),
@@ -179,8 +192,10 @@ func printCostSummary(w io.Writer, s cost.Summary) {
 			r.TurnCount,
 			r.Source,
 			r.Reliability,
-			r.CostUSD,
 		)
+		if !tokens {
+			line += costCell(r.CostUSD)
+		}
 		if showLatency {
 			if r.AvgLatencyMS > 0 {
 				line += fmt.Sprintf("\t%d", r.AvgLatencyMS)
@@ -194,7 +209,7 @@ func printCostSummary(w io.Writer, s cost.Summary) {
 		fmt.Fprintln(tw, line)
 	}
 	total := fmt.Sprintf(
-		"TOTAL\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t$%.4f",
+		"TOTAL\t%s\t%s\t%s\t%s\t%d\t%s\t%s",
 		formatTokens(s.TotalTokens.Input),
 		formatTokens(s.TotalTokens.Output),
 		formatTokens(s.TotalTokens.CacheRead),
@@ -202,8 +217,10 @@ func printCostSummary(w io.Writer, s cost.Summary) {
 		s.TurnCount,
 		"",
 		s.Reliability,
-		s.TotalCost,
 	)
+	if !tokens {
+		total += costCell(s.TotalCost)
+	}
 	if showLatency {
 		// TOTAL row leaves latency blank — it's a per-bucket mean,
 		// not a sum that would aggregate sensibly across buckets.
@@ -214,8 +231,11 @@ func printCostSummary(w io.Writer, s cost.Summary) {
 	}
 	fmt.Fprintln(tw, total)
 	_ = tw.Flush()
-	if s.UnknownModelCount > 0 {
-		fmt.Fprintf(w, "\n%d model(s) without pricing — their rows report 0 cost. Add entries under [intelligence.pricing.models] in config.toml.\n", s.UnknownModelCount)
+	if tokens {
+		fmt.Fprintln(w, "\n"+tokenViewNote)
+	}
+	if s.UnknownModelCount > 0 && !tokens {
+		fmt.Fprintf(w, "\n%d model(s) without pricing - their rows report 0 cost. Add entries under [intelligence.pricing.models] in config.toml.\n", s.UnknownModelCount)
 	}
 	if s.Days > 0 {
 		fmt.Fprintf(w, "window: last %d day(s); group_by=%s source=%s\n", s.Days, s.GroupBy, s.Source)
@@ -265,3 +285,7 @@ func truncate(s string, max int) string {
 	}
 	return s[:max-1] + "…"
 }
+
+// costCell is the COST_USD cell of the dollar view.
+// no-bare-usd:allow (printCostSummaryAs calls it only when costtext.Tokens is false)
+func costCell(usd float64) string { return fmt.Sprintf("\t$%.4f", usd) }

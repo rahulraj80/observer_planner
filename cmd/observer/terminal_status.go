@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -5,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/termfeed"
 	"github.com/marmutapp/superbased-observer/internal/termstatus"
 )
 
 // terminal_status.go is the F4 flagship: it fuses the trusted + untrusted signal
 // streams into a per-run agent status and serves it to the dashboard through the
-// dashboard.TerminalStatusProvider seam. It maintains per-run signal state from
+// dashapi.TerminalStatusProvider seam. It maintains per-run signal state from
 // the in-process event feed (internal/termfeed) — OSC hints (untrusted) and
 // OOB/launch/exit lifecycle (trusted) — and pulls PTY output-recency + exit
 // straight from termsession at classification time. Classification itself is the
@@ -39,7 +41,7 @@ type runSig struct {
 	hookAt     time.Time
 }
 
-// terminalStatusHub implements dashboard.TerminalStatusProvider.
+// terminalStatusHub implements dashapi.TerminalStatusProvider.
 type terminalStatusHub struct {
 	feed           *termfeed.Feed
 	lastActivity   func(handle string) (time.Time, bool)
@@ -51,8 +53,8 @@ type terminalStatusHub struct {
 	now            func() time.Time
 
 	mu   sync.Mutex
-	sig  map[string]*runSig                        // runID -> accumulated signals
-	last map[string]dashboard.TerminalStatusResult // handle -> last broadcast (change detection)
+	sig  map[string]*runSig                      // runID -> accumulated signals
+	last map[string]dashapi.TerminalStatusResult // handle -> last broadcast (change detection)
 	subs map[*statusSub]struct{}
 
 	stop     chan struct{}
@@ -74,7 +76,7 @@ func newTerminalStatusHub(
 		runIDForHandle: runIDForHandle, handleForRun: handleForRun, liveHandles: liveHandles,
 		th: th, now: func() time.Time { return time.Now().UTC() },
 		sig:  make(map[string]*runSig),
-		last: make(map[string]dashboard.TerminalStatusResult),
+		last: make(map[string]dashapi.TerminalStatusResult),
 		subs: make(map[*statusSub]struct{}),
 		stop: make(chan struct{}),
 	}
@@ -150,11 +152,11 @@ func (h *terminalStatusHub) ingest(ev termfeed.Event) {
 }
 
 // compute builds the fused status for a handle.
-func (h *terminalStatusHub) compute(handle string) (dashboard.TerminalStatusResult, bool) {
+func (h *terminalStatusHub) compute(handle string) (dashapi.TerminalStatusResult, bool) {
 	la, live := h.lastActivity(handle)
 	runID, _ := h.runIDForHandle(handle)
 	if !live && runID == "" {
-		return dashboard.TerminalStatusResult{}, false
+		return dashapi.TerminalStatusResult{}, false
 	}
 	sig := termstatus.Signals{Now: h.now()}
 	if live {
@@ -173,7 +175,7 @@ func (h *terminalStatusHub) compute(handle string) (dashboard.TerminalStatusResu
 	h.mu.Unlock()
 
 	res := termstatus.Classify(sig, h.th)
-	return dashboard.TerminalStatusResult{
+	return dashapi.TerminalStatusResult{
 		Handle:     handle,
 		RunID:      runID,
 		Status:     string(res.Status),
@@ -209,16 +211,16 @@ func (h *terminalStatusHub) recomputeAndBroadcast(handle string) {
 	}
 }
 
-// StatusForHandle satisfies dashboard.TerminalStatusProvider (the point-in-time
+// StatusForHandle satisfies dashapi.TerminalStatusProvider (the point-in-time
 // GET).
-func (h *terminalStatusHub) StatusForHandle(handle string) (dashboard.TerminalStatusResult, bool) {
+func (h *terminalStatusHub) StatusForHandle(handle string) (dashapi.TerminalStatusResult, bool) {
 	return h.compute(handle)
 }
 
-// Subscribe satisfies dashboard.TerminalStatusProvider (the live stream). The
+// Subscribe satisfies dashapi.TerminalStatusProvider (the live stream). The
 // new subscriber is seeded with the current status of every live handle.
-func (h *terminalStatusHub) Subscribe() dashboard.TerminalStatusSubscription {
-	s := &statusSub{ch: make(chan dashboard.TerminalStatusResult, 64)}
+func (h *terminalStatusHub) Subscribe() dashapi.TerminalStatusSubscription {
+	s := &statusSub{ch: make(chan dashapi.TerminalStatusResult, 64)}
 	h.mu.Lock()
 	h.subs[s] = struct{}{}
 	h.mu.Unlock()
@@ -243,12 +245,12 @@ func (h *terminalStatusHub) unsubscribe(s *statusSub) {
 // statusSub is one live subscriber's bounded queue (drop-oldest on overflow, so
 // a slow WS client never stalls the hub).
 type statusSub struct {
-	ch     chan dashboard.TerminalStatusResult
+	ch     chan dashapi.TerminalStatusResult
 	closed bool
 	mu     sync.Mutex
 }
 
-func (s *statusSub) offer(r dashboard.TerminalStatusResult) {
+func (s *statusSub) offer(r dashapi.TerminalStatusResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -268,14 +270,14 @@ func (s *statusSub) offer(r dashboard.TerminalStatusResult) {
 	}
 }
 
-// statusSubHandle adapts *statusSub to dashboard.TerminalStatusSubscription.
+// statusSubHandle adapts *statusSub to dashapi.TerminalStatusSubscription.
 type statusSubHandle struct {
 	hub *terminalStatusHub
 	sub *statusSub
 	one sync.Once
 }
 
-func (h *statusSubHandle) Updates() <-chan dashboard.TerminalStatusResult { return h.sub.ch }
+func (h *statusSubHandle) Updates() <-chan dashapi.TerminalStatusResult { return h.sub.ch }
 
 func (h *statusSubHandle) Close() {
 	h.one.Do(func() {

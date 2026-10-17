@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -8,69 +10,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/remoteauth"
 )
-
-const testRemoteHost = "remote.example:8443"
-
-func newRemoteTestServer(t *testing.T, opts Options) *Server {
-	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	opts.DB = database
-	s, err := New(opts)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return s
-}
-
-// newReadyRemoteController builds a real, Ready() controller with a known
-// pairing secret; returns the controller + the base64url secret to pair with.
-func newReadyRemoteController(t *testing.T) (RemoteController, string) {
-	return newReadyRemoteControllerWithTerminal(t, false)
-}
-
-func newReadyRemoteControllerWithTerminal(t *testing.T, allowTerminal bool) (RemoteController, string) {
-	t.Helper()
-	raw, enc, err := remoteauth.GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
-	hash, err := remoteauth.HashSecret(raw)
-	if err != nil {
-		t.Fatalf("HashSecret: %v", err)
-	}
-	rc := NewRemoteController(RemoteOptions{
-		HashedSecret:    hash,
-		AllowedHosts:    []string{testRemoteHost},
-		RateLimitPerMin: 6,
-		AllowTerminal:   allowTerminal,
-		Session:         remoteauth.SessionParams{TTL: time.Hour, Idle: time.Hour, Max: 5},
-	})
-	if !rc.Ready() {
-		t.Fatal("controller not Ready with secret + allowlist")
-	}
-	return rc, enc
-}
 
 // TestEveryRouteClassifiedOrFailClosed pins plan §4.1: every built-in route is
 // registered with a non-Unclassified capability.
 func TestEveryRouteClassifiedOrFailClosed(t *testing.T) {
 	s := newRemoteTestServer(t, Options{})
-	_, capMap := s.registerRoutes(nil)
+	_, capMap, _ := s.registerRoutes(nil)
 	if len(capMap) < 50 {
-		t.Fatalf("suspiciously few routes classified (%d) — registry may not be wired", len(capMap))
+		t.Fatalf("suspiciously few routes classified (%d) - registry may not be wired", len(capMap))
 	}
 	for pattern, cap := range capMap {
 		if cap == CapabilityUnclassified {
-			t.Errorf("route %q is UNCLASSIFIED — every route must be public/view/execute (fail closed)", pattern)
+			t.Errorf("route %q is UNCLASSIFIED - every route must be public/view/execute (fail closed)", pattern)
 		}
 	}
 }
@@ -80,7 +34,7 @@ func TestEveryRouteClassifiedOrFailClosed(t *testing.T) {
 // RemoteController is present.
 func TestExtraRoutesRejectedWithoutCapabilityMetadata(t *testing.T) {
 	rc, _ := newReadyRemoteController(t)
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +139,7 @@ func TestSecretNeverInQueryOrSubprotocol(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code == http.StatusOK {
-		t.Error("pairing succeeded with the secret in a query param — it must be body-only")
+		t.Error("pairing succeeded with the secret in a query param - it must be body-only")
 	}
 
 	// A WS upgrade carrying a 'secret' subprotocol but NO session cookie →
@@ -200,7 +154,7 @@ func TestSecretNeverInQueryOrSubprotocol(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
-		t.Errorf("WS with a secret subprotocol authenticated (%d) — subprotocols must never carry auth", rec.Code)
+		t.Errorf("WS with a secret subprotocol authenticated (%d) - subprotocols must never carry auth", rec.Code)
 	}
 }
 

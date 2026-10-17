@@ -42,7 +42,7 @@ func qwenConfig(baseURL string) string {
 }`
 }
 
-func TestRegisterQwenCodeRewritesKnownDefaultAndBacksUp(t *testing.T) {
+func TestRegisterQwenCodeRewritesKnownDefaultWithoutBackup(t *testing.T) {
 	home := t.TempDir()
 	path := writeQwenConfig(t, home, qwenConfig("https://api.openai.com/v1"))
 	r := newQwenRegistrar(t, home)
@@ -58,9 +58,9 @@ func TestRegisterQwenCodeRewritesKnownDefaultAndBacksUp(t *testing.T) {
 		t.Errorf("PriorBaseURL = %q", res.PriorBaseURL)
 	}
 
-	bak, err := os.ReadFile(path + ".bak")
-	if err != nil || !strings.Contains(string(bak), "api.openai.com") {
-		t.Errorf("backup missing or wrong: %v", err)
+	// T-657: no backup copy of a credential-bearing file.
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("the writer must leave no .bak copy of the file")
 	}
 
 	var doc map[string]any

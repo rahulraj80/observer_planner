@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/benchmark"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -72,7 +75,7 @@ func (d simDriver) Drive(_ context.Context, req DriveRequest) (DriveResult, erro
 
 func newRunnerStore(t *testing.T) (*store.Store, *sql.DB) {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "runner.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "runner.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

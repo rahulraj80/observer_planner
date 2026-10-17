@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package index_test
 
 import (
@@ -5,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 
 	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/codeintel/index"
@@ -18,7 +22,7 @@ import (
 // SymbolsInFile / FindSymbols / Available / Stale from the index.
 func TestIndexProject_EndToEnd(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -107,7 +111,7 @@ func Run() { g := &Greeter{}; _ = g.Hello() }
 // not indexed without consent (force=false).
 func TestIndexProject_ConsentGate(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -137,7 +141,7 @@ func TestIndexProject_ConsentGate(t *testing.T) {
 // ignore and indexes normally.
 func TestIndexProject_IgnorePath(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -181,7 +185,7 @@ func TestIndexProject_IgnorePath(t *testing.T) {
 // in a.go), exposed via the native engine's traversal surface.
 func TestIndexProject_Graph(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

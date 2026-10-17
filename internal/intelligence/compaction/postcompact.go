@@ -101,13 +101,13 @@ func BuildPostCompactContext(ctx context.Context, db *sql.DB, sessionID string) 
 	if len(fails) > 0 {
 		b.WriteString("\nRecent failures (in this session):\n")
 		for _, f := range fails {
-			fmt.Fprintf(&b, "  - %s — %s\n", f.summary, f.message)
+			fmt.Fprintf(&b, "  - %s - %s\n", f.summary, f.message)
 		}
 	}
 	if len(rules) > 0 {
 		b.WriteString("\nProject-specific learned rules (from prior sessions):\n")
 		for _, r := range rules {
-			fmt.Fprintf(&b, "  - %s [%s] — failed %d times, recovered %d times\n",
+			fmt.Fprintf(&b, "  - %s [%s] - failed %d times, recovered %d times\n",
 				r.CommandSummary, r.ErrorCategory, r.FailureCount, r.RecoveryCount)
 		}
 	}

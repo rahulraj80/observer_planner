@@ -1,0 +1,23 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ab9eced9ab1f79559674e9f877d74520ac96f430df20e2fa317f59b3f6552eeb",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/activity",
+    "status": 401
+  },
+  "notes": "The documented 401 response example, verbatim.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "OpenRouter API 1.0.0 (openapi.yaml as rendered on the reference page), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "082bd3c3382b3e79ed583fd567ea70f2289a9bc71fe18806099d9eff09c2bb72",
+  "source_url": "https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity-grouped-by-endpoint.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openrouter.mgmt.activity"
+}

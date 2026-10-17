@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
@@ -21,12 +23,6 @@ import (
 // so benchmark_score.go stays obs-free and the feature stays separable.
 
 const defaultTestsTimeoutSec = 300
-
-// evalScoreFn runs one reused obs-eval registry scorer over a shaped sample and
-// returns plain outputs (no eval types cross this boundary). available=false
-// means the scorer could not be built (e.g. llm_judge without a wired judge) ⇒
-// the runner records scorer_unavailable, never a silent pass.
-type evalScoreFn func(ctx context.Context, scorer string, params map[string]string, input, output, reference string) (score float64, passed bool, rationale string, available bool, err error)
 
 // benchmarkScorer implements attemptScorer. evalScore is the obs-eval bridge
 // (nil ⇒ registry scorers unavailable, e.g. a no_obs build); judgeModel names

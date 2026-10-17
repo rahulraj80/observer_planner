@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 )
 
@@ -49,6 +50,13 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 	if reqID == "" {
 		reqID = newRequestID()
 	}
+	// SR27-D3: a direct-provider Gemini call carries the developer's API key
+	// in ?key=, and both the upstream URL and a transport error's text (a
+	// *url.Error embeds the full URL) would otherwise land verbatim in
+	// process_events / process_network_bodies - and ship to the org on a
+	// full-content node. Redact at this one capture seam.
+	in.URL = redactCredentialQueryText(in.URL)
+	in.Error = redactCredentialQueryText(in.Error)
 	bodyMode := p.networkCapture.CaptureBodies
 	captureBodies := bodyMode == "proxied" || bodyMode == "available"
 
@@ -71,14 +79,14 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 		details["body_unavailable_reason"] = in.Unavailable
 	}
 
-	ev := processobs.ProcessEvent{
+	ev := procmodel.ProcessEvent{
 		ProcessKey: "proxy:" + shortHash(reqID),
 		Timestamp:  p.now().UTC(),
-		Type:       processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{
+		Type:       procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{
 			SessionID:  in.SessionID,
-			Source:     processobs.AttrHeuristic,
-			Confidence: processobs.ConfMedium,
+			Source:     procmodel.AttrHeuristic,
+			Confidence: procmodel.ConfMedium,
 		},
 		TargetKind: "url",
 		Target:     in.URL,
@@ -88,7 +96,7 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 	if captureBodies {
 		reqCap := capBody(in.RequestBody, p.networkCapture.MaxRequestBytes, in.RequestType, p.networkCapture.ScrubBodies, p.networkCapture.StoreBinary)
 		respCap := capBody(in.ResponseBody, p.networkCapture.MaxResponseBytes, in.ContentType, p.networkCapture.ScrubBodies, p.networkCapture.StoreBinary)
-		body := &processobs.NetworkBodyCapture{
+		body := &procmodel.NetworkBodyCapture{
 			CaptureSource:         "proxy",
 			APITurnID:             in.APITurnID,
 			RequestID:             reqID,
@@ -121,7 +129,7 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 
 	insertCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := p.networkSink.PersistProcessEvents(insertCtx, []processobs.ProcessEvent{ev}); err != nil {
+	if _, err := p.networkSink.PersistProcessEvents(insertCtx, []procmodel.ProcessEvent{ev}); err != nil {
 		p.logger.Warn("proxy: persist process network event", "err", err)
 		_ = ctx
 	}
@@ -253,4 +261,25 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// credentialQueryRe matches a gatewayCredentialQueryParams query parameter
+// (Gemini's ?key=) anywhere in a URL or in error text that embeds one, up to
+// the next parameter / whitespace / quote.
+var credentialQueryRe = func() *regexp.Regexp {
+	names := make([]string, 0, len(gatewayCredentialQueryParams))
+	for _, n := range gatewayCredentialQueryParams {
+		names = append(names, regexp.QuoteMeta(n))
+	}
+	return regexp.MustCompile(`([?&](?:` + strings.Join(names, "|") + `)=)[^&#\s"']+`)
+}()
+
+// redactCredentialQueryText replaces the value of every provider-credential
+// query parameter in s with REDACTED (security review 2026-09-27, SR27-D3).
+// Used for text that is persisted or logged, never for the forwarded URL.
+func redactCredentialQueryText(s string) string {
+	if s == "" || !strings.Contains(s, "=") {
+		return s
+	}
+	return credentialQueryRe.ReplaceAllString(s, "${1}REDACTED")
 }

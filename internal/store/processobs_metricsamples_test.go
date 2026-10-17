@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // TestMetricSamplesJSONRoundTrip pins the ring codec including the network
@@ -13,7 +13,7 @@ import (
 func TestMetricSamplesJSONRoundTrip(t *testing.T) {
 	t.Parallel()
 	ts := time.Unix(1_700_000_000, 0).UTC()
-	in := []processobs.MetricSample{
+	in := []procmodel.MetricSample{
 		{T: ts, CPUMs: 10, WorkingSet: 2048, ReadBytes: 1, WriteBytes: 2},
 		{
 			T: ts.Add(2 * time.Second), CPUMs: 20, WorkingSet: 4096, ReadBytes: 3, WriteBytes: 4,
@@ -66,7 +66,7 @@ func TestMetricSamplesJSONBackCompat(t *testing.T) {
 		CPUMs      int64     `json:"cpu_ms"`
 		WorkingSet int64     `json:"ws"`
 	}
-	newRing := marshalMetricSamples([]processobs.MetricSample{
+	newRing := marshalMetricSamples([]procmodel.MetricSample{
 		{T: time.Unix(1, 0).UTC(), CPUMs: 7, WorkingSet: 8, NetRxBytes: 9, NetMeasured: true},
 	})
 	var decoded []oldSample

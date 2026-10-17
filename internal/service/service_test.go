@@ -17,11 +17,38 @@ func TestRenderUnit(t *testing.T) {
 			opts: UnitOptions{ExecPath: "/usr/local/bin/observer", Scope: ScopeUser},
 			wantContain: []string{
 				"ExecStart=/usr/local/bin/observer start\n",
-				"Restart=always",
+				"Restart=on-failure",
 				"RestartSec=3",
 				"WantedBy=default.target",
+				"Environment=\"PATH=" + DefaultPath + "\"\n",
 			},
-			wantAbsent: []string{"WantedBy=multi-user.target", "WorkingDirectory="},
+			wantAbsent: []string{"WantedBy=multi-user.target", "WorkingDirectory=", "Restart=always"},
+		},
+		{
+			name: "injected Path overrides DefaultPath",
+			opts: UnitOptions{
+				ExecPath: "/usr/local/bin/observer",
+				Scope:    ScopeUser,
+				Path:     "/home/dev/.local/bin:/home/dev/.hermes/node/bin:/usr/bin:/bin",
+			},
+			wantContain: []string{
+				"Environment=\"PATH=/home/dev/.local/bin:/home/dev/.hermes/node/bin:/usr/bin:/bin\"\n",
+			},
+			wantAbsent: []string{"Environment=\"PATH=" + DefaultPath + "\"\n"},
+		},
+		{
+			// systemd word-splits an unquoted Environment= value; a WSL merged PATH
+			// routinely carries "/mnt/c/Program Files/..." and must survive whole.
+			name: "spaced dir in Path survives quoting",
+			opts: UnitOptions{
+				ExecPath: "/usr/local/bin/observer",
+				Scope:    ScopeUser,
+				Path:     "/home/dev/.local/bin:/mnt/c/Program Files/nodejs:/usr/bin",
+			},
+			wantContain: []string{
+				"Environment=\"PATH=/home/dev/.local/bin:/mnt/c/Program Files/nodejs:/usr/bin\"\n",
+			},
+			wantAbsent: []string{"Environment=PATH="},
 		},
 		{
 			name: "system scope with passthrough args",
@@ -75,6 +102,26 @@ func TestRenderUnit(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestUnitDescriptionNamesWhatRuns pins T-744: the Description names what
+// `observer start` runs on the node, so a no-proxy node's unit no longer says
+// "proxy"; nil keeps the full set (every earlier caller's unit unchanged).
+func TestUnitDescriptionNamesWhatRuns(t *testing.T) {
+	cases := []struct {
+		runs []string
+		want string
+	}{
+		{nil, "Description=SuperBased Observer (proxy + watcher + dashboard)\n"},
+		{[]string{"watcher", "dashboard"}, "Description=SuperBased Observer (watcher + dashboard)\n"},
+		{[]string{}, "Description=SuperBased Observer\n"},
+	}
+	for _, c := range cases {
+		got := RenderUnit(UnitOptions{ExecPath: "/usr/local/bin/observer", Scope: ScopeUser, Runs: c.runs})
+		if !strings.Contains(got, c.want) {
+			t.Errorf("runs %v: unit has no %q:\n%s", c.runs, c.want, got)
+		}
 	}
 }
 

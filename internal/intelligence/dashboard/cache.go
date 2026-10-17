@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/cachetrack"
 	"github.com/marmutapp/superbased-observer/internal/cachewarmsvc"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/store"
+	"github.com/marmutapp/superbased-observer/internal/timebucket"
 )
 
 // CacheStatusResponse is the payload for GET /api/cache/status. It serves
@@ -97,35 +100,30 @@ type SessionCacheEntry struct {
 }
 
 // SessionCacheEvent mirrors a cache_events row for the diagnostic
-// dump alongside the timeline. ZeroUsage is true when the event
-// has tokens_read=0 AND tokens_written=0; the frontend renders
-// these neutrally and the rate excludes them per the C12 follow-
-// up (cachetrack.MispredictRateGraded).
-type SessionCacheEvent struct {
-	Timestamp     string `json:"timestamp"`
-	Tier          string `json:"tier"`
-	Model         string `json:"model"`
-	Kind          string `json:"kind"`
-	Cause         string `json:"cause"`
-	PredictedKind string `json:"predicted_kind,omitempty"`
-	TokensRead    int64  `json:"tokens_read"`
-	TokensWritten int64  `json:"tokens_written"`
-	MessageID     string `json:"message_id,omitempty"`
-	ZeroUsage     bool   `json:"zero_usage,omitempty"`
-}
+// dump alongside the timeline. ZeroUsage is cachetrack.IsZeroUsage
+// over (Kind, TokensRead, TokensWritten) — a mispredict whose
+// provider envelope carried no token data at all; the frontend
+// renders these neutrally and the graded rate excludes them per the
+// C12 follow-up (cachetrack.MispredictRateGraded). CostDeltaUSD is a
+// nullable pointer (nil = not computed) feeding the efficiency tile's
+// AvoidableUSD.
+//
+// Alias of cachetrack.TimelineEvent — the pure builder now lives
+// in internal/cachetrack/timeline.go so the org server can reuse
+// it over the same per-event shape arriving on the wire. See
+// buildCacheTimeline below.
+type SessionCacheEvent = cachetrack.TimelineEvent
 
 // SessionCacheEfficiency is the rollup tile on the Cache tab.
 // Ratio is read/write — the cache-payback signal (higher = more
-// cache benefit). AvoidableUSD is a placeholder for now (the C9
-// reconciliation engine populates cost_delta_usd in a follow-up;
-// pre-population this stays at 0 and the frontend hides the tile
-// or shows it as "not yet computed").
-type SessionCacheEfficiency struct {
-	ReadTokens    int64   `json:"read_tokens"`
-	WrittenTokens int64   `json:"written_tokens"`
-	Ratio         float64 `json:"ratio"`
-	AvoidableUSD  float64 `json:"avoidable_usd"`
-}
+// cache benefit). AvoidableUSD is the sum of per-event cost_delta_usd
+// over the avoidable, non-baseline events (cachetrack.BuildEfficiency);
+// it stays 0 while every event's cost_delta_usd is NULL — a NULL
+// contributes nothing — so the frontend renders "not yet computed"
+// rather than a fabricated $0.00.
+//
+// Alias of cachetrack.Efficiency.
+type SessionCacheEfficiency = cachetrack.Efficiency
 
 // SessionCacheTimelineItem is one row of the panel's event
 // timeline. The operator UI steer: a long warm session produces
@@ -144,20 +142,9 @@ type SessionCacheEfficiency struct {
 //
 // The two are interleaved in the response in chronological
 // order; the frontend stamps them onto one timeline.
-type SessionCacheTimelineItem struct {
-	Kind string `json:"kind"` // "baseline" | "anomaly"
-
-	// Baseline-only fields.
-	Count            int    `json:"count,omitempty"`
-	BaselineReadSum  int64  `json:"baseline_read_sum,omitempty"`
-	BaselineWriteSum int64  `json:"baseline_write_sum,omitempty"`
-	FirstAt          string `json:"first_at,omitempty"`
-	LastAt           string `json:"last_at,omitempty"`
-
-	// Anomaly-only fields.
-	Event   *SessionCacheEvent `json:"event,omitempty"`
-	Flagged bool               `json:"flagged,omitempty"`
-}
+//
+// Alias of cachetrack.TimelineItem.
+type SessionCacheTimelineItem = cachetrack.TimelineItem
 
 // handleSessionCache serves /api/session/<id>/cache. Spec §13.
 //
@@ -206,7 +193,7 @@ func loadSessionCacheEvents(ctx context.Context, db *sql.DB, sessionID string) (
 		SELECT timestamp, tier, model, kind,
 		       COALESCE(cause, ''), COALESCE(predicted_kind, ''),
 		       COALESCE(tokens_read, 0), COALESCE(tokens_written, 0),
-		       COALESCE(message_id, '')
+		       COALESCE(message_id, ''), cost_delta_usd
 		FROM cache_events
 		WHERE session_id = ?
 		ORDER BY timestamp ASC, id ASC`
@@ -218,11 +205,22 @@ func loadSessionCacheEvents(ctx context.Context, db *sql.DB, sessionID string) (
 	out := []SessionCacheEvent{}
 	for rows.Next() {
 		var ev SessionCacheEvent
+		// cost_delta_usd is nullable and NOT COALESCE'd: nil = the
+		// reconciliation engine did not compute a delta, 0 = a genuinely
+		// zero delta. BuildEfficiency folds only non-nil positive deltas
+		// into AvoidableUSD, so the NULL must survive to the struct.
+		var costDelta sql.NullFloat64
 		if err := rows.Scan(&ev.Timestamp, &ev.Tier, &ev.Model, &ev.Kind,
-			&ev.Cause, &ev.PredictedKind, &ev.TokensRead, &ev.TokensWritten, &ev.MessageID); err != nil {
+			&ev.Cause, &ev.PredictedKind, &ev.TokensRead, &ev.TokensWritten, &ev.MessageID, &costDelta); err != nil {
 			return nil, fmt.Errorf("loadSessionCacheEvents: scan: %w", err)
 		}
-		ev.ZeroUsage = ev.Kind == "mispredict" && ev.TokensRead == 0 && ev.TokensWritten == 0
+		if costDelta.Valid {
+			v := costDelta.Float64
+			ev.CostDeltaUSD = &v
+		}
+		// IsZeroUsage is THE rule (cachetrack): a mispredict whose provider
+		// envelope carried no token data. A 0/0 hit or write is NOT vacant.
+		ev.ZeroUsage = cachetrack.IsZeroUsage(ev.Kind, ev.TokensRead, ev.TokensWritten)
 		out = append(out, ev)
 	}
 	if err := rows.Err(); err != nil {
@@ -276,43 +274,22 @@ func loadSessionCacheEntries(ctx context.Context, db *sql.DB, sessionID string) 
 // collapseTier returns the single-string tier label for the
 // session's events. "proxy" or "transcript" when all events
 // share one tier; "mixed" when both appear; "none" on empty.
+//
+// Thin delegation to cachetrack.CollapseTier — the one owner of
+// this logic (see internal/cachetrack/timeline.go).
 func collapseTier(events []SessionCacheEvent) string {
-	if len(events) == 0 {
-		return "none"
-	}
-	seen := map[string]bool{}
-	for _, ev := range events {
-		if ev.Tier != "" {
-			seen[ev.Tier] = true
-		}
-	}
-	if len(seen) == 0 {
-		return "none"
-	}
-	if len(seen) > 1 {
-		return "mixed"
-	}
-	for t := range seen {
-		return t
-	}
-	return "none"
+	return cachetrack.CollapseTier(events)
 }
 
 // buildCacheEfficiency rolls per-event tokens into the session's
 // efficiency tile. Ratio is read/write; division-by-zero falls
 // through to 0 (no writes = no cache yet = no payback signal).
-// AvoidableUSD stays 0 until the reconciliation engine populates
-// cost_delta_usd on events (deferred to a follow-up).
+// AvoidableUSD sums each non-baseline event's non-nil positive
+// cost_delta_usd; while those columns are NULL it stays 0.
+//
+// Thin delegation to cachetrack.BuildEfficiency.
 func buildCacheEfficiency(events []SessionCacheEvent) SessionCacheEfficiency {
-	var eff SessionCacheEfficiency
-	for _, ev := range events {
-		eff.ReadTokens += ev.TokensRead
-		eff.WrittenTokens += ev.TokensWritten
-	}
-	if eff.WrittenTokens > 0 {
-		eff.Ratio = float64(eff.ReadTokens) / float64(eff.WrittenTokens)
-	}
-	return eff
+	return cachetrack.BuildEfficiency(events)
 }
 
 // buildCacheTimeline produces the interleaved baseline-roll-up +
@@ -332,89 +309,23 @@ func buildCacheEfficiency(events []SessionCacheEvent) SessionCacheEfficiency {
 // these with a neutral "flagged" pill, not alarm-red. The
 // existing per-event diagnostic stays the same — only the pill
 // styling differs.
+//
+// Thin delegation to cachetrack.BuildTimeline — the pure builder
+// now lives in internal/cachetrack/timeline.go so the org server
+// can reuse it over the same per-event shape.
 func buildCacheTimeline(events []SessionCacheEvent) []SessionCacheTimelineItem {
-	out := []SessionCacheTimelineItem{}
-	var runStart, runEnd string
-	var runCount int
-	var runRead, runWrite int64
-
-	flushBaseline := func() {
-		if runCount == 0 {
-			return
-		}
-		out = append(out, SessionCacheTimelineItem{
-			Kind:             "baseline",
-			Count:            runCount,
-			BaselineReadSum:  runRead,
-			BaselineWriteSum: runWrite,
-			FirstAt:          runStart,
-			LastAt:           runEnd,
-		})
-		runCount, runRead, runWrite = 0, 0, 0
-		runStart, runEnd = "", ""
-	}
-
-	for i := range events {
-		ev := events[i]
-		if isBaselineEvent(ev) {
-			if runCount == 0 {
-				runStart = ev.Timestamp
-			}
-			runEnd = ev.Timestamp
-			runCount++
-			runRead += ev.TokensRead
-			runWrite += ev.TokensWritten
-			continue
-		}
-		flushBaseline()
-		evCopy := ev
-		out = append(out, SessionCacheTimelineItem{
-			Kind:    "anomaly",
-			Event:   &evCopy,
-			Flagged: isFlaggedCause(ev.Cause),
-		})
-	}
-	flushBaseline()
-	return out
+	return cachetrack.BuildTimeline(events)
 }
 
-// isBaselineEvent reports whether an event is part of the
-// healthy warm-growth baseline (collapsed into the timeline's
-// baseline roll-up rows). hit+suffix_growth is a cache hit on
-// the predicted prefix; write+suffix_growth is the normal
-// per-turn incremental write (every turn writes SOME new
-// suffix; that's not pathological).
+// isFlaggedCause reports whether cause is a known-limitation
+// cause that should render as a neutral "flagged" pill rather
+// than alarm-red (tools_changed: MCP server connect/disconnect
+// legitimately changes the tools array; see
+// docs/cache-tracking.md#mcp-tools_changed-readwrite-over-flag).
 //
-// reanchor is NOT baseline — it's the first turn for a session
-// and rates the visibility on a session-detail page. Per the
-// existing rate-skipped list it's denominator-excluded, but the
-// dashboard still itemizes it.
-//
-// Zero-usage mispredict events are also itemized (the frontend
-// renders them with the [zero-usage, excluded from rate] marker
-// per the C12 follow-up).
-func isBaselineEvent(ev SessionCacheEvent) bool {
-	if ev.Cause != "suffix_growth" {
-		return false
-	}
-	return ev.Kind == "hit" || ev.Kind == "write"
-}
-
-// flaggedCauses lists causes that may legitimately fire on a
-// real operator toggle. The frontend renders these neutrally
-// (a "flagged" pill, not "alarm").
-//
-// tools_changed: MCP server connect/disconnect legitimately
-// changes the tools array; the prior-prefix warm read combined
-// with the new-tail rewrite trips the read:write WARN at the
-// 3.0× default threshold even though the cause attribution is
-// correct (docs/cache-tracking.md#mcp-tools_changed-readwrite-over-flag).
-var flaggedCauses = map[string]bool{
-	"tools_changed": true,
-}
-
+// Thin delegation to cachetrack.IsFlaggedCause.
 func isFlaggedCause(cause string) bool {
-	return flaggedCauses[cause]
+	return cachetrack.IsFlaggedCause(cause)
 }
 
 // SessionCacheAnnotation is the C15 compact glance-view of
@@ -520,7 +431,7 @@ func loadCacheAnnotationsByKey(ctx context.Context, db *sql.DB, keyColumn string
 			ann.ReanchorCount++
 		case "mispredict":
 			ann.MispredictCount++
-			if read == 0 && written == 0 {
+			if cachetrack.IsZeroUsage(kind, read, written) {
 				ann.ZeroUsageCount++
 			}
 		}
@@ -592,7 +503,7 @@ func loadSessionCacheAnnotation(ctx context.Context, db *sql.DB, sessionID strin
 			out.ReanchorCount++
 		case "mispredict":
 			out.MispredictCount++
-			if read == 0 && written == 0 {
+			if cachetrack.IsZeroUsage(kind, read, written) {
 				out.ZeroUsageCount++
 			}
 		}
@@ -712,7 +623,8 @@ type CacheOverviewSessionRow struct {
 // share a fold over a single events-and-sessions join; the
 // per-project and worst-sessions surfaces use the same scan and
 // fold in different dimensions. Honors the standard
-// days / tool / project query params so the Cache page agrees
+// window (days / hours / since / until) + tool / project query
+// params so the Cache page agrees
 // with every other dashboard surface when the operator scopes
 // the TopBar.
 func (s *Server) handleCacheOverview(w http.ResponseWriter, r *http.Request) {
@@ -732,6 +644,14 @@ func (s *Server) handleCacheOverview(w http.ResponseWriter, r *http.Request) {
 		PeriodOffsetDays: offset,
 		Tool:             r.URL.Query().Get("tool"),
 		Project:          r.URL.Query().Get("project"),
+		Model:            modelParam(r),
+	}
+	if offset == 0 {
+		// The global window (since / hours / days + until), so a 1h window
+		// never serves all time; days=0 (and no window param) stays the
+		// all-time sentinel. The prior-period fetch (period_offset_days)
+		// keeps its day-grained shift.
+		q.Since, q.Until = windowRange(r, 0, 0, 36500)
 	}
 
 	events, err := loadOverviewEvents(ctx, s.db(), q)
@@ -754,11 +674,42 @@ func (s *Server) handleCacheOverview(w http.ResponseWriter, r *http.Request) {
 // prior-period comparison fetch on the Cache page. Days=30 +
 // PeriodOffsetDays=30 returns [now − 60d, now − 30d). Ignored
 // when Days==0 (full corpus has no meaningful "prior" period).
+//
+// Since / Until, when either is set, are the resolved global window
+// (windowRange) and take precedence over Days / PeriodOffsetDays; zero
+// Since is unbounded (all time) and zero Until is now.
 type cacheOverviewQuery struct {
 	Days             int
 	PeriodOffsetDays int
+	Since, Until     time.Time
 	Tool             string
 	Project          string
+	// Model is the global Model filter: cache_events carries its own
+	// model column, so it is turn grain (modelfilter.RowIs).
+	Model string
+}
+
+// timeWhere renders the window predicate over ce.timestamp.
+func (q cacheOverviewQuery) timeWhere() (where []string, args []any) {
+	since, until := q.Since, q.Until
+	if since.IsZero() && until.IsZero() && q.Days > 0 {
+		// Window: [now − (Days + Offset)days, now − Offset days).
+		// When Offset == 0, the upper bound is "now" — original behavior.
+		now := time.Now().UTC()
+		since = now.Add(-time.Duration(q.Days+q.PeriodOffsetDays) * 24 * time.Hour)
+		if q.PeriodOffsetDays > 0 {
+			until = now.Add(-time.Duration(q.PeriodOffsetDays) * 24 * time.Hour)
+		}
+	}
+	if !since.IsZero() {
+		where = append(where, "ce.timestamp >= ?")
+		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	}
+	if !until.IsZero() {
+		where = append(where, "ce.timestamp < ?")
+		args = append(args, until.UTC().Format(time.RFC3339Nano))
+	}
+	return where, args
 }
 
 // overviewEvent is the join-shaped row used by the overview
@@ -788,21 +739,7 @@ type tokenPair struct {
 // handleStatusScoped + handleCost do, so cross-page filter
 // behavior agrees.
 func loadOverviewEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery) ([]overviewEvent, error) {
-	where := []string{}
-	args := []any{}
-	if q.Days > 0 {
-		// Window: [now − (Days + Offset)days, now − Offset days).
-		// When Offset == 0, the upper bound is "now" — original behavior.
-		now := time.Now().UTC()
-		since := now.Add(-time.Duration(q.Days+q.PeriodOffsetDays) * 24 * time.Hour).Format(time.RFC3339Nano)
-		where = append(where, "ce.timestamp >= ?")
-		args = append(args, since)
-		if q.PeriodOffsetDays > 0 {
-			until := now.Add(-time.Duration(q.PeriodOffsetDays) * 24 * time.Hour).Format(time.RFC3339Nano)
-			where = append(where, "ce.timestamp < ?")
-			args = append(args, until)
-		}
-	}
+	where, args := q.timeWhere()
 	if q.Tool != "" {
 		where = append(where, "s.tool = ?")
 		args = append(args, q.Tool)
@@ -810,6 +747,10 @@ func loadOverviewEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery) (
 	if q.Project != "" {
 		where = append(where, "p.root_path = ?")
 		args = append(args, q.Project)
+	}
+	if frag, margs := modelfilter.RowIs("ce.model", q.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
 	}
 	whereClause := ""
 	if len(where) > 0 {
@@ -847,10 +788,10 @@ func loadOverviewEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery) (
 }
 
 // CacheTimeseriesPoint is one bucket in the cache_events
-// timeseries — drives the sparklines on the four headline tiles
-// of the Cache page.
+// timeseries. T is the bucket start (epoch ms).
 type CacheTimeseriesPoint struct {
 	Bucket        string `json:"bucket"`
+	T             int64  `json:"t"`
 	ReadTokens    int64  `json:"read_tokens"`
 	WrittenTokens int64  `json:"written_tokens"`
 	EventCount    int64  `json:"event_count"`
@@ -858,61 +799,110 @@ type CacheTimeseriesPoint struct {
 }
 
 // CacheTimeseriesResponse is the payload for GET
-// /api/cache/timeseries?days=&tool=&project=&bucket=day.
+// /api/cache/timeseries?days=|hours=|since=&until=&gran=&tz=&tool=&project=.
+// The bucket metadata (bucket = the granularity token, bucket_ms, tz,
+// gran_auto, since, until) comes from internal/timebucket.Spec.Meta.
 type CacheTimeseriesResponse struct {
-	Metric string                 `json:"metric"`
-	Bucket string                 `json:"bucket"`
-	Days   int                    `json:"days"`
-	Series []CacheTimeseriesPoint `json:"series"`
+	Metric     string                 `json:"metric"`
+	Bucket     string                 `json:"bucket"`
+	BucketMS   int64                  `json:"bucket_ms"`
+	TZ         string                 `json:"tz"`
+	TZFallback bool                   `json:"tz_fallback,omitempty"`
+	GranAuto   bool                   `json:"gran_auto"`
+	Since      string                 `json:"since"`
+	Until      string                 `json:"until"`
+	Days       int                    `json:"days"`
+	Series     []CacheTimeseriesPoint `json:"series"`
 }
 
 // handleCacheTimeseries serves /api/cache/timeseries. Buckets
-// cache_events by day and returns four series — read_tokens,
-// written_tokens, event_count, rewrite_count — over the same
-// days / tool / project filter the overview handler uses.
-// Drives sparklines on the headline Cache-page tiles so each
-// tile carries a visible trajectory in addition to its absolute
-// value (matches the Cost-page tile rhythm).
-//
-// Bucket granularity is fixed at "day" for now — the cache
-// engine emits per-turn events; hourly aggregation rarely adds
-// signal to a sparkline-shaped surface and would require a
-// dedicated bucket=hour code path the Cost handler still
-// maintains for its own legacy reasons.
+// cache_events by the requested granularity (gran=auto|5m|1h|1d|1w in
+// the viewer's tz) and returns four series — read_tokens,
+// written_tokens, event_count, rewrite_count — over the global window
+// (days / hours / since+until; days=0 = all time, the Cache page's
+// "all" sentinel) and the tool / project filter the overview handler
+// uses. The grid is zero-filled. Drives the Cache-page traffic / events /
+// ratio charts and the headline-tile sparklines.
 func (s *Server) handleCacheTimeseries(w http.ResponseWriter, r *http.Request) {
-	days := intArg(r, "days", 30, 1, 36500)
-	q := cacheOverviewQuery{
-		Days:    days,
+	days := intArg(r, "days", 30, 0, 36500)
+	since, until := windowRange(r, 30, 0, 36500)
+	spec, err := bucketSpec(r, since, until)
+	if err != nil {
+		writeBucketErr(w, err)
+		return
+	}
+	q := cacheTimeseriesQuery{
+		Since:   since,
+		Until:   until,
+		Spec:    spec,
 		Tool:    r.URL.Query().Get("tool"),
 		Project: r.URL.Query().Get("project"),
+		Model:   modelParam(r),
 	}
 
-	series, err := loadCacheTimeseries(r.Context(), s.db(), q)
+	sparse, err := loadCacheTimeseries(r.Context(), s.db(), q)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load cache timeseries: %v", err), http.StatusInternalServerError)
 		return
 	}
+	byKey := make(map[string]CacheTimeseriesPoint, len(sparse))
+	starts := make(map[string]time.Time, len(sparse))
+	for _, p := range sparse {
+		byKey[p.Bucket] = p
+		starts[p.Bucket] = time.UnixMilli(p.T)
+	}
+	slots := bucketSlots(spec, starts)
+	series := make([]CacheTimeseriesPoint, 0, len(slots))
+	for _, sl := range slots {
+		p, ok := byKey[sl.Key]
+		if !ok {
+			p = CacheTimeseriesPoint{Bucket: sl.Key}
+		}
+		p.T = millis(sl.T)
+		series = append(series, p)
+	}
+	meta := spec.Meta()
 	writeJSON(w, CacheTimeseriesResponse{
-		Metric: "cache",
-		Bucket: "day",
-		Days:   days,
-		Series: series,
+		Metric:     "cache",
+		Bucket:     string(spec.Gran),
+		BucketMS:   spec.Gran.Millis(),
+		TZ:         spec.TZ,
+		TZFallback: spec.TZFallback,
+		GranAuto:   spec.Auto,
+		Since:      meta["since"].(string),
+		Until:      meta["until"].(string),
+		Days:       days,
+		Series:     series,
 	})
 }
 
-// loadCacheTimeseries buckets cache_events by ISO date,
-// applying the same days / tool / project scope as
-// loadOverviewEvents. The rewrite_count column sums every
+// cacheTimeseriesQuery scopes loadCacheTimeseries: the resolved window
+// (zero Since = no lower bound; zero Until = no upper bound), the bucket
+// spec, and the overview's tool / project filters.
+type cacheTimeseriesQuery struct {
+	Since, Until time.Time
+	Spec         timebucket.Spec
+	Tool         string
+	Project      string
+	Model        string
+}
+
+// loadCacheTimeseries buckets cache_events by q.Spec (sparse: only
+// buckets with events; the handler zero-fills), applying the same tool /
+// project scope as loadOverviewEvents. The rewrite_count column sums every
 // non-baseline kind (invalidation_rewrite / expiry_rewrite /
-// model_switch_rewrite) so the surface aligns with the Worst
-// sessions ranking.
-func loadCacheTimeseries(ctx context.Context, db *sql.DB, q cacheOverviewQuery) ([]CacheTimeseriesPoint, error) {
+// model_switch_rewrite) so the surface aligns with the Worst sessions
+// ranking.
+func loadCacheTimeseries(ctx context.Context, db *sql.DB, q cacheTimeseriesQuery) ([]CacheTimeseriesPoint, error) {
 	where := []string{}
 	args := []any{}
-	if q.Days > 0 {
-		since := time.Now().UTC().Add(-time.Duration(q.Days) * 24 * time.Hour).Format(time.RFC3339Nano)
+	if !q.Since.IsZero() {
 		where = append(where, "ce.timestamp >= ?")
-		args = append(args, since)
+		args = append(args, q.Since.UTC().Format(time.RFC3339Nano))
+	}
+	if !q.Until.IsZero() {
+		where = append(where, "ce.timestamp < ?")
+		args = append(args, q.Until.UTC().Format(time.RFC3339Nano))
 	}
 	if q.Tool != "" {
 		where = append(where, "s.tool = ?")
@@ -922,14 +912,19 @@ func loadCacheTimeseries(ctx context.Context, db *sql.DB, q cacheOverviewQuery) 
 		where = append(where, "p.root_path = ?")
 		args = append(args, q.Project)
 	}
+	if frag, margs := modelfilter.RowIs("ce.model", q.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
 	whereClause := ""
 	if len(where) > 0 {
 		whereClause = " WHERE " + strings.Join(where, " AND ")
 	}
-	//nolint:gosec // G202: WHERE fragment is built from code constants; every value is bound via ? args.
+	slot := q.Spec.Slot()
+	//nolint:gosec // G202: the bucket expression is rendered by internal/timebucket and the WHERE fragment from code constants; every value is bound via ? args.
 	query := `
 		SELECT
-			substr(ce.timestamp, 1, 10) AS bucket,
+			` + slot.SQLiteExpr("ce.timestamp") + ` AS bucket,
 			COALESCE(SUM(ce.tokens_read), 0),
 			COALESCE(SUM(ce.tokens_written), 0),
 			COUNT(*),
@@ -937,24 +932,44 @@ func loadCacheTimeseries(ctx context.Context, db *sql.DB, q cacheOverviewQuery) 
 		FROM cache_events ce
 		LEFT JOIN sessions s ON s.id = ce.session_id
 		LEFT JOIN projects p ON p.id = s.project_id` + whereClause + `
-		GROUP BY bucket
-		ORDER BY bucket ASC`
+		GROUP BY bucket`
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("loadCacheTimeseries: query: %w", err)
 	}
 	defer rows.Close()
-	out := []CacheTimeseriesPoint{}
+	byKey := map[string]*CacheTimeseriesPoint{}
 	for rows.Next() {
+		var label sql.NullInt64
 		var p CacheTimeseriesPoint
-		if err := rows.Scan(&p.Bucket, &p.ReadTokens, &p.WrittenTokens, &p.EventCount, &p.RewriteCount); err != nil {
+		if err := rows.Scan(&label, &p.ReadTokens, &p.WrittenTokens, &p.EventCount, &p.RewriteCount); err != nil {
 			return nil, fmt.Errorf("loadCacheTimeseries: scan: %w", err)
 		}
-		out = append(out, p)
+		b, ok := slot.IndexBucket(label.Int64, label.Valid)
+		if !ok {
+			continue
+		}
+		key := q.Spec.Key(b)
+		if cur, ok := byKey[key]; ok {
+			// Several UTC slots fold into one bucket (hours into a day).
+			cur.ReadTokens += p.ReadTokens
+			cur.WrittenTokens += p.WrittenTokens
+			cur.EventCount += p.EventCount
+			cur.RewriteCount += p.RewriteCount
+			continue
+		}
+		p.Bucket = key
+		p.T = b.UnixMilli()
+		byKey[key] = &p
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("loadCacheTimeseries: rows: %w", err)
 	}
+	out := make([]CacheTimeseriesPoint, 0, len(byKey))
+	for _, p := range byKey {
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].T < out[j].T })
 	return out, nil
 }
 
@@ -979,9 +994,18 @@ type CacheHealthSummary struct {
 	// land in the same hit-vs-write bucket as the right answer and
 	// slip past the rate gate; this surfaces them directly.
 	BucketMispredicts int `json:"bucket_mispredicts"`
+	// PredictedEvents is the denominator for BucketMispredicts: events
+	// that carry a persisted prediction to compare against.
+	PredictedEvents int `json:"predicted_events"`
 
-	// Informational WARNs surfaced as banner pills.
+	// Informational engine diagnostics. They describe how well the
+	// attribution engine labels its own events, not the health of the
+	// user's cache, so the page shows them in a collapsed diagnostics
+	// section and alarms only on the grading gate (GatePassed).
 	InconsistentRewriteCount int `json:"inconsistent_rewrite_count"`
+	// RewriteEvents is the denominator for InconsistentRewriteCount:
+	// every rewrite or compaction-reset event.
+	RewriteEvents int `json:"rewrite_events"`
 	// DominantCause is non-nil when one non-suffix_growth cause
 	// exceeds the share threshold over GradedEvents. Banner copy
 	// uses the cause + share to call it out by name.
@@ -1063,7 +1087,10 @@ type CacheHealthDominantCause struct {
 // scope is intentionally ignored here so the WARN banner reads
 // "engine is unhealthy" without false negatives from a project
 // filter narrowing the corpus.
-func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary, error) {
+// model is the dashboard's global Model filter ("" = none); cache events and
+// the untracked-provider turns both carry their own model, so it is turn
+// grain (modelfilter.AndRowIs).
+func loadCacheHealthSummary(ctx context.Context, db *sql.DB, model string) (CacheHealthSummary, error) {
 	const (
 		defaultMinEvents     = 200
 		defaultMaxRate       = 0.05
@@ -1075,10 +1102,12 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		MaxRate:   defaultMaxRate,
 	}
 
-	const q = `SELECT kind, COALESCE(cause, ''), COALESCE(predicted_kind, ''),
+	mWhere, mArgs := modelfilter.AndRowIs("model", model)
+	//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
+	q := `SELECT kind, COALESCE(cause, ''), COALESCE(predicted_kind, ''),
 	           COALESCE(tokens_read, 0), COALESCE(tokens_written, 0)
-	           FROM cache_events ORDER BY id ASC`
-	rows, err := db.QueryContext(ctx, q)
+	           FROM cache_events WHERE 1=1` + mWhere + ` ORDER BY id ASC`
+	rows, err := db.QueryContext(ctx, q, mArgs...)
 	if err != nil {
 		return s, fmt.Errorf("loadCacheHealthSummary: query: %w", err)
 	}
@@ -1104,14 +1133,20 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		if cause != "" {
 			causeCounts[cause]++
 		}
-		if predicted != "" && cachetrack.BucketMismatch(cachetrack.Kind(predicted), k) {
-			s.BucketMispredicts++
+		if predicted != "" {
+			s.PredictedEvents++
+			if cachetrack.BucketMismatch(cachetrack.Kind(predicted), k) {
+				s.BucketMispredicts++
+			}
 		}
 		// read:write consistency: non-baseline rewrite kinds with
 		// read >> write are mechanically inconsistent with a real
 		// cache invalidation (a real one rebuilds a cold prefix → read ≈ 0).
-		if isRewriteKindLocal(k) && read > int64(defaultMaxRewriteRR*float64(written)) && read > 0 {
-			s.InconsistentRewriteCount++
+		if isRewriteKindLocal(k) {
+			s.RewriteEvents++
+			if read > int64(defaultMaxRewriteRR*float64(written)) && read > 0 {
+				s.InconsistentRewriteCount++
+			}
 		}
 		// §15.3 implicit-cache accounting. The §10 gate above is
 		// blind to these by design (cachetrack.isRateSkipped routes
@@ -1188,7 +1223,9 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 	// them" info banner. Tolerates the api_turns.provider column
 	// being NULL on legacy installs (no rows match → counts stay
 	// zero, no banner shown).
-	const untrackedQ = `
+	atWhere, atArgs := modelfilter.AndRowIs("at.model", model)
+	//nolint:gosec // G202: the model fragments are code constants; their values are bound.
+	untrackedQ := `
 		SELECT
 		  COUNT(*),
 		  COUNT(DISTINCT session_id),
@@ -1199,7 +1236,7 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		    WHERE at.provider IS NOT NULL AND at.provider != ''
 		      AND LOWER(at.provider) != 'anthropic'
 		      AND at.timestamp >= ?
-		      AND s.tool IS NOT NULL AND s.tool != ''
+		      AND s.tool IS NOT NULL AND s.tool != ''` + atWhere + `
 		    GROUP BY s.tool
 		    ORDER BY COUNT(DISTINCT at.session_id) DESC, s.tool ASC
 		    LIMIT 1
@@ -1207,9 +1244,10 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		FROM api_turns
 		WHERE provider IS NOT NULL AND provider != ''
 		  AND LOWER(provider) != 'anthropic'
-		  AND timestamp >= ?`
+		  AND timestamp >= ?` + mWhere
 	since := time.Now().UTC().Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)
-	_ = db.QueryRowContext(ctx, untrackedQ, since, since).Scan(
+	untrackedArgs := append(append(append([]any{since}, atArgs...), since), mArgs...)
+	_ = db.QueryRowContext(ctx, untrackedQ, untrackedArgs...).Scan(
 		&s.UntrackedProviderTurns,
 		&s.UntrackedProviderSessions,
 		&s.UntrackedProviderTopTool,
@@ -1248,7 +1286,7 @@ func isRewriteKindLocal(k cachetrack.Kind) bool {
 // global summary regardless of TopBar filters — engine health is
 // not a windowed signal.
 func (s *Server) handleCacheHealth(w http.ResponseWriter, r *http.Request) {
-	summary, err := loadCacheHealthSummary(r.Context(), s.db())
+	summary, err := loadCacheHealthSummary(r.Context(), s.db(), modelParam(r))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load cache health: %v", err), http.StatusInternalServerError)
 		return
@@ -1274,7 +1312,7 @@ type CacheEventRow struct {
 }
 
 // CacheEventsResponse is the paginated payload for
-// GET /api/cache/events?limit=N&offset=N&days=N&tool=&project=.
+// GET /api/cache/events?limit=N&offset=N&days=N|hours=N|since=&until=&tool=&project=.
 type CacheEventsResponse struct {
 	Rows   []CacheEventRow `json:"rows"`
 	Total  int64           `json:"total"`
@@ -1284,7 +1322,8 @@ type CacheEventsResponse struct {
 
 // handleCacheEvents serves /api/cache/events. Returns the most
 // recent cache_events rows (newest first) under the standard
-// days/tool/project filters, with limit + offset pagination.
+// window (days / hours / since / until) + tool / project filters,
+// with limit + offset pagination.
 // Default page size 50; max 200 — same Compression "Recent events"
 // pagination footprint so the dashboard rhythm reads uniformly.
 func (s *Server) handleCacheEvents(w http.ResponseWriter, r *http.Request) {
@@ -1296,7 +1335,11 @@ func (s *Server) handleCacheEvents(w http.ResponseWriter, r *http.Request) {
 		Days:    days,
 		Tool:    r.URL.Query().Get("tool"),
 		Project: r.URL.Query().Get("project"),
+		Model:   modelParam(r),
 	}
+	// The global window (since / hours / days + until); days=0 stays all
+	// time.
+	q.Since, q.Until = windowRange(r, 0, 0, 36500)
 
 	rows, total, err := loadCacheEvents(ctx, s.db(), q, limit, offset)
 	if err != nil {
@@ -1313,13 +1356,7 @@ func (s *Server) handleCacheEvents(w http.ResponseWriter, r *http.Request) {
 // scope. Returns rows DESC by id (proxy for chronological newest-
 // first; id is monotonically increasing per migration 036).
 func loadCacheEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery, limit, offset int) ([]CacheEventRow, int64, error) {
-	where := []string{}
-	args := []any{}
-	if q.Days > 0 {
-		since := time.Now().UTC().Add(-time.Duration(q.Days) * 24 * time.Hour).Format(time.RFC3339Nano)
-		where = append(where, "ce.timestamp >= ?")
-		args = append(args, since)
-	}
+	where, args := q.timeWhere()
 	if q.Tool != "" {
 		where = append(where, "s.tool = ?")
 		args = append(args, q.Tool)
@@ -1327,6 +1364,10 @@ func loadCacheEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery, limi
 	if q.Project != "" {
 		where = append(where, "p.root_path = ?")
 		args = append(args, q.Project)
+	}
+	if frag, margs := modelfilter.RowIs("ce.model", q.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
 	}
 	whereClause := ""
 	if len(where) > 0 {
@@ -1401,7 +1442,7 @@ type CacheEntryStatesResponse struct {
 // makes the engine-state distribution visible without requiring a
 // soak measurement first.
 func (s *Server) handleCacheEntryStates(w http.ResponseWriter, r *http.Request) {
-	rows, total, err := loadCacheEntryStates(r.Context(), s.db())
+	rows, total, err := loadCacheEntryStates(r.Context(), s.db(), modelParam(r))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load cache entry states: %v", err), http.StatusInternalServerError)
 		return
@@ -1412,10 +1453,14 @@ func (s *Server) handleCacheEntryStates(w http.ResponseWriter, r *http.Request) 
 // loadCacheEntryStates groups cache_entries by state. Returns a
 // deterministic state-ordered slice (alphabetical) so the front-
 // end can map state→color without surprises across reloads.
-func loadCacheEntryStates(ctx context.Context, db *sql.DB) ([]CacheEntryStateRow, int64, error) {
-	const q = `SELECT COALESCE(state, ''), COUNT(*)
-	           FROM cache_entries GROUP BY 1 ORDER BY 1 ASC`
-	rows, err := db.QueryContext(ctx, q)
+// model is the global Model filter ("" = none): a cache entry carries its own
+// model, so it is turn grain.
+func loadCacheEntryStates(ctx context.Context, db *sql.DB, model string) ([]CacheEntryStateRow, int64, error) {
+	mWhere, mArgs := modelfilter.AndRowIs("model", model)
+	//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
+	q := `SELECT COALESCE(state, ''), COUNT(*)
+	           FROM cache_entries WHERE 1=1` + mWhere + ` GROUP BY 1 ORDER BY 1 ASC`
+	rows, err := db.QueryContext(ctx, q, mArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("loadCacheEntryStates: query: %w", err)
 	}

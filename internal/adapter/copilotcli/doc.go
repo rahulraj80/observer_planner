@@ -55,7 +55,11 @@
 //     fill the input/cache/reasoning gap for users not running in
 //     debug mode — without Tier 0, ~90% of cost would silently
 //     disappear off the dashboard. OutputTokens is left zero to
-//     avoid double-counting with Tier 3 per-message rows. When Tier 1
+//     avoid double-counting with Tier 3 per-message rows, EXCEPT when
+//     no assistant.message in the same span (since the last resume /
+//     shutdown) reported outputTokens: then the shutdown row carries
+//     modelMetrics' outputTokens so output is never silently zero (T-353,
+//     a copilot-cli 1.0.91 session recorded input only). When Tier 1
 //     rows exist for the same session, the store-layer dedup drops
 //     Tier 0 rows (Tier 1 has finer per-request granularity).
 //
@@ -82,4 +86,20 @@
 // events.jsonl row without double-counting. Same-session cross-tier
 // dedup is handled at the store layer (see
 // store.InsertTokenEvents).
+//
+// # Capture surface
+//
+// `workspace.yaml`'s `client_name` line is the ONE grounded
+// discriminator for which client drove a session — surface.go resolves
+// it into a models.SessionSurface stamp (`JetBrains.<Product>` →
+// ide/jetbrains-<product>; `github/cli` → cli/copilot-cli; anything
+// else → no stamp). It is read through the SAME
+// resolveProjectFromWorkspaceYAML that already resolves the project
+// root, from both the events.jsonl and the process-log lanes, so there
+// is one reader of that file and one owner of the mapping. Nothing in
+// the event stream itself distinguishes the lanes:
+// `session.start.data.producer` is "copilot-agent" and `copilotVersion`
+// is just the CLI build in both cases. See surface.go's file doc for
+// the honesty rules, and testdata/copilotcli/README.md for the
+// grounding capture.
 package copilotcli

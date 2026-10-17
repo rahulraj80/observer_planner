@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "entries": "VerifiedOfficial",
+    "entries[]": "VerifiedOfficial",
+    "entries[].insertId": "VerifiedOfficial",
+    "entries[].logName": "VerifiedOfficial",
+    "entries[].protoPayload": "VerifiedOfficial",
+    "entries[].protoPayload.@type": "VerifiedOfficial",
+    "entries[].protoPayload.authenticationInfo": "VerifiedOfficial",
+    "entries[].protoPayload.authenticationInfo.principalEmail": "VerifiedOfficial",
+    "entries[].protoPayload.methodName": "VerifiedOfficial",
+    "entries[].protoPayload.resourceName": "Inferred",
+    "entries[].protoPayload.serviceName": "VerifiedOfficial",
+    "entries[].protoPayload.status": "VerifiedOfficial",
+    "entries[].protoPayload.status.code": "VerifiedOfficial",
+    "entries[].receiveTimestamp": "VerifiedOfficial",
+    "entries[].resource": "VerifiedOfficial",
+    "entries[].resource.type": "Inferred",
+    "entries[].severity": "VerifiedOfficial",
+    "entries[].timestamp": "VerifiedOfficial"
+  },
+  "fixture_sha256": "2e46565055ca9c4cb10fce91b18c1f7697b9649b94e1d931e3a3e1e3a700b540",
+  "http": {
+    "method": "POST",
+    "path": "/v2/entries:list",
+    "status": 200
+  },
+  "notes": "Synthesized from the LogEntry and AuditLog schemas (no cloudaicompanion audit entry example is published); the method names and service name are from 'cloudaicompanion API audit logging' (https://cloud.google.com/gemini/docs/audit-logging). The resourceName shape and the monitored resource type audited_resource are Inferred. requestMetadata, request and response are omitted: the driver never decodes them. Terminal page: nextPageToken omitted (proto3 JSON omits an empty field).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Cloud Logging API v2 discovery document (entries.list, LogEntry), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "e16ef989be58a0f36d7480b661ce564d57c05b40fa9f6b148a43810d41477700",
+  "source_url": "https://logging.googleapis.com/$discovery/rest?version=v2",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "google.codeassist.audit_logs"
+}

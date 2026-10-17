@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
+	"github.com/marmutapp/superbased-observer/internal/adapter/cacheobs"
 	"github.com/marmutapp/superbased-observer/internal/contentcap"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/ratelimitstate"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/tooltax"
 )
 
 // Adapter parses Claude Cowork audit logs at
@@ -69,16 +72,38 @@ func (*Adapter) Name() string { return models.ToolCowork }
 // `Claude_<hash>` package id is a publisher-derived stable string but
 // can rotate across signing-key changes, so we match `Claude_*`
 // rather than hardcoding the current hash.
+//
+// IDENTITY DEDUP: on a Windows MSIX install the first two layouts are
+// the SAME directory — `%APPDATA%\Claude` is a reparse point onto
+// `…\Packages\Claude_<hash>\LocalCache\Roaming\Claude`. Both spellings
+// are still enumerated (the MSIX one is the only spelling a WSL daemon
+// can traverse over DrvFs; the Roaming one is the only one a non-MSIX
+// install has), then collapsed by adapter.DedupRootsByIdentity —
+// otherwise the watcher walks one tree twice and every audit.jsonl is
+// ingested under two distinct source_file values, doubling every
+// action and token row (audit finding IDE-01). Deduping HERE as well
+// as in the watcher keeps this adapter's own IsSessionFile root set
+// equal to the set the watcher walks.
+//
+// The explicit watchRoots override (tests / fixtures) is returned
+// verbatim — it is an injected, already-canonical list, not discovery
+// output.
 func (a *Adapter) WatchPaths() []string {
 	if len(a.watchRoots) > 0 {
 		return a.watchRoots
 	}
 	var roots []string
-	for _, h := range crossmount.AllHomes() {
+	for _, h := range allHomesFunc() {
 		roots = append(roots, candidateRoots(h)...)
 	}
-	return roots
+	return adapter.DedupRootsByIdentity(roots)
 }
+
+// allHomesFunc is the test seam over crossmount.AllHomes — tests swap
+// in a synthetic home set so root discovery is assertable without
+// depending on the host's filesystem layout. Same shape as
+// clinecli.allHomesFunc / aider.allHomesFunc.
+var allHomesFunc = crossmount.AllHomes
 
 func candidateRoots(h crossmount.HomeRoot) []string {
 	switch h.OS {
@@ -130,54 +155,38 @@ func (a *Adapter) IsSessionFile(path string) bool {
 
 // actionMap translates Cowork tool names — which mirror Claude Code's
 // CLI tool surface plus a few Cowork-specific additions — to the
-// normalized action taxonomy. Names not listed get ActionUnknown and
-// keep their raw name in RawToolName.
+// normalized action taxonomy. It is READ OUT of internal/tooltax, the
+// one owner of the cross-adapter tool vocabulary (WP-T3 of
+// docs/plans/tool-taxonomy-standardization-plan-2026-07-31.md). Names
+// with no row get ActionUnknown and keep their raw name in
+// RawToolName.
 //
-// The `mcp__*` entries are MCP-flavored Cowork extensions that surface
-// in the live tool roster (system.init.tools[]). `mcp__workspace__bash`
-// is semantically equivalent to the built-in `Bash` tool, just routed
-// through the workspace MCP server; `mcp__workspace__web_fetch` is the
-// MCP twin of `WebFetch`. The remaining mcp__* names are server-side
-// helpers (cowork directory / present_files / visualize widgets) that
-// don't map to a single primitive action — they land as `mcp_call`.
-// `Skill` and `ToolSearch` are Anthropic-platform-level tools (skills
-// + deferred-tool loader); both surface as mcp_call.
-var actionMap = map[string]string{
-	"Read":                                  models.ActionReadFile,
-	"Write":                                 models.ActionWriteFile,
-	"Edit":                                  models.ActionEditFile,
-	"NotebookEdit":                          models.ActionEditFile,
-	"Bash":                                  models.ActionRunCommand,
-	"mcp__workspace__bash":                  models.ActionRunCommand,
-	"PowerShell":                            models.ActionRunCommand,
-	"powershell":                            models.ActionRunCommand,
-	"pwsh":                                  models.ActionRunCommand,
-	"cmd":                                   models.ActionRunCommand,
-	"cmd.exe":                               models.ActionRunCommand,
-	"sh":                                    models.ActionRunCommand,
-	"Grep":                                  models.ActionSearchText,
-	"Glob":                                  models.ActionSearchFiles,
-	"WebSearch":                             models.ActionWebSearch,
-	"WebFetch":                              models.ActionWebFetch,
-	"mcp__workspace__web_fetch":             models.ActionWebFetch,
-	"Agent":                                 models.ActionSpawnSubagent,
-	"Task":                                  models.ActionSpawnSubagent,
-	"TaskOutput":                            models.ActionTodoUpdate,
-	"TaskStop":                              models.ActionTodoUpdate,
-	"TaskCreate":                            models.ActionTodoUpdate,
-	"TaskUpdate":                            models.ActionTodoUpdate,
-	"TaskList":                              models.ActionTodoUpdate,
-	"TaskGet":                               models.ActionTodoUpdate,
-	"TodoWrite":                             models.ActionTodoUpdate,
-	"AskUserQuestion":                       models.ActionAskUser,
-	"Skill":                                 models.ActionMCPCall,
-	"ToolSearch":                            models.ActionMCPCall,
-	"mcp__cowork__request_cowork_directory": models.ActionMCPCall,
-	"mcp__cowork__present_files":            models.ActionMCPCall,
-	"mcp__cowork__allow_cowork_file_delete": models.ActionMCPCall,
-	"mcp__visualize__show_widget":           models.ActionMCPCall,
-	"mcp__visualize__read_me":               models.ActionMCPCall,
-}
+// Cowork's SEMANTIC REMAPS are preserved verbatim as cowork-specific
+// tooltax rows — they are deliberate adapter semantics, not drift, and
+// they intentionally differ from the claude-code rows for the same
+// native names:
+//
+//   - `mcp__workspace__bash` is semantically equivalent to the built-in
+//     `Bash` tool, just routed through the workspace MCP server, so it
+//     is run_command rather than mcp_call; `mcp__workspace__web_fetch`
+//     is the MCP twin of `WebFetch`.
+//   - The remaining `mcp__*` names are server-side helpers (cowork
+//     directory / present_files / visualize widgets) that don't map to
+//     a single primitive action — they land as `mcp_call`.
+//   - `Skill` and `ToolSearch` are Anthropic-platform-level tools
+//     (skills + deferred-tool loader); on THIS adapter both surface as
+//     mcp_call, where claude-code maps them to skill_invoke /
+//     tool_search.
+//
+// tooltax.For returns LITERAL rows only, so an unlisted `mcp__*` name
+// is still resolved by the models.IsMCPToolName fallback in the
+// tool_use branch — unchanged behaviour.
+//
+// TestActionMapPreservesPreTooltaxFixture pins every pre-conversion
+// pair as still present and unchanged (including every semantic
+// remap); TestActionMapTooltaxAdditions pins the intended additions so
+// an unreviewed one is loud.
+var actionMap = tooltax.For(models.ToolCowork)
 
 // nativeTools is the set of Cowork tools that are first-class agent
 // actions (not Bash shell wrappers). Used by IsNativeTool to set the
@@ -325,6 +334,27 @@ type rawContentBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
+	// Source is the attachment envelope on an image/document block
+	// ({type:"base64", media_type, data}). Only media_type is read
+	// (Issue 1 user-attachment capture); the base64 `data` is never
+	// decoded or stored.
+	Source json.RawMessage `json:"source"`
+}
+
+// imageMediaType reads the media_type off an image/document block's
+// source envelope ("image/png"), or "" when absent. Reads ONLY the
+// media type, never the base64 data.
+func (b rawContentBlock) imageMediaType() string {
+	if len(b.Source) == 0 {
+		return ""
+	}
+	var src struct {
+		MediaType string `json:"media_type"`
+	}
+	if err := json.Unmarshal(b.Source, &src); err == nil {
+		return src.MediaType
+	}
+	return ""
 }
 
 // sidecar is the canonical per-local-instance metadata at
@@ -367,19 +397,19 @@ func loadSidecar(auditPath string) (sidecar, error) {
 	return s, nil
 }
 
-// ProjectAttribution returns the (Observer session ID, project root)
-// pair that ParseSessionFile would attribute to a given audit.jsonl
-// path, without actually parsing the file. Used by the
-// --cowork-project-root backfill to re-attribute rows ingested before
-// a project-resolution bug fix.
+// ProjectAttribution returns the (Observer session ID, project root,
+// normalized git remote) triple that ParseSessionFile would attribute
+// to a given audit.jsonl path, without actually parsing the file. Used
+// by the --cowork-project-root backfill to re-attribute rows ingested
+// before a project-resolution bug fix.
 //
 // Returns ok=false when the path doesn't follow the local_<uuid>/
 // layout (in which case the file shouldn't have been ingested by the
 // adapter in the first place).
-func ProjectAttribution(auditPath string) (sessionID, projectRoot string, ok bool) {
+func ProjectAttribution(auditPath string) (sessionID, projectRoot, remote string, ok bool) {
 	sessionID = instanceSessionID(auditPath)
 	if sessionID == "" {
-		return "", "", false
+		return "", "", "", false
 	}
 	sc, err := loadSidecar(auditPath)
 	if err != nil {
@@ -388,8 +418,8 @@ func ProjectAttribution(auditPath string) (sessionID, projectRoot string, ok boo
 		// the backfill should converge on the same behavior.
 		sc = sidecar{}
 	}
-	projectRoot = resolveProjectRoot(sc, map[string]string{})
-	return sessionID, projectRoot, true
+	projectRoot, remote, _ = resolveProjectRoot(sc, map[string]projectGitInfo{})
+	return sessionID, projectRoot, remote, true
 }
 
 // instanceSessionID extracts the local-instance UUID from an audit.jsonl
@@ -427,7 +457,29 @@ func instanceSessionID(auditPath string) string {
 // finds the observer's OWN .git and mis-attributes every Cowork
 // session pointing at a Windows workspace to the observer's repo.
 // That's what v1.4.54 fixed.
-func resolveProjectRoot(s sidecar, cache map[string]string) string {
+// projectGitInfo is the per-candidate cache entry for resolveProjectRoot:
+// the resolved project root and its normalized "origin" remote,
+// captured together from a single git.Resolve call so the two never
+// drift and the filesystem walk never happens twice for the same
+// candidate.
+type projectGitInfo struct {
+	Root   string
+	Remote string
+	// Identity is the Project Identity Resolver v2 bundle (2026-09-06,
+	// §3.1 / W1) resolved alongside Root/Remote, zero-valued on every
+	// branch that doesn't run git.ResolveIdentity (an honest gap, never
+	// a fabricated value). Applied to every event in the ParseResult via
+	// adapter.ApplyProjectIdentity — cowork resolves at most one identity
+	// per ParseSessionFile call.
+	Identity git.Identity
+}
+
+// resolveProjectRoot returns (root, remote, identity). remote/identity
+// are only populated when git.ResolveIdentity actually ran and found a
+// repo (the reachable-path branch below); the sandbox-synthesis and
+// unreachable-path branches never call it, so both are zero there — an
+// honest gap, not a fabricated value.
+func resolveProjectRoot(s sidecar, cache map[string]projectGitInfo) (string, string, git.Identity) {
 	candidate := ""
 	if len(s.UserSelectedFolders) > 0 && s.UserSelectedFolders[0] != "" {
 		candidate = s.UserSelectedFolders[0]
@@ -435,7 +487,7 @@ func resolveProjectRoot(s sidecar, cache map[string]string) string {
 		candidate = s.Cwd
 	}
 	if candidate == "" {
-		return ""
+		return "", "", git.Identity{}
 	}
 
 	// Cowork-internal cwd (the session's own .../local_<id>/outputs
@@ -458,12 +510,12 @@ func resolveProjectRoot(s sidecar, cache map[string]string) string {
 			name = s.SessionID
 		}
 		if name != "" {
-			return "/sessions/" + name
+			return "/sessions/" + name, "", git.Identity{}
 		}
 	}
 
 	if r, ok := cache[candidate]; ok {
-		return r
+		return r.Root, r.Remote, r.Identity
 	}
 
 	// Translate Windows-style paths to /mnt/<drive>/ on WSL2
@@ -472,14 +524,16 @@ func resolveProjectRoot(s sidecar, cache map[string]string) string {
 	translated := crossmount.TranslateForeignPath(candidate)
 
 	if _, err := os.Stat(translated); err == nil {
-		if info, err := git.Resolve(translated); err == nil && info.IsGit {
-			cache[candidate] = info.Root
-			return info.Root
+		if id, err := git.ResolveIdentity(translated, git.IdentityOptions{}); err == nil && id.IsGit {
+			// id.Remote is already NormalizeRemote'd by ResolveIdentity;
+			// no separate NormalizeRemote call needed.
+			cache[candidate] = projectGitInfo{Root: id.Root, Remote: id.Remote, Identity: id}
+			return id.Root, id.Remote, id
 		}
 		// Path exists but isn't a git repo — return the reachable
 		// form rather than the foreign-OS string the sidecar emitted.
-		cache[candidate] = translated
-		return translated
+		cache[candidate] = projectGitInfo{Root: translated}
+		return translated, "", git.Identity{}
 	}
 	// Translated path isn't reachable from this host (sandbox paths
 	// like "/sessions/<adj-adj-name>" hit this; so do Windows paths
@@ -487,8 +541,8 @@ func resolveProjectRoot(s sidecar, cache map[string]string) string {
 	// verbatim — git.Resolve would otherwise interpret it as relative
 	// to the observer's CWD and mis-attribute the session to the
 	// observer's own repo (v1.4.54 regression).
-	cache[candidate] = candidate
-	return candidate
+	cache[candidate] = projectGitInfo{Root: candidate}
+	return candidate, "", git.Identity{}
 }
 
 // ParseSessionFile implements adapter.Adapter. Streams audit.jsonl
@@ -500,7 +554,13 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 	defer f.Close()
 
+	// rlTracker is the change-only rate-limit emission state
+	// (handleRateLimitEvent). On an incremental resume it is rebuilt from
+	// the pre-offset rate_limit_event records first, so a watcher poll
+	// emits exactly the rows a full rescan would.
+	var rlTracker ratelimitstate.Tracker
 	if fromOffset > 0 {
+		rlTracker = seedRateLimitTracker(f, fromOffset, instanceSessionID(path))
 		if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
 			return adapter.ParseResult{}, fmt.Errorf("cowork.ParseSessionFile: seek: %w", err)
 		}
@@ -514,10 +574,28 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 
 	sessionID := instanceSessionID(path)
-	rootCache := map[string]string{}
-	projectRoot := resolveProjectRoot(sc, rootCache)
+	rootCache := map[string]projectGitInfo{}
+	projectRoot, projectRemote, projectIdentity := resolveProjectRoot(sc, rootCache)
 
 	res := adapter.ParseResult{NewOffset: fromOffset}
+	// Part E: capture-surface attribution (IDE-15 provenance half).
+	// Cowork audit.jsonl is ALWAYS the Claude Desktop agent-mode
+	// runtime — there is no other host this format is written from —
+	// so every parse of a local-instance's audit.jsonl stamps the
+	// session desktop/claude-desktop unconditionally, no discriminator
+	// table needed. Re-stamping the same value on every chunk is
+	// harmless (Store.SetSessionSurface is first-wins-unless-empty). See
+	// docs/claude-cowork.md "Surface attribution" for why the Claude
+	// Code tab embedded inside Claude Desktop is a SEPARATE session
+	// captured by the claudecode adapter (entrypoint="claude-desktop"),
+	// not this one.
+	if sessionID != "" {
+		res.SessionSurfaces = append(res.SessionSurfaces, models.SessionSurface{
+			SessionID:   sessionID,
+			Surface:     models.SurfaceDesktop,
+			SurfaceHost: "claude-desktop",
+		})
+	}
 	pending := map[string]int{}            // tool_use_id → index in res.ToolEvents (PRUNED on tool_result pair)
 	allToolUseIdx := map[string]int{}      // tool_use_id → index in res.ToolEvents (NEVER pruned, for tool_use_summary join)
 	pendingPermissions := map[string]int{} // permission_request UUID → index, patched on the matching permission_response
@@ -528,7 +606,20 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	// Audit-record UUIDs in this set get IsSidechain=true on their
 	// emitted actions. Empty when the local-instance had no sub-agent
 	// activity (or no .claude/projects/ tree at all).
-	sidechain := collectSidechainUUIDs(filepath.Dir(path))
+	sidechain, err := collectSidechainUUIDs(ctx, filepath.Dir(path))
+	if err != nil {
+		adapter.ApplyProjectIdentity(&res, projectIdentity)
+		return res, err
+	}
+
+	// cacheAcc is the per-session Tier-2 cache-observation
+	// accumulator (see cachetrack.go). It receives every user +
+	// assistant content block in transcript order and emits one
+	// CacheTurnObservation per model at each `result` record — the
+	// only place cowork carries authoritative per-turn token
+	// accounting (handleAssistant's doc comment above explains why
+	// the streaming assistant.message.usage snapshot is not used).
+	cacheAcc := cacheobs.New(MaxBlocksPerSession)
 
 	// Use bufio.Reader.ReadString instead of bufio.Scanner so we get
 	// the exact byte count of each line (incl. the \r\n terminator
@@ -548,10 +639,12 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	lineNum := 0
 	for {
 		if ctx.Err() != nil {
+			adapter.ApplyProjectIdentity(&res, projectIdentity)
 			return res, ctx.Err()
 		}
 		line, readErr := reader.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
+			adapter.ApplyProjectIdentity(&res, projectIdentity)
 			return res, fmt.Errorf("cowork.ParseSessionFile: read: %w", readErr)
 		}
 		// ReadString includes the terminating '\n' when present. When
@@ -596,17 +689,17 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 
 		switch rec.Type {
 		case "user":
-			a.handleUser(&res, path, rec, sessionID, projectRoot, &sc, ts, pending, sidechain)
+			a.handleUser(&res, path, rec, sessionID, projectRoot, projectRemote, &sc, ts, pending, sidechain, cacheAcc)
 		case "assistant":
-			a.handleAssistant(&res, path, rec, sessionID, projectRoot, &sc, ts, pending, allToolUseIdx, &reasoning, sidechain)
+			a.handleAssistant(&res, path, rec, sessionID, projectRoot, projectRemote, &sc, ts, pending, allToolUseIdx, &reasoning, sidechain, cacheAcc)
 		case "system":
-			a.handleSystem(&res, path, rec, sessionID, projectRoot, &sc, ts, pendingPermissions)
+			a.handleSystem(&res, path, rec, sessionID, projectRoot, projectRemote, &sc, ts, pendingPermissions)
 		case "result":
-			a.handleResult(&res, path, rec, sessionID, projectRoot, &sc, ts)
+			a.handleResult(&res, path, rec, sessionID, projectRoot, projectRemote, &sc, ts, cacheAcc)
 		case "tool_use_summary":
 			handleToolUseSummary(&res, rec, allToolUseIdx)
 		case "rate_limit_event":
-			a.handleRateLimitEvent(&res, path, rec, sessionID, projectRoot, &sc, ts)
+			a.handleRateLimitEvent(&res, path, rec, sessionID, projectRoot, projectRemote, &sc, ts, &rlTracker)
 		default:
 			res.Warnings = append(res.Warnings, fmt.Sprintf("line %d: unknown record type %q", lineNum, rec.Type))
 		}
@@ -615,6 +708,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			break
 		}
 	}
+	adapter.ApplyProjectIdentity(&res, projectIdentity)
 	return res, nil
 }
 
@@ -624,11 +718,12 @@ func (a *Adapter) handleUser(
 	res *adapter.ParseResult,
 	path string,
 	rec rawRecord,
-	sessionID, projectRoot string,
+	sessionID, projectRoot, projectRemote string,
 	sc *sidecar,
 	ts time.Time,
 	pending map[string]int,
 	sidechain map[string]struct{},
+	cacheAcc *cacheobs.Accumulator,
 ) {
 	if len(rec.Message) == 0 {
 		return
@@ -638,6 +733,7 @@ func (a *Adapter) handleUser(
 		return
 	}
 	blocks := decodeContent(msg.Content)
+	cacheAcc.ObserveBlocks(accumulateCacheBlocksTier2(blocks, firstNonEmpty(msg.Role, "user")))
 	if len(blocks) == 0 {
 		return
 	}
@@ -673,16 +769,23 @@ func (a *Adapter) handleUser(
 	// marker row instead so the dashboard shows the user activity.
 	// Image cost lands on the next result.modelUsage.input bucket;
 	// this row is observability-only.
+	// Structured user-attachment metadata (Issue 1): the images/documents
+	// the user attached to this turn (kind + optional media_type),
+	// captured for image-only turns and turns that also carry text.
+	// Metadata only — no bytes, no filename.
+	var atts []models.UserAttachment
+	for _, b := range blocks {
+		switch b.Type {
+		case "image":
+			atts = append(atts, models.UserAttachment{Kind: "image", MediaType: b.imageMediaType()})
+		case "document":
+			atts = append(atts, models.UserAttachment{Kind: "file", MediaType: b.imageMediaType()})
+		}
+	}
 	text := userPromptText(blocks)
 	if text == "" {
-		images := 0
-		for _, b := range blocks {
-			if b.Type == "image" {
-				images++
-			}
-		}
-		if images > 0 {
-			text = fmt.Sprintf("[user sent %d image attachment(s)]", images)
+		if len(atts) > 0 {
+			text = fmt.Sprintf("[user sent %d image attachment(s)]", len(atts))
 		} else {
 			return
 		}
@@ -694,6 +797,7 @@ func (a *Adapter) handleUser(
 		SourceEventID:      rec.UUID,
 		SessionID:          sessionID,
 		ProjectRoot:        projectRoot,
+		GitRemote:          projectRemote,
 		Timestamp:          ts,
 		Tool:               models.ToolCowork,
 		ActionType:         models.ActionUserPrompt,
@@ -705,6 +809,7 @@ func (a *Adapter) handleUser(
 		MessageID:          "user:" + rec.UUID,
 		IsSidechain:        isSidechain,
 		Metadata:           coworkMetadata(sc, "", "", 0, 0, 0),
+		UserAttachments:    atts,
 	})
 }
 
@@ -720,13 +825,14 @@ func (a *Adapter) handleAssistant(
 	res *adapter.ParseResult,
 	path string,
 	rec rawRecord,
-	sessionID, projectRoot string,
+	sessionID, projectRoot, projectRemote string,
 	sc *sidecar,
 	ts time.Time,
 	pending map[string]int,
 	allToolUseIdx map[string]int,
 	reasoning *[]string,
 	sidechain map[string]struct{},
+	cacheAcc *cacheobs.Accumulator,
 ) {
 	_, isSidechain := sidechain[rec.UUID]
 	if len(rec.Message) == 0 {
@@ -738,6 +844,7 @@ func (a *Adapter) handleAssistant(
 	}
 
 	blocks := decodeContent(msg.Content)
+	cacheAcc.ObserveBlocks(accumulateCacheBlocksTier2(blocks, firstNonEmpty(msg.Role, "assistant")))
 	for blockIdx, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -762,6 +869,7 @@ func (a *Adapter) handleAssistant(
 				SourceEventID:      fmt.Sprintf("%s:text:%d", rec.UUID, blockIdx),
 				SessionID:          sessionID,
 				ProjectRoot:        projectRoot,
+				GitRemote:          projectRemote,
 				Timestamp:          ts,
 				Tool:               models.ToolCowork,
 				Model:              msg.Model,
@@ -781,28 +889,17 @@ func (a *Adapter) handleAssistant(
 			if th == "" {
 				continue
 			}
+			// REASONING SEMANTICS (B3 convergence, 2026-07-31): the
+			// thinking block is accumulated into the per-message
+			// reasoning buffer and reaches the timeline ONLY as
+			// PrecedingReasoning on the tool_use rows that follow it in
+			// this message (FAN-OUT accumulate — see lastReasoning below;
+			// one thinking block can precede several tool calls and each
+			// carries it). It is deliberately NOT emitted as a standalone
+			// task_complete row: a reasoning block is not an action, and
+			// the phantom rows polluted every action aggregate (see
+			// docs/plans/b3-reasoning-convergence-plan-2026-07-31.md §1).
 			*reasoning = appendCapped(*reasoning, th, 20)
-			// Emit the thinking as a standalone, visible reasoning row
-			// (matches cline/gemini/kilocode/opencode/codex), not only as
-			// downstream PrecedingReasoning.
-			thPreview := truncate(a.scrubber.String(th), 200)
-			res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
-				SourceFile:         path,
-				SourceEventID:      fmt.Sprintf("%s:reasoning:%d", rec.UUID, blockIdx),
-				SessionID:          sessionID,
-				ProjectRoot:        projectRoot,
-				Timestamp:          ts,
-				Tool:               models.ToolCowork,
-				Model:              msg.Model,
-				ActionType:         models.ActionTaskComplete,
-				Target:             thPreview,
-				Success:            true,
-				PrecedingReasoning: thPreview,
-				RawToolName:        "cowork.reasoning",
-				ToolOutput:         a.scrubber.String(contentcap.Cap(th, contentcap.DefaultMaxBytes)),
-				MessageID:          firstNonEmpty(msg.ID, "asst:"+rec.UUID),
-				IsSidechain:        isSidechain,
-			})
 
 		case "tool_use":
 			rawInput := string(b.Input)
@@ -831,6 +928,7 @@ func (a *Adapter) handleAssistant(
 				SourceEventID:      b.ID,
 				SessionID:          sessionID,
 				ProjectRoot:        projectRoot,
+				GitRemote:          projectRemote,
 				Timestamp:          ts,
 				Tool:               models.ToolCowork,
 				Model:              msg.Model,
@@ -874,9 +972,10 @@ func (a *Adapter) handleResult(
 	res *adapter.ParseResult,
 	path string,
 	rec rawRecord,
-	sessionID, projectRoot string,
+	sessionID, projectRoot, projectRemote string,
 	sc *sidecar,
 	ts time.Time,
+	cacheAcc *cacheobs.Accumulator,
 ) {
 	preview := truncate(a.scrubber.String(rec.Result), 200)
 	meta := coworkMetadata(sc, "", "", 0, 0, rec.TotalCostUSD)
@@ -894,6 +993,7 @@ func (a *Adapter) handleResult(
 		SourceEventID:      rec.UUID,
 		SessionID:          sessionID,
 		ProjectRoot:        projectRoot,
+		GitRemote:          projectRemote,
 		Timestamp:          ts,
 		Tool:               models.ToolCowork,
 		ActionType:         models.ActionTaskComplete,
@@ -938,11 +1038,12 @@ func (a *Adapter) handleResult(
 		if cw1h > cw {
 			cw1h = cw
 		}
-		res.TokenEvents = append(res.TokenEvents, models.TokenEvent{
+		tok := models.TokenEvent{
 			SourceFile:            path,
 			SourceEventID:         rec.UUID + ":" + model,
 			SessionID:             sessionID,
 			ProjectRoot:           projectRoot,
+			GitRemote:             projectRemote,
 			Timestamp:             ts,
 			Tool:                  models.ToolCowork,
 			Model:                 model,
@@ -955,8 +1056,27 @@ func (a *Adapter) handleResult(
 			Source:                models.TokenSourceJSONL,
 			Reliability:           models.ReliabilityAccurate,
 			MessageID:             "result:" + rec.UUID + ":" + model,
-		})
+		}
+		// rec.DurationAPIMs ("duration_api_ms") is the WHOLE result
+		// batch's total API (model-generation) time across every model
+		// in modelUsage — already milliseconds (verified against the
+		// live-capture fixture: duration_api_ms=7000 is a strict subset
+		// of duration_ms=9000, the wall-clock total including tool time,
+		// which is the expected api-time-within-wall-time relationship).
+		// With exactly ONE model in this result it unambiguously covers
+		// that model's own tokens; with 2+ models it's an UNDIVIDED
+		// aggregate across models observer has no way to split, so no
+		// model gets a stamp.
+		if len(models_) == 1 && rec.DurationAPIMs > 0 {
+			tok.GenMs = rec.DurationAPIMs
+			tok.GenBasis = models.GenBasisNative
+			tok.GenTimingV = 1
+		}
+		res.TokenEvents = append(res.TokenEvents, tok)
 	}
+
+	res.CacheObservations = append(res.CacheObservations,
+		emitCacheObservationsTier2(cacheAcc, path, sessionID, rec, ts, rec.ModelUsage, tier1hFrac, models_)...)
 }
 
 // coworkMetadata builds an ActionMetadata stamped with sidecar
@@ -1212,7 +1332,7 @@ func (a *Adapter) handleSystem(
 	res *adapter.ParseResult,
 	path string,
 	rec rawRecord,
-	sessionID, projectRoot string,
+	sessionID, projectRoot, projectRemote string,
 	sc *sidecar,
 	ts time.Time,
 	pendingPermissions map[string]int,
@@ -1239,6 +1359,7 @@ func (a *Adapter) handleSystem(
 			SourceEventID: rec.UUID,
 			SessionID:     sessionID,
 			ProjectRoot:   projectRoot,
+			GitRemote:     projectRemote,
 			Timestamp:     ts,
 			Tool:          models.ToolCowork,
 			ActionType:    models.ActionPermissionRequest,
@@ -1290,6 +1411,7 @@ func (a *Adapter) handleSystem(
 			SourceEventID: rec.UUID,
 			SessionID:     sessionID,
 			ProjectRoot:   projectRoot,
+			GitRemote:     projectRemote,
 			Timestamp:     ts,
 			Tool:          models.ToolCowork,
 			ActionType:    models.ActionPermissionDenied,
@@ -1312,6 +1434,7 @@ func (a *Adapter) handleSystem(
 			SourceEventID: "compact:" + rec.UUID,
 			SessionID:     sessionID,
 			ProjectRoot:   projectRoot,
+			GitRemote:     projectRemote,
 			Timestamp:     ts,
 			Tool:          models.ToolCowork,
 			ActionType:    models.ActionContextCompacted,
@@ -1326,19 +1449,27 @@ func (a *Adapter) handleSystem(
 }
 
 // handleRateLimitEvent emits an ActionRateLimit row carrying the
-// rate-limit window status. Cowork polls rate limits periodically
-// (~50/session in observed data); each poll lands as a distinct
-// row so the dashboard can chart status transitions over time. Not
-// deduped — see plan §M2/T20 for the rationale.
+// rate-limit window status. Cowork polls rate limits periodically; the
+// polls almost never differ (live corpus 2026-09-30: 256 rows over 32
+// sessions, ZERO changes after each session's first), and every row used
+// to render as its own "Rate limit" message. Emission is therefore
+// change-only through the shared ratelimitstate predicate — the first
+// reading per session, any status / overage / reset move, plus a
+// heartbeat — which still records every status TRANSITION (the original
+// §M2/T20 reason for keeping each poll).
 func (a *Adapter) handleRateLimitEvent(
 	res *adapter.ParseResult,
 	path string,
 	rec rawRecord,
-	sessionID, projectRoot string,
+	sessionID, projectRoot, projectRemote string,
 	sc *sidecar,
 	ts time.Time,
+	tr *ratelimitstate.Tracker,
 ) {
 	if len(rec.RateLimitInfo) == 0 {
+		return
+	}
+	if !coworkRateLimitEmit(tr, sessionID, rec.RateLimitInfo, ts) {
 		return
 	}
 	var info struct {
@@ -1373,6 +1504,7 @@ func (a *Adapter) handleRateLimitEvent(
 		SourceEventID: rec.UUID,
 		SessionID:     sessionID,
 		ProjectRoot:   projectRoot,
+		GitRemote:     projectRemote,
 		Timestamp:     ts,
 		Tool:          models.ToolCowork,
 		ActionType:    models.ActionRateLimit,
@@ -1384,6 +1516,53 @@ func (a *Adapter) handleRateLimitEvent(
 		MessageID:     "ratelimit:" + rec.UUID,
 		Metadata:      meta,
 	})
+}
+
+// coworkRateLimitEmit asks the shared change-only predicate whether a
+// rate_limit_info payload becomes a row. A payload the predicate cannot
+// read is emitted (fail-open, the pre-change behaviour).
+func coworkRateLimitEmit(tr *ratelimitstate.Tracker, sessionID string, info json.RawMessage, ts time.Time) bool {
+	snap, ok := ratelimitstate.Parse(string(info))
+	if !ok {
+		return true
+	}
+	emit, _ := tr.Observe(sessionID, snap, ts)
+	return emit
+}
+
+// seedRateLimitTracker replays the rate_limit_event records before
+// `until` through coworkRateLimitEmit (state only, nothing emitted) so a
+// resumed parse inherits the emission baseline. Only lines that mention
+// rate_limit_event are decoded, so the replay stays cheap. Best-effort: a
+// read error just stops the replay (the resumed parse then treats its
+// first reading as the session's first, at most one extra row).
+func seedRateLimitTracker(f *os.File, until int64, sessionID string) ratelimitstate.Tracker {
+	var tr ratelimitstate.Tracker
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return tr
+	}
+	reader := bufio.NewReaderSize(f, 64*1024)
+	var read int64
+	for {
+		line, err := reader.ReadString('\n')
+		if !strings.HasSuffix(line, "\n") {
+			return tr
+		}
+		read += int64(len(line))
+		if read > until {
+			return tr
+		}
+		if strings.Contains(line, "rate_limit_event") {
+			var rec rawRecord
+			if json.Unmarshal([]byte(strings.TrimRight(line, "\r\n")), &rec) == nil &&
+				rec.Type == "rate_limit_event" && len(rec.RateLimitInfo) > 0 {
+				coworkRateLimitEmit(&tr, sessionID, rec.RateLimitInfo, parseTimestamp(rec.AuditTimestamp))
+			}
+		}
+		if err != nil {
+			return tr
+		}
+	}
 }
 
 // collectSidechainUUIDs walks the local-instance's inner Claude Code
@@ -1398,15 +1577,22 @@ func (a *Adapter) handleRateLimitEvent(
 // Implementation: filepath.WalkDir descends recursively, picking only
 // files whose basename matches `agent-*.jsonl` AND whose parent dir
 // is named `subagents`. Each line is JSON-decoded just for `uuid` +
-// `type`.
-func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
+// `type`. A cancelled ctx stops the walk and returns ctx's error with an
+// empty set (T-557).
+func collectSidechainUUIDs(ctx context.Context, instanceDir string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	claudeProjects := filepath.Join(instanceDir, ".claude", "projects")
 	info, err := os.Stat(claudeProjects)
 	if err != nil || !info.IsDir() {
-		return out
+		return out, nil
 	}
-	_ = filepath.WalkDir(claudeProjects, func(p string, d os.DirEntry, walkErr error) error {
+	// T-557: this walk runs on every parse, so it honours cancellation
+	// between entries and between lines; a daemon stop never waits for the
+	// whole subagent tree to be decoded.
+	err = filepath.WalkDir(claudeProjects, func(p string, d os.DirEntry, walkErr error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if walkErr != nil {
 			// Skip unreadable subtrees; not fatal.
 			return nil
@@ -1421,7 +1607,7 @@ func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
 		if filepath.Base(filepath.Dir(p)) != "subagents" {
 			return nil
 		}
-		f, err := os.Open(p)
+		f, err := os.Open(p) //nolint:gosec // G122: walks the tool's own local session tree read only
 		if err != nil {
 			return nil
 		}
@@ -1429,6 +1615,9 @@ func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 		for sc.Scan() {
+			if cerr := ctx.Err(); cerr != nil {
+				return cerr
+			}
 			var rec struct {
 				Type string `json:"type"`
 				UUID string `json:"uuid"`
@@ -1442,5 +1631,20 @@ func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
 		}
 		return nil
 	})
-	return out
+	if err != nil {
+		// Only a cancellation stops the walk early (every other error is
+		// skipped above); a partial set must not reach the parse.
+		return map[string]struct{}{}, err
+	}
+	return out, nil
+}
+
+// IsNativeTool implements adapter.NativeToolClassifier (the package-level
+// IsNativeTool).
+func (*Adapter) IsNativeTool(name string) bool { return IsNativeTool(name) }
+
+// ProjectAttribution implements adapter.ProjectReattributor for the
+// --cowork-project-root backfill (the package-level ProjectAttribution).
+func (*Adapter) ProjectAttribution(path string) (sessionID, projectRoot, remote string, ok bool) {
+	return ProjectAttribution(path)
 }

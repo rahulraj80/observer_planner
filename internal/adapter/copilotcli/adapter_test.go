@@ -27,12 +27,6 @@ func jsonStr(t *testing.T, s string) string {
 	return string(b)
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolCopilotCLI {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolCopilotCLI)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := t.TempDir()
 	ssRoot := filepath.Join(root, ".copilot", "session-state")
@@ -879,8 +873,10 @@ func TestParseEventsJSONL_SessionShutdownModelMetrics(t *testing.T) {
 	if opus.InputTokens != 70845 {
 		t.Errorf("opus InputTokens = %d, want 70845 (578788 gross - 507943 cached)", opus.InputTokens)
 	}
-	if opus.OutputTokens != 0 {
-		t.Errorf("opus OutputTokens = %d, want 0 (Tier 3 covers output)", opus.OutputTokens)
+	// T-353: this fixture has NO assistant.message rows, so no Tier 3 row
+	// covers output and the shutdown row carries modelMetrics' output.
+	if opus.OutputTokens != 17822 {
+		t.Errorf("opus OutputTokens = %d, want 17822 (no Tier 3 output in the span)", opus.OutputTokens)
 	}
 	if opus.CacheReadTokens != 507943 {
 		t.Errorf("opus CacheReadTokens = %d, want 507943", opus.CacheReadTokens)
@@ -1849,5 +1845,366 @@ func TestParseEventsJSONL_MCPEnrichment_StripsServerPrefix(t *testing.T) {
 	want := "github-mcp-server:get_file_contents"
 	if row.RawToolName != want {
 		t.Errorf("RawToolName = %q, want %q (must not double-prefix)", row.RawToolName, want)
+	}
+}
+
+// TestParseEventsJSONL_ReasoningNeverMintsAnAction is the B3 regression
+// pin: an assistant.message's reasoningText / reasoningOpaque produce NO
+// action row (they briefly minted a `cline-cli`-shaped
+// `<tool>.reasoning` task_complete). Readable reasoningText rides the
+// sibling assistant_text row's PrecedingReasoning; an OPAQUE-ONLY
+// message threads NOTHING (the uniform placeholder rule — an encrypted
+// blob is not content, matching codex).
+func TestParseEventsJSONL_ReasoningNeverMintsAnAction(t *testing.T) {
+	cases := []struct {
+		name          string
+		reasoningAttr string
+		wantThreaded  string
+	}{
+		{
+			name:          "readable text threads",
+			reasoningAttr: `"reasoningText":"THREADED_REASONING",`,
+			wantThreaded:  "THREADED_REASONING",
+		},
+		{
+			// The dominant live shape on models that return encrypted
+			// reasoning: only `reasoningOpaque` is present. Pre-fix this
+			// threaded "[encrypted reasoning, 40 bytes]".
+			name:          "opaque-only threads nothing",
+			reasoningAttr: `"reasoningOpaque":"0123456789abcdef0123456789abcdef01234567",`,
+			wantThreaded:  "",
+		},
+		{
+			// Both present: the readable text wins, the blob is ignored.
+			name:          "readable text wins over opaque",
+			reasoningAttr: `"reasoningText":"THREADED_REASONING","reasoningOpaque":"0123456789abcdef0123456789abcdef01234567",`,
+			wantThreaded:  "THREADED_REASONING",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			uuid := "11111111-2222-3333-4444-555555555555"
+			ssRoot := filepath.Join(dir, ".copilot", "session-state")
+			sessDir := filepath.Join(ssRoot, uuid)
+			if err := os.MkdirAll(sessDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			evt := filepath.Join(sessDir, "events.jsonl")
+			body := strings.Join([]string{
+				`{"type":"session.start","data":{"sessionId":"` + uuid + `","copilotVersion":"1.0.48","selectedModel":"gpt-5-mini","context":{"cwd":` + jsonStr(t, dir) + `,"gitRoot":` + jsonStr(t, dir) + `,"branch":"main"}},"id":"e1","timestamp":"2026-05-17T09:28:27.909Z","parentId":null}`,
+				`{"type":"user.message","data":{"content":"do the thing"},"id":"e2","timestamp":"2026-05-17T09:28:38.300Z","parentId":"e1"}`,
+				`{"type":"assistant.message","data":{"messageId":"m1","model":"gpt-5-mini","content":"Here is your answer.",` + c.reasoningAttr + `"interactionId":"i1","turnId":"0"},"id":"e3","timestamp":"2026-05-17T09:28:46.000Z","parentId":"e2"}`,
+			}, "\n") + "\n"
+			if err := os.WriteFile(evt, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			a := NewWithOptions(nil, ssRoot)
+			res, err := a.ParseSessionFile(context.Background(), evt, 0)
+			if err != nil {
+				t.Fatalf("ParseSessionFile: %v", err)
+			}
+			var assistantRows int
+			for _, ev := range res.ToolEvents {
+				if strings.Contains(strings.ToLower(ev.RawToolName), "reasoning") {
+					t.Fatalf("reasoning-named action row emitted: raw=%q %+v", ev.RawToolName, ev)
+				}
+				if ev.Target == "THREADED_REASONING" || ev.ToolOutput == "THREADED_REASONING" {
+					t.Fatalf("reasoning body surfaced as action content: %+v", ev)
+				}
+				// No surface may carry the opaque blob, its byte count,
+				// or a placeholder standing in for it.
+				for _, field := range []string{ev.Target, ev.ToolOutput, ev.RawToolInput, ev.PrecedingReasoning} {
+					if strings.Contains(strings.ToLower(field), "encrypted reasoning") ||
+						strings.Contains(field, "0123456789abcdef") {
+						t.Fatalf("opaque reasoning placeholder/blob surfaced in %q: %+v", field, ev)
+					}
+				}
+				if ev.RawToolName != models.ToolCopilotCLI+".assistant_text" {
+					continue
+				}
+				assistantRows++
+				if ev.PrecedingReasoning != c.wantThreaded {
+					t.Errorf("assistant_text PrecedingReasoning = %q, want %q",
+						ev.PrecedingReasoning, c.wantThreaded)
+				}
+			}
+			if assistantRows != 1 {
+				t.Fatalf("assistant_text rows = %d, want 1: %+v", assistantRows, res.ToolEvents)
+			}
+		})
+	}
+}
+
+// TestThreadableReasoning covers the helper's contract directly: only
+// readable reasoningText is threadable; an opaque blob yields "" no
+// matter its size (B3 uniform placeholder rule).
+func TestThreadableReasoning(t *testing.T) {
+	cases := []struct {
+		name, text, want string
+	}{
+		{"plain text", "I should look at the file.", "I should look at the file."},
+		{"whitespace-only is empty", "   \n\t ", ""},
+		{"absent is empty", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := threadableReasoning(c.text); got != c.want {
+				t.Errorf("threadableReasoning(%q) = %q, want %q", c.text, got, c.want)
+			}
+		})
+	}
+}
+
+// TestParseEventsJSONL_SubagentEventsStampedSidechain pins that every
+// row emitted inside a subagent's execution context (env.agentId != "")
+// gets IsSidechain=true, on BOTH ToolEvents and TokenEvents — while the
+// spawning context (parent-level rows with no agentId, including the
+// asst.message that precedes subagent.started) stays IsSidechain=false.
+// This covers the copilot-cli half of the WS-SUBAGENT/EFFORT work-stream
+// (adapter-parity-audit-2026-08-25.md §2.4): the deferred subagent
+// model-attribution mechanism existed, but nothing derived from it ever
+// flagged the child rows as sidechain.
+func TestParseEventsJSONL_SubagentEventsStampedSidechain(t *testing.T) {
+	uuid := "5c51d44b-5a9f-4b23-85ff-0fddaadf2212"
+	// Parent-context control: no agentId anywhere on this row.
+	parentAsst := `{"type":"assistant.message","data":{"messageId":"m-parent","content":"parent reply","outputTokens":11,"requestId":"00000-rid-parent"},"id":"asP","timestamp":"2026-04-20T18:37:00.000Z","parentId":"e1"}`
+	subStarted := `{"type":"subagent.started","data":{"toolCallId":"agent-T","agentName":"rubber-duck"},"id":"sa-t","timestamp":"2026-04-20T18:38:21.175Z","parentId":"e1","agentId":"agent-T"}`
+	// Child asst.message + tool call, both carrying agentId="agent-T".
+	toolStart := `{"type":"tool.execution_start","data":{"toolCallId":"call-1","toolName":"grep","arguments":{"pattern":"foo"},"turnId":"0"},"id":"ts1","timestamp":"2026-04-20T18:38:21.500Z","parentId":"sa-t","agentId":"agent-T"}`
+	toolCompl := `{"type":"tool.execution_complete","data":{"toolCallId":"call-1","model":"gpt-5.4","interactionId":"i1","turnId":"0","success":true,"result":{"content":"found"}},"id":"tc1","timestamp":"2026-04-20T18:38:22.000Z","parentId":"ts1","agentId":"agent-T"}`
+	asstUnderAgent := `{"type":"assistant.message","data":{"messageId":"mA1","content":"subagent says hi","outputTokens":1234,"requestId":"00000-rid-A"},"id":"asA1","timestamp":"2026-04-20T18:38:23.000Z","parentId":"tc1","agentId":"agent-T"}`
+	subCompleted := `{"type":"subagent.completed","data":{"toolCallId":"agent-T","agentName":"rubber-duck","model":"gpt-5.4","totalTokens":18791,"totalToolCalls":1,"durationMs":73305},"id":"sc1","timestamp":"2026-04-20T18:39:33.943Z","parentId":"asA1","agentId":"agent-T"}`
+
+	evt := writeMinimalEventsFile(t, uuid, parentAsst, subStarted, toolStart, toolCompl, asstUnderAgent, subCompleted)
+	ssRoot := filepath.Dir(filepath.Dir(evt))
+	a := NewWithOptions(nil, ssRoot)
+	res, err := a.ParseSessionFile(context.Background(), evt, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+
+	toolEventsByMsg := map[string]models.ToolEvent{}
+	for _, te := range res.ToolEvents {
+		toolEventsByMsg[te.SourceEventID] = te
+	}
+	tokenEventsByMsg := map[string]models.TokenEvent{}
+	for _, te := range res.TokenEvents {
+		tokenEventsByMsg[te.MessageID] = te
+	}
+
+	// Parent-context rows: IsSidechain must be false.
+	if got := tokenEventsByMsg["00000-rid-parent"].IsSidechain; got {
+		t.Errorf("parent asst.message TokenEvent IsSidechain = %v, want false", got)
+	}
+	// Child rows under agent-T: IsSidechain must be true.
+	toolCompleteRow, ok := toolEventsByMsg["tc1"]
+	if !ok {
+		t.Fatalf("tool.execution_complete ToolEvent (id=tc1) not found among %d ToolEvents", len(res.ToolEvents))
+	}
+	if !toolCompleteRow.IsSidechain {
+		t.Errorf("subagent tool.execution_complete IsSidechain = %v, want true", toolCompleteRow.IsSidechain)
+	}
+	if got := tokenEventsByMsg["00000-rid-A"].IsSidechain; !got {
+		t.Errorf("subagent asst.message TokenEvent IsSidechain = %v, want true", got)
+	}
+	assistantTextRow, ok := toolEventsByMsg["asA1"]
+	if !ok {
+		t.Fatalf("subagent assistant_text ToolEvent (id=asA1) not found among %d ToolEvents", len(res.ToolEvents))
+	}
+	if !assistantTextRow.IsSidechain {
+		t.Errorf("subagent assistant_text IsSidechain = %v, want true", assistantTextRow.IsSidechain)
+	}
+	// The spawning subagent.started/completed markers themselves don't
+	// mint rows (no ToolEvent case for those types) — nothing further
+	// to assert there; the point is the CHILD work rows above are the
+	// ones flagged, per the convention documented on emitEvent.
+}
+
+// TestParseEventsJSONL_ReasoningEffortWiredIntoMetadata pins the
+// copilot-cli half of adapter-parity-audit-2026-08-25.md §2.5:
+// session.model_change.data.reasoningEffort and
+// session.resume.data.reasoningEffort were parsed into structs but
+// never referenced — this asserts they now land in
+// ActionMetadata.EffortLevel on subsequently emitted rows, persist as
+// session state across further rows until changed, and compose safely
+// with metadata already set for another reason (permission grants).
+func TestParseEventsJSONL_ReasoningEffortWiredIntoMetadata(t *testing.T) {
+	uuid := "5c51d44b-5a9f-4b23-85ff-0fddaadf2212"
+	// Before any reasoningEffort is seen: no EffortLevel.
+	preAsst := `{"type":"assistant.message","data":{"messageId":"m-pre","content":"before effort is set","outputTokens":5,"requestId":"00000-rid-pre"},"id":"as-pre","timestamp":"2026-04-20T18:00:00.000Z","parentId":"e1"}`
+	modelChange := `{"type":"session.model_change","data":{"previousModel":"gpt-5-mini","newModel":"claude-opus-4.7","previousReasoningEffort":"low","reasoningEffort":"high"},"id":"mc1","timestamp":"2026-04-20T18:01:00.000Z","parentId":"e1"}`
+	postAsst := `{"type":"assistant.message","data":{"messageId":"m-post","content":"after effort is set","outputTokens":9,"requestId":"00000-rid-post"},"id":"as-post","timestamp":"2026-04-20T18:02:00.000Z","parentId":"mc1"}`
+	// A second unrelated row after: EffortLevel must persist (session state).
+	laterAsst := `{"type":"assistant.message","data":{"messageId":"m-later","content":"still after effort is set","outputTokens":3,"requestId":"00000-rid-later"},"id":"as-later","timestamp":"2026-04-20T18:03:00.000Z","parentId":"as-post"}`
+
+	evt := writeMinimalEventsFile(t, uuid, preAsst, modelChange, postAsst, laterAsst)
+	ssRoot := filepath.Dir(filepath.Dir(evt))
+	a := NewWithOptions(nil, ssRoot)
+	res, err := a.ParseSessionFile(context.Background(), evt, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+
+	byMsg := map[string]models.ToolEvent{}
+	for _, te := range res.ToolEvents {
+		byMsg[te.SourceEventID] = te
+	}
+	preRow, ok := byMsg["as-pre"]
+	if !ok {
+		t.Fatalf("pre-effort assistant_text row not found")
+	}
+	if preRow.Metadata != nil && preRow.Metadata.EffortLevel != "" {
+		t.Errorf("pre-effort row EffortLevel = %q, want empty (reasoningEffort not yet seen)", preRow.Metadata.EffortLevel)
+	}
+	postRow, ok := byMsg["as-post"]
+	if !ok {
+		t.Fatalf("post-effort assistant_text row not found")
+	}
+	if postRow.Metadata == nil || postRow.Metadata.EffortLevel != "high" {
+		t.Fatalf("post-effort row Metadata = %+v, want EffortLevel=high", postRow.Metadata)
+	}
+	laterRow, ok := byMsg["as-later"]
+	if !ok {
+		t.Fatalf("later assistant_text row not found")
+	}
+	if laterRow.Metadata == nil || laterRow.Metadata.EffortLevel != "high" {
+		t.Fatalf("later row Metadata = %+v, want EffortLevel=high (must persist as session state)", laterRow.Metadata)
+	}
+}
+
+// TestParseEventsJSONL_ReasoningEffortMergesWithPermissionMetadata pins
+// that effortMetadata composes with (never clobbers) metadata already
+// populated for another reason — here permission.completed's
+// PermissionApprovalKind/PermissionLocationKey.
+func TestParseEventsJSONL_ReasoningEffortMergesWithPermissionMetadata(t *testing.T) {
+	uuid := "5c51d44b-5a9f-4b23-85ff-0fddaadf2212"
+	modelChange := `{"type":"session.model_change","data":{"previousModel":"gpt-5-mini","newModel":"gpt-5-mini","reasoningEffort":"medium"},"id":"mc1","timestamp":"2026-04-20T18:01:00.000Z","parentId":"e1"}`
+	permReq := `{"type":"permission.requested","data":{"requestId":"pr1","permissionRequest":{"kind":"shell","toolCallId":"tc1","fullCommandText":"go test ./...","intention":"run tests"}},"id":"pq1","timestamp":"2026-04-20T18:02:00.000Z","parentId":"mc1"}`
+	permCompleted := `{"type":"permission.completed","data":{"requestId":"pr1","toolCallId":"tc1","result":{"kind":"approved-for-session","locationKey":"/repo"}},"id":"pc1","timestamp":"2026-04-20T18:02:05.000Z","parentId":"pq1"}`
+
+	evt := writeMinimalEventsFile(t, uuid, modelChange, permReq, permCompleted)
+	ssRoot := filepath.Dir(filepath.Dir(evt))
+	a := NewWithOptions(nil, ssRoot)
+	res, err := a.ParseSessionFile(context.Background(), evt, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+
+	var permRow *models.ToolEvent
+	for i := range res.ToolEvents {
+		if res.ToolEvents[i].SourceEventID == "pc1" {
+			permRow = &res.ToolEvents[i]
+		}
+	}
+	if permRow == nil {
+		t.Fatalf("permission.completed row (id=pc1) not found among %d ToolEvents", len(res.ToolEvents))
+	}
+	if permRow.Metadata == nil {
+		t.Fatalf("Metadata is nil, want PermissionApprovalKind + EffortLevel both set")
+	}
+	if permRow.Metadata.PermissionApprovalKind != "approved-for-session" {
+		t.Errorf("PermissionApprovalKind = %q, want %q", permRow.Metadata.PermissionApprovalKind, "approved-for-session")
+	}
+	if permRow.Metadata.PermissionLocationKey != "/repo" {
+		t.Errorf("PermissionLocationKey = %q, want %q", permRow.Metadata.PermissionLocationKey, "/repo")
+	}
+	if permRow.Metadata.EffortLevel != "medium" {
+		t.Errorf("EffortLevel = %q, want %q (must merge with permission metadata, not clobber it)", permRow.Metadata.EffortLevel, "medium")
+	}
+}
+
+// TestParseEventsJSONL_AutoModeResolvedReplacesSentinel pins Auto-routing
+// attribution. When the user picks Auto, Copilot CLI writes
+// session.model_change{newModel:"auto"} (the router sentinel, which prices as a
+// MISS) and then session.auto_mode_resolved{chosenModel:<routed id>}. A token
+// row whose assistant.message omits data.model must bill at the ROUTED id, and
+// a row that does carry data.model keeps its own (per-message wins). Shape from
+// a live ~/.copilot/session-state events.jsonl (2026-08).
+func TestParseEventsJSONL_AutoModeResolvedReplacesSentinel(t *testing.T) {
+	uuid := "533a8529-1d64-41ec-a43c-c312c0222ee2"
+	toAuto := `{"type":"session.model_change","data":{"previousModel":"gpt-5-mini","newModel":"auto"},"id":"mc1","timestamp":"2026-08-01T11:40:00.000Z","parentId":"e1"}`
+	// Before the router resolves, the only session-level identity is the
+	// sentinel; an id-less message here stays "auto" (an honest MISS).
+	preResolve := `{"type":"assistant.message","data":{"messageId":"m0","content":"x","outputTokens":5,"requestId":"req-0"},"id":"am0","timestamp":"2026-08-01T11:40:01.000Z","parentId":"mc1"}`
+	resolved := `{"type":"session.auto_mode_resolved","data":{"chosenModel":"claude-haiku-4.5","candidateModels":["gpt-5-mini","claude-haiku-4.5"]},"id":"ar1","timestamp":"2026-08-01T11:40:02.000Z","parentId":"mc1"}`
+	noModel := `{"type":"assistant.message","data":{"messageId":"m1","content":"x","outputTokens":7,"requestId":"req-1"},"id":"am1","timestamp":"2026-08-01T11:40:03.000Z","parentId":"ar1"}`
+	ownModel := `{"type":"assistant.message","data":{"messageId":"m2","content":"x","outputTokens":9,"requestId":"req-2","model":"gpt-5-mini"},"id":"am2","timestamp":"2026-08-01T11:40:04.000Z","parentId":"ar1"}`
+	emptyResolve := `{"type":"session.auto_mode_resolved","data":{"candidateModels":["gpt-5-mini"]},"id":"ar2","timestamp":"2026-08-01T11:40:05.000Z","parentId":"ar1"}`
+	afterEmpty := `{"type":"assistant.message","data":{"messageId":"m3","content":"x","outputTokens":11,"requestId":"req-3"},"id":"am3","timestamp":"2026-08-01T11:40:06.000Z","parentId":"ar2"}`
+
+	evt := writeMinimalEventsFile(t, uuid, toAuto, preResolve, resolved, noModel, ownModel, emptyResolve, afterEmpty)
+	a := NewWithOptions(nil, filepath.Dir(filepath.Dir(evt)))
+	res, err := a.ParseSessionFile(context.Background(), evt, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	want := map[string]string{
+		"req-0": "auto",             // pre-resolution: the sentinel, never a guess
+		"req-1": "claude-haiku-4.5", // routed id replaces the sentinel
+		"req-2": "gpt-5-mini",       // per-message data.model wins
+		"req-3": "claude-haiku-4.5", // an empty chosenModel does not clobber
+	}
+	got := map[string]string{}
+	for _, te := range res.TokenEvents {
+		got[te.MessageID] = te.Model
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("token row %s model = %q, want %q (all rows: %v)", id, got[id], w, got)
+		}
+	}
+}
+
+// TestParseProcessLog_SiblingFallbackUsesAutoResolvedModel pins the same fix
+// on the process-log lane: a Tier-1 usage block with no model of its own
+// recovers the session model from the sibling events.jsonl, and under Auto
+// that must be the router's chosenModel rather than the "auto" sentinel.
+func TestParseProcessLog_SiblingFallbackUsesAutoResolvedModel(t *testing.T) {
+	dir := t.TempDir()
+	uuid := "26df8a84-8f2d-4b5b-babe-04146c5e7b0b"
+	logsRoot := filepath.Join(dir, ".copilot", "logs")
+	sessDir := filepath.Join(dir, ".copilot", "session-state", uuid)
+	for _, d := range []string{logsRoot, sessDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events := `{"type":"session.start","data":{"sessionId":"` + uuid + `","selectedModel":"gpt-5-mini"},"id":"e1","timestamp":"2026-08-01T11:39:00.000Z","parentId":null}` + "\n" +
+		`{"type":"session.model_change","data":{"previousModel":"gpt-5-mini","newModel":"auto"},"id":"mc1","timestamp":"2026-08-01T11:40:00.000Z","parentId":"e1"}` + "\n" +
+		`{"type":"session.auto_mode_resolved","data":{"chosenModel":"claude-haiku-4.5","candidateModels":["gpt-5-mini","claude-haiku-4.5"]},"id":"ar1","timestamp":"2026-08-01T11:40:02.000Z","parentId":"mc1"}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessDir, "events.jsonl"), []byte(events), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(logsRoot, "process-1785584340000-4242.log")
+	body := `2026-08-01T11:39:00.000Z [INFO] Workspace initialized: ` + uuid + ` (checkpoints: 0)
+2026-08-01T11:40:03.000Z [DEBUG] response (Request-ID 00000-auto-1):
+2026-08-01T11:40:03.000Z [DEBUG] data:
+2026-08-01T11:40:03.000Z [DEBUG] {
+  "usage": {
+    "completion_tokens": 120,
+    "prompt_tokens": 9000,
+    "total_tokens": 9120,
+    "prompt_tokens_details": {
+      "cached_tokens": 4000
+    }
+  }
+}
+2026-08-01T11:40:04.000Z [INFO] some non-DEBUG line that closes the block
+`
+	if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewWithOptions(nil, logsRoot)
+	res, err := a.ParseSessionFile(context.Background(), log, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	if len(res.TokenEvents) != 1 {
+		t.Fatalf("TokenEvents = %d, want 1 (got %+v)", len(res.TokenEvents), res.TokenEvents)
+	}
+	if got := res.TokenEvents[0].Model; got != "claude-haiku-4.5" {
+		t.Errorf("Model = %q, want claude-haiku-4.5 (the Auto router's chosenModel, not the sentinel)", got)
 	}
 }

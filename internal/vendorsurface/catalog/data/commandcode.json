@@ -1,0 +1,1129 @@
+{
+ "group": "commandcode",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/commandcode-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "commandcode.enterprise",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.enterprise",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "sales"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "Enterprise $5,000+/mo: self-hosted deployment options, \"custom security policies\", SLAs; details by sales",
+   "read_write_doc": "n/a",
+   "class_doc": "Retention, Policy",
+   "grain_doc": "contract",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/resources/security",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://commandcode.ai/pricing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.node.hooks",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per event",
+   "mechanism_doc": "Node hooks: PreToolUse, PostToolUse, Stop, SessionStart; `type: command`, `timeout`, `async`, `failClosed`, `matcher`",
+   "read_write_doc": "R/W",
+   "class_doc": "Telemetry (node intercept)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/settings",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://commandcode.ai/docs/hooks",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.node.sessions",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "local",
+   "per_user_doc": "per session",
+   "mechanism_doc": "Node: conversation history local only in `~/.commandcode/projects/` (transcripts carry provider `costUsd`, `traceIds`)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerSession / PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (node; Observer adapter)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/resources/security",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.node.settings",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "at start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per node / per repo",
+   "mechanism_doc": "Node files, precedence: project `settings.local.json` > project `settings.json` (team-shared, committed) > `~/.commandcode/settings.json` > legacy `config.json`; permission lists union across layers; NO managed/system tier",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node file)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/settings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.plan.rolling_windows",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.plan",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Go/GOAT/Pro/Max/Team Pro (Enterprise none)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "rolling",
+   "per_user_doc": "per user (Team Pro $12/5h, $24/week)",
+   "mechanism_doc": "CLI `/usage` live 5h/weekly meters; Studio; window starts at first request; `/extra` unblocks with top-up credits",
+   "read_write_doc": "R",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no machine contract)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/resources/pricing-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.provider.models",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.provider",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none shown"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "global",
+   "mechanism_doc": "GET /provider/v1/models (`supported_endpoints` per model; example sends no auth)",
+   "read_write_doc": "R",
+   "class_doc": "(ModelAccess read)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (catalog, not policy)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/provider",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.provider.response_usage",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.provider",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer CMD_API_KEY or x-api-key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "no numeric limits published; 429 is upstream"
+   },
+   "tier": {
+    "doc": "Provider plan and coding plans (not Go)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "Provider API responses carry native OpenAI/Anthropic `usage`; streaming always ends with usage; no cost field",
+   "read_write_doc": "R",
+   "class_doc": "Usage",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable on the proxy wire only",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/provider",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.share_link",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.share_link",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "not stated",
+   "per_user_doc": "per session",
+   "mechanism_doc": "Code \"never stored unless you share it\" (session share link)",
+   "read_write_doc": "W (user)",
+   "class_doc": "Content",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/resources/security",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.studio.api_keys",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.studio",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "user / org"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all (Go plan has no API access)"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key",
+   "mechanism_doc": "UI only (Generate API key; manage; org keys per org; features page claims rotate and scope, docs do not detail)",
+   "read_write_doc": "R/W in UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/studio",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://commandcode.ai/features",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.studio.billing",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.studio",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "per event",
+   "lookback_doc": "not stated",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI only (Studio > Billing: buy 5 to 500 credits, auto reload, cards, invoices; Enterprise invoice/wire)",
+   "read_write_doc": "R/W in UI",
+   "class_doc": "Cost, BillingExport",
+   "grain_doc": "per purchase / invoice",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/resources/pricing-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.studio.orgs",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.studio",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Team Pro, Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per member",
+   "mechanism_doc": "UI only (create organization; Settings > Members > Add Member by email; switch orgs)",
+   "read_write_doc": "R/W in UI",
+   "class_doc": "Identity, Projects",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/studio",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.studio.seats",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.studio",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Team Pro"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per seat",
+   "mechanism_doc": "UI only (admins manage seats in org settings)",
+   "read_write_doc": "R/W in UI",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/resources/pricing-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.studio.usage",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.studio",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Studio sign-in; admin for per-seat"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all; per-seat view on team orgs"
+   },
+   "freshness_doc": "\"real time\"",
+   "lookback_doc": "not stated",
+   "per_user_doc": "both (per request, per seat, team)",
+   "mechanism_doc": "UI only (Studio Usage tab; click a request for cost/token breakdown; \"actual price charged per request\"); no export or API documented",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall (per request) + per seat + team",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/studio",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://commandcode.ai/docs/resources/pricing-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.vendor_telemetry",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.vendor_telemetry",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "30 d",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Anonymous session metrics, commands, error codes, latency sent to vendor; retained 30 days; opt-out `DO_NOT_TRACK=1` or `\"telemetry\": false` in config.json (settings page says no settings key: minor doc conflict)",
+   "read_write_doc": "n/a",
+   "class_doc": "Telemetry (vendor-internal)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "Nothing for customers",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/troubleshooting/telemetry",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "commandcode.zdr",
+   "vendor_group": "commandcode",
+   "vendor": "commandcode",
+   "plane": "commandcode.zdr",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Provider and coding plans"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per request",
+   "mechanism_doc": "`x-cmd-zdr: 1` header or `CMD_ZDR=1`; 422 `cmd_zdr_no_providers` when no ZDR upstream; Anthropic already account-level ZDR",
+   "read_write_doc": "W (per request)",
+   "class_doc": "Retention",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (per request; no org-level setting)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://commandcode.ai/docs/provider",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://commandcode.ai/docs/resources/zdr",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

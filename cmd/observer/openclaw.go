@@ -70,8 +70,13 @@ func newOpenclawCmd() *cobra.Command {
 			"All arguments after the subcommand are forwarded to openclaw. Use\n" +
 			"`--` to separate observer flags from openclaw flags. NEVER touches\n" +
 			"API keys. Requires a running observer proxy (`observer start`).",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach-by-default (attach-all-launchers): hand the PTY to the
 			// daemon when attach resolves. openclaw self-routes via
 			// OPENAI_BASE_URL in the daemon-spawned inner launcher, so forward NO
@@ -121,12 +126,14 @@ func newOpenclawCmd() *cobra.Command {
 			}
 			resolved := resolveProxyURL(cfg.Proxy.Port, proxyURL)
 			return runEnvLauncher(envLauncherSpec{
-				tool:     "openclaw",
-				bin:      bin,
-				args:     args,
-				proxyURL: resolved,
-				env:      map[string]string{"OPENAI_BASE_URL": strings.TrimRight(resolved, "/") + "/v1"},
-				stderr:   cmd.ErrOrStderr(),
+				tool:       "openclaw",
+				bin:        bin,
+				args:       args,
+				configPath: configPath,
+				proxyURL:   resolved,
+				env:        map[string]string{"OPENAI_BASE_URL": strings.TrimRight(resolved, "/") + "/v1"},
+				dbPath:     cfg.Observer.DBPath,
+				stderr:     cmd.ErrOrStderr(),
 			})
 		},
 	}
@@ -138,7 +145,6 @@ func newOpenclawCmd() *cobra.Command {
 	cmd.Flags().IntVar(&fromMessage, "from-message", 0, "With --continue-from: fork after this 1-based transcript message (default: last message)")
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "openclaw")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
@@ -196,14 +202,36 @@ func runOpenclawContinue(cmd *cobra.Command, p openclawContinueParams) error {
 	fmt.Fprintf(cmd.ErrOrStderr(),
 		"observer openclaw: launching non-proxied `openclaw %s` (seed avoids the --local proxy stall; token capture via the openclaw adapter)\n",
 		openclawContinueSubcommand)
+	// The executable and argv are the process-cutoff recovery evidence: a
+	// direct launch is admissible when the daemon attests live cutoff over
+	// this exact installed surface (budgetlaunch_direct_linux.go), and without
+	// them it could never be, however well covered the node is.
+	if err := enforceBudgetControlledLaunch(cmd.Context(), p.configPath, "openclaw",
+		budgetLaunchEvidence{
+			Route: budgetLaunchRouteDirect, Executable: p.bin, Arguments: launchArgs,
+		}); err != nil {
+		return err
+	}
 
 	child := exec.Command(p.bin, launchArgs...) //nolint:gosec // user-launched tool; argv is the seeded handover + forwarded args
-	child.Env = os.Environ()
-	child.Dir = cwd // "" inherits the caller's cwd; set by --continue-from to the source project root
+	child.Env = scrubOOBEnv(os.Environ())       // strip the trusted OOB channel env
+	child.Dir = cwd                             // "" inherits the caller's cwd; set by --continue-from to the source project root
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
-	if rErr := child.Run(); rErr != nil {
+	if rErr := child.Start(); rErr != nil {
+		return fmt.Errorf("exec openclaw: %w", rErr)
+	}
+	// Direct process attribution (migration 086): record the child pid now
+	// that Start has made it knowable; retract the seed when the child is
+	// reaped. Best-effort both ways — a seeding failure never affects the
+	// launch (see cmd/observer/launchseed.go).
+	dbPath := ""
+	if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: p.configPath}); cErr == nil {
+		dbPath = cfg.Observer.DBPath
+	}
+	recordLaunchSeed(dbPath, "openclaw", cwd, child.Process.Pid, cmd.ErrOrStderr())
+	if rErr := child.Wait(); rErr != nil {
 		var ee *exec.ExitError
 		if errors.As(rErr, &ee) {
 			return exitErr(ee.ExitCode())

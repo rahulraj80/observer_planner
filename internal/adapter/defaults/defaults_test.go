@@ -66,6 +66,13 @@ var shapeFixturePathByAdapter = map[string]string{
 	// Grok — ACP updates.jsonl under .grok/sessions/<url-enc-cwd>/<uuid>/
 	// (the token source, logs/unified.jsonl, shares the same root-gating).
 	"grok": "/tmp/foreign/.grok/sessions/%2Fhome%2Fx%2Fproj/2e0a4a70-0000-0000-0000-000000000000/updates.jsonl",
+	// Grok Bot DESKTOP (distinct from "grok" above) — a base32-encoded
+	// persistence-slice blob in a sand-client-persistence dir. The name
+	// below decodes to
+	//   sand.client.slice.account.acct.transcript.replicas.00000000-…-000000000000
+	// so it has the exact right shape; only the under-WatchPaths gate
+	// rejects it.
+	"grokbot": "/tmp/foreign/sand-client-persistence/onqw4zbomnwgszlooqxhg3djmnss4yldmnxxk3tufzqwgy3ufz2heyloonrxe2lqoqxhezlqnruwgyltfyydambqgaydambngaydambngaydambngaydambngaydambqgaydambqgaya.blob",
 	// Devin CLI — SQLite sessions.db whose immediate parent dir must be
 	// `cli` (the Cognition layout ~/.local/share/devin/cli/sessions.db;
 	// Windows %APPDATA%\devin\cli\). Root-gating rejects a foreign
@@ -99,6 +106,36 @@ var shapeFixturePathByAdapter = map[string]string{
 	// The <uuid>.checkpoints.jsonl sidecar shares the extension and is
 	// rejected by the adapter's own suffix test, not by the root gate.
 	"command-code": "/tmp/foreign/.commandcode/projects/-tmp-foo/9f4c1a20-0000-0000-0000-000000000000.jsonl",
+	// muse (Meta Muse Code) — the fixed-basename session.jsonl under a
+	// date-sharded .local/share/muse/sessions/YYYY/MM/DD/<uuid>/ tree. The
+	// shape predicate binds the `/muse/sessions/` segment (so the fixture
+	// repeats it below /tmp/foreign) plus the exact basename, which is what
+	// rejects the sibling cron.db / .session.lock / tool-outputs entries.
+	"muse": "/tmp/foreign/.local/share/muse/sessions/2026/08/06/9904307b-045a-4e99-a982-9b676b2ac87f/session.jsonl",
+	// prime-agent — a flat <uuid>.jsonl under .prime/agent/sessions/. The
+	// shape half is only the `.jsonl` extension (the vendor migrates a
+	// legacy per-project layout in place, so no depth can be bound), which
+	// makes the under-WatchPaths gate the SOLE install-root authority —
+	// exactly what this test proves, since the same bare shape is claude
+	// -code's, codex's, pi's and openclaw's too.
+	"prime-agent": "/tmp/foreign/.prime/agent/sessions/019f0000-1111-7222-8333-444444444444.jsonl",
+	// junie (JetBrains Junie) — fixed basename events.jsonl under
+	// .junie/sessions/<session-id>/. The shape predicate binds the
+	// `/.junie/sessions/` segment plus the exact basename, which is what
+	// rejects the sibling index.jsonl / state.json / transcript.md entries.
+	"junie": "/tmp/foreign/.junie/sessions/session-260816-220304-lrfz/events.jsonl",
+	// deepseek (DeepSeek Harness) — session.jsonl.zstd under
+	// .dsh/sessions/<cwd-slug>/session-<uuid>/. The shape predicate binds
+	// the `/.dsh/sessions/` segment plus the exact basename (whole-file
+	// zstd, rewritten on every flush — never a bare .jsonl), which is what
+	// rejects the off-limits .credentials.yaml / settings.yaml siblings.
+	"deepseek": "/tmp/foreign/.dsh/sessions/--tmp-foreign--/session-019f0000-1111-7222-8333-444444444444/session.jsonl.zstd",
+	// poolside — trajectory-<agentId>_<sessionId>.ndjson under
+	// <data-home>/poolside/trajectories/. The shape predicate binds the
+	// exact `trajectory-` prefix / `.ndjson` suffix basename shape (no
+	// path-segment binding — the data-home varies per OS), so the
+	// under-WatchPaths gate is the SOLE install-root authority.
+	"poolside": "/tmp/foreign/poolside/trajectories/trajectory-standalone_019f0000-1111-7222-8333-444444444444.ndjson",
 	// chatgpt-web — hook-only browser adapter with NO watch paths and an
 	// IsSessionFile that always returns false. Any shaped path is rejected
 	// (there is no on-disk session file), so the reject test passes and the
@@ -114,6 +151,35 @@ var shapeFixturePathByAdapter = map[string]string{
 	"perplexity-web": "/tmp/foreign/browser/perplexity-web/turn.json",
 	"gemini-web":     "/tmp/foreign/browser/gemini-web/turn.json",
 	"copilot-web":    "/tmp/foreign/browser/copilot-web/turn.json",
+	// zcode (Z.AI's OpenCode fork) — same SQLite-state-store shape as
+	// opencode/kilo-code-cli (db.sqlite / db.sqlite-wal basename only),
+	// under .zcode/cli/db/.
+	"zcode": "/tmp/foreign/.zcode/cli/db/db.sqlite",
+	// mistral-code (`vibe`) — fixed basename messages.jsonl under
+	// .vibe/logs/session/<session-id>/. The shape predicate binds the
+	// `/.vibe/logs/session/` segment plus the exact basename, which is
+	// what rejects the sibling meta.json.
+	"mistral-code": "/tmp/foreign/.vibe/logs/session/088a17fc/messages.jsonl",
+	// freebuff (CodebuffAI) — fixed basename chat-messages.json under
+	// .config/manicode/projects/<slug>/chats/<RFC3339>/. The shape
+	// predicate binds the `/manicode/projects/` + `/chats/` segments plus
+	// the exact basename, which is what rejects the sibling
+	// run-state.json.
+	"freebuff": "/tmp/foreign/.config/manicode/projects/slug/chats/2026-08-11T07-07-38.552Z/chat-messages.json",
+	// kiro-crew (AWS Kiro Crew desktop) — any *.jsonl sitting DIRECTLY
+	// under a `sessions` dir inside the Crew data root. The shape
+	// predicate binds the parent-dir name plus the extension (which is
+	// what rejects the sibling <name>.jsonl.lock); only the
+	// under-WatchPaths gate rejects a foreign crew/sessions tree. Note
+	// the deliberate near-miss with kirocli's own /.kiro/sessions/ root:
+	// `crew` sits BETWEEN them, so neither is a prefix of the other.
+	"kiro-crew": "/tmp/foreign/.kiro/crew/sessions/dashboard_chat-2-1700000002.jsonl",
+	// zed — the fixed basename threads.db (or its -wal/-shm siblings)
+	// under a `threads` directory inside Zed's app-data root. The shape
+	// predicate binds the exact basename only (no path-segment binding
+	// beyond the parent dir being scanned by the watcher itself), so the
+	// under-WatchPaths gate is the sole install-root authority.
+	"zed": "/tmp/foreign/Zed/threads/threads.db",
 }
 
 // TestAllAdapters_IsSessionFile_RequiresUnderWatchRoots is the

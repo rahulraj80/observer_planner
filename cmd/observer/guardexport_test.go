@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -20,7 +21,7 @@ import (
 func seedExportFixture(t *testing.T, dbPath string) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -199,13 +200,13 @@ func TestGuardReportCmd(t *testing.T) {
 		t.Fatalf("guard report: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"Guard evidence pack — period 24h",
+		"Guard evidence pack - period 24h",
 		"== Policy changes in period ==",
 		"/u/guard-policy.toml",
 		"total 3, enforced 0",
 		"by severity:",
 		"== Audit-chain verification ==",
-		"OK — 3 row(s) verified",
+		"OK - 3 row(s) verified",
 		"== Coverage matrix (§6.5) ==",
 		"claude-code",
 		"== Exception register (active approvals) ==",

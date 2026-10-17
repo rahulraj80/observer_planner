@@ -5,14 +5,14 @@ import { fetchJSON } from "@/lib/api";
 import { markRestartPending } from "@/lib/restartPending";
 import type { ConfigResponse, LLMConnectionConfig, LLMConfig } from "@/lib/types";
 
-// LLMConnectionsCard — Settings → LLM analysis. Edits the [llm.connections]
+// LLMConnectionsCard - Settings → LLM analysis. Edits the [llm.connections]
 // map: add/rename/remove connections, edit base_url / kind / model list, save
 // an API key to the OS keychain, and run a live health probe.
 //
 // Two seams:
 //   - PUT /api/config/section/llm writes the Connections map to config.toml
 //     (the generic section save, validated via config.Validate). Keys are
-//     NEVER part of that body — config holds only the api_key_keychain LABEL.
+//     NEVER part of that body - config holds only the api_key_keychain LABEL.
 //   - PUT /api/config/llm/key/<id> stores the literal key in the OS keychain
 //     (0600-file fallback) and sets the label. DELETE clears it.
 //   - POST /api/config/llm/test/<id> probes the endpoint (reachability +
@@ -221,15 +221,15 @@ export function LLMConnectionsCard({
     <div className="space-y-3">
       <div className="rounded-3 border border-line-2 bg-bg-2 p-4 text-[11.5px]">
         <div className="text-[12px] font-semibold text-fg-1">
-          LLM analysis connections — [llm.connections]
+          LLM analysis connections - [llm.connections]
           <HelpInd id="card.settings_llm_connections" />
         </div>
         <p className="m-0 mt-0.5 text-fg-3">
           Optional endpoints the daily briefing can point analysis at (narrative upgrade + grounded Q&amp;A).
-          Nothing is configured by default — with no connections the briefing is data-only. A loopback host
+          Nothing is configured by default - with no connections the briefing is data-only. A loopback host
           (Ollama / vLLM / llama.cpp) is keyless; a remote provider needs{" "}
           <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">allow_remote</code> plus a key, which
-          is stored in the OS keychain — <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">config.toml</code>{" "}
+          is stored in the OS keychain - <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">config.toml</code>{" "}
           holds only the label, never the key. Restart required after save.
         </p>
         {error && <p className="m-0 mt-2 text-danger">{error}</p>}
@@ -379,7 +379,7 @@ export function LLMConnectionsCard({
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[11.5px]">
                 {test.ok ? (
                   <Pill variant="success">
-                    reachable — {test.models.length} model(s) in {test.health.latency_ms}ms
+                    reachable - {test.models.length} model(s) in {test.health.latency_ms}ms
                   </Pill>
                 ) : (
                   <Pill variant="danger">failed: {test.health.message}</Pill>
@@ -407,7 +407,7 @@ export function LLMConnectionsCard({
                     type="button"
                     onClick={() => saveKey(id)}
                     disabled={busy || !(keyInput[id] ?? "").trim()}
-                    className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-bg-3 disabled:text-fg-4 disabled:opacity-60"
                   >
                     Save key
                   </button>
@@ -477,11 +477,11 @@ export function LLMConnectionsCard({
           type="button"
           onClick={save}
           disabled={busy || !dirty}
-          className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-bg-3 disabled:text-fg-4 disabled:opacity-60"
         >
           Save connections
         </button>
-        {saved && <Pill variant="warn">saved — restart the daemon to apply</Pill>}
+        {saved && <Pill variant="warn">saved - restart the daemon to apply</Pill>}
         {!dirty && !saved && <span className="text-fg-3">No unsaved changes</span>}
       </div>
     </div>

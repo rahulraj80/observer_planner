@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "org_id": "org_synth01",
+      "name": "Platform",
+      "created_at": 1767225600,
+      "updated_at": 1767312000,
+      "max_session_acu_limit": 50,
+      "max_cycle_acu_limit": 2000
+    },
+    {
+      "org_id": "org_synth02",
+      "name": "Research",
+      "created_at": 1767229200,
+      "updated_at": 1767229200,
+      "max_session_acu_limit": null,
+      "max_cycle_acu_limit": null
+    }
+  ],
+  "has_next_page": true,
+  "end_cursor": "synthorganizations0002",
+  "total": 3
+}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -34,10 +36,10 @@ func TestReloadSecretSwapsLivePairingSecret(t *testing.T) {
 	rc.ReloadSecret(hashB)
 
 	if remoteauth.VerifySecret(mc.currentSecret(), rawA) {
-		t.Error("secret A must NOT verify after reload — the running controller kept the old hash")
+		t.Error("secret A must NOT verify after reload - the running controller kept the old hash")
 	}
 	if !remoteauth.VerifySecret(mc.currentSecret(), rawB) {
-		t.Error("secret B must verify after reload — the new QR could not pair without a restart")
+		t.Error("secret B must verify after reload - the new QR could not pair without a restart")
 	}
 	if !rc.Ready() {
 		t.Error("controller must stay Ready after reloading a non-empty secret")

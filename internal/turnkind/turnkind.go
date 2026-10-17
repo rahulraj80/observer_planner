@@ -1,7 +1,7 @@
 // Package turnkind provides a pure, deterministic requirement-kind classifier
 // for API turns. It reuses the routing taxonomy (TurnKind constants) but
 // exposes a simpler input interface suitable for offline/backfill use where
-// the full routing.DecisionInput (session window, client phase) is not available.
+// the full routingcore.DecisionInput (session window, client phase) is not available.
 //
 // Classification sources (precedence):
 //  1. Explicit: turn_kind already set on the turn (from live routing).
@@ -13,32 +13,32 @@
 // produce identical outputs, enabling idempotent backfill.
 package turnkind
 
-import "github.com/marmutapp/superbased-observer/internal/routing"
+import "github.com/marmutapp/superbased-observer/internal/routingcore"
 
-// Kind is an alias for routing.TurnKind so this package doesn't import routing
+// Kind is an alias for routingcore.TurnKind so this package doesn't import routing
 // in its public API (internal/evidence etc. can depend on turnkind without a
 // cycle). The values are the routing taxonomy v1.
-type Kind = routing.TurnKind
+type Kind = routingcore.TurnKind
 
 const (
-	KindPlan         = routing.TurnPlan
-	KindReadOnly     = routing.TurnReadOnly
-	KindEdit         = routing.TurnEdit
-	KindTestRun      = routing.TurnTestRun
-	KindHousekeeping = routing.TurnHousekeeping
-	KindSubagent     = routing.TurnSubagent
-	KindLongContext  = routing.TurnLongContext
-	KindUnknown      = routing.TurnUnknown
+	KindPlan         = routingcore.TurnPlan
+	KindReadOnly     = routingcore.TurnReadOnly
+	KindEdit         = routingcore.TurnEdit
+	KindTestRun      = routingcore.TurnTestRun
+	KindHousekeeping = routingcore.TurnHousekeeping
+	KindSubagent     = routingcore.TurnSubagent
+	KindLongContext  = routingcore.TurnLongContext
+	KindUnknown      = routingcore.TurnUnknown
 )
 
 // AllKinds enumerates the taxonomy for lint/tests.
 func AllKinds() []Kind {
-	return routing.AllTurnKinds()
+	return routingcore.AllTurnKinds()
 }
 
 // ClassifierInput is the minimal data needed to classify a turn offline.
-// When the full routing.DecisionInput is available (live), callers should
-// prefer routing.ClassifyTurnKind.
+// When the full routingcore.DecisionInput is available (live), callers should
+// prefer routingcore.ClassifyTurnKind.
 type ClassifierInput struct {
 	// PromptTokens is the input prompt token count for this turn.
 	PromptTokens int64

@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !sbo_omit_terminals
 
 package main
 
@@ -16,6 +16,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/attachsock"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/termfeed"
@@ -633,7 +634,7 @@ func TestAttachHubCorrelationDelivery(t *testing.T) {
 	// (which the producer fires from EndRunByHandle) clears the live view.
 	feed.Publish(termfeed.Event{Kind: exitKind, RunID: "R1", At: time.Now()})
 	if !hub.sessionLive("sess-real") {
-		t.Fatal("a feed-published term:exit must NOT clear liveness — correctness rides NotifyExit, not the feed")
+		t.Fatal("a feed-published term:exit must NOT clear liveness - correctness rides NotifyExit, not the feed")
 	}
 	hub.NotifyExit("R1")
 	if hub.sessionLive("sess-real") {
@@ -766,7 +767,7 @@ func TestAttachHostResumeSingleFlight(t *testing.T) {
 // the real store SQL + the host wiring together.
 func TestAttachHostResumeRefusedByStoreAuthority(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "authority.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "authority.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -880,7 +881,7 @@ func storeAuthorityFor(t *testing.T, ctx context.Context, st *store.Store, redis
 // SUCCEED with exactly one spawn.
 func TestAttachHostAutoResumeSucceedsForCrashOrphan(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "crash.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "crash.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -926,7 +927,7 @@ func TestAttachHostAutoResumeSucceedsForCrashOrphan(t *testing.T) {
 // is REFUSED with ErrResumeConflict and never spawns.
 func TestAttachHostAutoResumeRefusedWhenDistinctLiveRunPresent(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "distinct.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "distinct.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1063,7 +1064,7 @@ func TestAttachHubYoungTombstoneSurvivesFloodBeforePin(t *testing.T) {
 	released := false
 	hub.releaseOnExit(run, func() { released = true })
 	if !released {
-		t.Fatal("releaseOnExit must fire immediately — the young tombstone survived the pre-pin flood")
+		t.Fatal("releaseOnExit must fire immediately - the young tombstone survived the pre-pin flood")
 	}
 	hub.unpinTombstone(run)
 	if hub.sessionLive(sid) {
@@ -1199,4 +1200,13 @@ func TestAttachHubOnCorrelateDeadCheckSurvivesSelfShed(t *testing.T) {
 	if !hub.sessionLive(sid) {
 		t.Fatal("a subsequent resume of the session must succeed after the self-shed race")
 	}
+}
+
+// launches returns the number of LaunchAttachable calls observed so far.
+// It lives in this unix-only file because it is the sole consumer; keeping it
+// in attach_test.go left it flagged unused by lint on a Windows build.
+func (f *fakeAttachLauncher) launches() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.launchCalls
 }

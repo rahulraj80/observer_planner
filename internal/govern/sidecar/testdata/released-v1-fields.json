@@ -1,0 +1,18 @@
+{
+  "_comment": "FIXTURE, do not edit to make a test pass. The JSON field names of the governance sidecar (governance-effective.json, schema 1) as every RELEASED observer reads it, with a strict decoder. A file this build writes must use only these names, or a released reader refuses the whole file (the D-234 class; an update rollback hits it). New directive classes go in their own sidecar file.",
+  "fields": [
+    "schema",
+    "writer_version",
+    "written_at",
+    "state",
+    "org_key",
+    "generation",
+    "org_name",
+    "family_version",
+    "effective_hash",
+    "grant_expires_at",
+    "pinned",
+    "share",
+    "features"
+  ]
+}

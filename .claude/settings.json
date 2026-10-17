@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(*tk_run_vm*)",
+      "Bash(*vm-apply*)",
+      "Bash(*vm-revert*)",
+      "Bash(*vm-clone-rehearse*)",
+      "Bash(*az vm run-command*)",
+      "Bash(*az vm extension*)",
+      "Bash(*az rest*)",
+      "Bash(*az acr login*)",
+      "Bash(*az acr repository update*)",
+      "Bash(script *)",
+      "Bash(*unbuffer*)",
+      "Bash(*expect *)",
+      "Read(~/.observer-org-demo/pricing-feed-signing-key*)",
+      "Edit(~/.observer-org-demo/pricing-feed-signing-key*)",
+      "Write(~/.observer-org-demo/pricing-feed-signing-key*)",
+      "Bash(*pricing-feed-signing-key*)",
+      "PowerShell(*tk_run_vm*)",
+      "PowerShell(*vm-apply*)",
+      "PowerShell(*vm-revert*)",
+      "PowerShell(*vm-clone-rehearse*)",
+      "PowerShell(*az vm run-command*)",
+      "PowerShell(*az vm extension*)",
+      "PowerShell(*az rest*)",
+      "PowerShell(*az acr login*)",
+      "PowerShell(*az acr repository update*)",
+      "PowerShell(*script *)",
+      "PowerShell(*unbuffer*)",
+      "PowerShell(*expect *)",
+      "PowerShell(*pricing-feed-signing-key*)"
+    ]
+  }
+}

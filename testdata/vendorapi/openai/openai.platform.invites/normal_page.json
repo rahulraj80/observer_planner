@@ -1,0 +1,19 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "organization.invite",
+      "id": "invite-abc",
+      "email": "user@example.com",
+      "role": "owner",
+      "status": "accepted",
+      "created_at": 1711471533,
+      "expires_at": 1711471533,
+      "accepted_at": 1711471533,
+      "projects": []
+    }
+  ],
+  "first_id": "invite-abc",
+  "last_id": "invite-abc",
+  "has_more": true
+}

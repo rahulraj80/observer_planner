@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // fakeSink records inserted APITurns in memory for test assertions.
@@ -47,25 +47,25 @@ func (f *fakeSink) all() []models.APITurn {
 
 type fakeNetworkSink struct {
 	mu     sync.Mutex
-	events []processobs.ProcessEvent
+	events []procmodel.ProcessEvent
 }
 
-func (f *fakeNetworkSink) PersistProcessEvents(_ context.Context, events []processobs.ProcessEvent) (int, error) {
+func (f *fakeNetworkSink) PersistProcessEvents(_ context.Context, events []procmodel.ProcessEvent) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, events...)
 	return len(events), nil
 }
 
-func (f *fakeNetworkSink) all() []processobs.ProcessEvent {
+func (f *fakeNetworkSink) all() []procmodel.ProcessEvent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([]processobs.ProcessEvent, len(f.events))
+	out := make([]procmodel.ProcessEvent, len(f.events))
 	copy(out, f.events)
 	return out
 }
 
-func (f *fakeNetworkSink) waitForCount(n int) []processobs.ProcessEvent {
+func (f *fakeNetworkSink) waitForCount(n int) []procmodel.ProcessEvent {
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
 		events := f.all()
@@ -1135,7 +1135,7 @@ func TestProxy_ProcessNetworkCapturesTransportFailure(t *testing.T) {
 		t.Fatalf("network events: got %d want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Type != processobs.EventNetworkConnect {
+	if ev.Type != procmodel.EventNetworkConnect {
 		t.Fatalf("event type: got %q", ev.Type)
 	}
 	if ev.TargetKind != "url" || ev.Target == "" {
@@ -1355,6 +1355,9 @@ func TestProcessNetworkCapBodyHardening(t *testing.T) {
 	})
 }
 
+// TestProxy_OpenAIWebSocketUpgradePassthrough pins the opaque tunnel for an
+// OpenAI-path websocket that has no HTTP fallback rule. It used /v1/responses
+// until that endpoint moved to the 426 HTTP-fallback row (wsupgrade.go).
 func TestProxy_OpenAIWebSocketUpgradePassthrough(t *testing.T) {
 	seen := make(chan *http.Request, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1400,7 +1403,7 @@ func TestProxy_OpenAIWebSocketUpgradePassthrough(t *testing.T) {
 	}
 	defer conn.Close()
 
-	_, err = fmt.Fprintf(conn, "GET /v1/responses?conversation=abc HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer chatgpt-token\r\nX-Session-Id: local-session\r\n\r\n", proxyURL.Host)
+	_, err = fmt.Fprintf(conn, "GET /v1/chat/completions?conversation=abc HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer chatgpt-token\r\nX-Session-Id: local-session\r\n\r\n", proxyURL.Host)
 	if err != nil {
 		t.Fatalf("write upgrade request: %v", err)
 	}
@@ -1416,8 +1419,8 @@ func TestProxy_OpenAIWebSocketUpgradePassthrough(t *testing.T) {
 
 	select {
 	case req := <-seen:
-		if req.URL.Path != "/root/v1/responses" {
-			t.Errorf("upstream path: got %q want %q", req.URL.Path, "/root/v1/responses")
+		if req.URL.Path != "/root/v1/chat/completions" {
+			t.Errorf("upstream path: got %q want %q", req.URL.Path, "/root/v1/chat/completions")
 		}
 		if req.URL.RawQuery != "conversation=abc" {
 			t.Errorf("upstream query: got %q", req.URL.RawQuery)
@@ -1496,6 +1499,11 @@ func TestProxy_ChatGPTBackendRoutesToChatGPTUpstream(t *testing.T) {
 	}
 }
 
+// TestProxy_ChatGPTBackendWebSocketUpgradePassthrough pins that a chatgpt.com
+// backend websocket that is NOT the Responses endpoint still tunnels to the
+// ChatGPT upstream. The Responses socket itself (/backend-api/codex/responses)
+// is answered 426 so codex falls back to captured HTTP (wsupgrade.go,
+// TestProxy_ResponsesWebSocketUpgradeAnswers426).
 func TestProxy_ChatGPTBackendWebSocketUpgradePassthrough(t *testing.T) {
 	seen := make(chan *http.Request, 1)
 	chatgpt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1540,7 +1548,7 @@ func TestProxy_ChatGPTBackendWebSocketUpgradePassthrough(t *testing.T) {
 	}
 	defer conn.Close()
 
-	_, err = fmt.Fprintf(conn, "GET /backend-api/codex/responses HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer chatgpt-token\r\n\r\n", proxyURL.Host)
+	_, err = fmt.Fprintf(conn, "GET /backend-api/codex/realtime HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer chatgpt-token\r\n\r\n", proxyURL.Host)
 	if err != nil {
 		t.Fatalf("write upgrade request: %v", err)
 	}
@@ -1555,7 +1563,7 @@ func TestProxy_ChatGPTBackendWebSocketUpgradePassthrough(t *testing.T) {
 
 	select {
 	case req := <-seen:
-		if req.URL.Path != "/backend-api/codex/responses" {
+		if req.URL.Path != "/backend-api/codex/realtime" {
 			t.Errorf("upstream path: got %q", req.URL.Path)
 		}
 		if got := req.Header.Get("Authorization"); got != "Bearer chatgpt-token" {
@@ -1700,6 +1708,11 @@ func TestProviderForPath(t *testing.T) {
 		{"/v1/chat/completions", models.ProviderOpenAI},
 		{"/v1/responses", models.ProviderOpenAI},
 		{"/v1/embeddings", models.ProviderOpenAI},
+		// OpenAI Realtime (a websocket) used to fall through to the Anthropic
+		// default and would have been tunnelled to the wrong upstream.
+		{"/v1/realtime", models.ProviderOpenAI},
+		{"/v1/realtime?model=gpt-realtime", models.ProviderOpenAI},
+		{"/api/v1/realtime", models.ProviderOpenAI},
 		{"/backend-api/codex/responses", models.ProviderOpenAI},
 		{"/backend-api/plugins/list", models.ProviderOpenAI},
 		{"/", models.ProviderAnthropic},
@@ -2275,6 +2288,115 @@ func TestProxy_SessionResolverMissLeavesNull(t *testing.T) {
 	}
 }
 
+// TestProxy_OrdinaryResolvedSessionRejectedOnHostedLane is the PLANE BOUNDARY
+// regression pin (operator-reported class, 2026-08-13): a request that
+// arrives on an explicit /up/<id> hosted lane (Plane A) must never ACCEPT an
+// ordinary process-resolved coding-agent session (Plane B). The Arena runner
+// now has a narrowly prefixed synthetic exception, so the resolver is
+// consulted but this ordinary result must still leave the turn unattributed.
+func TestProxy_OrdinaryResolvedSessionRejectedOnHostedLane(t *testing.T) {
+	const requestBody = `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`
+	const responseBody = `{"id":"msg_abc","model":"claude-sonnet-4","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+
+	anth := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseBody))
+	})
+	anthUp := httptest.NewServer(anth)
+	defer anthUp.Close()
+
+	sink := &fakeSink{}
+	resolver := &fakeResolver{sessionID: "sess-from-bridge", ok: true}
+	p, err := New(Options{
+		AnthropicUpstream: anthUp.URL,
+		OpenAIUpstream:    "https://unused.example",
+		// The hosted lane routes to the same upstream; its PRESENCE on the
+		// /up/ prefix is what marks the request Plane A.
+		Upstreams:       map[string]string{"hosted": anthUp.URL},
+		Sink:            sink,
+		SessionResolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+	ts := httptest.NewServer(p.Handler())
+	defer ts.Close()
+
+	// Hosted lane, NO X-Session-Id: an ordinary bridge result is rejected.
+	req, _ := http.NewRequest("POST", ts.URL+"/up/hosted/v1/messages", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	resp.Body.Close()
+
+	turns := sink.all()
+	if len(turns) != 1 {
+		t.Fatalf("want 1 turn, got %d", len(turns))
+	}
+	if turns[0].SessionID != "" {
+		t.Errorf("hosted-lane turn borrowed a coding-agent session_id: got %q want empty", turns[0].SessionID)
+	}
+	if resolver.callCount() != 1 {
+		t.Errorf("SessionResolver calls = %d, want 1 prefix check", resolver.callCount())
+	}
+}
+
+// TestProxy_AgentLaneKeepsCodingAgentSession pins Options.AgentLanes: a
+// lane that carries a local coding agent's own traffic (OpenCode's Zen
+// provider through /up/opencode-zen) only picks the upstream host; the
+// request keeps the pid-derived Plane-B session, unlike a hosted lane.
+func TestProxy_AgentLaneKeepsCodingAgentSession(t *testing.T) {
+	const requestBody = `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`
+	const responseBody = `{"id":"msg_abc","model":"claude-sonnet-4","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	hits := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer up.Close()
+	sink := &fakeSink{}
+	p, err := New(Options{
+		AnthropicUpstream: "https://unused.example",
+		OpenAIUpstream:    "https://unused.example",
+		AgentUpstreams:    map[string]string{"opencode-zen": up.URL},
+		Sink:              sink,
+		SessionResolver:   &fakeResolver{sessionID: "ses_opencode", ok: true},
+	})
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+	ts := httptest.NewServer(p.Handler())
+	defer ts.Close()
+	req, _ := http.NewRequest("POST", ts.URL+"/up/opencode-zen/v1/messages", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	resp.Body.Close()
+	if hits != 1 {
+		t.Fatalf("lane upstream hits = %d, want 1", hits)
+	}
+	turns := sink.all()
+	if len(turns) != 1 || turns[0].SessionID != "ses_opencode" {
+		t.Fatalf("turns = %+v, want one turn attributed to the coding-agent session", turns)
+	}
+}
+
+func TestProxy_ArenaSyntheticSessionAcceptedOnHostedLane(t *testing.T) {
+	resolver := &fakeResolver{sessionID: models.ArenaSessionIDPrefix + "run-grok", ok: true}
+	p := &Proxy{sessions: resolver, logger: slog.Default()}
+	req := httptest.NewRequest(http.MethodPost, "/up/grok/v1/chat/completions", strings.NewReader(`{"model":"grok"}`))
+	req = req.WithContext(context.WithValue(req.Context(), obsLaneCtxKey{}, "grok"))
+	got := p.resolveAPITurnSessionID(req, models.ProviderOpenAI, []byte(`{"model":"grok"}`))
+	if got != models.ArenaSessionIDPrefix+"run-grok" {
+		t.Fatalf("synthetic Arena session = %q", got)
+	}
+}
+
 // TestParseAnthropicResponse_CacheCreationTierBreakdown verifies the
 // non-streaming response parser captures both
 // usage.cache_creation_input_tokens (the legacy total) and the per-tier
@@ -2779,6 +2901,87 @@ func TestProxy_ChatGPTAuthStreamsBytesIncrementally(t *testing.T) {
 // the body+header fallback entirely and relied solely on X-Session-Id,
 // so codex's chatgpt-auth turns (which carry the UUID on `session_id`
 // but not in the body) collapsed to an empty session_id.
+// TestResolveAPITurnSessionIDHostedAppLaneHeaders pins the gateway-rail
+// conversation-identity lift (operator-reported 4-rows-per-prompt class,
+// 2026-08-14): on an explicit /up/<id> lane, X-Superbased-Session (our
+// contract) and Open WebUI's native X-OpenWebUI-Chat-Id are accepted as the
+// session id, in that priority order — and NEITHER is consulted on a
+// default (Plane-B) lane, where hosted-app conventions must never leak
+// into coding-agent attribution.
+func TestResolveAPITurnSessionIDHostedAppLaneHeaders(t *testing.T) {
+	p, err := New(Options{
+		AnthropicUpstream: "http://127.0.0.1:1",
+		OpenAIUpstream:    "http://127.0.0.1:1",
+		ChatGPTUpstream:   "http://127.0.0.1:1",
+		Sink:              &fakeSink{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cases := []struct {
+		name    string
+		lane    string
+		headers map[string]string
+		want    string
+	}{
+		{
+			name:    "up-lane lifts X-Superbased-Session",
+			lane:    "openrouter",
+			headers: map[string]string{"X-Superbased-Session": "conv-abc"},
+			want:    "conv-abc",
+		},
+		{
+			name:    "up-lane lifts X-OpenWebUI-Chat-Id",
+			lane:    "openrouter",
+			headers: map[string]string{"X-OpenWebUI-Chat-Id": "owui-chat-7"},
+			want:    "owui-chat-7",
+		},
+		{
+			name: "X-Superbased-Session wins over X-OpenWebUI-Chat-Id",
+			lane: "openrouter",
+			headers: map[string]string{
+				"X-Superbased-Session": "conv-abc",
+				"X-OpenWebUI-Chat-Id":  "owui-chat-7",
+			},
+			want: "conv-abc",
+		},
+		{
+			name:    "default lane must NOT lift hosted-app headers",
+			lane:    "",
+			headers: map[string]string{"X-Superbased-Session": "conv-abc", "X-OpenWebUI-Chat-Id": "owui-chat-7"},
+			want:    "",
+		},
+		{
+			name:    "up-lane blank header values are ignored",
+			lane:    "openrouter",
+			headers: map[string]string{"X-Superbased-Session": "   "},
+			want:    "",
+		},
+		{
+			name:    "up-lane hosted-app header outranks generic X-Session-Id",
+			lane:    "openrouter",
+			headers: map[string]string{"X-Session-Id": "generic", "X-OpenWebUI-Chat-Id": "owui-chat-7"},
+			want:    "owui-chat-7",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodPost, "http://test/v1/chat/completions", nil)
+			for k, v := range tc.headers {
+				req.Header.Set(k, v)
+			}
+			if tc.lane != "" {
+				req = req.WithContext(context.WithValue(req.Context(), obsLaneCtxKey{}, tc.lane))
+			}
+			got := p.resolveAPITurnSessionID(req, models.ProviderOpenAI, []byte(`{"model":"nvidia/nemotron-3.5-lightning:free"}`))
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveAPITurnSessionID(t *testing.T) {
 	p, err := New(Options{
 		AnthropicUpstream: "http://127.0.0.1:1",
@@ -3463,6 +3666,31 @@ func TestApplyCost_ThreadsFastFlag(t *testing.T) {
 	}
 }
 
+// TestApplyCost_ThreadsTimestamp pins Phase 1 slice B of peak/off-peak
+// pricing (the Q3 live-path fix): applyCost must pass APITurn.Timestamp
+// through to the CostComputer as CostTokens.At, so a peak/off-peak-aware
+// cost engine resolves the rate at the turn's own wall-clock time rather
+// than at capture-time-blind current/flat rates. Before this fix the
+// proxy dropped the timestamp on the floor, so `api_turns.cost_usd`
+// could never reflect time-of-day pricing.
+func TestApplyCost_ThreadsTimestamp(t *testing.T) {
+	fake := &fakeCostComputer{rate: 0.01}
+	p := &Proxy{cost: fake}
+
+	want := time.Date(2026, 9, 21, 14, 30, 0, 0, time.UTC)
+	p.applyCost(&models.APITurn{Model: "claude-opus-4-8", InputTokens: 1000, Timestamp: want})
+	if !fake.lastTokens.At.Equal(want) {
+		t.Errorf("applyCost.At = %v, want %v", fake.lastTokens.At, want)
+	}
+
+	// A zero Timestamp must ride through as a zero At, not get
+	// silently defaulted to time.Now() somewhere along the seam.
+	p.applyCost(&models.APITurn{Model: "claude-opus-4-8", InputTokens: 1000})
+	if !fake.lastTokens.At.IsZero() {
+		t.Errorf("applyCost.At = %v, want zero", fake.lastTokens.At)
+	}
+}
+
 func TestExtractOpenAIModel_Roundtrip(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -3584,5 +3812,72 @@ func TestProxy_CompressInSessionForTool_ReceivesResolvedTool(t *testing.T) {
 	}
 	if comp.class.Provider != models.ProviderAnthropic {
 		t.Errorf("provider: got %q", comp.class.Provider)
+	}
+}
+
+// TestBuildTurn_ServiceTierCapture pins the Ultrafast capture: the SERVED
+// service_tier (OpenAI: "a response served through it will show
+// `service_tier=ultrafast`") lands on APITurn.ServiceTier for the cost
+// engine's tier-as-SKU rule, the request tier is the fallback when no
+// response tier is parsed, and Ultrafast is never flagged Fast (it is its
+// own priced SKU, so the Fast multiplier must not also apply). Request
+// `service_tier:"fast"` is Fast mode per OpenAI's reference ("include the
+// `service_tier=fast` or `service_tier=priority` parameter").
+func TestBuildTurn_ServiceTierCapture(t *testing.T) {
+	t.Parallel()
+	p := &Proxy{now: func() time.Time { return time.Unix(0, 0) }}
+	for _, tc := range []struct {
+		name, reqTier, respTier string
+		wantTier                string
+		wantFast                bool
+	}{
+		{"served ultrafast", "ultrafast", "ultrafast", "ultrafast", false},
+		{"ultrafast downgraded to default", "ultrafast", "default", "default", false},
+		{"requested ultrafast, no served tier", "ultrafast", "", "ultrafast", false},
+		{"served priority", "priority", "priority", "priority", true},
+		{"requested fast, served priority", "fast", "priority", "priority", true},
+		{"requested fast, no served tier", "fast", "", "fast", true},
+		{"unknown tier", "hyperdrive", "hyperdrive", "hyperdrive", false},
+		{"no tier", "", "", "", false},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := requestShape{Model: "gpt-6-astra", ServiceTier: tc.reqTier}
+			body := `{"model":"gpt-6-astra","usage":{"input_tokens":10,"output_tokens":5}}`
+			if tc.respTier != "" {
+				body = `{"model":"gpt-6-astra","service_tier":"` + tc.respTier + `","usage":{"input_tokens":10,"output_tokens":5}}`
+			}
+			turn := p.buildTurn(models.ProviderOpenAI, req, []byte(body), http.Header{}, time.Unix(0, 0), "")
+			if turn.ServiceTier != tc.wantTier || turn.Fast != tc.wantFast {
+				t.Errorf("buildTurn = (tier %q, fast %v), want (%q, %v)", turn.ServiceTier, turn.Fast, tc.wantTier, tc.wantFast)
+			}
+			inner := `{"type":"response.completed","response":{"id":"r1","model":"gpt-6-astra","status":"completed",`
+			if tc.respTier != "" {
+				inner += `"service_tier":"` + tc.respTier + `",`
+			}
+			inner += `"usage":{"input_tokens":10,"output_tokens":5}}}`
+			st := p.buildStreamTurn(models.ProviderOpenAI, req, []byte("event: response.completed\ndata: "+inner+"\n\n"), http.Header{}, time.Unix(0, 0), time.Time{}, "")
+			if st.ServiceTier != tc.wantTier || st.Fast != tc.wantFast {
+				t.Errorf("buildStreamTurn = (tier %q, fast %v), want (%q, %v)", st.ServiceTier, st.Fast, tc.wantTier, tc.wantFast)
+			}
+		})
+	}
+	errTurn := buildErrorTurn(models.ProviderOpenAI, requestShape{Model: "gpt-6-astra", ServiceTier: "ultrafast"},
+		[]byte(`{"error":{"message":"boom"}}`), http.Header{}, 500, time.Unix(0, 0), "")
+	if errTurn.ServiceTier != "ultrafast" || errTurn.Fast {
+		t.Errorf("buildErrorTurn = (tier %q, fast %v), want (ultrafast, false)", errTurn.ServiceTier, errTurn.Fast)
+	}
+}
+
+// TestApplyCost_ThreadsServiceTier pins the wiring from APITurn.ServiceTier
+// to CostTokens.ServiceTier, the input the cost engine's tier-as-SKU rule
+// (cost.Engine.ResolveServiceTier) needs to price an Ultrafast turn.
+func TestApplyCost_ThreadsServiceTier(t *testing.T) {
+	fake := &fakeCostComputer{rate: 0.01}
+	p := &Proxy{cost: fake}
+	p.applyCost(&models.APITurn{Model: "gpt-6-astra", InputTokens: 1000, ServiceTier: "ultrafast"})
+	if fake.lastTokens.ServiceTier != "ultrafast" {
+		t.Errorf("applyCost.ServiceTier = %q, want ultrafast", fake.lastTokens.ServiceTier)
 	}
 }

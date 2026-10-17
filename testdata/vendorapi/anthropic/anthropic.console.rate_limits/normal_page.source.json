@@ -1,0 +1,36 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].group": "VerifiedOfficial",
+    "data[].group.display_name": "VerifiedOfficial",
+    "data[].group.id": "VerifiedOfficial",
+    "data[].group.type": "VerifiedOfficial",
+    "data[].group_type": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].limits": "VerifiedOfficial",
+    "data[].limits[]": "VerifiedOfficial",
+    "data[].limits[].type": "VerifiedOfficial",
+    "data[].limits[].value": "VerifiedOfficial",
+    "data[].models": "VerifiedOfficial",
+    "data[].models[]": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "a7112386738293b9a88197003a7716c169ae873d4e51da6a8700ed8b508cd671",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/rate_limits",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/organizations/rate_limits.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.rate_limits"
+}

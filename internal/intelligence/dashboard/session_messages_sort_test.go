@@ -130,6 +130,14 @@ func TestMessageSortOrder_PerKey(t *testing.T) {
 			wantDesc: []int{1, 3, 2},
 		},
 		{
+			key: "response_ms",
+			set: func(f *messageSortField, i int) {
+				f.ResponseMs = []*int64{i64p(3000), i64p(1000), i64p(2000)}[i]
+			},
+			wantAsc:  []int{2, 3, 1},
+			wantDesc: []int{1, 3, 2},
+		},
+		{
 			key: "tokens_per_sec",
 			set: func(f *messageSortField, i int) {
 				f.TokensPerSec = []*float64{f64p(90.5), f64p(10.25), f64p(50)}[i]
@@ -140,6 +148,15 @@ func TestMessageSortOrder_PerKey(t *testing.T) {
 		{
 			key:      "tool_call_count",
 			set:      func(f *messageSortField, i int) { f.ToolCalls = []int{7, 1, 4}[i] },
+			wantAsc:  []int{2, 3, 1},
+			wantDesc: []int{1, 3, 2},
+		},
+		{
+			// Attachment count sorts ascending; 0 is the null-sink (tested
+			// separately in TestMessageSortOrder_NullSink), so all values here
+			// are nonzero to exercise the ordering itself.
+			key:      "attachments",
+			set:      func(f *messageSortField, i int) { f.Attachments = []int{3, 1, 2}[i] },
 			wantAsc:  []int{2, 3, 1},
 			wantDesc: []int{1, 3, 2},
 		},
@@ -187,14 +204,14 @@ func TestMessageSortOrder_PerKey(t *testing.T) {
 	}
 }
 
-// TestMessageSortKeys_AllColumnsCovered pins the allow-list against the 17
+// TestMessageSortKeys_AllColumnsCovered pins the allow-list against the 18
 // columns the Messages table renders — a new column must land as a table row
 // here AND a case in TestMessageSortOrder_PerKey, never as a new conditional.
 func TestMessageSortKeys_AllColumnsCovered(t *testing.T) {
 	want := []string{
-		"seq", "timestamp", "message_id", "role", "model", "effort_level",
-		"input", "cache_read", "cache_creation", "output", "elapsed_ms",
-		"tokens_per_sec", "tool_call_count", "ai_cost_usd", "tool_cost_usd",
+		"seq", "timestamp", "message_id", "role", "account", "model", "effort_level",
+		"input", "cache_read", "cache_creation", "output", "elapsed_ms", "response_ms",
+		"tokens_per_sec", "tool_call_count", "attachments", "ai_cost_usd", "tool_cost_usd",
 		"cost_usd", "content",
 	}
 	if len(messageSortKeys) != len(want) {
@@ -218,6 +235,9 @@ func TestMessageSortOrder_NullSink(t *testing.T) {
 		{"elapsed_ms", func(f *messageSortField, i int) {
 			f.ElapsedMs = []*int64{i64p(200), nil, i64p(100), nil}[i]
 		}},
+		{"response_ms", func(f *messageSortField, i int) {
+			f.ResponseMs = []*int64{i64p(200), nil, i64p(100), nil}[i]
+		}},
 		{"tokens_per_sec", func(f *messageSortField, i int) {
 			f.TokensPerSec = []*float64{f64p(200), nil, f64p(100), nil}[i]
 		}},
@@ -226,6 +246,11 @@ func TestMessageSortOrder_NullSink(t *testing.T) {
 		// treatment — including whitespace-only, which trims to empty.
 		{"effort_level", func(f *messageSortField, i int) {
 			f.EffortLevel = []string{"high", "", "low", "  "}[i]
+		}},
+		// 0 attachments is the null-sink (the MAJORITY value on real data —
+		// almost every turn has none), same treatment as an absent metric.
+		{"attachments", func(f *messageSortField, i int) {
+			f.Attachments = []int{2, 0, 1, 0}[i]
 		}},
 	}
 	for _, tc := range tests {
@@ -434,7 +459,7 @@ type sortMsgResp struct {
 func newSortFixture(t *testing.T, sessionID string) *Server {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

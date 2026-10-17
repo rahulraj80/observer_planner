@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].byok_usage_inference": "VerifiedOfficial",
+    "data[].cached_tokens": "VerifiedOfficial",
+    "data[].completion_tokens": "VerifiedOfficial",
+    "data[].date": "VerifiedOfficial",
+    "data[].endpoint_id": "VerifiedOfficial",
+    "data[].model": "VerifiedOfficial",
+    "data[].model_permaslug": "VerifiedOfficial",
+    "data[].prompt_tokens": "VerifiedOfficial",
+    "data[].provider_name": "VerifiedOfficial",
+    "data[].reasoning_tokens": "VerifiedOfficial",
+    "data[].requests": "VerifiedOfficial",
+    "data[].usage": "VerifiedOfficial"
+  },
+  "fixture_sha256": "cd7482b97e6535fc6da76209af2284c0c9db5d2817bc968c4562b1eba93fa886",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/activity",
+    "status": 200
+  },
+  "notes": "The first row is the reference's response example verbatim; the second row (another model and endpoint on the same date) is synthesized from the ActivityItem schema. The default request (no filter) answers the last 30 completed UTC days in one unpaged document.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "OpenRouter API 1.0.0 (openapi.yaml as rendered on the reference page), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "082bd3c3382b3e79ed583fd567ea70f2289a9bc71fe18806099d9eff09c2bb72",
+  "source_url": "https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity-grouped-by-endpoint.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openrouter.mgmt.activity"
+}

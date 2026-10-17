@@ -38,11 +38,11 @@ func FormatVerdict(tool, pathFlag string, r Resolution) string {
 		fmt.Fprintf(&b, "  using the native %s at %s instead (the shim would crash under this OS).\n", tool, r.Bin)
 
 	case VerdictForeignOnly:
-		fmt.Fprintf(&b, "%s: installed on Windows, not in WSL — the daemon cannot launch it. Install it natively:\n", tool)
+		fmt.Fprintf(&b, "%s: installed on Windows, not in WSL - the daemon cannot launch it. Install it natively:\n", tool)
 		if cmd := firstInstallDisplay(r.Installs); cmd != "" {
 			fmt.Fprintf(&b, "  %s\n", cmd)
 		} else {
-			fmt.Fprintf(&b, "  no grounded install command — see the vendor's docs\n")
+			fmt.Fprintf(&b, "  %s\n", NoGroundedInstallMsg)
 		}
 		// Escape hatch: an operator who KNOWS the found /mnt candidate is a real
 		// Linux-executable binary (not a Windows shim) can force it past the
@@ -55,7 +55,7 @@ func FormatVerdict(tool, pathFlag string, r Resolution) string {
 		fmt.Fprintf(&b, "%s: not installed.\n", tool)
 		displays := installDisplays(r.Installs)
 		if len(displays) == 0 {
-			fmt.Fprintf(&b, "  no grounded install command — see the vendor's docs\n")
+			fmt.Fprintf(&b, "  %s\n", NoGroundedInstallMsg)
 		}
 		for _, d := range displays {
 			fmt.Fprintf(&b, "  install: %s\n", d)

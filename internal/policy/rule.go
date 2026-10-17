@@ -40,6 +40,16 @@ const (
 	CategoryLimit Category = "limit"
 	// CategoryAnomaly covers statistical anomaly rules (§5.7, G12).
 	CategoryAnomaly Category = "anomaly"
+	// CategoryPII covers deterministic PII detected in the
+	// developer's OWN prompt text at submit-time — the prompt-submit
+	// intervention feature (docs/plans/
+	// prompt-submit-intervention-exploration-2026-09-07.md §5.6).
+	// Distinct from CategoryExfil, which secret-shaped content in a
+	// prompt or outbound request keeps (R-172, extended to
+	// KindUserPrompt) — R-190 below is PII-only so the two categories
+	// never collide on one rule ID (validateRules requires same-ID
+	// rows to agree on category).
+	CategoryPII Category = "pii"
 )
 
 // MatchContext is the per-evaluation working set, built ONCE by the
@@ -133,6 +143,33 @@ type Rule struct {
 	// observe. Set via Override (the [[override]] enforce key) or on
 	// compiled user rules with enforce = true.
 	Enforced bool
+	// Overridable marks the rule ORG-GRANTED OVERRIDABLE (org
+	// guardrail control wave, Track B): the organization published a
+	// bundle that explicitly allows a developer to override this
+	// rule's block on their own node, so the emission seam softens a
+	// deny into an ask wherever the channel can prompt, and the
+	// §6.3 approvals register accepts a scoped grant for it.
+	//
+	// Only the ORG layer may set it (guard/merge.go drops the key on
+	// the user/project layers with a load issue). The zero value —
+	// every rule on an individual, un-enrolled node — means "not
+	// org-granted", which is byte-identical to the pre-wave behaviour:
+	// a deny stays a deny and nothing consults it.
+	Overridable bool
+	// EnforceCappedBy is the policy layer ("org", "user",
+	// "trusted_project") whose [[override]] wrote an explicit
+	// `enforce = false` on this rule, or "" when none did (D-030: an
+	// explicit enforce=false caps the rule at FLAG on every seam, tool
+	// and prompt alike, whatever the engine mode). verdictFor applies the
+	// cap; a later `enforce = true` override clears it.
+	EnforceCappedBy string
+	// ReadsBudgetStamps declares that the row's matcher reads the guard-stamped
+	// spend or usage fields (Event.SessionCostUSD and its siblings). A compiled
+	// policy-file rule sets it when it uses a spend matcher; the built-in budget
+	// rows leave it false because their thresholds are on Config and
+	// Engine.ReadsBudgetStamps reads those directly. It feeds that one
+	// predicate and nothing else (T-418).
+	ReadsBudgetStamps bool
 }
 
 // Override tunes rule rows by public ID without redefining them (spec
@@ -150,6 +187,19 @@ type Override struct {
 	Decision *Decision
 	// Enforced sets Rule.Enforced — the per-rule enforce upgrade.
 	Enforced bool
+	// Overridable sets Rule.Overridable — the org-granted override
+	// grant. Only an ORG-layer [[override]] row ever sets it true
+	// (the guard merge drops it elsewhere); true never turns back to
+	// false through a later override, because the composition rule is
+	// "false wins" and a lower-trust layer cannot grant what the org
+	// withheld.
+	Overridable bool
+	// EnforceOff is an explicit `enforce = false`: it caps the rule at
+	// FLAG (Rule.EnforceCappedBy = Source) and clears Rule.Enforced. The
+	// guard merge decides which layers may write it; New refuses it on a
+	// protected row (an integrity rule, or an org-authoritative hard
+	// budget row) from any source but the org budget boundary.
+	EnforceOff bool
 	// Source labels the layer the override came from ("user",
 	// "project", "org") so the verdict attributes to the layer that
 	// last tuned the rule.

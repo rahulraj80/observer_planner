@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "id": "id",
+      "group": {
+        "id": "id",
+        "display_name": "display_name",
+        "type": "model_group"
+      },
+      "group_type": "batch",
+      "limits": [
+        {
+          "type": "type",
+          "value": 0
+        }
+      ],
+      "models": [
+        "string"
+      ],
+      "type": "rate_limit"
+    }
+  ],
+  "next_page": "next_page"
+}

@@ -34,7 +34,7 @@ func newTestAdapter() *Adapter {
 func parseFixture(t *testing.T, name string) ([]models.ToolEvent, []models.TokenEvent) {
 	t.Helper()
 	a := newTestAdapter()
-	return a.parseTranscript(context.Background(), fixture(t, name), "/proj", "/proj")
+	return a.parseTranscript(context.Background(), fixture(t, name), "/proj", "/proj", "")
 }
 
 func countActions(evs []models.ToolEvent, action string) int {
@@ -54,12 +54,6 @@ func firstAction(evs []models.ToolEvent, action string) (models.ToolEvent, bool)
 		}
 	}
 	return models.ToolEvent{}, false
-}
-
-func TestName(t *testing.T) {
-	if got := newTestAdapter().Name(); got != models.ToolAider {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolAider)
-	}
 }
 
 func TestIsSessionFile(t *testing.T) {
@@ -92,7 +86,7 @@ func TestParseReadonlyFixture(t *testing.T) {
 	if got := countActions(tools, models.ActionUserPrompt); got != 3 {
 		t.Errorf("user prompts = %d, want 3", got)
 	}
-	if got := countActions(tools, models.ActionTaskComplete); got != 2 {
+	if got := countActions(tools, models.ActionAssistantMessage); got != 2 {
 		t.Errorf("assistant texts = %d, want 2", got)
 	}
 	if len(tokens) != 2 {
@@ -266,8 +260,8 @@ func TestParseTokenCount(t *testing.T) {
 func TestDeterministicIDs(t *testing.T) {
 	a := newTestAdapter()
 	data := fixture(t, "readonly.md")
-	t1, k1 := a.parseTranscript(context.Background(), data, "/proj", "/proj")
-	t2, k2 := a.parseTranscript(context.Background(), data, "/proj", "/proj")
+	t1, k1 := a.parseTranscript(context.Background(), data, "/proj", "/proj", "")
+	t2, k2 := a.parseTranscript(context.Background(), data, "/proj", "/proj", "")
 
 	if len(t1) != len(t2) || len(k1) != len(k2) {
 		t.Fatal("event counts differ between parses")
@@ -337,7 +331,7 @@ func TestParseSessionFileWatermark(t *testing.T) {
 func TestResolveProjectRoot(t *testing.T) {
 	dir := t.TempDir()
 	a := newTestAdapter()
-	got := a.resolveProjectRoot(filepath.Join(dir, ".aider.chat.history.md"))
+	got, _, _ := a.resolveProjectRoot(filepath.Join(dir, ".aider.chat.history.md"))
 	// The project root is the transcript's directory, resolved through
 	// git.Resolve. We avoid asserting an exact path (the temp dir could
 	// sit inside a git working tree on some CI hosts), only that a real,
@@ -347,7 +341,7 @@ func TestResolveProjectRoot(t *testing.T) {
 	}
 
 	// The empty/degenerate case yields the placeholder.
-	if p := a.resolveProjectRoot(".aider.chat.history.md"); p == "" {
+	if p, _, _ := a.resolveProjectRoot(".aider.chat.history.md"); p == "" {
 		t.Error("resolveProjectRoot of bare filename returned empty")
 	}
 }

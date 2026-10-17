@@ -1,12 +1,16 @@
 package guard
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/guardfallback"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
 
@@ -18,7 +22,11 @@ import (
 // Parsing is STRICT (unknown keys, unknown matcher fields, missing
 // required fields, invalid regexes are all errors) — `observer guard
 // lint` (G5) calls the same parser, and a policy file that parses
-// here is a policy file that loads. Go's regexp is RE2: linear-time,
+// here is a policy file that loads. The one asymmetry is the ORG
+// layer's unknown keys: the LOADER ignores + notes them so a bundle
+// from a newer server cannot disarm an older node's org floor (see
+// parsePolicyFile), while Lint still reports them so the authoring/
+// publish gate refuses a typo. Go's regexp is RE2: linear-time,
 // no catastrophic backtracking class to lint for (a documented selling
 // point vs PCRE-based competitors).
 
@@ -26,6 +34,15 @@ import (
 const (
 	layerUser    = "user"
 	layerProject = "project"
+	// layerTrustedProject is the dashboard-authored, daemon-local
+	// per-project layer (guard-rule-management-ui plan §3): it lives
+	// under ~/.observer (inside R-160's deny surface, so the agent
+	// cannot write it) and therefore carries user-level weaken/disable
+	// semantics scoped to one project root — the ONE layer allowed a
+	// top-level `disable = [...]` key, and the ONE project-scoped layer
+	// that may relax a decision (never below the org floor). Distinct
+	// from layerProject, the in-repo, agent-writable, escalate-only file.
+	layerTrustedProject = "trusted_project"
 	// layerOrg is the org policy-bundle layer (spec §14.2, G13) — the
 	// same TOML format as user/project files, delivered signed by the
 	// org server and merged as the strictness floor.
@@ -37,6 +54,28 @@ type policyFile struct {
 	layer     string
 	rules     []policy.Rule
 	overrides []rawOverride
+	// notes are non-fatal parse notes: the TOML key paths this binary
+	// did not understand and IGNORED. Only the org layer ever fills
+	// this (user/project files stay strict — see parsePolicyFile).
+	// File order, no de-duplication (the decoder reports each path
+	// once).
+	notes []string
+	// disable is the top-level `disable = [...]` rule-ID list. It is
+	// honored ONLY for the trusted-project layer (an unknown-key error
+	// for every other layer, enforced in parsePolicyFile); the caller
+	// unions it into the per-project engine's Config.Disabled.
+	disable []string
+	// fallbacks is the org layer's `[fallbacks]` table (internal/
+	// guardfallback, D-221): the organization's choice of what an invalid
+	// user policy and a missing sandbox degrade to. Only the ORG layer may
+	// carry it (every other layer refuses the key); the zero value is the
+	// all-defaults set.
+	fallbacks guardfallback.Fallbacks
+	// fallbackProblems are entries of that table this binary could not
+	// honour (an unknown key or value). The authoring gate (Lint) refuses
+	// them; the consumer gate notes them and keeps the default for the
+	// key, because a newer server may know a value this agent does not.
+	fallbackProblems []string
 }
 
 // rawOverride is a parsed [[override]] entry, kept pre-merge so the
@@ -47,13 +86,40 @@ type rawOverride struct {
 	Decision policy.Decision
 	HasDec   bool
 	Enforced bool
-	Layer    string
+	// Overridable is the §14.2 org-granted override grant
+	// (`overridable = true` on an [[override]] row). It is PARSED on
+	// every layer so the key never trips the strict unknown-key check,
+	// but only the ORG layer may act on it — merge.go drops it
+	// elsewhere with a load issue, and `observer guard lint` reports
+	// the same issue against a user/project file.
+	Overridable bool
+	// EnforceOff is set when the row writes `enforce = false`
+	// EXPLICITLY (an absent key leaves it false). It caps the rule at
+	// FLAG on every seam, tool and prompt (D-030; the operator ruling of
+	// 2026-10-02 made the policy form's "Enforce (block/hold, not just
+	// flag)" checkbox, when OFF, mean exactly this; Sol A2-06 carried it
+	// past the org prompt lanes). merge.go decides per layer: the org and
+	// the user / trusted-project layers may write it (not on an
+	// org-floored or integrity rule below the org); the agent-writable
+	// in-repo project layer may not, because it relaxes.
+	EnforceOff bool
+	Layer      string
 }
 
 // tomlPolicyFile is the on-disk shape.
 type tomlPolicyFile struct {
 	Rule     []tomlRule     `toml:"rule"`
 	Override []tomlOverride `toml:"override"`
+	// Disable is the optional top-level `disable = [...]` list. Decoded
+	// for every layer so it never lands in the decoder's Undecoded set,
+	// but parsePolicyFile REJECTS it for any layer except
+	// trusted_project (the "disable is a config posture" split for the
+	// user + in-repo-project layers is preserved as an unknown-key error).
+	Disable []string `toml:"disable"`
+	// Fallbacks is the org-only `[fallbacks]` table (guardfallback.Table).
+	// Decoded as a loose map so a key from a newer server is a fallback
+	// problem (noted on the org layer) rather than a decoder error.
+	Fallbacks map[string]any `toml:"fallbacks"`
 }
 
 // tomlRule is one [[rule]] entry (§4.4).
@@ -71,7 +137,11 @@ type tomlRule struct {
 type tomlOverride struct {
 	Rule     string `toml:"rule"`
 	Decision string `toml:"decision"`
-	Enforce  bool   `toml:"enforce"`
+	// Enforce is a pointer so an explicit `enforce = false` is told
+	// apart from an absent key (rawOverride.EnforceOff).
+	Enforce *bool `toml:"enforce"`
+	// Overridable is org-layer-only (see rawOverride.Overridable).
+	Overridable bool `toml:"overridable"`
 }
 
 // tomlMatchers is the §4.4 matcher vocabulary v1. Fields are AND-ed.
@@ -125,9 +195,12 @@ var validSinks = map[string]struct {
 // same parse + compile pass, PLUS a throwaway engine construction so
 // override targets resolve (an [[override]] on an unknown rule ID is
 // only detectable against the rule tables). layer is "user",
-// "project" or "org" — project and org files additionally get the
-// §4.6 one-way merge pass so relaxation attempts surface as problems
-// here instead of as silent load-time drops (org overrides are
+// "project", "trusted_project" or "org" — project and org files
+// additionally get the §4.6 one-way merge pass so relaxation attempts
+// surface as problems here instead of as silent load-time drops (the
+// trusted_project layer is weaken-allowed, so its standalone merge pass
+// only catches parse/compile problems — the real org-floor check is
+// org-aware and lives in LintTrustedProject; org overrides are
 // escalate-only: the bundle is a strictness floor, and the server's
 // publish path lints with layer "org" so a relaxing bundle is caught
 // BEFORE it is signed). Returns nil when the file is clean.
@@ -135,25 +208,111 @@ var validSinks = map[string]struct {
 // `observer guard lint` (G5) and `observer-org policy publish` (G13)
 // are the callers; a file that lints clean is a file that loads with
 // zero LoadIssues.
+//
+// Lint is the AUTHORING half of a pair: AcceptOrgBundleTOML is the
+// CONSUMER half a node runs over a bundle a possibly-NEWER server
+// signed, and it alone tolerates unknown keys (GUARD-FWD-1 in
+// docs/security.md). Both share lintParsed, so what counts as a FATAL
+// problem is defined once.
 func Lint(raw []byte, layer string) []string {
 	pf, err := parsePolicyFile(raw, layer)
 	if err != nil {
 		return []string{err.Error()}
 	}
+	// Lint stays STRICT on every layer, including org — it is the
+	// AUTHORING gate (see AcceptOrgBundleTOML for the consumer one).
+	// Re-reporting the parse notes here, and short-circuiting on them,
+	// keeps the publish gate byte-identical to the pre-tolerance
+	// behaviour: the same wording, the same single-problem result, and
+	// "fix the typo first" before any downstream problem it caused.
+	if len(pf.fallbackProblems) > 0 {
+		return append([]string(nil), pf.fallbackProblems...)
+	}
+	if len(pf.notes) > 0 {
+		return []string{unknownKeysProblem(pf.notes)}
+	}
+	return lintParsed(pf, layer)
+}
+
+// AcceptOrgBundleTOML is the CONSUMER gate for a signed org bundle:
+// the check a NODE runs before it caches and loads one. It returns the
+// FATAL problems only — everything Lint reports (syntax, bad rule ids,
+// invalid decisions/severities/matchers, §4.6 floor violations, engine
+// construction) EXCEPT the unknown-key report, which comes back as
+// notes instead. Empty problems = accept; notes name the TOML key
+// paths this binary did not understand and ignored.
+//
+// The asymmetry with Lint is deliberate and is the fix for GUARD-FWD-1
+// (docs/security.md): tolerance belongs at CONSUMPTION, strictness at
+// AUTHORING.
+//
+//   - AUTHORING (Lint, layer "org"): the SERVER defines the bundle
+//     vocabulary, so an unknown key there is a typo — `overidable` —
+//     and must be refused before the bundle is signed, stored and
+//     shipped to a fleet. api.LintOrgBundle is that gate.
+//   - CONSUMPTION (this function + parseOrgBundle): the node may be
+//     running an OLDER binary than the server that signed the bundle,
+//     so an unknown key is simply a key from the future. Refusing it
+//     was fail-OPEN — the org layer is escalate-only, so dropping it
+//     can only LOOSEN policy, and one new key would have silently
+//     disarmed every older node's org guardrails.
+//
+// Both gates share lintParsed, so their fatal-problem sets cannot
+// drift. Callers: internal/orgclient's fetch gate (before the cache is
+// written) — the loader half is internal/guard/bundle.go, which
+// surfaces the same notes on PolicyState.Notes.
+func AcceptOrgBundleTOML(raw []byte) (problems, notes []string) {
+	pf, err := parsePolicyFile(raw, layerOrg)
+	if err != nil {
+		return []string{err.Error()}, nil
+	}
+	return lintParsed(pf, layerOrg), pf.notes
+}
+
+// unknownKeysProblem is the one wording for an undecoded-key report,
+// shared by the strict parse error and Lint so the two can never
+// disagree about how an unknown key reads.
+func unknownKeysProblem(keys []string) string {
+	return fmt.Sprintf("unknown keys: %s", strings.Join(keys, ", "))
+}
+
+// lintParsed runs the post-parse half of the checks — the §4.6 merge
+// pass for the layer plus a throwaway engine construction so override
+// targets resolve — over an already-parsed file, and returns the FATAL
+// problems. It is the ONE definition of "fatal" that Lint and
+// AcceptOrgBundleTOML both call, which is what keeps the authoring and
+// consumer gates from drifting apart. Returns nil when clean.
+func lintParsed(pf *policyFile, layer string) []string {
 	var problems []string
 	var extra []policy.Rule
 	var overrides []policy.Override
 	switch layer {
 	case layerProject:
 		var mergeIssues []string
-		extra, overrides, mergeIssues = mergeLayers(nil, nil, pf)
+		extra, overrides, _, mergeIssues = mergeLayers(nil, nil, pf, nil)
+		problems = append(problems, mergeIssues...)
+	case layerTrustedProject:
+		// The trusted layer's own merge pass: weakening/disable are
+		// allowed, so a standalone lint (no org bundle in scope) surfaces
+		// only parse/compile problems here. The REAL org-floor check runs
+		// in LintTrustedProject (org-aware) and in the per-project engine
+		// build — both feed the floor from the actual org bundle.
+		var mergeIssues []string
+		extra, overrides, _, mergeIssues = mergeLayers(nil, nil, nil, pf)
 		problems = append(problems, mergeIssues...)
 	case layerOrg:
 		var mergeIssues []string
-		extra, overrides, mergeIssues = mergeLayers(pf, nil, nil)
+		extra, overrides, _, mergeIssues = mergeLayers(pf, nil, nil, nil)
 		problems = append(problems, mergeIssues...)
 	default:
-		extra, overrides, _ = mergeLayers(nil, pf, nil)
+		// The user layer has no relaxation check to fail in isolation
+		// (its only one is against an org floor, which lint has no
+		// bundle for), but it CAN carry an authoring mistake the merge
+		// reports — an `overridable` key only the org may grant. Take
+		// the issues so lint says what loading would record.
+		var mergeIssues []string
+		extra, overrides, _, mergeIssues = mergeLayers(nil, pf, nil, nil)
+		problems = append(problems, mergeIssues...)
 	}
 	if _, err := policy.New(policy.Config{
 		ExtraRules: extra,
@@ -164,23 +323,99 @@ func Lint(raw []byte, layer string) []string {
 	return problems
 }
 
+// LintTrustedProject lints trusted per-project content EXACTLY as the
+// per-project engine build loads it: the standard trusted-project
+// parse+compile pass PLUS the real §4.6 org-floor check against the org
+// bundle at the configured [guard.rules] org_bundle path (cfg + home
+// resolve it exactly as guard.New does). A trusted relaxation of an
+// org-floored rule is a load issue surfaced HERE, before the write —
+// which the plain Lint(raw, "trusted_project") cannot see because it has
+// no org context. When no org bundle is present the result equals
+// Lint(raw, "trusted_project"): weakening/disabling built-ins is allowed
+// on the trusted layer by design.
+//
+// It is the dashboard's save/validate gate for the trusted-project file;
+// `observer guard lint` uses the pure Lint (no org context) for the CLI.
+func LintTrustedProject(cfg config.GuardConfig, home string, raw []byte) []string {
+	pf, err := parsePolicyFile(raw, layerTrustedProject)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	var org *policyFile
+	if p := OrgBundlePath(cfg, home); p != "" {
+		org = loadVerifiedOrgLayer(os.ReadFile, p)
+	}
+	extra, overrides, _, issues := mergeLayers(org, nil, nil, pf)
+	problems := append([]string{}, issues...)
+	if _, perr := policy.New(policy.Config{
+		ExtraRules: extra,
+		Overrides:  overrides,
+	}); perr != nil {
+		problems = append(problems, perr.Error())
+	}
+	return problems
+}
+
 // parsePolicyFile parses + compiles one policy source. Strict: any
 // problem is an error naming the offending entry.
+//
+// ONE deliberate exception, the org layer's forward-compatibility
+// rule: an unknown key in a SIGNED org bundle is IGNORED and recorded
+// on policyFile.notes instead of failing the parse. Strictness there
+// was fail-OPEN in the worst way — bundle.go turns a parse error into
+// "running without the org layer", so the first bundle using a key a
+// newer server knows would silently disarm the org guard floor on
+// every older node. User and project files stay strict: they are
+// hand-edited locally, and a typo there must fail loudly. Lint
+// re-reports pf.notes as a problem on EVERY layer, so this tolerance
+// reaches only the two CONSUMER gates — AcceptOrgBundleTOML (the
+// node's fetch gate) and parseOrgBundle (the loader) — and never an
+// authoring surface.
 func parsePolicyFile(raw []byte, layer string) (*policyFile, error) {
 	var f tomlPolicyFile
 	meta, err := toml.Decode(string(raw), &f)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	var ignored []string
 	if undec := meta.Undecoded(); len(undec) > 0 {
 		keys := make([]string, 0, len(undec))
 		for _, k := range undec {
 			keys = append(keys, k.String())
 		}
-		return nil, fmt.Errorf("unknown keys: %s", strings.Join(keys, ", "))
+		if layer != layerOrg {
+			return nil, errors.New(unknownKeysProblem(keys))
+		}
+		ignored = keys
+	}
+	// `disable` is a trusted-project-only capability. For the user and
+	// in-repo-project layers it stays an unknown-key error (the field is
+	// decoded, so it would otherwise be silently accepted — this preserves
+	// the strict "disable is a config posture, not a policy-file key"
+	// split). The ORG layer gets the same tolerance as any other key this
+	// binary does not honour there (GUARD-FWD-1): a signed bundle carrying
+	// `disable` is accepted with the key IGNORED and noted, never rejected
+	// — a rejection here would strand the node on a stale bundle (or, from
+	// the on-disk cache, drop the whole org floor: fail-open).
+	if meta.IsDefined("disable") && layer != layerTrustedProject {
+		if layer != layerOrg {
+			return nil, fmt.Errorf("unknown keys: disable")
+		}
+		ignored = append(ignored, "disable")
+		f.Disable = nil
 	}
 
-	pf := &policyFile{layer: layer}
+	pf := &policyFile{layer: layer, notes: ignored, disable: f.Disable}
+	// `[fallbacks]` is the organization's setting (D-221): only a signed org
+	// bundle may carry it. On a user / project file it stays an unknown-key
+	// error, so a developer can never author the org's choice locally.
+	if meta.IsDefined(guardfallback.Table) {
+		if layer != layerOrg {
+			return nil, errors.New(unknownKeysProblem([]string{guardfallback.Table}))
+		}
+		pf.fallbacks, pf.fallbackProblems = guardfallback.Decode(f.Fallbacks)
+		pf.notes = append(pf.notes, pf.fallbackProblems...)
+	}
 	seen := map[string]bool{}
 	for i := range f.Rule {
 		r, err := compileRule(&f.Rule[i], layer)
@@ -197,7 +432,13 @@ func parsePolicyFile(raw []byte, layer string) (*policyFile, error) {
 		if ov.Rule == "" {
 			return nil, fmt.Errorf("override %d: missing rule id", i+1)
 		}
-		ro := rawOverride{RuleID: ov.Rule, Enforced: ov.Enforce, Layer: layer}
+		ro := rawOverride{
+			RuleID:      ov.Rule,
+			Enforced:    ov.Enforce != nil && *ov.Enforce,
+			EnforceOff:  ov.Enforce != nil && !*ov.Enforce,
+			Overridable: ov.Overridable,
+			Layer:       layer,
+		}
 		if ov.Decision != "" {
 			d, err := policy.ParseDecision(ov.Decision)
 			if err != nil {
@@ -213,17 +454,20 @@ func parsePolicyFile(raw []byte, layer string) (*policyFile, error) {
 // PolicyRuleRefs structurally parses raw as a §4.4 policy file and returns
 // the rule IDs it references: overrides = [[override]].rule targets (existing
 // rule IDs whose decisions the file escalates), declared = [[rule]].id
-// entries the file defines itself. It powers the org dashboard's §14.2
-// dry-run statistics (G14): override targets have server-side hit history,
-// newly declared matchers do not. The parse is deliberately LOOSE — no
-// matcher compilation, no unknown-key strictness — because every authoring
+// entries the file defines itself, disabled = the top-level `disable = [...]`
+// list (meaningful only for a trusted-project file; a stray one elsewhere is
+// still reported so the dry-run counts are honest — Lint is what rejects it).
+// It powers the org dashboard's §14.2 dry-run statistics (G14) and the node
+// dashboard's per-layer counts: override targets have server-side hit
+// history, newly declared matchers do not. The parse is deliberately LOOSE —
+// no matcher compilation, no unknown-key strictness — because every authoring
 // surface runs Lint alongside it; a structurally unparseable file returns
 // the parse error. Order follows file order; duplicates are preserved
 // (Lint reports them).
-func PolicyRuleRefs(raw []byte) (overrides, declared []string, err error) {
+func PolicyRuleRefs(raw []byte) (overrides, declared, disabled []string, err error) {
 	var f tomlPolicyFile
 	if _, err := toml.Decode(string(raw), &f); err != nil {
-		return nil, nil, fmt.Errorf("guard.PolicyRuleRefs: parse: %w", err)
+		return nil, nil, nil, fmt.Errorf("guard.PolicyRuleRefs: parse: %w", err)
 	}
 	for _, ov := range f.Override {
 		if ov.Rule != "" {
@@ -235,7 +479,12 @@ func PolicyRuleRefs(raw []byte) (overrides, declared []string, err error) {
 			declared = append(declared, r.ID)
 		}
 	}
-	return overrides, declared, nil
+	for _, id := range f.Disable {
+		if id != "" {
+			disabled = append(disabled, id)
+		}
+	}
+	return overrides, declared, disabled, nil
 }
 
 // compileRule turns one [[rule]] entry into a policy.Rule row.
@@ -245,7 +494,7 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		return zero, fmt.Errorf("missing id")
 	}
 	if policy.IsBuiltinRuleID(tr.ID) {
-		return zero, fmt.Errorf("id collides with built-in rule %s — use [[override]] to tune built-ins", tr.ID)
+		return zero, fmt.Errorf("id collides with built-in rule %s - use [[override]] to tune built-ins", tr.ID)
 	}
 	if tr.Category == "" {
 		return zero, fmt.Errorf("missing category (destructive|boundary|secrets|exfil|posture|mcp|taint|budget|anomaly)")
@@ -268,10 +517,10 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		return zero, err
 	}
 	if cmdScoped == nil && evScoped == nil {
-		return zero, fmt.Errorf("no matchers — the rule would never fire")
+		return zero, fmt.Errorf("no matchers - the rule would never fire")
 	}
 	if cmdScoped != nil && evScoped != nil {
-		return zero, fmt.Errorf("cannot mix command-scoped (command_regex/command_base/arg_contains) and event-scoped matchers in one rule — split into two rules")
+		return zero, fmt.Errorf("cannot mix command-scoped (command_regex/command_base/arg_contains) and event-scoped matchers in one rule - split into two rules")
 	}
 
 	// applies_to: explicit list wins; otherwise the matchers imply it.
@@ -286,7 +535,7 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		}
 	}
 	if len(kinds) == 0 {
-		return zero, fmt.Errorf("cannot infer applies_to from the matchers — set applies_to explicitly")
+		return zero, fmt.Errorf("cannot infer applies_to from the matchers - set applies_to explicitly")
 	}
 
 	// Observe = min(decision, flag): observe mode records, never
@@ -307,6 +556,9 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		Doc:       layer + " rule " + tr.ID,
 		Source:    layer,
 		Enforced:  tr.Enforce,
+		// A spend matcher reads the guard's budget stamp, so the engine must
+		// keep the budget lookup on for this rule (T-418).
+		ReadsBudgetStamps: tr.Match.SessionCostUSDGt > 0,
 	}
 	r.Match = evScoped
 	r.MatchCmd = cmdScoped
@@ -478,7 +730,7 @@ func compileEvConds(m *tomlMatchers) (conds []evCond, kinds []policy.EventKind, 
 		limit := m.SessionCostUSDGt
 		conds = append(conds, func(ctx *policy.MatchContext) (bool, string) {
 			if ctx.Event.SessionCostUSD > limit {
-				return true, fmt.Sprintf("session spend $%.2f > $%.2f", ctx.Event.SessionCostUSD, limit)
+				return true, policy.SessionCostConditionReason(ctx.Event.SessionCostUSD, limit)
 			}
 			return false, ""
 		})

@@ -734,7 +734,7 @@
       const title =
         kind === "block"
           ? "SuperBased Observer blocked this send"
-          : "SuperBased Observer — sensitive data detected";
+          : "SuperBased Observer - sensitive data detected";
       overlayEl.textContent = title + ": " + detail;
       overlayEl.style.display = "block";
       clearTimeout(showOverlay._t);

@@ -1,0 +1,33 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "role_01J1F8PROJ",
+      "name": "API Project Key Manager",
+      "permissions": [
+        "api.organization.projects.api_keys.read",
+        "api.organization.projects.api_keys.write"
+      ],
+      "resource_type": "api.project",
+      "predefined_role": false,
+      "description": "Allows managing API keys for the project",
+      "created_at": 1711471533,
+      "updated_at": 1711472599,
+      "created_by": "user_abc123",
+      "created_by_user_obj": {
+        "id": "user_abc123",
+        "name": "Ada Lovelace",
+        "email": "ada@example.com"
+      },
+      "metadata": {},
+      "assignment_sources": [
+        {
+          "principal_id": "user_abc123",
+          "principal_type": "user"
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next": null
+}

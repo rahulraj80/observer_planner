@@ -1,0 +1,26 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "consumption_by_date": "VerifiedOfficial",
+    "total_acus": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b890287818f1717f70d20e8b317b724d71452bf502e6f0edef65e115d90fd369",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/consumption/daily",
+    "query": {
+      "time_after": "1791187200",
+      "time_before": "1791360000"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized empty window: required members present, no day.",
+  "scenario": "empty_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.consumption_daily"
+}

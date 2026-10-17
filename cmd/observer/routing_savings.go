@@ -1,8 +1,11 @@
+//go:build !sbo_omit_proxy_routing
+
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,7 +15,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
 	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -50,7 +52,7 @@ func newRoutingSavingsCmd() *cobra.Command {
 			"provider-invoice deltas.\n\n" +
 			"Reading the error bars: '$/decision = m ± c' is the group's mean\n" +
 			"per-decision saving with a 95% confidence interval over the per-decision\n" +
-			"distribution (§R7.2 error-bar discipline — never a bare point claim).\n" +
+			"distribution (§R7.2 error-bar discipline - never a bare point claim).\n" +
 			"A wide interval means few or noisy decisions: treat the mean as noise\n" +
 			"until the interval tightens, and treat overlapping intervals between\n" +
 			"groups as 'no detectable difference'.",
@@ -76,7 +78,7 @@ func newRoutingSavingsCmd() *cobra.Command {
 				return nil
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Routing savings — last %dd: %d decisions, realized $%.2f (est.), would-have $%.2f\n",
+			fmt.Fprintf(out, "Routing savings - last %dd: %d decisions, realized $%.2f (est.), would-have $%.2f\n",
 				rep.WindowDays, rep.Decisions, rep.RealizedUSD, rep.WouldHaveUSD)
 			printGroups(out, "by project", rep.ByProject)
 			printGroups(out, "by tool", rep.ByTool)
@@ -151,7 +153,7 @@ func newRoutingExplainCmd() *cobra.Command {
 			if d.APITurnID != nil {
 				fmt.Fprintf(out, "  api turn    %d\n", *d.APITurnID)
 			} else {
-				fmt.Fprintln(out, "  api turn    (none — the turn never landed or predates linkage)")
+				fmt.Fprintln(out, "  api turn    (none - the turn never landed or predates linkage)")
 			}
 			return nil
 		},
@@ -168,7 +170,7 @@ func newRoutingAdviseCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "advise",
-		Short: "Recent routing decisions feed — what the router did or would have done (§R17.6)",
+		Short: "Recent routing decisions feed - what the router did or would have done (§R17.6)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
 			if err != nil {
@@ -187,7 +189,7 @@ func newRoutingAdviseCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if len(rows) == 0 {
-				fmt.Fprintln(out, "no routing decisions in the last 30d — enable [routing] and route traffic through the proxy")
+				fmt.Fprintln(out, "no routing decisions in the last 30d - enable [routing] and route traffic through the proxy")
 				return nil
 			}
 			for _, d := range rows {
@@ -216,7 +218,7 @@ func newRoutingShadowCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "shadow",
-		Short: "Advise-shadow report: would-have savings vs quality flags — the §R18.2 promotion surface",
+		Short: "Advise-shadow report: would-have savings vs quality flags - the §R18.2 promotion surface",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			days, err := parseWindowDays(window)
 			if err != nil {
@@ -238,7 +240,7 @@ func newRoutingShadowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			facts.Price = routingPriceFn(cost.NewEngine(cfg.Intelligence))
+			facts.Price = routingPriceFn(acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default()))
 			evidence := modelvalue.Build(facts, modelvalue.Options{}).EvidenceByKindTier()
 
 			rep := store.BuildAdviseShadowReport(rows, evidence, routing.NewTierResolver().Table(), days)
@@ -248,7 +250,7 @@ func newRoutingShadowCmd() *cobra.Command {
 				return nil
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Advise shadow — last %dd: %d advise decisions, %d would reroute\n",
+			fmt.Fprintf(out, "Advise shadow - last %dd: %d advise decisions, %d would reroute\n",
 				rep.WindowDays, rep.AdviseDecisions, rep.WouldReroute)
 			fmt.Fprintf(out, "  would have saved   $%.2f (net of $%.2f cache forfeits)\n", rep.WouldSaveUSD, rep.CacheForfeitUSD)
 			fmt.Fprintf(out, "  quality flags      %d (%d moves evidence-backed)\n", rep.QualityFlags, rep.EvidenceBackedMoves)
@@ -262,9 +264,9 @@ func newRoutingShadowCmd() *cobra.Command {
 				}
 			}
 			if rep.ReadyToPromote {
-				fmt.Fprintln(out, "  gate read: savings with ZERO quality flags — promotion evidence present (operator-judged, §R22)")
+				fmt.Fprintln(out, "  gate read: savings with ZERO quality flags - promotion evidence present (operator-judged, §R22)")
 			} else {
-				fmt.Fprintln(out, "  gate read: not yet — needs ≥50 decisions, positive savings, zero quality flags (§R22)")
+				fmt.Fprintln(out, "  gate read: not yet - needs ≥50 decisions, positive savings, zero quality flags (§R22)")
 			}
 			fmt.Fprintf(out, "\nnote: %s\n", rep.Note)
 			return nil
@@ -282,7 +284,7 @@ func newRoutingImportBenchmarkCmd() *cobra.Command {
 		Short: "Validate a §R7.3 benchmark file and print the tier placements it derives (dry-run)",
 		Long: "Parses a versioned RouterBench/RouterEval-format coding-score file and\n" +
 			"prints the tier placements it would derive. To ACTIVATE an import, add\n" +
-			"the file to [routing] benchmark_files in config.toml — placements load\n" +
+			"the file to [routing] benchmark_files in config.toml - placements load\n" +
 			"at daemon start with provenance logged; explicit [routing.tiers]\n" +
 			"overrides always win.",
 		Args: cobra.ExactArgs(1),

@@ -58,7 +58,7 @@ export function hoverMarkdown(state: FileStateResponse): string {
   }
   if ((state.stale_rereads_24h ?? 0) > 0) {
     lines.push(
-      `**Stale re-reads (24h)**: ${state.stale_rereads_24h} — these are flagged, not prevented`,
+      `**Stale re-reads (24h)**: ${state.stale_rereads_24h} - these are flagged, not prevented`,
     );
   }
   if ((state.tools_touched ?? []).length > 0) {

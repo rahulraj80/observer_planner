@@ -112,14 +112,14 @@ export class DaemonManager implements vscode.Disposable {
   async start(): Promise<DaemonState> {
     if (this.state.mode === 'detect') {
       void vscode.window.showInformationMessage(
-        'SuperBased: daemon.mode is "detect" — set it to "managed" or "auto" to allow the extension to spawn the daemon.',
+        'SuperBased: daemon.mode is "detect" - set it to "managed" or "auto" to allow the extension to spawn the daemon.',
       );
       return this.state;
     }
     const live = await readLiveLocks(dbDirDefault());
     if (live.length > 0) {
       void vscode.window.showInformationMessage(
-        `SuperBased: already running (PID ${live[0].pid}) — attaching instead.`,
+        `SuperBased: already running (PID ${live[0].pid}) - attaching instead.`,
       );
       this.setState({ status: 'attached', lock: live[0] });
       return this.state;
@@ -151,7 +151,7 @@ export class DaemonManager implements vscode.Disposable {
     }
     await new Promise((r) => setTimeout(r, SIGTERM_GRACE_MS));
     if (pid && processAlive(pid)) {
-      output.appendLine(`PID ${pid} still alive after ${SIGTERM_GRACE_MS}ms — sending SIGKILL`);
+      output.appendLine(`PID ${pid} still alive after ${SIGTERM_GRACE_MS}ms - sending SIGKILL`);
       try {
         this.child.kill('SIGKILL');
       } catch (err) {
@@ -291,7 +291,7 @@ export class DaemonManager implements vscode.Disposable {
 
   private async escalateCrash(): Promise<void> {
     const message =
-      'SuperBased: daemon crashed 4 times in a row — auto-restart paused. Check the Output channel.';
+      'SuperBased: daemon crashed 4 times in a row - auto-restart paused. Check the Output channel.';
     const choice = await vscode.window.showErrorMessage(
       message,
       'Open Output Channel',

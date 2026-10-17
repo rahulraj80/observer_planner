@@ -20,14 +20,19 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/marmutapp/superbased-observer/internal/clientwire"
+	"github.com/marmutapp/superbased-observer/internal/codextrust"
+	"github.com/marmutapp/superbased-observer/internal/hook"
+	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/proxyroute"
+	"github.com/marmutapp/superbased-observer/internal/routeprov"
+	"github.com/marmutapp/superbased-observer/internal/shimguard"
 )
 
 // codexSetupSnapshot is the GET /api/setup/codex response. The frontend
@@ -66,6 +71,81 @@ type codexSetupSnapshot struct {
 type codexSetupPostRequest struct {
 	Force  bool `json:"force"`
 	DryRun bool `json:"dry_run"`
+	// Undo removes the route instead of writing it (proxyroute.Unregister*,
+	// the seam `observer uninstall` uses). Only this install's own route is
+	// removed; force does not apply.
+	Undo bool `json:"undo"`
+}
+
+// routeUndoResponse is the POST {"undo": true} response for both tools.
+// Removed is true when the route was (or, with dry_run, would be) removed;
+// false means there was nothing of this install's to remove, and BaseURL
+// then names what the file points at, if anything.
+type routeUndoResponse struct {
+	Tool       string `json:"tool"`
+	ConfigPath string `json:"config_path"`
+	BaseURL    string `json:"base_url,omitempty"`
+	Removed    bool   `json:"removed"`
+	DryRun     bool   `json:"dry_run"`
+	Error      string `json:"error,omitempty"`
+	Snapshot   any    `json:"snapshot"`
+}
+
+// undoRoute runs one tool's route removal through clientwire.RouteRemover
+// (the proxyroute undo `observer uninstall` runs) and answers
+// the POST. A real removal is audited like the other dashboard writes.
+func (s *Server) undoRoute(
+	w http.ResponseWriter,
+	r *http.Request,
+	body codexSetupPostRequest,
+	tool string,
+	snapshot func() any,
+) {
+	// Review M3-05: removing a proxy route is a config write; it carries the
+	// confirm token like every other dashboard write.
+	if !requireJSONConfirm(w, r) {
+		return
+	}
+	remove, ok := clientwire.RouteRemover(tool)
+	if !ok {
+		http.Error(w, "no removable proxy route for "+tool, http.StatusBadRequest)
+		return
+	}
+	port := s.opts.ProxyPort
+	if port <= 0 {
+		port = 8820
+	}
+	reg, err := proxyroute.NewRegistrar(proxyroute.RegisterOptions{
+		Writer:    routeprov.WriterSetup,
+		ProxyPort: port,
+		DryRun:    body.DryRun,
+		Lock:      hook.LockSettingsFile,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	res := remove(reg)
+	resp := routeUndoResponse{
+		Tool:       res.Tool,
+		ConfigPath: res.ConfigPath,
+		BaseURL:    res.BaseURL,
+		Removed:    res.Added && res.Error == nil,
+		DryRun:     res.DryRun,
+	}
+	if res.Error != nil {
+		resp.Error = res.Error.Error()
+		resp.Snapshot = snapshot()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+	if resp.Removed && !resp.DryRun {
+		s.recordManageAudit(r, "proxy_route_undo", "tool="+res.Tool)
+	}
+	resp.Snapshot = snapshot()
+	writeJSON(w, resp)
 }
 
 // codexSetupPostResponse is the POST response shape; mirrors
@@ -103,7 +183,13 @@ func (s *Server) handleSetupCodex(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if body.Undo {
+			s.undoRoute(w, r, body, "codex",
+				func() any { return s.codexSetupSnapshot() })
+			return
+		}
 		reg, err := proxyroute.NewRegistrar(proxyroute.RegisterOptions{
+			Writer:    routeprov.WriterSetup,
 			ProxyPort: s.opts.ProxyPort,
 			DryRun:    body.DryRun,
 			Force:     body.Force,
@@ -329,11 +415,17 @@ func (s *Server) handleSetupClaude(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if body.Undo {
+			s.undoRoute(w, r, body, "claude-code",
+				func() any { return s.claudeSetupSnapshot() })
+			return
+		}
 		port := s.opts.ProxyPort
 		if port <= 0 {
 			port = 8820
 		}
 		reg, err := proxyroute.NewRegistrar(proxyroute.RegisterOptions{
+			Writer:    routeprov.WriterSetup,
 			ProxyPort: port,
 			DryRun:    body.DryRun,
 			Force:     body.Force,
@@ -386,7 +478,9 @@ func (s *Server) claudeSetupSnapshot() claudeSetupSnapshot {
 	if hasOAuthAccessToken(out.CredentialsPath) {
 		out.HasOAuthCredentials = true
 	}
-	if path, err := exec.LookPath("claude"); err == nil {
+	// shimguard.LookPath skips a command-wrapping shim: a shim named
+	// `claude` is not a Claude Code install.
+	if path, err := shimguard.LookPath("claude"); err == nil {
 		out.ClaudeBinaryFound = true
 		out.ClaudeBinaryPath = path
 	}
@@ -449,7 +543,7 @@ func hasOAuthAccessToken(path string) bool {
 	if path == "" {
 		return false
 	}
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // G703: the Claude credentials path under the operator's own home, presence check only
 	if err != nil {
 		return false
 	}
@@ -466,12 +560,14 @@ func hasOAuthAccessToken(path string) bool {
 
 // codexHookTrustSnapshot is the GET /api/setup/codex-hooks response.
 // Surfaces the only user-actionable gap in the codex hook integration:
-// each registered hook entry must be manually trusted via the codex
-// `/hooks` slash command before codex will dispatch it. The trust
-// hash algorithm is opaque (not exposed via any `codex` subcommand and
-// changes across releases), so observer cannot pre-trust on the
-// user's behalf — we surface the gap prominently and tell the user
-// exactly what to do.
+// each registered hook entry must be trusted inside codex (`/hooks`)
+// before codex will dispatch it. The state is computed by
+// internal/codextrust (the one owner, shared with `observer doctor`'s
+// codex.hook_trust): it recomputes Codex's trust hash to tell a CHANGED
+// entry from a trusted one, reads `enabled = false`, and lists every
+// event Observer registers (from the integration registry) so an event a
+// newer Observer adds shows up before hooks.json carries it. Detection
+// only: Observer never trusts a hook on the user's behalf (D-148).
 //
 // Status values:
 //
@@ -480,21 +576,35 @@ func hasOAuthAccessToken(path string) bool {
 //   - "config_missing":    hooks.json has observer entries but
 //     config.toml doesn't exist (codex never opened
 //     since hook install)
-//   - "needs_trust":       at least one observer hook lacks a
-//     trusted_hash entry — user must run /hooks
-//   - "all_trusted":       every observer hook is trusted; nothing to do
 //   - "feature_disabled":  hooks file is set up but [features].hooks=false
-//     in config.toml — codex won't dispatch hooks
-//     regardless of trust state
+//     in config.toml (codex won't dispatch hooks
+//     regardless of trust state)
+//   - "needs_trust":       at least one observer entry will not run
+//     (never trusted, changed since trusted, or
+//     switched off), so the user must visit /hooks
+//   - "needs_register":    every present entry runs, but an event Observer
+//     registers is missing from hooks.json
+//   - "all_trusted":       every observer event is present and trusted
 type codexHookTrustSnapshot struct {
-	Status             string   `json:"status"`
-	HooksFile          string   `json:"hooks_file,omitempty"`
-	ConfigFile         string   `json:"config_file,omitempty"`
-	RegisteredEvents   []string `json:"registered_events,omitempty"`
-	TrustedEvents      []string `json:"trusted_events,omitempty"`
-	UntrustedEvents    []string `json:"untrusted_events,omitempty"`
-	FeatureFlagEnabled bool     `json:"feature_flag_enabled"`
-	Instruction        string   `json:"instruction,omitempty"`
+	Status           string   `json:"status"`
+	HooksFile        string   `json:"hooks_file,omitempty"`
+	ConfigFile       string   `json:"config_file,omitempty"`
+	RegisteredEvents []string `json:"registered_events,omitempty"`
+	TrustedEvents    []string `json:"trusted_events,omitempty"`
+	// UntrustedEvents is every present entry Codex will not run
+	// (untrusted, modified or disabled).
+	UntrustedEvents []string `json:"untrusted_events,omitempty"`
+	ModifiedEvents  []string `json:"modified_events,omitempty"`
+	DisabledEvents  []string `json:"disabled_events,omitempty"`
+	MissingEvents   []string `json:"missing_events,omitempty"`
+	// Entries is the per-event state table the card renders.
+	Entries []codextrust.Entry `json:"entries,omitempty"`
+	// HashVerified is false when no recorded trust hash reproduces (a
+	// Codex release that hashes differently): a changed entry then cannot
+	// be told apart from a trusted one.
+	HashVerified       bool   `json:"hash_verified"`
+	FeatureFlagEnabled bool   `json:"feature_flag_enabled"`
+	Instruction        string `json:"instruction,omitempty"`
 }
 
 // handleSetupCodexHooks serves /api/setup/codex-hooks (GET only).
@@ -510,8 +620,7 @@ func (s *Server) handleSetupCodexHooks(w http.ResponseWriter, r *http.Request) {
 }
 
 // codexHookTrustSnapshot reads ~/.codex/hooks.json + ~/.codex/config.toml
-// and computes the trust state across observer-owned hook entries. Pure
-// read; never mutates.
+// and classifies every observer Codex event. Pure read; never mutates.
 func (s *Server) codexHookTrustSnapshot() codexHookTrustSnapshot {
 	out := codexHookTrustSnapshot{}
 	home, err := os.UserHomeDir()
@@ -532,110 +641,100 @@ func (s *Server) codexHookTrustSnapshot() codexHookTrustSnapshot {
 		out.Status = "no_hooks"
 		return out
 	}
-	var hooksFile struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Type    string `json:"type"`
-				Command string `json:"command"`
-			} `json:"hooks"`
-		} `json:"hooks"`
+	cfgRaw, cfgErr := os.ReadFile(out.ConfigFile)
+	if cfgErr != nil {
+		cfgRaw = nil
 	}
-	if err := json.Unmarshal(hooksRaw, &hooksFile); err != nil {
-		out.Status = "no_hooks"
-		return out
+	var expected []string
+	if c, ok := integration.For(models.ToolCodex); ok {
+		expected = c.Hook.RegisteredEvents()
 	}
-	for event, groups := range hooksFile.Hooks {
-		for _, g := range groups {
-			for _, h := range g.Hooks {
-				if h.Type == "command" && strings.Contains(h.Command, " hook codex ") {
-					out.RegisteredEvents = append(out.RegisteredEvents, event)
-					break
-				}
-			}
+	rep, err := codextrust.Classify(codextrust.Input{
+		HooksPath:  out.HooksFile,
+		HooksJSON:  hooksRaw,
+		ConfigTOML: cfgRaw,
+		Expected:   expected,
+		Owned:      func(cmd string) bool { return strings.Contains(cmd, " hook codex ") },
+	})
+	if err != nil {
+		// A broken config.toml still lets hooks.json say what is ours.
+		rep, err = codextrust.Classify(codextrust.Input{
+			HooksPath: out.HooksFile, HooksJSON: hooksRaw, Expected: expected,
+			Owned: func(cmd string) bool { return strings.Contains(cmd, " hook codex ") },
+		})
+		if err != nil {
+			out.Status = "no_hooks"
+			return out
 		}
 	}
-	sort.Strings(out.RegisteredEvents)
+	out.Entries = rep.Entries
+	out.HashVerified = rep.HashVerified
+	out.FeatureFlagEnabled = rep.FeatureHooks
+	for _, e := range rep.Entries {
+		if e.State != codextrust.StateMissing {
+			out.RegisteredEvents = append(out.RegisteredEvents, e.Event)
+		}
+	}
 	if len(out.RegisteredEvents) == 0 {
 		out.Status = "no_hooks"
+		out.Entries = nil
 		return out
 	}
+	out.TrustedEvents = rep.Events(codextrust.StateTrusted)
+	out.UntrustedEvents = rep.Events(codextrust.StateUntrusted, codextrust.StateModified, codextrust.StateDisabled)
+	out.ModifiedEvents = rep.Events(codextrust.StateModified)
+	out.DisabledEvents = rep.Events(codextrust.StateDisabled)
+	out.MissingEvents = rep.Events(codextrust.StateMissing)
 
-	cfgRaw, err := os.ReadFile(out.ConfigFile)
-	if err != nil {
+	switch {
+	case cfgErr != nil:
 		out.Status = "config_missing"
+		out.TrustedEvents = nil
 		out.UntrustedEvents = out.RegisteredEvents
-		out.Instruction = codexHookTrustInstruction(out.UntrustedEvents)
-		return out
-	}
-	root := map[string]any{}
-	if len(cfgRaw) > 0 {
-		_ = toml.Unmarshal(cfgRaw, &root)
-	}
-	if features, _ := root["features"].(map[string]any); features != nil {
-		if v, _ := features["hooks"].(bool); v {
-			out.FeatureFlagEnabled = true
-		}
-	}
-	if !out.FeatureFlagEnabled {
+		out.Instruction = codexHookTrustInstruction(out.UntrustedEvents, nil, nil)
+	case !out.FeatureFlagEnabled:
 		out.Status = "feature_disabled"
 		out.UntrustedEvents = out.RegisteredEvents
 		out.Instruction = "set [features].hooks = true in " + out.ConfigFile +
-			" — observer init --codex sets this automatically; codex won't dispatch hooks without it"
-		return out
-	}
-
-	hooksState, _ := root["hooks"].(map[string]any)
-	state, _ := hooksState["state"].(map[string]any)
-	trusted := map[string]bool{}
-	for key, v := range state {
-		entry, _ := v.(map[string]any)
-		if hash, _ := entry["trusted_hash"].(string); hash == "" {
-			continue
-		}
-		if !strings.HasPrefix(key, out.HooksFile+":") {
-			continue
-		}
-		rest := strings.TrimPrefix(key, out.HooksFile+":")
-		parts := strings.SplitN(rest, ":", 2)
-		if len(parts) == 0 {
-			continue
-		}
-		trusted[snakeToCamelEvent(parts[0])] = true
-	}
-	for _, e := range out.RegisteredEvents {
-		if trusted[e] {
-			out.TrustedEvents = append(out.TrustedEvents, e)
-		} else {
-			out.UntrustedEvents = append(out.UntrustedEvents, e)
-		}
-	}
-	if len(out.UntrustedEvents) == 0 {
+			" (the Set up wizard's Hooks step for codex sets this automatically); codex won't dispatch hooks without it"
+	case len(out.UntrustedEvents) > 0:
+		out.Status = "needs_trust"
+		out.Instruction = codexHookTrustInstruction(out.UntrustedEvents, out.ModifiedEvents, out.DisabledEvents)
+	case len(out.MissingEvents) > 0:
+		out.Status = "needs_register"
+		out.Instruction = "Observer also registers " + strings.Join(out.MissingEvents, ", ") +
+			", which hooks.json does not carry yet: run the Set up wizard's Hooks step for codex (or restart the daemon, which auto-registers hooks), then trust the new entries in codex /hooks"
+	default:
 		out.Status = "all_trusted"
-		return out
 	}
-	out.Status = "needs_trust"
-	out.Instruction = codexHookTrustInstruction(out.UntrustedEvents)
 	return out
 }
 
-func codexHookTrustInstruction(events []string) string {
-	return "open `codex` and run /hooks to mark these entries trusted: " +
-		strings.Join(events, ", ") + ". one-time setup; trust persists in ~/.codex/config.toml"
-}
-
-// snakeToCamelEvent converts e.g. "session_start" → "SessionStart".
-// Mirrors snakeToCamel in internal/diag/doctor.go but is duplicated here
-// to avoid a cross-package dep on diag for one trivial helper.
-func snakeToCamelEvent(s string) string {
-	if s == "" {
-		return ""
+// codexHookTrustInstruction tells the user exactly what to do inside
+// codex, naming each event once under the action it needs. untrusted is
+// every entry codex will not run (it includes modified and disabled).
+// Observer never does it for them (D-148).
+func codexHookTrustInstruction(untrusted, modified, disabled []string) string {
+	other := map[string]bool{}
+	for _, e := range append(append([]string{}, modified...), disabled...) {
+		other[e] = true
 	}
-	parts := strings.Split(s, "_")
-	for i, p := range parts {
-		if p == "" {
-			continue
+	var never []string
+	for _, e := range untrusted {
+		if !other[e] {
+			never = append(never, e)
 		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
 	}
-	return strings.Join(parts, "")
+	var parts []string
+	if len(never) > 0 {
+		parts = append(parts, "trust "+strings.Join(never, ", "))
+	}
+	if len(modified) > 0 {
+		parts = append(parts, "re-trust "+strings.Join(modified, ", ")+" (changed since you trusted it)")
+	}
+	if len(disabled) > 0 {
+		parts = append(parts, "turn "+strings.Join(disabled, ", ")+" back on (switched off)")
+	}
+	return "open `codex`, run /hooks and " + strings.Join(parts, "; ") +
+		". Trust persists in ~/.codex/config.toml until the hook command changes."
 }

@@ -49,7 +49,44 @@ type UnitOptions struct {
 	// Env adds extra Environment= lines (rendered sorted for a
 	// deterministic unit file). PATH is always set to a sane default.
 	Env map[string]string
+	// Path, when non-empty, becomes the unit's Environment=PATH= value —
+	// normally the caller's merged (process + login-shell) PATH from
+	// toolresolve.MergedPathDirs, joined with ":". A colon-joined string
+	// rather than a []string keeps this package's only PATH-shaped
+	// input symmetric with the systemd Environment= line it renders,
+	// and lets a caller that has nothing to report (a failed capture)
+	// pass "" and get DefaultPath instead of an empty/malformed line.
+	Path string
+	// Runs names what `observer start` runs on this node, in order, for the
+	// unit's Description (T-744: a build or selection without the proxy
+	// must not be described as one). nil keeps the full set (proxy, watcher,
+	// dashboard).
+	Runs []string
 }
+
+// defaultRuns is what a full node's `observer start` runs.
+var defaultRuns = []string{"proxy", "watcher", "dashboard"}
+
+// Description is the unit's Description= value for runs (nil: the full set).
+func Description(runs []string) string {
+	if runs == nil {
+		runs = defaultRuns
+	}
+	if len(runs) == 0 {
+		return "SuperBased Observer"
+	}
+	return "SuperBased Observer (" + strings.Join(runs, " + ") + ")"
+}
+
+// DefaultPath is systemd's own manager default and the fallback used when
+// UnitOptions.Path is empty. It has no ~/.local/bin, no npm global-prefix
+// bin dir, and no version-manager shims, so a daemon started under it
+// cannot see the operator's npm-installed AI-tool binaries (the DI-04/
+// DI-23 class of bug — see docs/plans/dashboard-install-gap-remediation-
+// research-2026-09-02.md §4.4). Callers should prefer populating
+// UnitOptions.Path from toolresolve.MergedPathDirs; this constant is only
+// the last-resort fallback when that capture returns nothing.
+const DefaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 // RenderUnit renders the systemd service unit text for opts. The output
 // is deterministic (Env keys are sorted) so a re-install with identical
@@ -64,14 +101,28 @@ func RenderUnit(opts UnitOptions) string {
 
 	var b strings.Builder
 	b.WriteString("[Unit]\n")
-	b.WriteString("Description=SuperBased Observer (proxy + watcher + dashboard)\n")
+	b.WriteString("Description=" + Description(opts.Runs) + "\n")
 	b.WriteString("After=network.target\n\n")
 	b.WriteString("[Service]\n")
 	b.WriteString("Type=simple\n")
 	b.WriteString("ExecStart=" + execStart + "\n")
-	b.WriteString("Restart=always\n")
+	// on-failure, not always: systemd excludes SIGTERM from what counts as
+	// a "failure" restart trigger (systemd.service(5)), so this unit does
+	// NOT relaunch itself during scripts/restart-daemon.sh's deliberate
+	// graceful `kill -TERM` down-window — the script's own relaunch owns
+	// that transition. `always` fought the script: systemd would race it
+	// back onto :8820 mid-restart, and the two relaunches collided.
+	b.WriteString("Restart=on-failure\n")
 	b.WriteString("RestartSec=3\n")
-	b.WriteString("Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
+	path := opts.Path
+	if path == "" {
+		path = DefaultPath
+	}
+	// Quote the WHOLE assignment: systemd word-splits an unquoted Environment=
+	// value, so a merged PATH carrying a spaced dir (WSL: /mnt/c/Program Files/...)
+	// would be truncated at the space and reintroduce the exit-127 class this
+	// line exists to close (review F2, 2026-09-03).
+	b.WriteString("Environment=\"PATH=" + path + "\"\n")
 
 	keys := make([]string, 0, len(opts.Env))
 	for k := range opts.Env {

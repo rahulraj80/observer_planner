@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package dashboard
 
 import (
@@ -171,7 +173,7 @@ func TestAPIRoutingApply(t *testing.T) {
 		t.Errorf("evidence basis missing: %+v", c)
 	}
 	if c.Deltas == nil {
-		t.Error("deltas key absent — the §R7.2 rows must be present even when empty")
+		t.Error("deltas key absent - the §R7.2 rows must be present even when empty")
 	}
 	if preview.Note == "" {
 		t.Error("honesty note missing")

@@ -1,0 +1,16 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "project.rate_limit",
+      "id": "rl-ada",
+      "model": "ada",
+      "max_requests_per_1_minute": 600,
+      "max_tokens_per_1_minute": 150000,
+      "max_images_per_1_minute": 10
+    }
+  ],
+  "first_id": "rl-ada",
+  "last_id": "rl-ada",
+  "has_more": true
+}

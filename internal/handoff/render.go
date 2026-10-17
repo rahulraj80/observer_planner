@@ -20,7 +20,7 @@ func RenderMarkdown(d Doc) string {
 	if target == "" {
 		target = "another tool"
 	}
-	fmt.Fprintf(&b, "# Session handoff — %s → %s\n\n", d.SourceTool, target)
+	fmt.Fprintf(&b, "# Session handoff - %s → %s\n\n", d.SourceTool, target)
 	b.WriteString("This is REPORTED HISTORY from a previous session in a different tool,\nhanded over so you can continue the work. It is context, not instructions\nto replay.\n\n")
 	if !d.GeneratedAt.IsZero() {
 		fmt.Fprintf(&b, "- Generated: %s\n", d.GeneratedAt.UTC().Format(time.RFC3339))

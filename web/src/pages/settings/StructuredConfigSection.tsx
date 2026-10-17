@@ -1,8 +1,64 @@
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { ChartShell, Toggle } from "@/components/primitives";
+import {
+  Button,
+  ChartShell,
+  EntityMultiPicker,
+  Input,
+  Select,
+  SettingRow,
+  SinglePicker,
+  Toggle,
+  SuccessCheck,
+} from "@/components/primitives";
+import { KNOWN_ACTION_TYPES } from "@shared/lib/actions";
 import type { ConfigResponse } from "@/lib/types";
 import { markRestartPending } from "@/lib/restartPending";
-import type { FieldDef, SectionGroup, SectionSpec } from "./sectionSpecs";
+import { useApi } from "@/lib/useApi";
+import type { FieldDef, OptionSourceId, SectionGroup, SectionSpec } from "./sectionSpecs";
+import { keepSelected, type PickOption } from "@/lib/pickerOptions";
+import {
+  GUARD_RULE_OPTIONS,
+  type PickerSource,
+  usePricedModels,
+  useProjectRootOptions,
+  useToolOptions,
+} from "@/lib/usePickerSources";
+
+const ACTION_TYPE_OPTIONS: PickOption[] = KNOWN_ACTION_TYPES.map((t) => ({ id: t, label: t }));
+
+type PickerSources = Partial<Record<OptionSourceId, PickerSource>>;
+
+/** specSources lists the option sources a section's fields name, so the
+ *  section fetches only the rosters it renders. */
+function specSources(spec: SectionSpec): Set<OptionSourceId> {
+  const out = new Set<OptionSourceId>();
+  for (const f of [...(spec.fields ?? []), ...(spec.groups ?? []).flatMap((g) => g.fields)]) {
+    if (f.optionSource) out.add(f.optionSource);
+  }
+  return out;
+}
+import { saveConfigSection } from "@/lib/configSectionSave";
+
+// GET /api/guard/prompt/detectors response shape (backend:
+// internal/intelligence/dashboard/guard_prompt.go's
+// handleGuardPromptDetectors/promptDetectorJSON) — the full detector
+// vocabulary scrub.DetectorNames() knows, each with its class, the
+// raw configured/default mode, the RESOLVED effective mode after the
+// stricter-wins-with-floor clamp, and whether an override is set.
+// Only `id` and `effective_mode` are consumed here; the rest is kept
+// on the type for completeness/future use.
+type PromptDetectorEntry = {
+  id: string;
+  class: string;
+  default_mode: string;
+  effective_mode: string;
+  overridden: boolean;
+};
+
+type PromptDetectorsResponse = {
+  detectors: PromptDetectorEntry[];
+};
 
 // StructuredConfigSection — per-section structured form. Edits live
 // in a local draft; clicking Save POSTs to
@@ -19,12 +75,19 @@ export function StructuredConfigSection({
   description,
   badge,
   footer,
+  readOnly,
+  icon,
 }: {
   spec: SectionSpec;
+  /** The section glyph from the Settings SECTIONS table (card title). */
+  icon?: LucideIcon;
   config: ConfigResponse | null;
   description?: string;
   badge?: React.ReactNode;
   footer?: React.ReactNode;
+  // Governance can lock a section read-only (docs/plane-a governance
+  // posture). No-op / undefined on an ungoverned node.
+  readOnly?: boolean;
 }) {
   // Dynamic select-option sources (D11): fields with `optionsFrom`
   // resolve their option list from the loaded config response, so
@@ -33,6 +96,45 @@ export function StructuredConfigSection({
     () => ({ profile_names: config?.profile_names }),
     [config],
   );
+
+  // Picker rosters (D-571): fetched only when a field of this section
+  // names the source.
+  const wanted = useMemo(() => specSources(spec), [spec]);
+  const adapters = useToolOptions(wanted.has("adapters"));
+  const projectRoots = useProjectRootOptions(wanted.has("project_roots"));
+  const pricedModels = usePricedModels(wanted.has("priced_models"));
+  const pickers = useMemo<PickerSources>(
+    () => ({
+      adapters,
+      project_roots: projectRoots,
+      priced_models: pricedModels,
+      action_types: { options: ACTION_TYPE_OPTIONS, loading: false },
+      guard_rules: { options: GUARD_RULE_OPTIONS, loading: false },
+    }),
+    [adapters, projectRoots, pricedModels],
+  );
+
+  // Resolved effective-mode sidecar for the "prompt-detectors" GROUP
+  // ONLY (fields opted in via FieldDef.showEffectiveMode) — sourced
+  // from a SEPARATE fetch to GET /api/guard/prompt/detectors, not from
+  // the ConfigResponse prop `dynamicOptions` draws from. "guard" is a
+  // grouped section (see spec.groups below): "prompt-detectors" is one
+  // of ITS groups, not a top-level spec.id, so the gate checks the
+  // groups list rather than spec.id — this fetch never fires for any
+  // section/group other than that one.
+  const hasPromptDetectorsGroup = Boolean(
+    spec.groups?.some((g) => g.id === "prompt-detectors"),
+  );
+  const detectorsApi = useApi<PromptDetectorsResponse>(
+    hasPromptDetectorsGroup ? "/api/guard/prompt/detectors" : null,
+  );
+  const effectiveModes = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const d of detectorsApi.data?.detectors ?? []) {
+      out[d.id] = d.effective_mode;
+    }
+    return out;
+  }, [detectorsApi.data]);
   // The form payload mirrors the structure of the config section it
   // saves. For grouped sections (Compression has 7 sub-groups across
   // 3 levels of nesting) the draft is the full Compression object;
@@ -83,23 +185,28 @@ export function StructuredConfigSection({
     setErr(null);
     setSavedMsg(null);
     try {
-      const res = await fetch(`/api/config/section/${spec.id}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      const out = await res.json().catch(() => null as null | Record<string, unknown>);
-      if (out && out.restart_required) {
+      // A field the spec marks `disabled` renders inert (honest-disabled-
+      // copy) precisely because no Go consumer reads it — writing it back
+      // anyway would still land a dead key in config.toml. Strip only
+      // those keys from the OUTGOING payload; the draft itself (and the
+      // rest of the section object) is untouched.
+      const payload = stripDisabledFields(draft, spec);
+      // Previews the masked diff (and any credential-shaped value) in the
+      // shell's save dialog, then writes with the confirm token (T-432).
+      const out = await saveConfigSection(spec.id, payload);
+      if (out.write_mode === "noop") {
+        setSavedMsg("Nothing to save; config.toml already says this.");
+      } else if (out.restart_required) {
+        const keys = out.restart_required_keys.length > 0 ? out.restart_required_keys : undefined;
         setSavedMsg(
-          "Saved. Restart the observer daemon to pick up the change.",
+          keys && keys.length > 0
+            ? `Saved. Restart the observer daemon to apply ${keys.join(", ")}.`
+            : "Saved. Restart the observer daemon to pick up the change.",
         );
         // Feed the global restart-pending banner so the reminder
-        // survives navigating away from Settings (P1.9).
-        markRestartPending(spec.id);
+        // survives navigating away from Settings (P1.9) — with the KEYS
+        // the daemon classified as bind-at-start (plan §3.3 item 1).
+        markRestartPending(spec.id, keys);
       } else {
         setSavedMsg("Saved.");
       }
@@ -124,6 +231,7 @@ export function StructuredConfigSection({
           {badge}
         </span>
       }
+      icon={icon}
       sub={description ?? spec.description}
     >
       <div className="space-y-4">
@@ -136,6 +244,8 @@ export function StructuredConfigSection({
                 value={pickField(draft, f.id)}
                 onChange={(v) => setAt([f.id], v)}
                 dynamicOptions={dynamicOptions}
+                effectiveModes={effectiveModes}
+                pickers={pickers}
               />
             ))}
           </div>
@@ -161,34 +271,36 @@ export function StructuredConfigSection({
                   setAt([...rel, field], value)
                 }
                 dynamicOptions={dynamicOptions}
+                effectiveModes={effectiveModes}
+                pickers={pickers}
               />
             );
           })}
         {!hasGroups && draft == null && (
           <p className="rounded-2 border border-dashed border-line-2 bg-bg-3/40 px-3 py-2 text-[11.5px] text-fg-3">
             Section not present in the running config. Backend may not have
-            initialized the defaults yet — restart the daemon.
+            initialized the defaults yet - restart the daemon.
           </p>
         )}
         <div className="flex flex-wrap items-center gap-3 border-t border-line-1 pt-3">
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={save}
-            disabled={!dirty || busy}
-            className="rounded-2 bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-on transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!dirty || busy || readOnly}
+            loading={busy}
+            title={readOnly ? "Managed by your organization" : undefined}
           >
             {busy ? "Saving…" : "Save"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             onClick={reset}
-            disabled={!dirty || busy}
-            className="rounded-2 border border-line-2 bg-bg-2 px-3 py-1.5 text-[12px] text-fg-2 hover:bg-bg-3 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!dirty || busy || readOnly}
+            title={readOnly ? "Managed by your organization" : undefined}
           >
             Reset
-          </button>
+          </Button>
           {savedMsg && (
-            <span className="text-[11.5px] text-success">{savedMsg}</span>
+            <SuccessCheck label={savedMsg} className="!text-[11.5px]" />
           )}
           {err && <span className="text-[11.5px] text-danger">{err}</span>}
         </div>
@@ -204,12 +316,16 @@ function GroupCard({
   relPath,
   onChange,
   dynamicOptions,
+  effectiveModes,
+  pickers,
 }: {
   group: SectionGroup;
   draft: Record<string, unknown> | null;
   relPath: string[];
   onChange: (field: string, value: unknown) => void;
   dynamicOptions?: Record<string, string[] | undefined>;
+  effectiveModes?: Record<string, string>;
+  pickers?: PickerSources;
 }) {
   const groupData = useMemo(
     () => resolveSub(draft, relPath),
@@ -235,6 +351,8 @@ function GroupCard({
             value={pickField(groupData, f.id)}
             onChange={(v) => onChange(f.id, v)}
             dynamicOptions={dynamicOptions}
+            effectiveModes={effectiveModes}
+            pickers={pickers}
           />
         ))}
       </div>
@@ -242,36 +360,43 @@ function GroupCard({
   );
 }
 
+// FieldRow is a thin wrapper over the shared SettingRow: label + help in
+// the label column, the typed control beside it, and — for a field the
+// spec marks `disabled` — the honest "why" note under the control.
 function FieldRow({
   field,
   value,
   onChange,
   dynamicOptions,
+  effectiveModes,
+  pickers,
 }: {
   field: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
   dynamicOptions?: Record<string, string[] | undefined>;
+  effectiveModes?: Record<string, string>;
+  pickers?: PickerSources;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-4">
-      <div className="lg:pt-1.5">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-2">
-          {field.label}
-        </div>
-        {field.help && (
-          <div className="mt-1 text-[11px] leading-snug text-fg-3">
-            {field.help}
-          </div>
-        )}
-      </div>
+    <SettingRow
+      label={field.label}
+      help={field.help}
+      status={
+        field.disabled && field.note ? (
+          <span className="text-[11px] leading-snug text-warn">{field.note}</span>
+        ) : undefined
+      }
+    >
       <FieldInput
         field={field}
         value={value}
         onChange={onChange}
         dynamicOptions={dynamicOptions}
+        effectiveModes={effectiveModes}
+        pickers={pickers}
       />
-    </div>
+    </SettingRow>
   );
 }
 
@@ -280,14 +405,20 @@ function FieldInput({
   value,
   onChange,
   dynamicOptions,
+  effectiveModes,
+  pickers,
 }: {
   field: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
   dynamicOptions?: Record<string, string[] | undefined>;
+  effectiveModes?: Record<string, string>;
+  pickers?: PickerSources;
 }) {
-  const common =
-    "w-full rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1.5 font-mono text-[12px] text-fg-1 placeholder:text-fg-4 focus:border-accent focus:outline-none";
+  // A spec may mark a field `disabled` — a key the config still carries but
+  // that no consumer reads. It renders inert rather than live, and
+  // FieldRow prints the field's `note` under it (honest-disabled-copy).
+  const disabled = Boolean(field.disabled);
 
   if (field.kind === "bool") {
     const on = Boolean(value);
@@ -296,6 +427,7 @@ function FieldInput({
         <Toggle
           on={on}
           onChange={onChange}
+          disabled={disabled}
           label={on ? "enabled" : "disabled"}
         />
       </div>
@@ -308,26 +440,46 @@ function FieldInput({
       : undefined;
     const options =
       dynamic && dynamic.length > 0 ? dynamic : field.options ?? [];
+    // Resolved effective mode (post floor-clamp/off-exemption), shown
+    // beside the raw configured value for a "prompt-detectors" field —
+    // see FieldDef.showEffectiveMode's doc comment. Absent (undefined)
+    // until the /api/guard/prompt/detectors fetch resolves, so nothing
+    // renders on first paint or on a daemon too old to serve it.
+    const effectiveMode = field.showEffectiveMode
+      ? effectiveModes?.[field.id]
+      : undefined;
+    const rawValue = String(value ?? "");
+    const differs = effectiveMode != null && effectiveMode !== rawValue;
     return (
-      <select
-        className={common}
-        value={String(value ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+      <div>
+        <Select
+          mono
+          disabled={disabled}
+          options={options}
+          value={rawValue}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {effectiveMode != null && (
+          <div
+            className={
+              "mt-1 text-[11px] leading-snug " +
+              (differs ? "text-warn" : "text-fg-3")
+            }
+          >
+            effective: {effectiveMode}
+            {differs && " (clamped/overridden by the global mode)"}
+          </div>
+        )}
+      </div>
     );
   }
 
   if (field.kind === "int") {
     return (
-      <input
+      <Input
+        mono
         type="number"
-        className={common}
+        disabled={disabled}
         value={value == null ? "" : Number(value)}
         min={field.min}
         max={field.max}
@@ -340,12 +492,52 @@ function FieldInput({
     );
   }
 
+  // A list or text field over a known set is a picker (D-571): a closed
+  // `options` list or a daemon roster named by `optionSource`. A value the
+  // list does not carry (set by hand in config.toml) stays visible.
+  const source = field.optionSource ? pickers?.[field.optionSource] : undefined;
+  const known: PickOption[] | undefined =
+    field.kind === "list" && field.options
+      ? field.options.map((o) => ({ id: o, label: o }))
+      : source?.options;
+  if (field.kind === "list" && known) {
+    const arr = (Array.isArray(value) ? value : []).map(String);
+    return (
+      <EntityMultiPicker
+        options={keepSelected(known, arr)}
+        value={arr}
+        onChange={(next) => onChange(next)}
+        disabled={disabled}
+        allowFreeId={Boolean(field.allowFree)}
+        loading={source?.loading}
+        placeholder={field.allowFree ? "Pick, or type a value and press Enter…" : "Pick…"}
+        ariaLabel={field.label}
+      />
+    );
+  }
+  if (field.kind === "text" && known) {
+    const cur = value == null ? "" : String(value);
+    return (
+      <SinglePicker
+        options={keepSelected(known, cur ? [cur] : [])}
+        value={cur}
+        onChange={(next) => onChange(next)}
+        disabled={disabled}
+        allowFree={Boolean(field.allowFree)}
+        loading={source?.loading}
+        placeholder="Pick one…"
+        ariaLabel={field.label}
+      />
+    );
+  }
+
   if (field.kind === "list") {
     const arr = Array.isArray(value) ? value : [];
     return (
-      <input
+      <Input
+        mono
         type="text"
-        className={common}
+        disabled={disabled}
         value={arr.join(", ")}
         placeholder="comma-separated"
         onChange={(e) => {
@@ -361,9 +553,10 @@ function FieldInput({
 
   // text
   return (
-    <input
+    <Input
+      mono
       type="text"
-      className={common}
+      disabled={disabled}
       value={value == null ? "" : String(value)}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -405,6 +598,33 @@ function pickField(
 
 function prettyTitle(id: string): string {
   return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+// stripDisabledFields drops every key whose FieldDef is marked
+// `disabled: true` (honest-disabled-copy — the config still carries the
+// key but no Go consumer reads it) from the OUTGOING save payload only,
+// leaving the rest of the section object — and the caller's `draft`
+// state — intact. Walks both the section's flat `fields` and each
+// group's `fields` at the group's resolved sub-path.
+function stripDisabledFields(
+  draft: Record<string, unknown> | null,
+  spec: SectionSpec,
+): Record<string, unknown> | null {
+  if (!draft) return draft;
+  const out = deepClone(draft);
+  for (const f of spec.fields ?? []) {
+    if (f.disabled) delete out[f.id];
+  }
+  for (const g of spec.groups ?? []) {
+    const rel =
+      spec.path.length === 0 ? g.path : g.path.slice(spec.path.length);
+    const sub = resolveSub(out, rel);
+    if (!sub) continue;
+    for (const f of g.fields) {
+      if (f.disabled) delete sub[f.id];
+    }
+  }
+  return out;
 }
 
 function deepClone<T>(v: T): T {

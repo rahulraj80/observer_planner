@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // bypassFilePrefix is the os.CreateTemp prefix for the one-shot CLI-scope
@@ -89,6 +92,144 @@ func readClaudeSettingsBaseURLPresent(path string) (value string, present bool) 
 	}
 	v, ok := doc.Env["ANTHROPIC_BASE_URL"]
 	return v, ok
+}
+
+// claudeBackendEnvKeys are provider switches that move Claude Code away from
+// the first-party Anthropic HTTP API. The observer proxy route is not proof of
+// budget coverage for these native cloud backends, so a managed hard budget
+// must refuse unless every effective setting is known to leave them disabled.
+var claudeBackendEnvKeys = []string{
+	"CLAUDE_CODE_USE_BEDROCK",
+	"CLAUDE_CODE_USE_VERTEX",
+	"CLAUDE_CODE_USE_FOUNDRY",
+}
+
+// claudeProxyBackendProven reports whether the final Claude launch can be
+// proven to use the proxy's first-party Anthropic route. It inspects only
+// provider-selection metadata; credentials and token values are never read.
+// Any enabled or unreadable provider selector downgrades the result to
+// unknown. The check is deliberately conservative because a settings/env
+// provider switch can make ANTHROPIC_BASE_URL irrelevant while leaving the
+// process apparently proxy-configured.
+func claudeProxyBackendProven(environ []string, cwd string, args []string) bool {
+	for _, key := range claudeBackendEnvKeys {
+		if value, present := lookupEnvValue(environ, key); present {
+			enabled, known := claudeBackendFlag(value)
+			if !known || enabled {
+				return false
+			}
+		}
+	}
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+
+	// Inspect every settings scope Claude can merge. A lower scope containing
+	// an enabled selector is treated as unsafe even if another scope currently
+	// appears to override it: this avoids making a positive budget admission
+	// claim from a hand-rolled precedence model when the CLI changes versions.
+	paths := []string{
+		managedClaudeSettingsPath(),
+		projectClaudeSettingsPath(cwd, "settings.local.json"),
+		projectClaudeSettingsPath(cwd, "settings.json"),
+		claudeSettingsPath(),
+	}
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		env, present, readable := readClaudeSettingsEnv(path)
+		if !present {
+			continue
+		}
+		if !readable {
+			return false
+		}
+		if claudeBackendEnvEnabled(env) {
+			return false
+		}
+	}
+	if cliVal := claudeArgsSettingsFile(args); cliVal != "" {
+		env, readable := readClaudeCLISettingsEnv(cliVal, cwd)
+		if !readable || claudeBackendEnvEnabled(env) {
+			return false
+		}
+	}
+	return true
+}
+
+// readClaudeSettingsEnv reads the non-secret env map from a settings file.
+// present distinguishes a missing file from a present but malformed file;
+// malformed settings are unknown and therefore fail closed at admission.
+func readClaudeSettingsEnv(path string) (env map[string]string, present, readable bool) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, true
+	}
+	if err != nil {
+		return nil, true, false
+	}
+	var doc struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, true, false
+	}
+	return doc.Env, true, true
+}
+
+// readClaudeCLISettingsEnv mirrors --settings' file-or-inline-JSON forms.
+// The returned bool is false for a value Claude may accept but Observer cannot
+// parse, which must remain unknown for managed budget admission.
+func readClaudeCLISettingsEnv(value, cwd string) (map[string]string, bool) {
+	t := strings.TrimSpace(value)
+	if t == "" {
+		return nil, true
+	}
+	var raw []byte
+	if strings.HasPrefix(t, "{") {
+		raw = []byte(t)
+	} else {
+		path := t
+		if !filepath.IsAbs(path) && cwd != "" {
+			path = filepath.Join(cwd, path)
+		}
+		var err error
+		raw, err = os.ReadFile(path)
+		if err != nil {
+			return nil, false
+		}
+	}
+	var doc struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, false
+	}
+	return doc.Env, true
+}
+
+func claudeBackendEnvEnabled(env map[string]string) bool {
+	for _, key := range claudeBackendEnvKeys {
+		if value, ok := env[key]; ok {
+			enabled, known := claudeBackendFlag(value)
+			if !known || enabled {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func claudeBackendFlag(value string) (enabled, known bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "0", "false", "no", "off":
+		return false, true
+	case "1", "true", "yes", "on":
+		return true, true
+	default:
+		return false, false
+	}
 }
 
 // claudeRouteClass classifies the EFFECTIVE settings-scope ANTHROPIC_BASE_URL
@@ -541,15 +682,51 @@ func withClaudeBypassSettings(baseURL string, fn func(settingsPath string) error
 // execClaudeChild runs claude with the given argv, env, and working dir, wiring
 // stdio to the terminal and forwarding the child's exit code via exitErr. Shared
 // by the direct/neutralize/empty-unset launch paths so they don't each re-spell
-// the exec + exit-code plumbing. A "" dir inherits the caller's cwd.
-func execClaudeChild(bin string, launchArgs, env []string, dir string) error {
+// the exec + exit-code plumbing. A "" dir inherits the caller's cwd. configPath
+// (the launcher's --config value) feeds the best-effort launch-seed attribution
+// row (migration 086); a config load failure just disables seeding.
+func execClaudeChild(bin string, launchArgs, env []string, dir, configPath string, evidence budgetLaunchEvidence) error {
+	if evidence.Route == budgetLaunchRouteObserverProxy &&
+		!claudeProxyBackendProven(env, dir, launchArgs) {
+		// ANTHROPIC_BASE_URL can coexist with Claude Code's native Bedrock,
+		// Vertex, or Foundry switches. Preserve the launch for ordinary users,
+		// but make managed hard-budget admission fail closed because the proxy
+		// URL alone does not prove that the request will cross it.
+		evidence = budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
+	}
+	evidence.Executable = bin
+	evidence.Arguments = launchArgs
+	if err := enforceBudgetControlledLaunch(context.Background(), configPath, "claude-code", evidence); err != nil {
+		return err
+	}
 	child := exec.Command(bin, launchArgs...)
-	child.Env = env
+	// Backstop for every claude child: the proxy-route callers build env from raw
+	// os.Environ() (they don't all go through prepareClaudeEnv), so strip the
+	// trusted OOB channel env here so the untrusted claude child never inherits it.
+	//
+	// DI-04b: every claude launch path funnels through here, so this is also the
+	// one place the child's PATH is widened — the resolved binary's own dir
+	// (an npm-channel node shim needs node beside it) plus the login-only
+	// dirs the resolver saw; additive, the daemon PATH survives in order.
+	child.Env = applyChildPATH(scrubOOBEnv(env), daemonLoginPathDirs(), bin)
 	child.Dir = dir
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
-	if err := child.Run(); err != nil {
+	if err := child.Start(); err != nil {
+		return fmt.Errorf("exec claude: %w", err)
+	}
+	// Direct process attribution (migration 086): record the child pid now
+	// that Start has made it knowable; retract the seed when the child is
+	// reaped. Best-effort both ways — a seeding failure never affects the
+	// launch (see cmd/observer/launchseed.go). claude-code already carries
+	// hook-based attribution; the daemon sweep never overwrites that row.
+	dbPath := ""
+	if cfg, cfgErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cfgErr == nil {
+		dbPath = cfg.Observer.DBPath
+	}
+	recordLaunchSeed(dbPath, "claude-code", dir, child.Process.Pid, os.Stderr)
+	if err := child.Wait(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return exitErr(ee.ExitCode())
@@ -624,18 +801,18 @@ func claudeProxyFailClosedMsg(reason proxyFallbackReason, proxyURL, settingsPath
 		switch reason {
 		case reasonNoProxyRouteConflict:
 			return fmt.Sprintf(
-				"observer claude: refusing to launch under --no-proxy-route — the enterprise managed-settings file %s routes claude to the observer proxy (%s) via env.ANTHROPIC_BASE_URL, and managed settings OUTRANK every other scope (even a CLI --settings file cannot override them), so the launcher cannot bypass it — it would KEEP routing through the proxy and capture turns you asked not to capture. Fix it with your admin: remove env.ANTHROPIC_BASE_URL from %s (managed settings are admin-provisioned; observer cannot override them). Then re-run.",
+				"observer claude: refusing to launch under --no-proxy-route - the enterprise managed-settings file %s routes claude to the observer proxy (%s) via env.ANTHROPIC_BASE_URL, and managed settings OUTRANK every other scope (even a CLI --settings file cannot override them), so the launcher cannot bypass it - it would KEEP routing through the proxy and capture turns you asked not to capture. Fix it with your admin: remove env.ANTHROPIC_BASE_URL from %s (managed settings are admin-provisioned; observer cannot override them). Then re-run.",
 				settingsPath, proxyURL, settingsPath,
 			)
 		default: // reasonProxyDownConflict
 			if attachNoticed {
 				return fmt.Sprintf(
-					"observer claude: refusing to launch — the enterprise managed-settings file %s routes claude to the observer proxy via env.ANTHROPIC_BASE_URL, and managed settings OUTRANK every other scope (even a CLI --settings file cannot defeat them), so every API call would hit the dead proxy and fail. Fix it one of two ways: start the daemon with `observer start` (restores capture), OR have your admin remove env.ANTHROPIC_BASE_URL from %s. Then re-run.",
+					"observer claude: refusing to launch - the enterprise managed-settings file %s routes claude to the observer proxy via env.ANTHROPIC_BASE_URL, and managed settings OUTRANK every other scope (even a CLI --settings file cannot defeat them), so every API call would hit the dead proxy and fail. Fix it one of two ways: start the daemon with `observer start` (restores capture), OR have your admin remove env.ANTHROPIC_BASE_URL from %s. Then re-run.",
 					settingsPath, settingsPath,
 				)
 			}
 			return fmt.Sprintf(
-				"observer claude: refusing to launch — the observer proxy at %s is unreachable, but the enterprise managed-settings file %s routes claude to it via env.ANTHROPIC_BASE_URL, and managed settings OUTRANK every other scope (even a CLI --settings file cannot defeat them), so every API call would hit the dead proxy and fail. Fix it one of two ways: start the daemon with `observer start` (restores capture), OR have your admin remove env.ANTHROPIC_BASE_URL from %s. Then re-run.",
+				"observer claude: refusing to launch - the observer proxy at %s is unreachable, but the enterprise managed-settings file %s routes claude to it via env.ANTHROPIC_BASE_URL, and managed settings OUTRANK every other scope (even a CLI --settings file cannot defeat them), so every API call would hit the dead proxy and fail. Fix it one of two ways: start the daemon with `observer start` (restores capture), OR have your admin remove env.ANTHROPIC_BASE_URL from %s. Then re-run.",
 				proxyURL, settingsPath, settingsPath,
 			)
 		}
@@ -643,18 +820,18 @@ func claudeProxyFailClosedMsg(reason proxyFallbackReason, proxyURL, settingsPath
 	switch reason {
 	case reasonNoProxyRouteConflict:
 		return fmt.Sprintf(
-			"observer claude: refusing to launch under --no-proxy-route — %s routes claude to the observer proxy (%s) via env.ANTHROPIC_BASE_URL, and Claude Code's settings.json env WINS over the process environment. observer would normally bypass it with a one-shot --settings override, but you passed your OWN --settings and stacking a second one could clobber yours. Fix it: drop your --settings, OR remove the baked-in route with `observer init --claude-code --skip-proxy-route` (or delete env.ANTHROPIC_BASE_URL from %s), then re-run.",
+			"observer claude: refusing to launch under --no-proxy-route - %s routes claude to the observer proxy (%s) via env.ANTHROPIC_BASE_URL, and Claude Code's settings.json env WINS over the process environment. observer would normally bypass it with a one-shot --settings override, but you passed your OWN --settings and stacking a second one could clobber yours. Fix it: drop your --settings, OR remove the baked-in route with `observer init --claude-code --skip-proxy-route` (or delete env.ANTHROPIC_BASE_URL from %s), then re-run.",
 			settingsPath, proxyURL, settingsPath,
 		)
 	default: // reasonProxyDownConflict
 		if attachNoticed {
 			return fmt.Sprintf(
-				"observer claude: refusing to launch — %s routes claude to the observer proxy via env.ANTHROPIC_BASE_URL (which WINS over the process environment), so every API call would hit the dead proxy and fail. observer would normally bypass it with a one-shot --settings override, but you passed your OWN --settings and stacking a second one could clobber yours. Fix it one of three ways: start the daemon with `observer start` (restores capture); drop your --settings; or remove the baked-in route with `observer init --claude-code --skip-proxy-route` (or delete env.ANTHROPIC_BASE_URL from %s). Then re-run.",
+				"observer claude: refusing to launch - %s routes claude to the observer proxy via env.ANTHROPIC_BASE_URL (which WINS over the process environment), so every API call would hit the dead proxy and fail. observer would normally bypass it with a one-shot --settings override, but you passed your OWN --settings and stacking a second one could clobber yours. Fix it one of three ways: start the daemon with `observer start` (restores capture); drop your --settings; or remove the baked-in route with `observer init --claude-code --skip-proxy-route` (or delete env.ANTHROPIC_BASE_URL from %s). Then re-run.",
 				settingsPath, settingsPath,
 			)
 		}
 		return fmt.Sprintf(
-			"observer claude: refusing to launch — the observer proxy at %s is unreachable, but %s routes claude to it via env.ANTHROPIC_BASE_URL (which WINS over the process environment), so every API call would hit the dead proxy and fail. observer would normally bypass it with a one-shot --settings override, but you passed your OWN --settings and stacking a second one could clobber yours. Fix it one of three ways: start the daemon with `observer start` (restores capture); drop your --settings; or remove the baked-in route with `observer init --claude-code --skip-proxy-route` (or delete env.ANTHROPIC_BASE_URL from %s). Then re-run.",
+			"observer claude: refusing to launch - the observer proxy at %s is unreachable, but %s routes claude to it via env.ANTHROPIC_BASE_URL (which WINS over the process environment), so every API call would hit the dead proxy and fail. observer would normally bypass it with a one-shot --settings override, but you passed your OWN --settings and stacking a second one could clobber yours. Fix it one of three ways: start the daemon with `observer start` (restores capture); drop your --settings; or remove the baked-in route with `observer init --claude-code --skip-proxy-route` (or delete env.ANTHROPIC_BASE_URL from %s). Then re-run.",
 			proxyURL, settingsPath, settingsPath,
 		)
 	}
@@ -670,22 +847,33 @@ func claudeProxyFailClosedMsg(reason proxyFallbackReason, proxyURL, settingsPath
 // capture-loss half is NEW information and always survives. Pure so the exact
 // copy is unit-testable without exec.
 func claudeNeutralizeNotice(reason proxyFallbackReason, proxyURL, settingsPath string, overridingRoute, attachNoticed bool) string {
+	// A build without capture.proxy: the proxy is down because this binary
+	// has none, so name the build, never "start the daemon" (lane MP-L1L,
+	// T-715, D-514).
+	if reason == reasonProxyDownClean {
+		if why := proxyNotInBuildReason(); why != "" {
+			if overridingRoute {
+				return fmt.Sprintf("observer claude: %s - bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; the transcript is still captured).", why, settingsPath)
+			}
+			return fmt.Sprintf("observer claude: %s - launching claude WITHOUT proxy routing (traffic goes straight to Anthropic; the transcript is still captured).", why)
+		}
+	}
 	if overridingRoute {
 		switch reason {
 		case reasonProxyDownClean:
 			if attachNoticed {
 				return fmt.Sprintf(
-					"observer claude: bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back — start it with `observer start`).",
+					"observer claude: bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back - start it with `observer start`).",
 					settingsPath,
 				)
 			}
 			return fmt.Sprintf(
-				"observer claude: proxy unreachable at %s — bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back — start it with `observer start`).",
+				"observer claude: proxy unreachable at %s - bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back - start it with `observer start`).",
 				proxyURL, settingsPath,
 			)
 		default: // reasonNoProxyRouteClean
 			return fmt.Sprintf(
-				"observer claude: --no-proxy-route set — bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; turns are NOT captured).",
+				"observer claude: --no-proxy-route set - bypassing the observer proxy route configured in %s for this run via a one-shot --settings override (traffic goes straight to Anthropic; turns are NOT captured).",
 				settingsPath,
 			)
 		}
@@ -693,14 +881,14 @@ func claudeNeutralizeNotice(reason proxyFallbackReason, proxyURL, settingsPath s
 	switch reason {
 	case reasonProxyDownClean:
 		if attachNoticed {
-			return "observer claude: proxy routing skipped for this run (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back — start it with `observer start`)."
+			return "observer claude: proxy routing skipped for this run (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back - start it with `observer start`)."
 		}
 		return fmt.Sprintf(
-			"observer claude: proxy unreachable at %s — launching claude WITHOUT proxy routing for this run (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back — start it with `observer start`).",
+			"observer claude: proxy unreachable at %s - launching claude WITHOUT proxy routing for this run (traffic goes straight to Anthropic; turns are NOT captured until the daemon is back - start it with `observer start`).",
 			proxyURL,
 		)
 	default: // reasonNoProxyRouteClean
-		return "observer claude: --no-proxy-route set — launching claude WITHOUT proxy routing (traffic goes straight to Anthropic; turns are NOT captured)."
+		return "observer claude: --no-proxy-route set - launching claude WITHOUT proxy routing (traffic goes straight to Anthropic; turns are NOT captured)."
 	}
 }
 
@@ -736,10 +924,11 @@ func neutralizeBypassEnv(environ []string, proxyURL string) []string {
 // re-resolve it (that would double-render the handoff and re-answer the route).
 func runClaudeThirdPartyDirect(opts claudeLauncherOptions, bin string, route claudeRouteResolution, launchArgs []string, continueDir string) error {
 	fmt.Fprintf(opts.stderr,
-		"observer claude: honoring your configured ANTHROPIC_BASE_URL route (%s, in %s) — launching claude with your own routing untouched; turns are NOT captured through the observer proxy.\n",
+		"observer claude: honoring your configured ANTHROPIC_BASE_URL route (%s, in %s) - launching claude with your own routing untouched; turns are NOT captured through the observer proxy.\n",
 		route.value, claudeScopeLabel(route.scope))
 	// Inherit the environment unchanged — the operator's route must stand.
-	return execClaudeChild(bin, launchArgs, os.Environ(), continueDir)
+	return execClaudeChild(bin, launchArgs, os.Environ(), continueDir, opts.configPath,
+		budgetLaunchEvidence{Route: budgetLaunchRouteDirect})
 }
 
 // runClaudeBareDirect execs claude BYPASSING the observer proxy (the neutralize
@@ -773,7 +962,8 @@ func runClaudeBareDirect(opts claudeLauncherOptions, bin string, reason proxyFal
 			// remainder / injected continue-from prompt. CLI --settings outranks the
 			// process env too, so inherit the environment unchanged.
 			args := append([]string{"--settings", settingsFile}, launchArgs...)
-			return execClaudeChild(bin, args, os.Environ(), continueDir)
+			return execClaudeChild(bin, args, os.Environ(), continueDir, opts.configPath,
+				budgetLaunchEvidence{Route: budgetLaunchRouteDirect})
 		})
 		var bwe *bypassWriteError
 		if errors.As(err, &bwe) {
@@ -789,7 +979,8 @@ func runClaudeBareDirect(opts claudeLauncherOptions, bin string, reason proxyFal
 	// No baked-in route: neutralize ONLY an observer-proxy process-env value; a
 	// third-party gateway is preserved verbatim (finding 2).
 	fmt.Fprintln(opts.stderr, claudeNeutralizeNotice(reason, proxyURL, settingsPath, false, attachDownNoticed))
-	return execClaudeChild(bin, launchArgs, neutralizeBypassEnv(os.Environ(), proxyURL), continueDir)
+	return execClaudeChild(bin, launchArgs, neutralizeBypassEnv(os.Environ(), proxyURL), continueDir, opts.configPath,
+		budgetLaunchEvidence{Route: budgetLaunchRouteDirect})
 }
 
 // claudeEmptyUnsetAction is what to do about a settings scope that explicitly
@@ -843,23 +1034,32 @@ func claudeEmptyUnsetNotice(action claudeEmptyUnsetAction, reason proxyFallbackR
 	switch action {
 	case emptyUnsetPinProxy:
 		return fmt.Sprintf(
-			"observer claude: %s explicitly unsets ANTHROPIC_BASE_URL (=\"\"), which would defeat proxy routing and silently skip capture — pinning a one-shot --settings override back to the observer proxy (%s) for this run so turns ARE captured.",
+			"observer claude: %s explicitly unsets ANTHROPIC_BASE_URL (=\"\"), which would defeat proxy routing and silently skip capture - pinning a one-shot --settings override back to the observer proxy (%s) for this run so turns ARE captured.",
 			settingsFile, proxyURL,
 		)
 	case emptyUnsetWarnDirect:
 		return fmt.Sprintf(
-			"observer claude: %s explicitly unsets ANTHROPIC_BASE_URL (=\"\") and observer cannot override it, so proxy capture is DISABLED for this run — launching claude direct to Anthropic; turns are NOT captured.",
+			"observer claude: %s explicitly unsets ANTHROPIC_BASE_URL (=\"\") and observer cannot override it, so proxy capture is DISABLED for this run - launching claude direct to Anthropic; turns are NOT captured.",
 			settingsFile,
 		)
 	default: // emptyUnsetDirectSatisfied
 		if reason == reasonProxyDownClean {
+			// A build without capture.proxy: name the build, never `observer
+			// start`, which would not bring a proxy up (D-514, the same rule
+			// claudeNeutralizeNotice follows; found by FIX-TAGTESTS, D-535).
+			if why := proxyNotInBuildReason(); why != "" {
+				return fmt.Sprintf(
+					"observer claude: %s, and %s already unsets ANTHROPIC_BASE_URL (=\"\") - launching claude direct to Anthropic (the transcript is still captured).",
+					why, settingsFile,
+				)
+			}
 			return fmt.Sprintf(
-				"observer claude: proxy unreachable at %s and %s already unsets ANTHROPIC_BASE_URL (=\"\") — launching claude direct to Anthropic; turns are NOT captured until the daemon is back (start it with `observer start`).",
+				"observer claude: proxy unreachable at %s and %s already unsets ANTHROPIC_BASE_URL (=\"\") - launching claude direct to Anthropic; turns are NOT captured until the daemon is back (start it with `observer start`).",
 				proxyURL, settingsFile,
 			)
 		}
 		return fmt.Sprintf(
-			"observer claude: --no-proxy-route set and %s already unsets ANTHROPIC_BASE_URL (=\"\") — launching claude direct to Anthropic; turns are NOT captured.",
+			"observer claude: --no-proxy-route set and %s already unsets ANTHROPIC_BASE_URL (=\"\") - launching claude direct to Anthropic; turns are NOT captured.",
 			settingsFile,
 		)
 	}
@@ -930,14 +1130,16 @@ func runClaudeEmptyUnset(opts claudeLauncherOptions, bin, proxyURL string, route
 				pinArgs = forceClaudeSessionID(pinArgs)
 			}
 			args := append([]string{"--settings", settingsFile}, pinArgs...)
-			return execClaudeChild(bin, args, env, continueDir)
+			return execClaudeChild(bin, args, env, continueDir, opts.configPath,
+				budgetLaunchEvidence{Route: budgetLaunchRouteObserverProxy, ProxyURL: proxyURL})
 		})
 		var bwe *bypassWriteError
 		if errors.As(err, &bwe) {
 			fmt.Fprintf(opts.stderr,
-				"observer claude: could not write the capture-restoring --settings override (%v); launching direct instead — turns are NOT captured this run.\n",
+				"observer claude: could not write the capture-restoring --settings override (%v); launching direct instead - turns are NOT captured this run.\n",
 				bwe.err)
-			return execClaudeChild(bin, launchArgs, os.Environ(), continueDir)
+			return execClaudeChild(bin, launchArgs, os.Environ(), continueDir, opts.configPath,
+				budgetLaunchEvidence{Route: budgetLaunchRouteDirect})
 		}
 		return err
 	}
@@ -955,5 +1157,6 @@ func runClaudeEmptyUnset(opts claudeLauncherOptions, bin, proxyURL string, route
 	} else {
 		fmt.Fprintln(opts.stderr, claudeEmptyUnsetNotice(action, reason, proxyURL, route.file))
 	}
-	return execClaudeChild(bin, launchArgs, os.Environ(), continueDir)
+	return execClaudeChild(bin, launchArgs, os.Environ(), continueDir, opts.configPath,
+		budgetLaunchEvidence{Route: budgetLaunchRouteDirect})
 }

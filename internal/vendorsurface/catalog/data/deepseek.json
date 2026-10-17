@@ -1,0 +1,1931 @@
+{
+ "group": "deepseek",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/deepseek-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "deepseek.console.account_verification",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account",
+   "mechanism_doc": "UI only: individual vs enterprise verification; enterprise bound to one authorized administrator; re-bind on admin change",
+   "read_write_doc": "UI",
+   "class_doc": "Identity (single account owner)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-terms-of-service.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.console.api_keys",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account",
+   "mechanism_doc": "UI only: create, name, delete API keys; key shown once; no scopes, no expiry, no per-key limits documented",
+   "read_write_doc": "R/W in UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.console.internal_usage_endpoints",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "browser session token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account",
+   "mechanism_doc": "undocumented console JSON/CSV endpoints (third party reports e.g. usage export and summary) using a browser login token, not an API key",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "OrgDay",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly, DO NOT BUILD (unsupported, needs a login token)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/shajanjp/deepseek-usage",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.console.topup",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account",
+   "mechanism_doc": "UI only: prepaid top-up; bank transfer for verified enterprises; no invoice API documented",
+   "read_write_doc": "UI",
+   "class_doc": "BillingExport (payments)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.console.usage_csv_export",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.console",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "manual",
+   "lookback_doc": "months selectable (exact lookback undocumented)",
+   "per_user_doc": "per API key (amount file only); cost file per model x wallet",
+   "mechanism_doc": "UI download: Usage -> Export monthly data -> ZIP of `amount-<range>.csv` (`start_time_iso`,`end_time_iso`,`model`,`api_key_name`,`api_key` masked,`type` in request_count/output_tokens/input_cache_hit_tokens/input_cache_miss_tokens,`price` CNY,`amount`) and `cost-<range>.csv` (`start_time_iso`,`end_time_iso`,`model`,`wallet_type`,`cost` negative = charge,`currency`); legacy files use `utc_date`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, BillingExport",
+   "grain_doc": "OrgDay x model x api_key_name x type (Beijing-local day)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (manual import possible; layout THIRD-PARTY documented, not vendor)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "usd_micros",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/GavinCnod/deepseek-api-usage-analysis",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/shajanjp/deepseek-usage",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.console.usage_page",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.console",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "console login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "near real time (not documented)",
+   "lookback_doc": "not documented",
+   "per_user_doc": "account, per API key name",
+   "mechanism_doc": "UI only, platform.deepseek.com/usage",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "OrgDay (by model, by key)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://platform.deepseek.com/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/GavinCnod/deepseek-api-usage-analysis",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.docs.rate_limits",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.docs",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "static",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account; per user_id when expanded",
+   "mechanism_doc": "docs prose: account-wide concurrency 2500 deepseek-flash / 500 deepseek-v4-pro regardless of key; HTTP 429 on excess; capacity expansion by request, free; on expanded accounts per-`user_id` caps (same numbers); 10-minute pre-inference timeout with keep-alive filler; no rate-limit headers documented",
+   "read_write_doc": "R (doc)",
+   "class_doc": "RateLimits",
+   "grain_doc": "Snapshot (static policy)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api-docs.deepseek.com/quick_start/rate_limit",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.platform.files",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "as above"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "no general policy; optional per-file expiry",
+   "per_user_doc": "account",
+   "mechanism_doc": "REST `POST /files`, `GET /files` (`after`,`limit` 1-1000,`order`,`purpose=user_data`; `has_more`,`first_id`,`last_id`), `GET /files/{id}`, `DELETE /files/{id}`; fields `id`,`bytes`,`created_at`,`filename`,`purpose`,`expires_at` (only if set at upload)",
+   "read_write_doc": "R/W (own files)",
+   "class_doc": "Content-adjacent (uploaded inputs), Retention (per-file `expires_at`)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "snapshot",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api-docs.deepseek.com/api/list-files",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.platform.models",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "as above"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account",
+   "mechanism_doc": "REST `GET /models`",
+   "read_write_doc": "R",
+   "class_doc": "(model catalog; not an org policy)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api-docs.deepseek.com/api/list-models",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "deepseek.platform.user_balance",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.platform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "ordinary API key (Bearer); no scopes"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented separately (account concurrency policy)"
+   },
+   "tier": {
+    "doc": "all (no tiers)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "none (current value only; spend inferred by delta polling)",
+   "per_user_doc": "account aggregate",
+   "mechanism_doc": "REST `GET https://api.deepseek.com/user/balance` -> `is_available`, `balance_infos[]{currency CNY/USD, total_balance, granted_balance, topped_up_balance}` (decimal strings)",
+   "read_write_doc": "R",
+   "class_doc": "Cost (wallet), Limits-adjacent (`is_available`)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api-docs.deepseek.com/api/get-user-balance",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.policy.privacy",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.policy",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "static",
+   "lookback_doc": "n/a",
+   "per_user_doc": "account",
+   "mechanism_doc": "Privacy Policy (2026-02-10): data stored in PRC; kept \"as long as you have an account\"; training opt-out right by email (privacy@deepseek.com); API end-user data out of scope (developer is controller). ToS: no retention period, no DPA, no ZDR tier",
+   "read_write_doc": "R (doc)",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot (prose)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.status",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.status",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "global",
+   "mechanism_doc": "status.deepseek.com",
+   "read_write_doc": "R",
+   "class_doc": "(availability)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://status.deepseek.com/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "deepseek.wire.chat_usage",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.wire",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "inference response `usage{prompt_tokens, completion_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, prompt_tokens_details.cached_tokens, completion_tokens_details.reasoning_tokens}` + body `id`; streaming: usage on last content chunk",
+   "read_write_doc": "R (proxy only)",
+   "class_doc": "Usage",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable at the Observer proxy, not an admin surface",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api-docs.deepseek.com/api/create-chat-completion",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "deepseek.wire.user_id",
+   "vendor_group": "deepseek",
+   "vendor": "deepseek",
+   "plane": "deepseek.wire",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per-user_id cap on expanded accounts"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per end user",
+   "mechanism_doc": "request field `user_id` ([a-zA-Z0-9_-], max 512, no PII): safety review, KV-cache isolation, scheduling isolation, per-user_id rate caps",
+   "read_write_doc": "W (sender sets it)",
+   "class_doc": "Identity attribution key",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (proxy could stamp it)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api-docs.deepseek.com/api/create-chat-completion",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.client_product_analytics",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per install",
+   "mechanism_doc": "`dsh-client-product-analytics` (`enabled` volatile, `appVersion`; \"application-owned collection policy; no user settings surface\"); destination and schema undocumented",
+   "read_write_doc": "none for a customer",
+   "class_doc": "Telemetry, Adoption",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (vendor-bound, undocumented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "file_url_token_match",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.config",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "on load / volatile",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`cordis.yml` composition + Settings UI volatile values; `dsh-permission-presets` (`presets`, `defaultPreset`; workspace-write/ask, danger-full-access/never), `dsh-sandbox-policy.mode` (default read-only), `dsh-user-approval.policy` ask/never, `dsh-mcp-client` servers, `dsh-llm-pi-ai.providers[].baseURL/models`, `dsh-llm-deepseek-api-key.apiKeyEnv` (DEEPSEEK_API_KEY), `dsh-credentials-local.path` (`~/.dsh/.credentials.yaml`), `$DSH_HOME/.env`; NO system-wide or admin-managed layer",
+   "read_write_doc": "R/W (file)",
+   "class_doc": "Policy, Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable as a node file (Rail B style), no vendor contract",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "file_url_token_match",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.hooks",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "per event",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`hooks.json` or settings file via `configPath`, Claude-compatible env `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`; read once at load",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (hook protocol)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "file_url_token_match",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.network",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`/`NO_PROXY`/`NODE_EXTRA_CA_CERTS` from env or `$DSH_HOME/.env` (project .env refused); web server `host` 127.0.0.1 or 0.0.0.0, `trustedHosts`",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (network)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/network-proxy.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/public-deployments.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "file_url_token_match",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.product_telemetry_otel",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none / endpoint headers"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "batched",
+   "lookback_doc": "collector-defined",
+   "per_user_doc": "per install",
+   "mechanism_doc": "`dsh-host-product-telemetry-otel`: OTLP/HTTP logs to `endpoint`, `channel`, `serviceName`, `serviceVersion`, batching knobs; honours `OTEL_EXPORTER_OTLP_*_COMPRESSION`; OTLP bypasses HTTP proxies",
+   "read_write_doc": "R (push to a collector)",
+   "class_doc": "Telemetry",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node config contract; Observer OTLP receiver could be the endpoint)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/network-proxy.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.session_log",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "seq"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "unbounded (immutable events)",
+   "per_user_doc": "per user",
+   "mechanism_doc": "local append-only JSONL session log (zstd compressed on disk per the Observer adapter: `~/.dsh/sessions/<cwd-slug>/session-<uuid>/session.jsonl.zstd`)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Content, Usage, Audit-like (approval/asked, approval/decided, approval/policy, permission/preset, sandbox/mode, hook/invoked, hook/result)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node capture, already shipped)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/persistence-catalog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.session_log_export",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "manual",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`@deepseek-ai/dsh-session-log-export` ZIP export (DEFLATE `compressionLevel`)",
+   "read_write_doc": "R",
+   "class_doc": "Content",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.node.session_telemetry_otel",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "exporter headers; ambient credentials not inherited"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "on feedback",
+   "lookback_doc": "collector-defined",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`dsh-session-telemetry-otel`: `mode` FEEDBACK_ONLY (default; ships session history only when the user submits feedback) or DISABLED; `exporter.url` required unless DISABLED; `maxRequestBytes` <= 4,000,000; env `DSH_TELEMETRY_MODE=DISABLED`",
+   "read_write_doc": "R (push)",
+   "class_doc": "Telemetry, Content (feedback-attached history)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node config)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/network-proxy.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "file_url_token_match",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.web.public_deployment",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.web",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "launch token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "single shared credential",
+   "mechanism_doc": "single-process web UI: one launch token -> signed cookie; `--trusted-host` fence; no per-user identity, roles, audit or limits",
+   "read_write_doc": "n/a",
+   "class_doc": "Identity (none)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/public-deployments.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.wire.harness_headers",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.wire",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "per request",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per install / session",
+   "mechanism_doc": "headers `x-deepseek-harness-user-id` (stable anonymous UUID per harness home), `x-deepseek-harness-session-id`, `x-deepseek-harness-compact: 1`, `user-agent deepseek-harness/<ver>`; no opt-out documented for headers",
+   "read_write_doc": "R at a proxy",
+   "class_doc": "Identity (anonymous), Sessions join keys",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable at the proxy",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/deepseek-llm-api-wire-extensions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.wire.plugin_inventory",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.wire",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "per request",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per install",
+   "mechanism_doc": "body field `dsh_plugin_packages{version:1, packages[{name, version}]}`, default ON",
+   "read_write_doc": "R at a proxy",
+   "class_doc": "Adoption / Policy (installed plugin set)",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable at the proxy",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/deepseek-llm-api-wire-extensions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "dsh.wire.session_log_upload",
+   "vendor_group": "deepseek",
+   "vendor": "dsh",
+   "plane": "dsh.wire",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "sent with the user's API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "seq ranges"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "per request",
+   "lookback_doc": "DeepSeek side undocumented",
+   "per_user_doc": "per user/session",
+   "mechanism_doc": "request BODY field `dsh_session_log{version:1, sessionFormatVersion, session{id, createdAt, cwd, parentSession, seedLength, origin, delegationDepth, agentPreset}, afterSeq, throughSeq, events[]}`, up to `maxBytes` 8 MiB per request, at-least-once, sent to the resolved `baseURL` INCLUDING a configured gateway; default ON (`@deepseek-ai/dsh-session-log-deepseek` `enabled: true`)",
+   "read_write_doc": "R at a proxy",
+   "class_doc": "Content, Sessions, Usage (assistant/message usage events)",
+   "grain_doc": "PerCall carrying an Event range",
+   "build": "buildable",
+   "build_doc": "Driverable at the Observer proxy (documented wire contract)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/deepseek-llm-api-wire-extensions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

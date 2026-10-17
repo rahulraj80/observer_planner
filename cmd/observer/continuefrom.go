@@ -161,8 +161,8 @@ func buildInjectedPrompt(doc, docPath string, maxBytes int) string {
 		b.WriteString("\n\n")
 	}
 	fmt.Fprintf(&b,
-		"This session continues a previous one. A full handover document — a distilled, "+
-			"priced session handover reported from the source tool — was written to %s. "+
+		"This session continues a previous one. A full handover document - a distilled, "+
+			"priced session handover reported from the source tool - was written to %s. "+
 			"Read that file first before continuing; it was too large to inline here.",
 		docPath)
 	return b.String()
@@ -395,7 +395,7 @@ func continueFromArgs(ctx context.Context, p continueFromParams) (args []string,
 	// expensive) handoff render.
 	if promptConflict(p.args, p.inject) {
 		return nil, "", fmt.Errorf(
-			"--continue-from seeds the handover as %s's first prompt, but you also forwarded a prompt — drop the extra prompt (forward value-flags as --flag=value so their value isn't mistaken for a prompt)",
+			"--continue-from seeds the handover as %s's first prompt, but you also forwarded a prompt - drop the extra prompt (forward value-flags as --flag=value so their value isn't mistaken for a prompt)",
 			p.label,
 		)
 	}
@@ -404,11 +404,11 @@ func continueFromArgs(ctx context.Context, p continueFromParams) (args []string,
 		return nil, "", err
 	}
 	fmt.Fprintf(p.stderr,
-		"observer %s: seeded from session %s — handover written to %s (%d bytes as the prompt)\n",
+		"observer %s: seeded from session %s - handover written to %s (%d bytes as the prompt)\n",
 		p.label, p.sessionID, out.DocPath, len(out.Prompt))
 	if out.Degraded {
 		fmt.Fprintf(p.stderr,
-			"observer %s: handover exceeded %dKB — injected a pointer prompt; the full doc is at %s\n",
+			"observer %s: handover exceeded %dKB - injected a pointer prompt; the full doc is at %s\n",
 			p.label, continueFromMaxPromptBytes/1024, out.DocPath)
 	}
 	if out.Note != "" {
@@ -425,59 +425,49 @@ func continueFromArgs(ctx context.Context, p continueFromParams) (args []string,
 	return seeded, dir, nil
 }
 
-// continueFromLauncher maps a target tool to the `observer <x>` launcher
-// that implements --continue-from for it, or "" when none is wired yet.
-// Only the launchers that both declare InjectPrompt AND have a
-// grounded, verified interactive-seed contract (claude-code, codex,
-// gemini-cli, pi) are listed — the `observer handoff` hint stays honest
-// about what actually exists.
+// continueFromLaunchers maps a target tool to the `observer <x>` launcher
+// that implements --continue-from for it (Seeded or DocAssisted). It is the
+// hand-maintained half of the bidirectional pin
+// TestLaunchCapabilityMatchesWiredLauncher holds against the registry's
+// Handoff.Launch rows, so the `observer handoff` hint stays honest about what
+// actually exists. A data table (CLAUDE.md #5), not a switch.
+var continueFromLaunchers = map[string]string{
+	"claude-code":      "observer claude",
+	"codex":            "observer codex",
+	"gemini-cli":       "observer gemini",
+	"pi":               "observer pi",
+	"opencode":         "observer opencode",
+	"copilot-cli":      "observer copilot-cli",
+	"cline-cli":        "observer cline-cli",
+	"kilo-code-cli":    "observer kilo",
+	"cursor":           "observer cursor",
+	"openclaw":         "observer openclaw",
+	"hermes":           "observer hermes",
+	"antigravity-cli":  "observer antigravity-cli",
+	"qwen-code":        "observer qwen",
+	"kiro-cli":         "observer kiro",
+	"kimi-code":        "observer kimi",
+	"grok":             "observer grok",
+	"qoder":            "observer qoder",
+	"goose":            "observer goose",
+	"devin":            "observer devin",
+	"droid":            "observer droid",
+	"open-interpreter": "observer open-interpreter",
+	"command-code":     "observer command-code",
+	"muse":             "observer muse",
+	"prime-agent":      "observer prime-agent",
+	"zcode":            "observer zcode",
+	"mistral-code":     "observer vibe",
+	"freebuff":         "observer freebuff",
+	// The 2026-10-03 terminal-picker coverage wave (all doc-assisted).
+	"aider":    "observer aider",
+	"crush":    "observer crush",
+	"junie":    "observer junie",
+	"poolside": "observer pool",
+}
+
+// continueFromLauncher returns the `observer <x>` launcher that implements
+// --continue-from for tool, or "" when none is wired.
 func continueFromLauncher(tool string) string {
-	switch tool {
-	case "claude-code":
-		return "observer claude"
-	case "codex":
-		return "observer codex"
-	case "gemini-cli":
-		return "observer gemini"
-	case "pi":
-		return "observer pi"
-	case "opencode":
-		return "observer opencode"
-	case "copilot-cli":
-		return "observer copilot-cli"
-	case "cline-cli":
-		return "observer cline-cli"
-	case "kilo-code-cli":
-		return "observer kilo"
-	case "cursor":
-		return "observer cursor"
-	case "openclaw":
-		return "observer openclaw"
-	case "hermes":
-		return "observer hermes"
-	case "antigravity-cli":
-		return "observer antigravity-cli"
-	case "qwen-code":
-		return "observer qwen"
-	case "kiro-cli":
-		return "observer kiro"
-	case "kimi-code":
-		return "observer kimi"
-	case "grok":
-		return "observer grok"
-	case "qoder":
-		return "observer qoder"
-	case "goose":
-		return "observer goose"
-	case "devin":
-		return "observer devin"
-	case "droid":
-		return "observer droid"
-	case "open-interpreter":
-		return "observer open-interpreter"
-	case "command-code":
-		return "observer command-code"
-	default:
-		return ""
-	}
+	return continueFromLaunchers[tool]
 }

@@ -1,8 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTerminalTheme } from "@/lib/terminalTheme";
+import type { TerminalThemePref } from "@shared/lib/terminalTheme";
 import { isRemoteView } from "@/lib/remote";
 import { pushToast } from "@/components/Toast";
 import { useCompanionRegistry } from "@/components/primitives/companion";
-import { Tooltip, TooltipSpan } from "@/components/primitives";
+import { ConfirmButton, Icon, LiveDot, Tooltip, TooltipSpan } from "@/components/primitives";
+import { TRANSPORT_DOT, liveDotProps, withDotClass } from "@/lib/liveSignals";
+import {
+  CircleDot,
+  Copy,
+  Ellipsis,
+  Expand,
+  FolderTree,
+  Fullscreen,
+  GitBranch,
+  Keyboard,
+  LayoutGrid,
+  Minus,
+  Moon,
+  RotateCcw,
+  Shrink,
+  Sun,
+  SunMoon,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useMobileTerminal } from "@/lib/useMediaQuery";
 import { platformPrefLabel, useKeyPlatform } from "@/lib/keyPlatform";
 import {
@@ -21,6 +44,13 @@ import {
   storeStandingSecret,
   terminalControlDenialMessage,
 } from "@/lib/remoteTerminal";
+import {
+  clipboardReadAvailable,
+  clipboardWriteAvailable,
+  decodeOsc52,
+  readClipboard,
+  writeClipboard,
+} from "@/lib/clipboard";
 
 // LaunchTerminal renders the embedded web terminal for a launched session
 // (Continue-in… → "Launch <tool> here"). It opens a websocket to
@@ -45,6 +75,12 @@ type Props = {
   onMinimize: () => void;
   /** Report lifecycle status up to the dock (pill state + beforeunload guard). */
   onStatus?: (s: Status) => void;
+  /**
+   * Report the node-intervention policy-stop explanation up to the dock, when
+   * the exit frame carried one (undefined = clear / nothing to show). Lets
+   * the minimized pill surface the same explanation as the expanded modal.
+   */
+  onPolicyStop?: (info: PolicyStopInfo | undefined) => void;
   /** True while this session is the on-screen (expanded) panel. */
   expanded: boolean;
   /**
@@ -98,28 +134,17 @@ type Props = {
   sessionPanelEnabled?: boolean;
 };
 
-export type Status =
-  | "connecting"
-  | "open"
-  | "reconnecting"
-  | "exited"
-  | "error";
-
-// isLiveStatus is the single predicate for "is this token still live?" — i.e.
-// its project can still be browsed and it can still be docked/paste-targeted. A
-// policy-rejected/errored socket ("error") is just as dead as an "exited" one
-// (P2-3): both must gate the project panel off, close an open panel, and revoke
-// the paste writer. Undefined/"connecting" count as live (optimistic, matching
-// the pre-existing disabled-gate semantics).
-//
-// "reconnecting" is LIVE by construction (2026-07-25, mobile terminal-continuity
-// arc): the PTY is a server-side object that outlives its viewers — the manager
-// removes a viewer WITHOUT killing the process — so a dropped websocket says
-// nothing at all about the session. Treating a transport drop as death is what
-// made a phone returning from its mail app find every terminal tombstoned.
-export function isLiveStatus(s: Status | undefined): boolean {
-  return s !== "exited" && s !== "error";
-}
+// The status vocabulary and its helpers live in lib/launchStatus.ts so the
+// dock can name a status without importing this module (and its xterm
+// chunks). Re-exported here so existing importers compile unchanged.
+import {
+  isLiveStatus,
+  policyStopMessage,
+  type PolicyStopInfo,
+  type Status,
+} from "@/lib/launchStatus";
+export { isLiveStatus, policyStopMessage };
+export type { PolicyStopInfo, Status };
 
 // STANDING_REACQUIRE_COOLDOWN_MS bounds the automatic standing re-present that
 // answers an expiry demote (review B3). A writer lease ages out on the order of
@@ -208,6 +233,7 @@ export function LaunchTerminal({
   onClose,
   onMinimize,
   onStatus,
+  onPolicyStop,
   expanded,
   fill,
   onAddToGrid,
@@ -224,12 +250,45 @@ export function LaunchTerminal({
   // desktop user who merely narrows the window, gets the shipped rendering
   // unchanged (CLAUDE.md rule 3).
   const isTouch = useMobileTerminal();
+  // Terminal theme: follows the app theme unless pinned in Settings. The
+  // panel root carries data-theme-scope so its chrome tokens (--term-*,
+  // fg-*, line-*) resolve to the TERMINAL's theme; the xterm canvas gets the
+  // matching ANSI palette below.
+  const termTheme = useTerminalTheme();
+  const termColorsRef = useRef(termTheme.colors);
+  termColorsRef.current = termTheme.colors;
+  const termContrastRef = useRef(termTheme.minimumContrastRatio);
+  termContrastRef.current = termTheme.minimumContrastRatio;
   // D13: which modifier VOCABULARY the on-screen key bar prints — the DAEMON's
   // OS (/api/status.host_os), overridable from the ⋯ menu. The host, not the
   // browser: the browser is often a phone that is not the machine whose PTY
   // this is. ONE owner here; the resolved platform goes down to TerminalKeyBar
   // as a plain string. Labels only — it changes no byte on the wire.
   const keyPlatform = useKeyPlatform();
+  // Closure-stable mirror for the setup effect (deps [token, isRemote]) — the
+  // clipboard hint names the ⌥/Shift modifier per the SAME resolved vocabulary
+  // the key bar prints, and must not go stale when the override changes.
+  const keyPlatformRef = useRef(keyPlatform.platform);
+  useEffect(() => {
+    keyPlatformRef.current = keyPlatform.platform;
+  }, [keyPlatform.platform]);
+  // Once-per-terminal latch for the "a TUI owns the mouse — Shift-drag to
+  // select" hint. A ref, not state: it must never trigger a render, and it
+  // resets naturally when the terminal is torn down.
+  const selectionHintShownRef = useRef(false);
+  // Clipboard verbs, reachable from the setup effect's closure (deps
+  // [token, isRemote]) without widening those deps — the same assign-on-render
+  // ref pattern reacquireLocalRef uses below.
+  const copySelectionRef = useRef<(text: string) => Promise<void>>(
+    async () => {},
+  );
+  const selectionHelpRef = useRef<() => string>(() => "");
+  // Right-click Copy/Paste menu. Anchored at the pointer, viewport coordinates.
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    hasSelection: boolean;
+  } | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   // Mirrors `expanded` for the ws handlers (closure-stable): only the
   // currently-expanded floating panel may steal focus on socket open — a
@@ -246,6 +305,13 @@ export function LaunchTerminal({
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [exitCode, setExitCode] = useState<number | null>(null);
+  // Set from the exit frame's optional policy_stop field (undefined when the
+  // daemon has nothing to report — most exits). Lives alongside exitCode and
+  // follows the same lifetime (a fresh mount, e.g. a relaunch, starts a new
+  // component instance with fresh state).
+  const [policyStop, setPolicyStop] = useState<PolicyStopInfo | undefined>(
+    undefined,
+  );
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
   // Remote-writer control (§4). A remote-paired device starts read-only and
@@ -432,6 +498,10 @@ export function LaunchTerminal({
     let term: import("@xterm/xterm").Terminal | null = null;
     let fit: import("@xterm/addon-fit").FitAddon | null = null;
     let ro: ResizeObserver | null = null;
+    // Raw DOM listeners bound to the xterm HOST element (not to xterm itself),
+    // so term.dispose() does not take them with it — collected here and undone
+    // explicitly in the cleanup below.
+    const hostCleanup: Array<() => void> = [];
 
     // ── Reconnect state (2026-07-25, mobile terminal-continuity arc) ────────
     // The server keeps the PTY alive across a viewer disconnect (termsession
@@ -485,13 +555,140 @@ export function LaunchTerminal({
         fontFamily:
           'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
         fontSize: 12,
-        theme: { background: "#0b0b0f", foreground: "#e6e6e6" },
+        theme: termColorsRef.current,
+        // Lightness-only contrast floor per terminal theme (1 = pass-through on
+        // dark; 4.5 on light, where dark-assuming truecolor output would vanish).
+        // See TERMINAL_MIN_CONTRAST in shared/lib/terminalTheme.ts.
+        minimumContrastRatio: termContrastRef.current,
+        // A full-screen TUI (opencode, claude-code 2.1.220+, etc.) turns on
+        // DECSET mouse-tracking (?1000/1002/1003/1006h) so it can receive
+        // clicks/drags itself. xterm couples that 1:1 to its OWN selection
+        // engine: Terminal.ts disables SelectionService entirely for as long
+        // as ANY mouse-tracking mode is active, so a plain click-drag no
+        // longer produces a local text selection — the drag goes to the app
+        // instead. xterm's shipped escape hatch is a modifier-held drag
+        // forcing local selection regardless of mouse-tracking
+        // (SelectionService.shouldForceSelection): Shift on Windows/Linux,
+        // which is xterm's default and needs no config here — but on macOS
+        // it instead checks Option, gated behind this option, whose default
+        // is `false`. Without this, Mac users have no drag-to-select
+        // fallback at all while a TUI owns the mouse. This is a terminal-
+        // capability fix, not a per-tool one: every full-screen TUI trips it.
+        macOptionClickForcesSelection: true,
       });
       fit = new FitAddon();
       term.loadAddon(fit);
       fitRef.current = fit;
       term.open(hostRef.current);
       termRef.current = term;
+
+      // ── OSC 52: let a TUI put text on the SYSTEM clipboard ────────────────
+      // THE root cause of "copy doesn't work in opencode" (and in vim, tmux,
+      // helix, lazygit, claude-code — every TUI that offers its own copy verb).
+      // A full-screen app owns the mouse (DECSET ?1000-?1003), so it renders
+      // its OWN selection and, when you press its copy key, it does NOT put
+      // anything in xterm's selection buffer — it emits
+      //   ESC ] 52 ; c ; <base64 of the text> BEL
+      // which is the terminal protocol's ONLY way for an application to reach
+      // the system clipboard. xterm.js ships no handler for OSC 52 (that lives
+      // in the separate @xterm/addon-clipboard package), and an unhandled OSC
+      // is silently DISCARDED — so the copy appeared to work inside the TUI and
+      // nothing ever landed on the clipboard. This is a terminal-capability
+      // gap, not a per-tool bug: registering the handler fixes every TUI at
+      // once.
+      //
+      // WRITE ONLY, NEVER READ. decodeOsc52 returns null for the `?` payload
+      // (the clipboard *read* request) so we never answer one: replying would
+      // hand the operator's clipboard to whatever is running in the terminal —
+      // including a command an agent was talked into running. xterm ships the
+      // read side disabled for exactly this reason.
+      //
+      // Returning `true` marks the sequence consumed either way, so a refused
+      // read is not re-emitted as garbage into the grid.
+      term.parser.registerOscHandler(52, (payload) => {
+        const text = decodeOsc52(payload);
+        if (text == null) return true;
+        void writeClipboard(text).then((res) => {
+          if (res === "failed") {
+            pushToast(
+              clipboardWriteAvailable()
+                ? "The app tried to copy, but the browser refused clipboard access"
+                : "The app tried to copy - the clipboard needs an https (or localhost) connection",
+              "warn",
+            );
+            return;
+          }
+          // Confirm the write: the TUI has no way to tell the operator whether
+          // the sequence actually reached the clipboard, so the terminal does.
+          pushToast("Copied to clipboard", "success");
+        });
+        return true;
+      });
+
+      // ── Selection discoverability while a TUI owns the mouse ──────────────
+      // With mouse-tracking on, xterm disables its selection engine outright,
+      // so a plain click-drag selects NOTHING and reads as "copy is broken".
+      // The escape hatch (Shift-drag, ⌥-drag on a Mac) is real but invisible.
+      // Say it once per terminal, and only after a DRAG actually came up empty
+      // — never as a pre-emptive nag, and never on a plain click-to-focus,
+      // which is why the pointer travel is measured rather than just watching
+      // for mouseup. 8px is comfortably past a hand tremor and well under any
+      // deliberate text drag.
+      let dragFrom: { x: number; y: number } | null = null;
+      const onHostMouseDown = (e: MouseEvent) => {
+        dragFrom = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+      };
+      const onHostMouseUp = (e: MouseEvent) => {
+        const from = dragFrom;
+        dragFrom = null;
+        if (!from) return;
+        const moved = Math.hypot(e.clientX - from.x, e.clientY - from.y);
+        if (moved < 8) return;
+        if (selectionHintShownRef.current) return;
+        const t = termRef.current;
+        if (!t || t.hasSelection()) return;
+        if (t.modes.mouseTrackingMode === "none") return;
+        selectionHintShownRef.current = true;
+        pushToast(
+          keyPlatformRef.current === "mac"
+            ? "This app is using the mouse - hold ⌥ Option and drag to select text, or right-click for Copy/Paste"
+            : "This app is using the mouse - hold Shift and drag to select text, or right-click for Copy/Paste",
+          "info",
+        );
+      };
+      const hostEl = hostRef.current;
+      hostEl.addEventListener("mousedown", onHostMouseDown);
+      hostEl.addEventListener("mouseup", onHostMouseUp);
+      hostCleanup.push(() => {
+        hostEl.removeEventListener("mousedown", onHostMouseDown);
+        hostEl.removeEventListener("mouseup", onHostMouseUp);
+      });
+
+      // ── Right-click Copy / Paste ──────────────────────────────────────────
+      // The second half of the mouse-tracking problem. While a TUI has mouse
+      // reporting on, xterm forwards the right-click to the app and cancels the
+      // browser's own context menu, so the operator loses the ONE paste
+      // affordance that needs no keyboard and no memorised chord. We render our
+      // own menu instead.
+      //
+      // BUBBLE phase, preventDefault only: the app still receives the
+      // right-click (xterm reports it from `mousedown`, which we do not touch);
+      // all we take is the browser's default menu, which was not going to
+      // appear anyway. SHIFT+right-click is the documented escape hatch — it
+      // skips our menu and gives the browser's back.
+      const onHostContextMenu = (e: MouseEvent) => {
+        if (e.shiftKey) return;
+        e.preventDefault();
+        setCtxMenu({
+          x: e.clientX,
+          y: e.clientY,
+          hasSelection: !!termRef.current?.hasSelection(),
+        });
+      };
+      hostEl.addEventListener("contextmenu", onHostContextMenu);
+      hostCleanup.push(() =>
+        hostEl.removeEventListener("contextmenu", onHostContextMenu),
+      );
 
       // STT/dictation note: no paste bridge lives here — none is needed. The
       // real defect was xterm swallowing plain Ctrl+V (mapped to \x16 and the
@@ -587,7 +784,35 @@ export function LaunchTerminal({
         if (e.ctrlKey && e.altKey) return true;
         const mod = e.ctrlKey || e.metaKey;
         if (!mod) return true;
+        // Ctrl+Shift+C — the terminal-standard EXPLICIT copy, and the only copy
+        // gesture that is unambiguous while a TUI owns Ctrl+C as "interrupt".
+        // Handled programmatically rather than left to the browser: Chrome maps
+        // Ctrl+Shift+C to "inspect element", so a native copy never fires here,
+        // and the selection may have been made with Shift-drag while xterm's
+        // selection engine is otherwise disabled by mouse-tracking.
+        //
+        // Swallowed in BOTH branches (preventDefault + return false), the way
+        // every real terminal emulator claims this chord — notably including
+        // the no-selection branch, where sending xterm's ^C would turn a failed
+        // copy into an interrupt.
+        if (
+          e.ctrlKey &&
+          e.shiftKey &&
+          !e.altKey &&
+          (e.key === "c" || e.key === "C")
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          const sel = termRef.current?.getSelection() ?? "";
+          if (sel) void copySelectionRef.current(sel);
+          else pushToast(selectionHelpRef.current(), "info");
+          return false;
+        }
         // Copy WITH a selection stays a native browser copy (don't send ^C).
+        // The browser's copy event reaches xterm's own handler, which writes the
+        // selection via ClipboardEvent.clipboardData — no `navigator.clipboard`
+        // and so no secure-context requirement. That is why plain Ctrl+C copy
+        // keeps working on a plain-http origin where the async API is absent.
         if (
           !e.altKey &&
           !e.shiftKey &&
@@ -795,6 +1020,7 @@ export function LaunchTerminal({
                 by?: "local" | "remote";
                 expiry?: boolean;
                 reason?: TerminalControlDenialReason;
+                policy_stop?: PolicyStopInfo;
               };
               if (m.t === "exit") {
                 // The AUTHORITATIVE "really exited" signal — the only thing that
@@ -803,6 +1029,7 @@ export function LaunchTerminal({
                 sawActivityRef.current = true;
                 ptyExited = true;
                 setExitCode(typeof m.code === "number" ? m.code : 0);
+                setPolicyStop(m.policy_stop);
                 setStatus("exited");
               } else if (m.t === "pty_size") {
                 // Feature A / Feature 2: the server's geometry frame (sent on open
@@ -993,7 +1220,7 @@ export function LaunchTerminal({
                   m.expiry === true
                     ? // An age-out, with no standing secret to answer it: say
                       // so honestly rather than implying somebody took control.
-                      "Terminal control timed out — ask for control again"
+                      "Terminal control timed out - ask for control again"
                     : isRemote
                       ? by === "local"
                         ? "The owner took terminal control"
@@ -1042,7 +1269,7 @@ export function LaunchTerminal({
           if (ev.code === 1008 && !sawActivityRef.current) {
             sessionGone = true;
             setStatus((s) => (s === "exited" ? s : "error"));
-            setErrMsg("Session ended before the terminal could connect — it was no longer running.");
+            setErrMsg("Session ended before the terminal could connect - it was no longer running.");
             return;
           }
           // An authoritative exit frame already arrived — the child is gone.
@@ -1127,6 +1354,14 @@ export function LaunchTerminal({
         reconnectTimer = null;
       }
       ro?.disconnect();
+      for (const undo of hostCleanup) {
+        try {
+          undo();
+        } catch {
+          /* the host element may already be gone */
+        }
+      }
+      hostCleanup.length = 0;
       try {
         ws?.close();
       } catch {
@@ -1489,7 +1724,7 @@ export function LaunchTerminal({
       return;
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      setAcqErr("Not connected — reopen the terminal and try again.");
+      setAcqErr("Not connected - reopen the terminal and try again.");
       return;
     }
     ws.send(JSON.stringify({ t: "acquire-writer", cap, confirm }));
@@ -1514,11 +1749,11 @@ export function LaunchTerminal({
       return;
     }
     if (!secret.startsWith("standing.")) {
-      setAcqErr('That is not a standing secret — it should start with "standing.". Use the capability + confirm fields above for a one-time approval.');
+      setAcqErr('That is not a standing secret - it should start with "standing.". Use the capability + confirm fields above for a one-time approval.');
       return;
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      setAcqErr("Not connected — reopen the terminal and try again.");
+      setAcqErr("Not connected - reopen the terminal and try again.");
       return;
     }
     if (rememberStanding) {
@@ -1612,19 +1847,21 @@ export function LaunchTerminal({
     onStatus?.(status);
   }, [status, onStatus]);
 
+  // Bubble the policy-stop explanation up to the dock so a minimized pill
+  // can surface the same reason as the expanded modal.
+  useEffect(() => {
+    onPolicyStop?.(policyStop);
+  }, [policyStop, onPolicyStop]);
+
   // Closing kills the child process tree (ws teardown → server reap), so
   // confirm when it's still live. Minimize is the non-destructive exit.
-  function requestClose() {
-    // A reconnecting seat is still backed by a LIVE process (only the transport
-    // dropped), so it must get the same destructive confirmation as an open one.
-    if (
-      (status === "open" || status === "reconnecting") &&
-      !window.confirm(`Stop the running ${tool} session? This ends the process.`)
-    ) {
-      return;
-    }
-    onClose();
-  }
+  // A reconnecting seat is still backed by a LIVE process (only the transport
+  // dropped), so it must get the same destructive confirmation as an open one.
+  // The confirm is the in-place two-step ConfirmButton (unstyled, so it keeps
+  // the terminal header's own button look), never a native window.confirm:
+  // the first click arms it and names what is about to happen, only a second
+  // click stops the process.
+  const closeIsDestructive = status === "open" || status === "reconnecting";
 
   // ── D10: copy off a touch device ───────────────────────────────────────
   // xterm.css sets `.xterm { user-select: none }` and xterm's own selection is
@@ -1654,17 +1891,84 @@ export function LaunchTerminal({
       pushToast("Nothing on screen to copy", "info");
       return;
     }
-    try {
-      await navigator.clipboard.writeText(text);
-      pushToast("Copied the visible terminal output", "success");
-    } catch {
-      // Clipboard writes need a secure context (HTTPS or localhost) and, on
-      // some browsers, a permission the user has denied. Name the dependency.
+    // Goes through the shared clipboard seam, which falls back to the legacy
+    // execCommand path on a plain-http origin (where `navigator.clipboard` is
+    // undefined outright, not merely rejecting) — the case that used to make
+    // this button a dead control on a non-localhost, non-TLS dashboard.
+    const res = await writeClipboard(text);
+    if (res === "failed") {
+      pushToast(clipboardFailureMessage(), "warn");
+      return;
+    }
+    pushToast("Copied the visible terminal output", "success");
+  }
+
+  // ── Clipboard verbs (Task 10) ────────────────────────────────────────────
+  // Assigned every render so the setup effect's closure always calls the
+  // current implementation without widening its [token, isRemote] deps.
+
+  copySelectionRef.current = async (text: string) => {
+    const res = await writeClipboard(text);
+    if (res === "failed") {
+      pushToast(clipboardFailureMessage(), "warn");
+      return;
+    }
+    pushToast("Copied the selection", "success");
+  };
+
+  selectionHelpRef.current = () =>
+    keyPlatformRef.current === "mac"
+      ? "Nothing selected - drag to select (hold ⌥ Option if the app is using the mouse)"
+      : "Nothing selected - drag to select (hold Shift if the app is using the mouse)";
+
+  /**
+   * pasteFromClipboard is the right-click Paste verb. It reads the clipboard
+   * programmatically and hands the text to xterm's OWN paste pipeline, so
+   * bracketed-paste wrapping is applied exactly as it is for a manual Ctrl+V
+   * (the shell therefore neutralises metacharacters the same way, and nothing
+   * auto-executes).
+   *
+   * When the read is refused or unavailable — an insecure origin has no
+   * `readText` at all, and even a secure one lets the user deny
+   * `clipboard-read` — it does NOT fail silently: it names the working
+   * alternative. Ctrl+V is not merely a nicer path, it is a DIFFERENT
+   * mechanism (a native `paste` ClipboardEvent) that needs no permission and
+   * works on every origin, which is why it stays the primary paste gesture and
+   * why this menu item is the convenience, not the contract.
+   */
+  async function pasteFromClipboard() {
+    if (!canWrite) {
+      pushToast("This terminal is read-only - you don't have control", "warn");
+      return;
+    }
+    const res = await readClipboard();
+    if (!res.ok) {
       pushToast(
-        "Could not copy — the clipboard needs a secure (HTTPS) connection",
+        res.reason === "unsupported"
+          ? "Reading the clipboard needs an https (or localhost) connection - press Ctrl+V to paste instead"
+          : "The browser blocked clipboard access - press Ctrl+V to paste instead",
         "warn",
       );
+      return;
     }
+    if (!res.text) {
+      pushToast("The clipboard is empty", "info");
+      return;
+    }
+    termRef.current?.paste(res.text);
+    termRef.current?.focus();
+  }
+
+  /**
+   * clipboardFailureMessage names the ACTUAL dependency that failed, rather
+   * than always blaming TLS: on an insecure origin the async API is missing
+   * (and the legacy fallback has now also failed), whereas on a secure one the
+   * browser refused the write.
+   */
+  function clipboardFailureMessage(): string {
+    return clipboardWriteAvailable()
+      ? "Could not copy - the browser refused clipboard access"
+      : "Could not copy - the clipboard needs an https (or localhost) connection";
   }
 
   // sendResizeNow tells the PTY to adopt explicit dims over the control channel
@@ -1776,13 +2080,22 @@ export function LaunchTerminal({
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  // Swap the canvas palette live when the app theme or the preference flips.
+  useEffect(() => {
+    const t = termRef.current;
+    if (!t) return;
+    t.options.theme = termTheme.colors;
+    t.options.minimumContrastRatio = termTheme.minimumContrastRatio;
+  }, [termTheme.colors, termTheme.minimumContrastRatio]);
+
   return (
     <div
       ref={rootRef}
+      data-theme-scope={termTheme.name}
       className={
         fill
-          ? "flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2 border bg-[#0b0b0f]"
-          : "flex h-[60vh] min-h-[360px] flex-col overflow-hidden rounded-2 border bg-[#0b0b0f]"
+          ? "flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2 border bg-term-bg"
+          : "flex h-[60vh] min-h-[360px] flex-col overflow-hidden rounded-2 border bg-term-bg"
       }
     >
       {/* D9: the desktop header carries EIGHT always-on actions in one 33px
@@ -1794,7 +2107,7 @@ export function LaunchTerminal({
           Desktop keeps the exact shipped class string. */}
       <div
         className={
-          "flex items-center justify-between gap-x-2 gap-y-1 border-b border-white/10 bg-[#14141a] " +
+          "flex items-center justify-between gap-x-2 gap-y-1 border-b border-line-2 bg-term-chrome " +
           // Touch: NEVER wrap (D15). The header budget is what forced minimize
           // down to a glyph; making the row structurally un-wrappable buys the
           // space back the honest way — the identity span on the left is the
@@ -1809,17 +2122,16 @@ export function LaunchTerminal({
       >
         <span
           className={
-            "flex min-w-0 items-center gap-2 text-[11px] text-white/60 " +
+            "flex min-w-0 items-center gap-2 text-[11px] text-fg-2 " +
             (isTouch ? "flex-nowrap overflow-hidden" : "flex-wrap")
           }
         >
-          {/* Literal palette, not theme tokens: this header is hardcoded
-              bg-[#14141a] (terminal chrome is always dark, independent of
-              sb_theme), so text-fg-1/text-fg-2 resolve LIGHT under the light
-              theme and render near-invisible on it. */}
+          {/* Theme-scoped tokens: the panel root sets data-theme-scope, so
+              fg-* here resolve to the TERMINAL's theme (dark or light), never
+              to the app's - the old literal white-on-dark palette is gone. */}
           <span
             className={
-              "font-mono text-white/85" + (isTouch ? " min-w-0 truncate" : "")
+              "font-mono text-fg-1" + (isTouch ? " min-w-0 truncate" : "")
             }
           >
             {tool}
@@ -1849,30 +2161,38 @@ export function LaunchTerminal({
             <TerminalOverflowMenu
               items={[
                 onOpenFiles && {
-                  label: "▤ Files",
+                  label: "Files",
+                  icon: FolderTree,
                   onSelect: onOpenFiles,
                   disabled: !projectPanelEnabled || !isLiveStatus(status),
                   disabledTitle: !isLiveStatus(status)
-                    ? "This session is no longer running — its project can no longer be browsed"
-                    : "This terminal was launched without a project root",
+                    ? "This session is no longer running - its project can no longer be browsed"
+                    : "This terminal has no directory on this machine to browse",
                 },
                 onOpenGit && {
-                  label: "⎇ Git",
+                  label: "Git",
+                  icon: GitBranch,
                   onSelect: onOpenGit,
                   disabled: !projectPanelEnabled || !isLiveStatus(status),
                   disabledTitle: !isLiveStatus(status)
-                    ? "This session is no longer running — its project can no longer be browsed"
-                    : "This terminal was launched without a project root",
+                    ? "This session is no longer running - its project can no longer be browsed"
+                    : "This terminal has no directory on this machine to browse",
                 },
                 onOpenSession && {
-                  label: "⊙ Session",
+                  label: "Session",
+                  icon: CircleDot,
                   onSelect: onOpenSession,
                   disabled: !sessionPanelEnabled || !isLiveStatus(status),
                   disabledTitle: !isLiveStatus(status)
-                    ? "This session is no longer running — its activity can no longer be shown"
+                    ? "This session is no longer running - its activity can no longer be shown"
                     : "No AI tool running in this terminal",
                 },
-                { label: "⧉ Copy visible", onSelect: () => void copyVisible() },
+                { label: "Copy visible", icon: Copy, onSelect: () => void copyVisible() },
+                {
+                  label: TERMINAL_THEME[termTheme.pref].label,
+                  icon: TERMINAL_THEME[termTheme.pref].icon,
+                  onSelect: () => termTheme.setPref(nextTerminalThemePref(termTheme.pref)),
+                },
                 // D13: the key-label override. It lives here rather than in the
                 // key bar because a control in the bar would have to clear the
                 // 44px tap floor and would cost a whole extra row of a phone's
@@ -1882,21 +2202,24 @@ export function LaunchTerminal({
                 // hatch for anything that fact cannot describe.
                 canWrite && {
                   label: platformPrefLabel(keyPlatform.pref, keyPlatform.platform),
+                  icon: Keyboard,
                   onSelect: keyPlatform.cycle,
                 },
                 canWrite && {
-                  label: sizeMode === "original" ? "⤢ Fit" : "↺ Original size",
+                  label: sizeMode === "original" ? "Fit" : "Original size",
+                  icon: sizeMode === "original" ? Expand : RotateCcw,
                   onSelect: sizeMode === "original" ? enterFitSize : enterOriginalSize,
                   disabled: sizeMode !== "original" && !initialDims,
                   disabledTitle: "Original size unknown for this session",
                 },
                 {
-                  label: focusMode ? "⤢ Exit focus" : "⤢ Focus mode",
+                  label: focusMode ? "Exit focus" : "Focus mode",
+                  icon: focusMode ? Shrink : Fullscreen,
                   onSelect: focusMode ? exitFocusMode : enterFocusMode,
                   disabled: !focusModeSupported,
                   disabledTitle: FOCUS_MODE_UNSUPPORTED,
                 },
-                onAddToGrid && { label: "⊞ Add to grid", onSelect: onAddToGrid },
+                onAddToGrid && { label: "Add to grid", icon: LayoutGrid, onSelect: onAddToGrid },
               ]}
             />
           )}
@@ -1906,44 +2229,52 @@ export function LaunchTerminal({
               and this never touches the ws bridge. */}
           {!isTouch && onOpenFiles && (
             <ProjectPanelButton
-              label="▤ Files"
+              label="Files"
+              icon={FolderTree}
               enabled={!!projectPanelEnabled && isLiveStatus(status)}
               onClick={onOpenFiles}
-              enabledTitle="Browse this project's files"
+              enabledTitle="Browse this terminal's files"
               disabledTitle={
                 !isLiveStatus(status)
-                  ? "This session is no longer running — its project can no longer be browsed"
+                  ? "This session is no longer running - its project can no longer be browsed"
                   : undefined
               }
             />
           )}
           {!isTouch && onOpenGit && (
             <ProjectPanelButton
-              label="⎇ Git"
+              label="Git"
+              icon={GitBranch}
               enabled={!!projectPanelEnabled && isLiveStatus(status)}
               onClick={onOpenGit}
-              enabledTitle="Show this project's git status, changes, and history"
+              enabledTitle="Show git status, changes, and history for this terminal's directory"
               disabledTitle={
                 !isLiveStatus(status)
-                  ? "This session is no longer running — its project can no longer be browsed"
+                  ? "This session is no longer running - its project can no longer be browsed"
                   : undefined
               }
             />
           )}
-          {/* Session cockpit: cost / tokens / live activity for the AI tool
-              attached to this terminal. Disabled (honest title) for a run-shape
-              that can never correlate to an observer session (a plain shell
-              run) or once the session is no longer live. Header button only —
-              the panel is provider-owned and this never touches the ws bridge. */}
+          {/* Session details: opens the FULL session slide-over over the
+              terminal workspace (Task 9) — the same panel the Sessions page
+              uses, plus a live hero band (context used / limit headroom /
+              next-turn cost / process·network·memory). The small floating
+              vitals cockpit is still one click away from inside it, and is what
+              an UNCORRELATED run falls back to. Disabled (honest title) for a
+              run-shape that can never correlate to an observer session (a plain
+              shell run) or once the session is no longer live. Header button
+              only — the modal is provider-owned and this never touches the ws
+              bridge. */}
           {!isTouch && onOpenSession && (
             <ProjectPanelButton
-              label="⊙ Session"
+              label="Session"
+              icon={CircleDot}
               enabled={!!sessionPanelEnabled && isLiveStatus(status)}
               onClick={onOpenSession}
-              enabledTitle="View this session's cost, tokens, and live activity"
+              enabledTitle="Open this session's full details - context and limit headroom, next-message cost, messages, cache and system"
               disabledTitle={
                 !isLiveStatus(status)
-                  ? "This session is no longer running — its activity can no longer be shown"
+                  ? "This session is no longer running - its activity can no longer be shown"
                   : "No AI tool running in this terminal"
               }
             />
@@ -1967,27 +2298,44 @@ export function LaunchTerminal({
               convention it now renders disabled, naming the missing dependency
               — the button is a bonus (keyboard capture), not the only usable
               view, so its absence must not look like a bug. */}
+          {!isTouch && (
+            <Tooltip
+              maxWidth={300}
+              content="Terminal colors: follow the dashboard theme, or pin dark or light. Remembered in this browser."
+            >
+              <button
+                type="button"
+                data-testid="terminal-theme-toggle"
+                onClick={() => termTheme.setPref(nextTerminalThemePref(termTheme.pref))}
+                className="inline-flex items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] text-fg-3 hover:bg-overlay-1 hover:text-fg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+              >
+                <Icon icon={TERMINAL_THEME[termTheme.pref].icon} size="xs" />
+                {TERMINAL_THEME[termTheme.pref].label}
+              </button>
+            </Tooltip>
+          )}
           {!isTouch &&
             (focusModeSupported ? (
               <Tooltip
                 maxWidth={320}
                 content={
                   focusMode
-                    ? "Exit focus mode — release keyboard capture and leave fullscreen"
-                    : "Focus mode — fullscreen + capture browser shortcuts (Ctrl-W/T/N) so they reach the TUI. Chromium only; exit with this button (Esc is captured)."
+                    ? "Exit focus mode - release keyboard capture and leave fullscreen"
+                    : "Focus mode - fullscreen + capture browser shortcuts (Ctrl-W/T/N) so they reach the TUI. Chromium only; exit with this button (Esc is captured)."
                 }
               >
                 <button
                   type="button"
                   onClick={focusMode ? exitFocusMode : enterFocusMode}
                   className={
-                    "rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
+                    "inline-flex items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
                     (focusMode
                       ? "bg-accent/20 text-accent hover:bg-accent/30"
-                      : "text-fg-3 hover:bg-white/10 hover:text-fg-1")
+                      : "text-fg-3 hover:bg-overlay-1 hover:text-fg-1")
                   }
                 >
-                  {focusMode ? "⤢ Exit focus" : "⤢ Focus mode"}
+                  <Icon icon={focusMode ? Shrink : Fullscreen} size="xs" />
+                  {focusMode ? "Exit focus" : "Focus mode"}
                 </button>
               </Tooltip>
             ) : (
@@ -1996,24 +2344,26 @@ export function LaunchTerminal({
                   type="button"
                   disabled
                   aria-label={FOCUS_MODE_UNSUPPORTED}
-                  className="cursor-not-allowed rounded-2 px-2 py-0.5 text-[11px] text-fg-4 opacity-60"
+                  className="inline-flex cursor-not-allowed items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] text-fg-4 opacity-60"
                 >
-                  ⤢ Focus mode
+                  <Icon icon={Fullscreen} size="xs" />
+                  Focus mode
                 </button>
               </TooltipSpan>
             ))}
           {!isTouch && onAddToGrid && (
-            <Tooltip content="Add to grid — dock this terminal on the Terminals workspace. The session keeps running.">
+            <Tooltip content="Add to grid - dock this terminal on the Terminals workspace. The session keeps running.">
               <button
                 type="button"
                 onClick={onAddToGrid}
-                className="rounded-2 px-2 py-0.5 text-[11px] text-fg-3 hover:bg-white/10 hover:text-fg-1 focus:outline-none"
+                className="inline-flex items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] text-fg-3 hover:bg-overlay-1 hover:text-fg-1 focus:outline-none"
               >
-                ⊞ Add to grid
+                <Icon icon={LayoutGrid} size="xs" />
+                Add to grid
               </button>
             </Tooltip>
           )}
-          <Tooltip content="Minimize — keeps the session running; restore it from the dock">
+          <Tooltip content="Minimize - keeps the session running; restore it from the dock">
             <button
               type="button"
               onClick={onMinimize}
@@ -2033,57 +2383,95 @@ export function LaunchTerminal({
               // catches the eye first.
               aria-label={
                 isTouch
-                  ? "Minimize — keeps the session running; restore it from the dock"
+                  ? "Minimize - keeps the session running; restore it from the dock"
                   : undefined
               }
               className={
-                "rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
+                "inline-flex items-center justify-center gap-1 rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
                 (isTouch
                   ? TOUCH_TARGET +
-                    " shrink-0 whitespace-nowrap bg-white/10 text-white/90 hover:bg-white/20"
-                  : "text-fg-3 hover:bg-white/10 hover:text-fg-1")
+                    " shrink-0 whitespace-nowrap bg-overlay-1 text-fg-1 hover:bg-overlay-2"
+                  : "text-fg-3 hover:bg-overlay-1 hover:text-fg-1")
               }
             >
-              ▾ Minimize
+              <Icon icon={Minus} size="xs" />
+              Minimize
             </button>
           </Tooltip>
           <Tooltip
             content={
-              status === "open" || status === "reconnecting"
+              closeIsDestructive
                 ? "Stop the running process and close"
                 : "Close"
             }
           >
-            <button
-              type="button"
-              onClick={requestClose}
-              aria-label={
-                isTouch
-                  ? status === "open" || status === "reconnecting"
-                    ? "Stop the running process and close"
-                    : "Close terminal"
-                  : undefined
-              }
-              // Touch: this is the DESTRUCTIVE action sitting next to Minimize
-              // at 19px in the measured layout. It gets the 44px floor, an
-              // extra gap from its neighbour, and a danger tint so a thumb
-              // aiming at Minimize has both distance and colour to go on.
-              className={
-                "rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
-                (isTouch
-                  ? TOUCH_TARGET + " ml-2 text-danger hover:bg-danger/15"
-                  : "text-fg-3 hover:bg-white/10 hover:text-fg-1")
-              }
-            >
-              {isTouch
-                ? "✕"
-                : status === "open" || status === "reconnecting"
-                  ? "✕ Stop & close"
-                  : "✕ Close"}
-            </button>
+            {/* The span is the Tooltip trigger: ConfirmButton is a plain
+                function component, so it cannot take the floating ref. */}
+            <span className="inline-flex">
+              <ConfirmButton
+                unstyled
+                requireConfirm={closeIsDestructive}
+                onConfirm={onClose}
+                ariaLabel={
+                  isTouch
+                    ? closeIsDestructive
+                      ? "Stop the running process and close"
+                      : "Close terminal"
+                    : undefined
+                }
+                // Touch: this is the DESTRUCTIVE action sitting next to Minimize
+                // at 19px in the measured layout. It gets the 44px floor, an
+                // extra gap from its neighbour, and a danger tint so a thumb
+                // aiming at Minimize has both distance and colour to go on.
+                className={
+                  "inline-flex items-center justify-center gap-1 rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
+                  (isTouch
+                    ? TOUCH_TARGET + " ml-2 text-danger hover:bg-danger/15"
+                    : "text-fg-3 hover:bg-overlay-1 hover:text-fg-1")
+                }
+                // Armed: the same button, tinted danger, so the second click
+                // reads as the destructive one.
+                armedClassName={
+                  "inline-flex items-center justify-center gap-1 rounded-2 px-2 py-0.5 text-[11px] font-medium focus:outline-none bg-danger/15 text-danger hover:bg-danger/25 " +
+                  (isTouch ? TOUCH_TARGET + " ml-2" : "")
+                }
+                confirmLabel={
+                  <>
+                    <Icon icon={X} size={isTouch ? "md" : "xs"} />
+                    {isTouch ? "Stop?" : "Confirm stop"}
+                  </>
+                }
+                armedNote={`Stop the running ${tool} session? This ends the process.`}
+                armedNoteClassName={
+                  isTouch
+                    ? "max-w-[10rem] text-[10.5px] leading-tight text-fg-2"
+                    : "max-w-[16rem] text-[11px] leading-snug text-fg-2"
+                }
+              >
+                <Icon icon={X} size={isTouch ? "md" : "xs"} />
+                {isTouch
+                  ? null
+                  : closeIsDestructive
+                    ? "Stop & close"
+                    : "Close"}
+              </ConfirmButton>
+            </span>
           </Tooltip>
         </span>
       </div>
+      {status === "exited" && policyStop && (
+        <div
+          className={
+            "border-b px-3 py-1.5 text-[11px] leading-relaxed " +
+            (policyStop.decision === "terminated" || policyStop.decision === "killed"
+              ? "border-danger/40 bg-danger/10 text-danger"
+              : "border-warn/40 bg-warn/10 text-warn")
+          }
+          title={policyStopMessage(policyStop)}
+        >
+          {policyStopMessage(policyStop)}
+        </div>
+      )}
       {isRemote && (
         <RemoteControlBar
           touch={isTouch}
@@ -2114,20 +2502,20 @@ export function LaunchTerminal({
         <button
           type="button"
           onClick={() => reacquireLocalRef.current()}
-          className="flex w-full items-center gap-2 border-b border-white/10 bg-warn/10 px-3 py-1.5 text-left text-[11px] text-warn hover:bg-warn/15"
+          className="flex w-full items-center gap-2 border-b border-line-2 bg-warn/10 px-3 py-1.5 text-left text-[11px] text-warn hover:bg-warn/15"
         >
           <span className="rounded-full bg-warn/20 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.05em]">
             read-only
           </span>
           <span>
             {revokedBy === "remote"
-              ? "A remote device took control — click to take back."
-              : "Control returned to the native terminal — click to take back."}
+              ? "A remote device took control - click to take back."
+              : "Control returned to the native terminal - click to take back."}
           </span>
         </button>
       )}
       {!isRemote && control === "requesting" && (
-        <div className="border-b border-white/10 bg-bg-1 px-3 py-1.5 text-[11px] text-fg-3">
+        <div className="border-b border-line-2 bg-bg-1 px-3 py-1.5 text-[11px] text-fg-3">
           Taking back control…
         </div>
       )}
@@ -2177,7 +2565,195 @@ export function LaunchTerminal({
           platform={keyPlatform.platform}
         />
       )}
+      {ctxMenu && (
+        <TerminalContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          hasSelection={ctxMenu.hasSelection}
+          canWrite={canWrite}
+          canReadClipboard={clipboardReadAvailable()}
+          onCopy={() => {
+            const sel = termRef.current?.getSelection() ?? "";
+            if (sel) void copySelectionRef.current(sel);
+          }}
+          onPaste={() => void pasteFromClipboard()}
+          onCopyVisible={() => void copyVisible()}
+          onClose={() => {
+            setCtxMenu(null);
+            termRef.current?.focus();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// TerminalContextMenu — the right-click Copy/Paste menu for the embedded
+// terminal (Task 10). It exists because a full-screen TUI turns on DECSET
+// mouse-tracking, xterm forwards the right-click to the app and cancels the
+// browser's own context menu, and the operator is left with no pointer-driven
+// clipboard affordance at all.
+//
+// Rendered into a portal at z-200 — above the expanded-terminal backdrop
+// (z-80), the floating panel band ([90,110]) and the session slide-over
+// (z-112/114), matching the z-200 the dock's layering note already reserves
+// for context menus. A portal, not an in-tree absolute box, because the
+// terminal panel is `overflow-hidden` and a menu opened near the bottom edge
+// would otherwise be clipped.
+//
+// HONEST DISABLING. "Paste" is not shown as an ordinary item when it cannot
+// work: with no write control it is disabled with the reason; with no
+// clipboard-read permission path it is disabled and points at Ctrl+V, which is
+// a different mechanism that still works. A control that silently does nothing
+// is the thing this repo's convention forbids.
+function TerminalContextMenu({
+  x,
+  y,
+  hasSelection,
+  canWrite,
+  canReadClipboard,
+  onCopy,
+  onPaste,
+  onCopyVisible,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  hasSelection: boolean;
+  canWrite: boolean;
+  canReadClipboard: boolean;
+  onCopy: () => void;
+  onPaste: () => void;
+  onCopyVisible: () => void;
+  onClose: () => void;
+}) {
+  const menuTheme = useTerminalTheme();
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState({ x, y });
+
+  // Flip the menu back inside the viewport when it was opened near an edge.
+  // Measured after mount (the size depends on which items rendered), so this
+  // is a layout effect's job — but a one-frame settle is invisible here and
+  // useEffect keeps the component SSR-safe like the rest of the file.
+  useEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const nx = x + r.width > window.innerWidth - 8 ? Math.max(8, x - r.width) : x;
+    const ny = y + r.height > window.innerHeight - 8 ? Math.max(8, y - r.height) : y;
+    if (nx !== x || ny !== y) setPos({ x: nx, y: ny });
+  }, [x, y]);
+
+  // Dismiss on anything that means "I'm done with this menu". `pointerdown` in
+  // the CAPTURE phase so the click that dismisses does not also land in the
+  // terminal underneath; `scroll` captured too, since the scroller is an
+  // ancestor and scroll does not bubble.
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+
+  const pasteReason = !canWrite
+    ? "This terminal is read-only"
+    : !canReadClipboard
+      ? "Needs an https (or localhost) connection - press Ctrl+V instead"
+      : undefined;
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      role="menu"
+      data-testid="terminal-context-menu"
+      style={{ top: pos.y, left: pos.x }}
+      // Portaled out of the panel, so it re-declares the terminal's theme
+      // scope itself to match the chrome it was opened from.
+      data-theme-scope={menuTheme.name}
+      className="fixed z-[200] min-w-[190px] overflow-hidden rounded-2 border border-line-3 bg-term-chrome py-1 text-[12px] text-fg-1 shadow-drawer"
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <MenuItem
+        label="Copy"
+        hint="Ctrl+Shift+C"
+        disabled={!hasSelection}
+        disabledReason="Nothing selected"
+        onSelect={() => {
+          onCopy();
+          onClose();
+        }}
+      />
+      <MenuItem
+        label="Paste"
+        hint="Ctrl+V"
+        disabled={Boolean(pasteReason)}
+        disabledReason={pasteReason}
+        onSelect={() => {
+          onPaste();
+          onClose();
+        }}
+      />
+      <div className="my-1 border-t border-line-2" />
+      <MenuItem
+        label="Copy visible output"
+        onSelect={() => {
+          onCopyVisible();
+          onClose();
+        }}
+      />
+    </div>,
+    document.body,
+  );
+}
+
+function MenuItem({
+  label,
+  hint,
+  disabled,
+  disabledReason,
+  onSelect,
+}: {
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
+      // Keep xterm's helper textarea focused through the press so a Paste lands
+      // in a still-focused terminal.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onSelect}
+      className={
+        "flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left " +
+        (disabled
+          ? "cursor-not-allowed text-fg-4"
+          : "text-fg-1 hover:bg-overlay-1")
+      }
+    >
+      <span>{label}</span>
+      {hint && <span className="shrink-0 text-[10px] text-fg-3">{hint}</span>}
+    </button>
   );
 }
 
@@ -2187,7 +2763,7 @@ export function LaunchTerminal({
 // so it is absent in every Safari (including all iPhones) and over a plain-http
 // remote origin.
 const FOCUS_MODE_UNSUPPORTED =
-  "Focus mode needs keyboard capture — a Chromium browser over HTTPS (or localhost). This browser doesn't provide it.";
+  "Focus mode needs keyboard capture - a Chromium browser over HTTPS (or localhost). This browser doesn't provide it.";
 
 // TOUCH_TARGET is the tap-target floor applied below the touch breakpoint.
 // Apple HIG asks 44pt and Android 48dp; 44px is the binding minimum. Measured
@@ -2196,6 +2772,8 @@ const TOUCH_TARGET = "min-h-[44px] min-w-[44px]";
 
 type OverflowItem = {
   label: string;
+  /** Leading glyph, rendered through <Icon> before the label. */
+  icon?: LucideIcon;
   onSelect: () => void;
   disabled?: boolean;
   /** Honest reason shown (and announced) when disabled. */
@@ -2225,9 +2803,9 @@ function TerminalOverflowMenu({
         aria-label="More terminal actions"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className={`${TOUCH_TARGET} rounded-2 px-2 text-[15px] leading-none text-white/70 hover:bg-white/10 hover:text-white focus:outline-none`}
+        className={`${TOUCH_TARGET} inline-flex items-center justify-center rounded-2 px-2 leading-none text-fg-2 hover:bg-overlay-1 hover:text-fg-0 focus:outline-none`}
       >
-        ⋯
+        <Icon icon={Ellipsis} size="md" />
       </button>
       {open && (
         <>
@@ -2239,11 +2817,9 @@ function TerminalOverflowMenu({
           />
           <span
             data-testid="terminal-overflow-menu"
-            // Terminal chrome is always dark (the panel hardcodes #0b0b0f /
-            // #14141a rather than theme tokens). `bg-bg-1`/`text-fg-2` resolve
-            // to WHITE-on-dark-grey under the light theme, so this surface uses
-            // the same literal palette as the header it drops out of.
-            className="absolute right-0 top-full z-50 mt-1 flex w-56 flex-col overflow-hidden rounded-2 border border-white/15 bg-[#1b1b23] shadow-lg"
+            // Inside the panel's data-theme-scope, so the term-* / fg-* tokens
+            // resolve to the terminal's own theme, matching the header.
+            className="absolute right-0 top-full z-50 mt-1 flex w-56 flex-col overflow-hidden rounded-2 border border-line-3 bg-term-pop shadow-lg"
           >
             {live.map((item) => (
               <button
@@ -2259,12 +2835,13 @@ function TerminalOverflowMenu({
                   item.onSelect();
                 }}
                 className={
-                  `${TOUCH_TARGET} flex items-center px-3 text-left text-[13px] ` +
+                  `${TOUCH_TARGET} flex items-center gap-2 px-3 text-left text-[13px] ` +
                   (item.disabled
-                    ? "cursor-not-allowed text-white/35"
-                    : "text-white/85 hover:bg-white/10 hover:text-white")
+                    ? "cursor-not-allowed text-fg-4"
+                    : "text-fg-1 hover:bg-overlay-1 hover:text-fg-0")
                 }
               >
+                {item.icon && <Icon icon={item.icon} size="sm" className="shrink-0" />}
                 {item.label}
               </button>
             ))}
@@ -2276,16 +2853,22 @@ function TerminalOverflowMenu({
 }
 
 // ProjectPanelButton is a small chrome button (Files / Git) that opens the
-// per-terminal project panel. Honest-disabled when the run has no project root
-// (per the honest-disabled-copy convention).
+// per-terminal project panel. Enabled for every dashboard-launched terminal
+// that has a directory on this machine: an allow-listed project root when the
+// launch requested one, otherwise the terminal's own working directory (the
+// panel header says which). Honest-disabled only when there is genuinely
+// nothing local to browse, e.g. an SSH terminal whose files live on the remote
+// host (per the honest-disabled-copy convention).
 function ProjectPanelButton({
   label,
+  icon,
   enabled,
   onClick,
   enabledTitle,
-  disabledTitle = "This terminal was launched without a project root",
+  disabledTitle = "This terminal has no directory on this machine to browse",
 }: {
   label: string;
+  icon: LucideIcon;
   enabled: boolean;
   onClick: () => void;
   enabledTitle: string;
@@ -2297,18 +2880,19 @@ function ProjectPanelButton({
       type="button"
       disabled={!enabled}
       onClick={onClick}
-      // Enabled: accessible name stays the visible glyph+word label
-      // ("▤ Files" / "⊙ Session"). Disabled: a disabled control can't
+      // Enabled: accessible name stays the visible word label ("Files" /
+      // "Session"; the glyph is an aria-hidden <Icon>). Disabled: a disabled control can't
       // carry a title tooltip a screen reader announces, so surface the
       // honest reason as the accessible name (the 417 e2e asserts this).
       aria-label={enabled ? undefined : tip}
       className={
-        "rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
+        "inline-flex items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] focus:outline-none " +
         (enabled
-          ? "text-fg-3 hover:bg-white/10 hover:text-fg-1"
+          ? "text-fg-3 hover:bg-overlay-1 hover:text-fg-1"
           : "cursor-not-allowed text-fg-4 opacity-60")
       }
     >
+      <Icon icon={icon} size="xs" />
       {label}
     </button>
   );
@@ -2323,9 +2907,21 @@ function ProjectPanelButton({
   );
 }
 
+// Terminal theme cycle: follow app -> dark -> light -> follow app.
+function nextTerminalThemePref(p: TerminalThemePref): TerminalThemePref {
+  return p === "app" ? "dark" : p === "dark" ? "light" : "app";
+}
+// TERMINAL_THEME is the label + glyph per terminal theme preference, shared
+// by the desktop header toggle and the touch overflow menu.
+const TERMINAL_THEME: Record<TerminalThemePref, { label: string; icon: LucideIcon }> = {
+  app: { label: "Theme: auto", icon: SunMoon },
+  dark: { label: "Theme: dark", icon: Moon },
+  light: { label: "Theme: light", icon: Sun },
+};
+
 // SizeModeControl is the Feature-A size-mode toggle shown in the terminal
-// chrome. In "fit" it offers "↺ Original size" (honest-disabled when the native
-// geometry is unknown); in "original" it shows an active "⤢ Fit" to return to
+// chrome. In "fit" it offers "Original size" (honest-disabled when the native
+// geometry is unknown); in "original" it shows an active "Fit" to return to
 // container-tracking. Writer-gated by its caller.
 function SizeModeControl({
   mode,
@@ -2340,13 +2936,14 @@ function SizeModeControl({
 }) {
   if (mode === "original") {
     return (
-      <Tooltip content="Pinned to the native terminal's original size — click to refit to the panel.">
+      <Tooltip content="Pinned to the native terminal's original size - click to refit to the panel.">
         <button
           type="button"
           onClick={onFit}
-          className="rounded-2 bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30 focus:outline-none"
+          className="inline-flex items-center gap-1 rounded-2 bg-accent/20 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/30 focus:outline-none"
         >
-          ⤢ Fit
+          <Icon icon={Expand} size="xs" />
+          Fit
         </button>
       </Tooltip>
     );
@@ -2359,9 +2956,10 @@ function SizeModeControl({
         <button
           type="button"
           disabled
-          className="cursor-not-allowed rounded-2 px-2 py-0.5 text-[11px] text-fg-4 opacity-60"
+          className="inline-flex cursor-not-allowed items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] text-fg-4 opacity-60"
         >
-          ↺ Original size
+          <Icon icon={RotateCcw} size="xs" />
+          Original size
         </button>
       </TooltipSpan>
     );
@@ -2369,14 +2967,15 @@ function SizeModeControl({
   return (
     <Tooltip
       maxWidth={320}
-      content="Restore the native terminal's original size — fixes a TUI that garbled after a resize. Stops auto-refit until you switch back to Fit."
+      content="Restore the native terminal's original size - fixes a TUI that garbled after a resize. Stops auto-refit until you switch back to Fit."
     >
       <button
         type="button"
         onClick={onOriginal}
-        className="rounded-2 px-2 py-0.5 text-[11px] text-fg-3 hover:bg-white/10 hover:text-fg-1 focus:outline-none"
+        className="inline-flex items-center gap-1 rounded-2 px-2 py-0.5 text-[11px] text-fg-3 hover:bg-overlay-1 hover:text-fg-1 focus:outline-none"
       >
-        ↺ Original size
+        <Icon icon={RotateCcw} size="xs" />
+        Original size
       </button>
     </Tooltip>
   );
@@ -2436,20 +3035,20 @@ function RemoteControlBar({
         ? "Requesting control…"
         : control === "revoked"
           ? revokedBy === "local"
-            ? "The owner took control — you are viewing read-only"
+            ? "The owner took control - you are viewing read-only"
             : revokedBy === "remote"
-              ? "Another remote device took control — you are viewing read-only"
-              : "Control ended — you are viewing read-only"
+              ? "Another remote device took control - you are viewing read-only"
+              : "Control ended - you are viewing read-only"
           : control === "denied"
-            ? "Read-only — control was denied"
+            ? "Read-only - control was denied"
             : "Read-only view";
   const pillCls = writer
     ? "bg-ok/20 text-ok"
     : requesting
-      ? "bg-white/10 text-fg-3"
+      ? "bg-overlay-1 text-fg-3"
       : "bg-warn/20 text-warn";
   return (
-    <div className="border-b border-white/10 bg-[#101017] px-3 py-1.5 text-[11px]">
+    <div className="border-b border-line-2 bg-term-banner px-3 py-1.5 text-[11px]">
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <span className="flex min-w-0 flex-wrap items-center gap-2">
           <span
@@ -2479,7 +3078,7 @@ function RemoteControlBar({
       {standingStored && (
         <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-2 border border-line-2 bg-bg-1 px-2 py-1">
           <span className="text-[10.5px] text-fg-3">
-            Standing access is saved on this device — control is re-acquired automatically on refresh.
+            Standing access is saved on this device - control is re-acquired automatically on refresh.
           </span>
           <Tooltip content="Remove the saved standing secret from this browser (stops auto-acquiring on refresh)">
             <button
@@ -2540,7 +3139,7 @@ function RemoteControlBar({
               {requesting ? "requesting…" : "Take control"}
             </button>
             <span className="text-[10px] text-fg-3">
-              Sent over the encrypted session only — never stored or put in the URL.
+              Sent over the encrypted session only - never stored or put in the URL.
             </span>
           </div>
 
@@ -2601,14 +3200,14 @@ function StatusPill({
   exitCode: number | null;
 }) {
   const map: Record<Status, { label: string; cls: string }> = {
-    connecting: { label: "connecting…", cls: "bg-white/10 text-fg-3" },
+    connecting: { label: "connecting…", cls: "bg-overlay-1 text-fg-3" },
     open: { label: "live", cls: "bg-ok/20 text-ok" },
     // The session is still running server-side — only this browser's transport
     // dropped. Warn-coloured (something is off) but never "exited".
     reconnecting: { label: "reconnecting…", cls: "bg-warn/20 text-warn" },
     exited: {
       label: exitCode === null ? "exited" : `exited (${exitCode})`,
-      cls: "bg-white/10 text-fg-3",
+      cls: "bg-overlay-1 text-fg-3",
     },
     error: { label: "error", cls: "bg-danger/20 text-danger" },
   };
@@ -2618,8 +3217,11 @@ function StatusPill({
       // shrink-0: in the touch header the identity row never wraps, so the
       // pill must keep its full width and let the tool NAME be the thing that
       // truncates — a half-clipped "reconnecting…" says nothing.
-      className={`shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.05em] ${cls}`}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.05em] ${cls}`}
     >
+      {/* Same transport dot as the dock chip and the workspace tile
+          (TRANSPORT_DOT in lib/liveSignals). */}
+      <LiveDot {...withDotClass(liveDotProps(TRANSPORT_DOT, status), "h-1.5 w-1.5 shrink-0")} />
       {label}
     </span>
   );

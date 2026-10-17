@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/pidbridge"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/termsession"
@@ -77,6 +80,9 @@ type fakeResolver struct {
 	links   map[string]string // runID -> established session id
 	tools   map[string]string // handle -> canonical tool
 	roots   map[string]string // handle -> project root
+	// spawnDirs is the factual child cwd for a run with NO authorized project
+	// root (the default-cwd launch shape); roots wins when both are present.
+	spawnDirs map[string]string
 }
 
 func (f fakeResolver) HandleForRun(runID string) (string, bool) {
@@ -103,6 +109,16 @@ func (f fakeResolver) KindForHandle(handle string) (termrun.Kind, string, bool) 
 func (f fakeResolver) ProjectRoot(handle string) (string, bool) {
 	r, ok := f.roots[handle]
 	return r, ok
+}
+
+// SpawnDir mirrors the service: the launch root when the run carried one,
+// otherwise the daemon cwd the child inherits (spawnDirs).
+func (f fakeResolver) SpawnDir(handle string) (string, bool) {
+	if r, ok := f.roots[handle]; ok && r != "" {
+		return r, true
+	}
+	d, ok := f.spawnDirs[handle]
+	return d, ok && d != ""
 }
 
 func spawnEvent(handle string, pid int) termsession.ProcessEvent {
@@ -266,7 +282,7 @@ func TestTerminalPidSeederPidReuse(t *testing.T) {
 	s.OnRunCorrelated(context.Background(), "run-A", first)
 	s.Observe(exitEvent("hA", 100))
 	if _, ok := fb.lookup(100); ok {
-		t.Fatal("pid 100 still bridged after terminal A exited — a recycled pid would inherit a dead session")
+		t.Fatal("pid 100 still bridged after terminal A exited - a recycled pid would inherit a dead session")
 	}
 
 	// Terminal B is handed the SAME pid and correlates to a different session.
@@ -407,7 +423,7 @@ func TestSeedingCorrelator(t *testing.T) {
 // disappears when the terminal's child is reaped.
 func TestTerminalPidSeederEndToEnd(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -434,6 +450,11 @@ func TestTerminalPidSeederEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// Registered AFTER the mgr.Shutdown cleanup so it runs BEFORE it (LIFO):
+	// the PTY must be released before Shutdown waits on the goroutines reading
+	// it. Belt-and-braces alongside Kill/Close — this holds even if a future
+	// terminate() path stops calling either.
+	t.Cleanup(sp.release)
 	if pid, ok := mgr.PIDForHandle(handle); !ok || pid != 31337 {
 		t.Fatalf("PIDForHandle = (%d,%v), want (31337,true)", pid, ok)
 	}
@@ -468,7 +489,7 @@ func TestTerminalPidSeederEndToEnd(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("pid 31337 still bridged after the PTY child exited — a recycled pid would be misattributed")
+	t.Fatal("pid 31337 still bridged after the PTY child exited - a recycled pid would be misattributed")
 }
 
 // pidSpawnerStub is a minimal pid-reporting PTY for the end-to-end test: it
@@ -481,7 +502,7 @@ type pidSpawnerStub struct {
 
 func (s *pidSpawnerStub) Spawn(termsession.Spec) (termsession.PTY, error) {
 	s.done = make(chan struct{})
-	return &stubPTY{pid: s.pid, done: s.done}, nil
+	return &stubPTY{pid: s.pid, done: s.done, release: s.release}, nil
 }
 
 func (s *pidSpawnerStub) release() { s.once.Do(func() { close(s.done) }) }
@@ -489,6 +510,9 @@ func (s *pidSpawnerStub) release() { s.once.Do(func() { close(s.done) }) }
 type stubPTY struct {
 	pid  int
 	done chan struct{}
+	// release unblocks the parked Read/Wait. It is the spawner's own
+	// single-shot release, so Kill-then-Close cannot double-close.
+	release func()
 }
 
 func (p *stubPTY) Pid() int { return p.pid }
@@ -500,7 +524,57 @@ func (p *stubPTY) Read([]byte) (int, error) {
 func (p *stubPTY) Write(b []byte) (int, error) { return len(b), nil }
 func (p *stubPTY) Resize(_, _ uint16) error    { return nil }
 func (p *stubPTY) Wait() (int, error)          { <-p.done; return 0, nil }
-func (p *stubPTY) Kill() error                 { return nil }
-func (p *stubPTY) Close() error                { return nil }
+
+// Kill and Close unblock the parked Read/Wait, the way a real PTY does. A
+// stub that accepts Close and leaves its reader parked does not model a
+// PTY, and the cost of that is not cosmetic: Manager.Shutdown ends in an
+// unbounded m.wg.Wait(), so any t.Fatal between Create and release() parks
+// the cleanup forever. On the 2026-08-01 cache-cleared sweep that turned
+// ONE flaked assertion into a 40m cmd/observer timeout which starved ~340
+// parallel tests in the same package — the whole package reported FAIL
+// having actually run almost none of it.
+func (p *stubPTY) Kill() error  { p.release(); return nil }
+func (p *stubPTY) Close() error { p.release(); return nil }
 
 var errClosedStub = errors.New("stub pty closed")
+
+// TestTerminalPidSeederUsesSpawnDirForDefaultCwdLaunch pins the pid-bridge half
+// of the default-cwd fix with the devbox's real values: a dashboard "New
+// Terminal" launched with no authorized project root (the node has no
+// [terminal.launch].allowed_project_roots) spawns with an empty Spec.Dir and has
+// no ProjectRoot, yet its child demonstrably runs in the daemon's cwd
+// (/home/azureuser — the value the launcher's own os.Getwd wrote into the
+// launch_seeds row for pid 44993). Reading the factual SpawnDir seam instead of
+// the authorization-bearing ProjectRoot keeps the bridge row's CWD real.
+func TestTerminalPidSeederUsesSpawnDirForDefaultCwdLaunch(t *testing.T) {
+	const daemonCwd = "/home/azureuser"
+	var wrote []pidbridge.Entry
+	seeder := newTerminalPidSeederWith(
+		func(_ context.Context, e pidbridge.Entry) error { wrote = append(wrote, e); return nil },
+		func(context.Context, int, string) (bool, error) { return true, nil },
+		nil,
+	)
+	// Spawned with NO Dir — the default-cwd shape.
+	seeder.Observe(termsession.ProcessEvent{
+		Kind: termsession.ProcessSpawned, Handle: "h-devbox", PID: 44993,
+		Subcommand: "opencode", Dir: "", At: time.Now(),
+	})
+	res := fakeResolver{
+		handles:   map[string]string{"run-devbox": "h-devbox"},
+		links:     map[string]string{"run-devbox": "ses_fb73193f7ffexyKthX20fRk905"},
+		tools:     map[string]string{"h-devbox": "opencode"},
+		roots:     map[string]string{},                      // no authorized project root
+		spawnDirs: map[string]string{"h-devbox": daemonCwd}, // but a real child cwd
+	}
+	seeder.OnRunCorrelated(context.Background(), "run-devbox", res)
+
+	if len(wrote) != 1 {
+		t.Fatalf("writes = %d, want 1", len(wrote))
+	}
+	want := pidbridge.Entry{
+		PID: 44993, SessionID: "ses_fb73193f7ffexyKthX20fRk905", Tool: "opencode", CWD: daemonCwd,
+	}
+	if wrote[0] != want {
+		t.Fatalf("seeded row = %+v, want %+v", wrote[0], want)
+	}
+}

@@ -10,6 +10,7 @@ import { useFilters, windowParams, windowLabel, windowSpanHours } from "@/lib/fi
 import { useApi } from "@/lib/useApi";
 import { fmtCompact, fmtInt, fmtPct, fmtUSD } from "@/lib/format";
 import type { CostSummary } from "@/lib/types";
+import { navIcon } from "@/lib/nav";
 
 interface EvidenceTimeseriesPoint {
   bucket: string;
@@ -127,9 +128,9 @@ export function APIExplorerPage() {
   if (evidenceSummary.error || evidenceTs.error) {
     return (
       <div className="p-6">
-        <PageHeader
+        <PageHeader icon={navIcon("apiexplorer")}
           title="API Explorer"
-          sub="Provider × model × kind × time cuts — your API usage under the microscope."
+          sub="Provider × model × kind × time cuts - your API usage under the microscope."
         />
         <div className="mt-4 rounded-3 border border-warn/30 bg-warn/5 px-4 py-3 text-[12px] text-warn">
           Evidence unavailable: {evidenceSummary.error?.message || evidenceTs.error?.message}
@@ -141,9 +142,9 @@ export function APIExplorerPage() {
   if (!evidenceSummary.data || !evidenceTs.data) {
     return (
       <div className="p-6">
-        <PageHeader
+        <PageHeader icon={navIcon("apiexplorer")}
           title="API Explorer"
-          sub="Provider × model × kind × time cuts — your API usage under the microscope."
+          sub="Provider × model × kind × time cuts - your API usage under the microscope."
         />
         <div className="mt-4 text-[12px] text-fg-3">Loading…</div>
       </div>
@@ -160,9 +161,9 @@ export function APIExplorerPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
+      <PageHeader icon={navIcon("apiexplorer")}
         title="API Explorer"
-        sub="Provider × model × kind × time cuts — your API usage under the microscope."
+        sub="Provider × model × kind × time cuts - your API usage under the microscope."
         right={
           <div className="flex items-center gap-2">
             <Pill>{winLbl} · bucket: {bucket}</Pill>
@@ -233,7 +234,7 @@ export function APIExplorerPage() {
         </h2>
         <ChartShell title="Cost & tokens over time">
           <div className="text-center text-fg-3 text-[12px] py-8">
-            Timeseries chart placeholder — connect recharts for evidenceTs
+            Timeseries chart placeholder - connect recharts for evidenceTs
           </div>
         </ChartShell>
       </section>
@@ -338,10 +339,10 @@ export function APIExplorerPage() {
                       )}
                     </td>
                     <td className="px-3 py-2 text-right text-fg-2">
-                      {p.avg_ttft_ms > 0 ? fmtInt(Math.round(p.avg_ttft_ms)) + "ms" : "—"}
+                      {p.avg_ttft_ms > 0 ? fmtInt(Math.round(p.avg_ttft_ms)) + "ms" : " - "}
                     </td>
                     <td className="px-3 py-2 text-right text-fg-2">
-                      {p.avg_total_ms > 0 ? fmtInt(Math.round(p.avg_total_ms)) + "ms" : "—"}
+                      {p.avg_total_ms > 0 ? fmtInt(Math.round(p.avg_total_ms)) + "ms" : " - "}
                     </td>
                   </tr>
                 ))}

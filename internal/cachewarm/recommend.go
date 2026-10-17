@@ -95,7 +95,7 @@ func Recommend(in RecommendInput) Recommendation {
 	}
 	if in.ResumeConfidence < in.MinResumeConfidence {
 		rec.Action = ActionNone
-		rec.Rationale = "session unlikely to resume — keep-warm would be wasted spend"
+		rec.Rationale = "session unlikely to resume - keep-warm would be wasted spend"
 		return rec
 	}
 
@@ -111,7 +111,7 @@ func Recommend(in RecommendInput) Recommendation {
 		rec.Action = ActionUse1hTier
 		rec.PaysOff = true
 		rec.ProjectedSavingsUSD = savings
-		rec.Rationale = "switch this cache to the 1h TTL tier — a one-time client-side change, no pinging"
+		rec.Rationale = "switch this cache to the 1h TTL tier - a one-time client-side change, no pinging"
 	case in.Mode == "enforce" && in.Proxied:
 		rec.Action = ActionReplayPing
 		rec.PaysOff = true
@@ -122,9 +122,9 @@ func Recommend(in RecommendInput) Recommendation {
 		// Anthropic already on 1h, or a provider with no content-free
 		// lever (OpenAI implicit) outside enforce/proxied.
 		if in.Window.Supports1hTier {
-			rec.Rationale = "already on the longest content-free tier — resume soon or accept a re-write"
+			rec.Rationale = "already on the longest content-free tier - resume soon or accept a re-write"
 		} else {
-			rec.Rationale = "no content-free keep-warm lever for this provider — resume soon or accept a re-write"
+			rec.Rationale = "no content-free keep-warm lever for this provider - resume soon or accept a re-write"
 		}
 	}
 	return rec

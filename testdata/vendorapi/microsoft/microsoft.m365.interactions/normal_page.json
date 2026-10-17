@@ -1,0 +1,35 @@
+{
+  "value": [
+    {
+      "id": "1764008994427",
+      "sessionId": "19:4MaLljqiHJSD-rKYK-aqJmaGuUgmlsBgQxeXaUspdz41@thread.v2",
+      "requestId": "79699122-d834-6cc2-c1df-0332a0bd982d",
+      "appClass": "IPM.SkypeTeams.Message.Copilot.BizChat",
+      "interactionType": "userPrompt",
+      "conversationType": "bizchat",
+      "etag": "1764008994427",
+      "createdDateTime": "2025-11-24T18:29:54.427Z",
+      "locale": "en-us",
+      "contexts": [],
+      "from": {
+        "@odata.type": "#microsoft.graph.chatMessageFromIdentitySet",
+        "application": null,
+        "device": null,
+        "user": {
+          "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+          "id": "254efcd0-5094-4fc5-b2b3-1637629393e1",
+          "displayName": "8:orgid:254efcd0-5094-4fc5-b2b3-1637629393e1",
+          "userIdentityType": "aadUser",
+          "tenantId": "c9d0512d-d402-4cfa-becc-4407bcf48a2d"
+        }
+      },
+      "body": {
+        "contentType": "text",
+        "content": "What are the key action items from my recent meetings?"
+      },
+      "attachments": [],
+      "links": [],
+      "mentions": []
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -56,8 +57,13 @@ func newOpencodeCmd() *cobra.Command {
 			"proxy-level api_turns). Run `observer doctor opencode` to check.\n\n" +
 			"Requires a running observer proxy. Start one with `observer\n" +
 			"start` or `observer proxy start` first.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach-by-default (attach-all-launchers): when attach resolves,
 			// hand the PTY to the daemon so the dashboard can view/drive this
 			// SAME live opencode session. opencode self-routes via
@@ -151,7 +157,6 @@ func newOpencodeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "opencode")
 	resume = registerResumeFlag(cmd, "opencode")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
@@ -188,6 +193,11 @@ func runOpencodeLauncher(opts opencodeLauncherOptions) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	// P6 item 5 + G8: the process that starts the tool refuses an
+	// org-disallowed tool and counts a tool grant's use, once (review M3-10).
+	if err := refuseIfToolDisallowedCfg(cfg, "opencode", opts.stderr); err != nil {
+		return err
+	}
 
 	proxyURL := resolveProxyURL(cfg.Proxy.Port, opts.proxyURL)
 
@@ -196,26 +206,83 @@ func runOpencodeLauncher(opts opencodeLauncherOptions) error {
 		return err
 	}
 
-	env, baseURL, preset := prepareOpencodeEnv(os.Environ(), proxyURL)
-	if preset {
-		fmt.Fprintf(opts.stderr,
-			"observer opencode: OPENAI_BASE_URL already set in env (%s); using yours.\n", baseURL)
-	}
-
-	if !proxyReachable(proxyURL, 250*time.Millisecond) {
-		fmt.Fprintf(opts.stderr,
-			"observer opencode: warning — proxy not reachable at %s (start it with `observer start`)\n", proxyURL)
+	// Layer the rename-safe agent runtime-dir env under OPENAI_BASE_URL, so an
+	// SMB/NFS HOME (e.g. a containerized node on Azure Files) can't break
+	// OpenCode's openrouter-provider npm/bun install (adapter-agnostic; no-op
+	// unless [launch].agent_runtime_dir is set).
+	childBase := applyChildPATH(applyAgentRuntimeEnv(os.Environ(), agentRuntimeDir()), daemonLoginPathDirs(), bin)
+	var (
+		env     []string
+		baseURL string
+		preset  bool
+	)
+	if notice, out := proxyNotInBuildNotice("opencode"); out && !proxyReachable(proxyURL, 250*time.Millisecond) {
+		// A build without capture.proxy (lane MP-L1L, T-715, D-514): launch
+		// unrouted with the one reason, never at a dead port. preset keeps
+		// the run's telemetry unmarked as proxied.
+		fmt.Fprintln(opts.stderr, notice)
+		env, preset = childBase, true
 	} else {
-		fmt.Fprintf(opts.stderr, "observer opencode: routing via %s\n", baseURL)
+		env, baseURL, preset = prepareOpencodeEnv(childBase, proxyURL)
+		if preset {
+			fmt.Fprintf(opts.stderr,
+				"observer opencode: OPENAI_BASE_URL already set in env (%s); using yours.\n", baseURL)
+		}
+		// OpenCode's built-in Zen provider ignores OPENAI_BASE_URL; route it
+		// through the proxy's opencode-zen lane too, or a Zen session (the
+		// free default models) bypasses the proxy: no prompt-lane warning, no
+		// accurate tokens.
+		var zenRouted bool
+		env, zenRouted = prepareOpencodeZenRoute(env, proxyURL)
+		if !zenRouted {
+			fmt.Fprintln(opts.stderr,
+				"observer opencode: OPENCODE_CONFIG_CONTENT already set in env; OpenCode Zen models are not routed through the proxy.")
+		}
+
+		if !proxyReachable(proxyURL, 250*time.Millisecond) {
+			fmt.Fprintf(opts.stderr,
+				"observer opencode: warning - proxy not reachable at %s (start it with `observer start`)\n", proxyURL)
+		} else {
+			fmt.Fprintf(opts.stderr, "observer opencode: routing via %s\n", baseURL)
+		}
+	}
+	evidence := envBudgetLaunchEvidence("opencode", proxyURL,
+		map[string]string{"OPENAI_BASE_URL": strings.TrimRight(proxyURL, "/") + "/v1"},
+		env, opts.opencodeArgs)
+	evidence.Executable = bin
+	evidence.Arguments = opts.opencodeArgs
+	if err := enforceBudgetControlledLaunch(context.Background(), opts.configPath, "opencode", evidence); err != nil {
+		return err
 	}
 
 	child := exec.Command(bin, opts.opencodeArgs...) //nolint:gosec // user-launched tool, args are theirs
-	child.Env = env
-	child.Dir = opts.dir // "" inherits the caller's cwd; set by --continue-from to the source project root
+	if !preset {
+		env = withOTelRouteMarker(env, "opencode") // T-536: this run's export is proxied
+	}
+	child.Env = scrubOOBEnv(env) // strip the trusted OOB channel env
+	child.Dir = opts.dir         // "" inherits the caller's cwd; set by --continue-from to the source project root
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
-	if rErr := child.Run(); rErr != nil {
+	discovery := prepareGenericDiscovery(context.Background(), "opencode", opts.dir)
+	if rErr := child.Start(); rErr != nil {
+		return fmt.Errorf("exec opencode: %w", rErr)
+	}
+	// Direct process attribution (migration 086): record the child pid now
+	// that Start has made it knowable; retract the seed when the child is
+	// reaped. Best-effort both ways — a seeding failure never affects the
+	// launch (see cmd/observer/launchseed.go).
+	recordLaunchSeed(cfg.Observer.DBPath, "opencode", opts.dir, child.Process.Pid, opts.stderr)
+	// Best-effort generic post-launch session discovery (WS-DISCOVERY): a
+	// no-op unless the trusted OOB channel is active AND "opencode" resolves
+	// to an adapter that declares session-file watch roots. Cancel the
+	// instant the child exits so a window cut short by exit never announces a
+	// candidate that only looked unique because the scan stopped early.
+	discoverCancel := discovery.start()
+	if discoverCancel != nil {
+		defer discoverCancel()
+	}
+	if rErr := child.Wait(); rErr != nil {
 		var ee *exec.ExitError
 		if errors.As(rErr, &ee) {
 			return exitErr(ee.ExitCode())
@@ -223,6 +290,21 @@ func runOpencodeLauncher(opts opencodeLauncherOptions) error {
 		return fmt.Errorf("exec opencode: %w", rErr)
 	}
 	return nil
+}
+
+// prepareOpencodeZenRoute points OpenCode's built-in Zen provider
+// ("opencode", e.g. the free big-pickle model, served from
+// opencode.ai/zen) at the proxy's config.OpenCodeZenLane lane through
+// OPENCODE_CONFIG_CONTENT, which OpenCode merges over its config files.
+// OPENAI_BASE_URL only reroutes the openai provider, so without this a
+// Zen session never touched the proxy (demo node 1, 2026-10-02: no
+// prompt-lane warning on a pasted token). A caller-set
+// OPENCODE_CONFIG_CONTENT is left alone (routed=false).
+func prepareOpencodeZenRoute(parent []string, proxyURL string) (env []string, routed bool) {
+	content := fmt.Sprintf(`{"provider":{"opencode":{"options":{"baseURL":%q}}}}`,
+		strings.TrimRight(proxyURL, "/")+"/up/"+config.OpenCodeZenLane+"/v1")
+	out, _, presets := applyBaseURLEnv(parent, map[string]string{"OPENCODE_CONFIG_CONTENT": content})
+	return out, len(presets) == 0
 }
 
 // prepareOpencodeEnv sets OPENAI_BASE_URL=<proxyURL>/v1 in the child env

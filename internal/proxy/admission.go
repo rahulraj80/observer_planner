@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
@@ -22,9 +23,35 @@ import (
 // Bound at the obs wiring point (cmd/observer/obs_wire.go) so internal/proxy
 // never imports internal/obs — the reverse-import boundary. nil ⇒ admission
 // disabled, zero overhead.
+//
+// The seam is TWO-PHASE (admission-trace-linkage spec §1). Admit judges the
+// request and returns the verdict immediately, but for an ALLOWED verdict on
+// the forwarded path it may DEFER persisting its audit row and hand back an
+// opaque [AdmitToken] on [AdmitResult.Finalize]. The proxy then calls
+// FinalizeAdmission exactly once — via defer, on every exit path — with the
+// request id that finally resolved for the turn (the provider-echoed id when
+// the upstream supplied one, else the proxy's own). That is the only instant
+// at which the trace-id seed is knowable AND the row is not yet hash-locked,
+// so the gate can stamp a trace id matching the synthesized gateway trace
+// instead of mutating a chained row after the fact.
+//
+// Blocked verdicts persist inside Admit (nothing is forwarded, so no later id
+// can resolve) and return a nil Finalize token.
 type Admitter interface {
 	Admit(ctx context.Context, in AdmitInput) AdmitResult
+	// FinalizeAdmission persists a verdict Admit deferred. token is whatever
+	// Admit returned on AdmitResult.Finalize; a nil token is a no-op. It is
+	// called at most once per Admit and must be safe to call with a token it
+	// does not recognize.
+	FinalizeAdmission(ctx context.Context, token AdmitToken, resolvedRequestID string)
 }
+
+// AdmitToken is the opaque handle to an admission verdict whose audit row the
+// gate deferred. The proxy only carries it back to FinalizeAdmission — it
+// never inspects it, so no obs type crosses the reverse-import boundary
+// (precedent: AdmitRoute.DecisionID + EgressReporter.ReportEgressRealized, the
+// realized-outcome callback shape). nil ⇒ nothing to finalize.
+type AdmitToken any
 
 // AdmitInput is the plain request the proxy hands the gate. The proxy owns
 // provider-shape knowledge (it already parses these bodies), so the gate
@@ -148,6 +175,11 @@ type AdmitResult struct {
 	Reason    string
 	Criterion string
 	Route     *AdmitRoute
+	// Finalize is the opaque deferred-persist handle (see [Admitter]). Non-nil
+	// only for a verdict whose audit row the gate held back pending the
+	// resolved request id; the proxy hands it to FinalizeAdmission exactly once
+	// on the way out. nil ⇒ the gate already persisted (or persists nothing).
+	Finalize AdmitToken
 }
 
 // admit runs the pre-forward gate on a parsed request body. It returns the
@@ -167,6 +199,26 @@ func (p *Proxy) admit(ctx context.Context, provider string, body []byte, userID,
 	if text == "" {
 		// Nothing to judge (a tool-result-only turn, or an unparseable
 		// body — e.g. an undecoded gzip payload, §3.5) — never gate.
+		//
+		// G1 visibility fix (docs/audits/multimodal-tracking-audit-2026-08-26.md):
+		// this branch also covers an image/audio-only turn, which the judge
+		// then silently never evaluates. Judging non-text content is a
+		// separate design arc (out of scope here — we must NOT synthesize
+		// marker text and feed it to the judge, that would fake coverage).
+		// What we CAN do cheaply and safely is tell an admin "there was
+		// non-text content here that nothing judged" apart from the
+		// routine "truly nothing to judge" case (a tool-result-only turn),
+		// by logging a distinct, greppable line — read-only, no Admitter
+		// call, so this cannot change gating behavior.
+		if types := nonTextBlockTypes(provider, body); len(types) > 0 {
+			p.logger.Info(
+				"proxy: admission skipped - non-text user content present, not judged",
+				"provider", provider,
+				"request_id", requestID,
+				"session_id", sessionIDForProvider(provider, body),
+				"non_text_block_types", types,
+			)
+		}
 		return AdmitResult{}, false
 	}
 	res := p.admitter.Admit(ctx, AdmitInput{
@@ -179,6 +231,26 @@ func (p *Proxy) admit(ctx context.Context, provider string, body []byte, userID,
 		PromptTokensEst: len(body) / 4,
 	})
 	return res, res.Block
+}
+
+// finalizeAdmission persists a deferred admission verdict through the seam,
+// stamping the request id that finally resolved for this turn. It is a no-op
+// on a nil admitter or a nil token (a blocked verdict, an admitter that never
+// defers, or a request admission never ran on), so the non-obs paths pay
+// nothing.
+//
+// Called from serve() via defer so EVERY exit path — success, upstream error,
+// unwinding panic — finalizes exactly once with the best id resolved at that
+// point (falling back to the proxy's own request id). The insert context is
+// detached (insertTurnDetached precedent): the row must land even when the
+// client has already disconnected and cancelled the request context.
+func (p *Proxy) finalizeAdmission(handle AdmitToken, resolvedRequestID string) {
+	if p.admitter == nil || handle == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p.admitter.FinalizeAdmission(ctx, handle, resolvedRequestID)
 }
 
 // resolveEgressTarget parses a Plane-A route's resolved target URL into an
@@ -211,12 +283,12 @@ func (p *Proxy) forwardEgressFailOpen(r *http.Request, upstream *url.URL, upstre
 	}
 	outURL := *upstream
 	outURL.Path = joinPath(upstream.Path, upstreamPath)
-	outURL.RawQuery = r.URL.RawQuery
+	outURL.RawQuery = stripHostedIdentityQueryParams(r.URL.RawQuery)
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
 	}
-	copyRequestHeaders(outReq.Header, r.Header)
+	p.copyRequestHeaders(outReq.Header, r.Header)
 	outReq.Header.Set("Accept-Encoding", "identity")
 	outReq.Host = upstream.Host
 	outReq.ContentLength = int64(len(reqBody))
@@ -401,4 +473,142 @@ func decodeMessageText(raw json.RawMessage) string {
 		b.WriteString(bl.Text)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// nonTextBlockTypes returns the distinct content-block "type" values present
+// in the LAST user message of a provider request body — companion to
+// extractLastUserText, used ONLY for the G1 admission-visibility log line
+// (docs/audits/multimodal-tracking-audit-2026-08-26.md): telling "an
+// image/audio-only turn the judge never saw" apart from "truly nothing here"
+// (a tool-result-only turn) without ever invoking the judge. Best-effort and
+// read-only, matching extractLastUserText's own fail-open shape: an
+// unparseable or provider-unhandled body, or a message with no array-shaped
+// content, yields nil.
+func nonTextBlockTypes(provider string, body []byte) []string {
+	if len(body) == 0 {
+		return nil
+	}
+	if provider == models.ProviderOpenAI {
+		return nonTextBlockTypesOpenAI(body)
+	}
+	return nonTextBlockTypesAnthropic(body)
+}
+
+// nonTextBlockTypesAnthropic finds the last user-role message in a Messages
+// API body and reports its non-text block types. Unlike lastUserTextAnthropic
+// (which keeps walking backward past a user message that decoded to no text,
+// looking for one that did), this stops at the first — i.e. most recent — user
+// message: since the caller already knows overall text extraction came up
+// empty, the most recent turn is the one relevant to log.
+func nonTextBlockTypesAnthropic(body []byte) []string {
+	var raw struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	for i := len(raw.Messages) - 1; i >= 0; i-- {
+		if raw.Messages[i].Role != "user" {
+			continue
+		}
+		return decodeMessageBlockTypes(raw.Messages[i].Content)
+	}
+	return nil
+}
+
+// nonTextBlockTypesOpenAI mirrors nonTextBlockTypesAnthropic for a Chat
+// Completions body, falling back to the Responses API input[] shape — the
+// same two shapes lastUserTextOpenAI handles.
+func nonTextBlockTypesOpenAI(body []byte) []string {
+	var raw struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	for i := len(raw.Messages) - 1; i >= 0; i-- {
+		if raw.Messages[i].Role != "user" {
+			continue
+		}
+		return decodeMessageBlockTypes(raw.Messages[i].Content)
+	}
+	in := bytes.TrimSpace(raw.Input)
+	if len(in) == 0 || in[0] != '[' {
+		return nil
+	}
+	var items []struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(in, &items) != nil {
+		return nil
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Role != "user" {
+			continue
+		}
+		return decodeMessageBlockTypes(items[i].Content)
+	}
+	return nil
+}
+
+// decodeMessageBlockTypes returns the distinct "type" values of content
+// blocks in a message's content field that carry genuine non-text USER
+// content the judge never sees — image, image_url, input_image, input_audio,
+// audio, document, video, file, etc. — the non-text-detecting companion to
+// decodeMessageText.
+//
+// Two categories are deliberately excluded, both to avoid miscounting the
+// EXISTING "nothing to judge" case (extractLastUserText's own doc comment:
+// "a tool-result-only turn... never gate") as the NEW "non-text content
+// existed but was never judged" case this function exists to surface:
+//   - text-shaped types (text, input_text, output_text) — decodeMessageText
+//     already covers these; this function only runs when that came up empty
+//   - non-user-authored control/plumbing types (tool_use, tool_result,
+//     thinking, redacted_thinking, server_tool_use, web_search_tool_result,
+//     and similar *_tool_result variants) — these appear in "user"-role
+//     messages as protocol mechanics (a tool result re-injected, a replayed
+//     thinking block), not content a human/app sent for the judge to weigh
+//
+// A bare-string content field, or blocks carrying no "type", contribute
+// nothing — matching decodeMessageText's own best-effort shape: content this
+// function can't positively identify as non-text user content is invisible
+// here, not miscounted as such.
+func decodeMessageBlockTypes(raw json.RawMessage) []string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '[' {
+		return nil
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(blocks))
+	var types []string
+	for _, bl := range blocks {
+		switch bl.Type {
+		case "", "text", "input_text", "output_text",
+			"tool_use", "tool_result", "server_tool_use",
+			"thinking", "redacted_thinking":
+			continue
+		}
+		if strings.HasSuffix(bl.Type, "_tool_result") {
+			continue
+		}
+		if seen[bl.Type] {
+			continue
+		}
+		seen[bl.Type] = true
+		types = append(types, bl.Type)
+	}
+	return types
 }

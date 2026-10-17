@@ -181,8 +181,8 @@ func PlanTask(in Inputs) Plan {
 			// Same call as selectProcessBackend's `backend = "etw"` warning —
 			// a config that asks for a feed it cannot get is told so.
 			p.Reason = "[observer.process.etw].enabled is true but [observer.process].enabled is false, " +
-				"so the whole process-capture subsystem — the listener an elevated capturer dials into " +
-				"included — is never started. Set [observer.process].enabled = true as well."
+				"so the whole process-capture subsystem - the listener an elevated capturer dials into " +
+				"included - is never started. Set [observer.process].enabled = true as well."
 		}
 		return p
 	}
@@ -239,7 +239,7 @@ func PlanTask(in Inputs) Plan {
 		if err := validateActionValue(v.value, v.addrLike); err != nil {
 			return Plan{
 				Outcome: OutcomeBlocked,
-				Reason: fmt.Sprintf("%s (%q) %v, so no elevated command could be composed from it — "+
+				Reason: fmt.Sprintf("%s (%q) %v, so no elevated command could be composed from it - "+
 					"point it at a path without that character and re-run", v.what, v.value, err),
 			}
 		}
@@ -355,7 +355,7 @@ func composedCommandNotes(args string) []string {
 			"a path in this command contains a %. Pasting it into COMMAND PROMPT expands %…% as an\n"+
 				"    environment variable before schtasks ever sees it, so use the dashboard button or\n"+
 				"    PowerShell. Whether Task Scheduler ALSO expands the stored action when it runs has not\n"+
-				"    been measured here — read the stored action back and check it says what you expect:\n"+
+				"    been measured here - read the stored action back and check it says what you expect:\n"+
 				"    schtasks.exe /Query /TN \""+TaskName+"\" /V /FO LIST")
 	}
 	return notes
@@ -390,13 +390,13 @@ func unresolvedBinaryReason(hint, source string) string {
 	hint = strings.TrimSpace(hint)
 	if hint == "" {
 		return "no Windows observer.exe is configured, and none was found next to the daemon " +
-			"binary or under ./bin — set [observer.process].windows_binary_path " +
+			"binary or under ./bin - set [observer.process].windows_binary_path " +
 			"(or $OBSERVER_WINDOWS_BINARY) to the Windows-side observer.exe and re-run"
 	}
 	if source == "" {
 		source = "[observer.process].windows_binary_path"
 	}
-	return fmt.Sprintf("the Windows observer.exe configured in %s (%q) does not exist — "+
+	return fmt.Sprintf("the Windows observer.exe configured in %s (%q) does not exist - "+
 		"point it at a Windows-side observer.exe this daemon can read "+
 		"(a /mnt/… or C:\\… path) and re-run", source, hint)
 }
@@ -636,19 +636,19 @@ func TaskNotes(tokenPath, windowsUser string) []string {
 		// back into a `type`.
 		notes = append(notes, fmt.Sprintf(
 			"the token lives on the WSL filesystem; in the SAME elevated prompt, check it is reachable first\n"+
-				"    (this lists the file — it deliberately never prints the token, which is a shared secret):\n    dir \"%s\"", tokenPath,
+				"    (this lists the file - it deliberately never prints the token, which is a shared secret):\n    dir \"%s\"", tokenPath,
 		))
 	}
 	if windowsUser != "" {
 		notes = append(notes, fmt.Sprintf(
 			"the task must belong to %s (the account that owns this WSL distro). If you elevate with a\n"+
-				"    different admin account, add /RU \"%s\" — schtasks will then ask for that account's password.",
+				"    different admin account, add /RU \"%s\" - schtasks will then ask for that account's password.",
 			windowsUser, windowsUser,
 		))
 	}
 	notes = append(notes,
 		"the capturer re-reads the token on every connect attempt, so a task that fires at logon\n"+
-			"    before WSL is up recovers on its own — no ordering requirement between the two.")
+			"    before WSL is up recovers on its own - no ordering requirement between the two.")
 	return notes
 }
 

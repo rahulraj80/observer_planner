@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
+
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
@@ -18,7 +20,7 @@ import (
 // NewestEventAge before "now" with the multi-day spread preserved.
 func TestEvents(t *testing.T) {
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
-	events, tokens, err := Events(context.Background(), now)
+	events, tokens, err := Events(context.Background(), now, claudecode.New())
 	if err != nil {
 		t.Fatalf("Events: %v", err)
 	}
@@ -86,7 +88,7 @@ func TestEvents(t *testing.T) {
 // roots carry the demo marker, so seeded rows can never be mistaken
 // for captured ones.
 func TestEventsSessionsLookDemo(t *testing.T) {
-	events, _, err := Events(context.Background(), time.Now().UTC())
+	events, _, err := Events(context.Background(), time.Now().UTC(), claudecode.New())
 	if err != nil {
 		t.Fatalf("Events: %v", err)
 	}

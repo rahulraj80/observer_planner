@@ -1,0 +1,21 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "Inferred"
+  },
+  "fixture_sha256": "d7ba41c771d7a7b9a0974e31fd1b8f631b992f1ac78db9b0145168a27578a132",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/users",
+    "status": 401
+  },
+  "notes": "The reference documents that most requests need the Authorization header but no error body; this shape is synthesized and Inferred.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "JetBrains IDE Services User management via REST API (import-users-via-rest-api.html), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "5880507235c874a4a8cbdb5e86af144266b47c54616d7424e181e868e75e69e9",
+  "source_url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "jetbrains.ideservices.users_list"
+}

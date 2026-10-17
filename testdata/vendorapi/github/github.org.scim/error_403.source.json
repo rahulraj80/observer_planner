@@ -1,0 +1,26 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "detail": "Inferred",
+    "documentation_url": "Inferred",
+    "message": "Inferred",
+    "schemas": "VerifiedOfficial",
+    "schemas[]": "VerifiedOfficial",
+    "status": "VerifiedOfficial"
+  },
+  "fixture_sha256": "2df0f983e38e6be9eb43b91629f7b87964273782a8f017613d838e2703ccde1a",
+  "http": {
+    "method": "GET",
+    "path": "/scim/v2/organizations/{org}/Users",
+    "status": 403
+  },
+  "notes": "Error schema from the operation's declared response in the official description; the message, detail and URL values are synthesized.",
+  "scenario": "error_403",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.org.scim"
+}

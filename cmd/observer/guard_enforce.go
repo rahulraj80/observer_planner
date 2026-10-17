@@ -16,6 +16,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/guard"
+	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -42,7 +43,7 @@ func registerGuardEnforceCmds(root *cobra.Command) {
 // reason hook registration edits client configs additively).
 func setGuardConfigMode(path string, enabled bool, mode string) error {
 	if path == "" {
-		return errors.New("config path unresolved — pass --config")
+		return errors.New("config path unresolved - pass --config")
 	}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -67,7 +68,7 @@ func setGuardConfigMode(path string, enabled bool, mode string) error {
 		body = setOrAppendTOMLKey(body, "mode", fmt.Sprintf("%q", mode))
 		text = text[:loc[2]] + body + text[loc[3]:]
 	}
-	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil { //nolint:gosec // G703: the operator's own observer config path
 		return fmt.Errorf("write config: %w", err)
 	}
 	return nil
@@ -174,7 +175,7 @@ func newGuardApproveCmd() *cobra.Command {
 			"blocking verdicts downgrade to flag, so the agent's natural retry\n" +
 			"succeeds. Scope one of: --session <id>, --project (this repo's\n" +
 			"root), --global. --ttl bounds the grant (default 24h; 0 = no\n" +
-			"expiry). Grants are part of the audit story — `observer guard\n" +
+			"expiry). Grants are part of the audit story - `observer guard\n" +
 			"approvals` lists them, `observer guard revoke <id>` withdraws.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -205,11 +206,21 @@ func newGuardApproveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
+			// Org-lock gate (org guardrail control wave, Track B): under
+			// an org policy bundle only a rule the organization marked
+			// `overridable` may be granted a local exception. Refused
+			// HERE, at creation, so the register never fills with grants
+			// applyApprovals would ignore at evaluation time. A node with
+			// no bundle takes the zero-cost path below and behaves
+			// exactly as before the wave.
 			database, err := db.Open(cmd.Context(), db.Options{Path: cfg.Observer.DBPath})
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
 			defer database.Close()
+			if err := refuseOrgLockedApproval(cmd.Context(), cfg, store.New(database), ruleID); err != nil {
+				return err
+			}
 			now := time.Now().UTC()
 			row := store.GuardApprovalRow{
 				TS: now, RuleID: ruleID, Scope: scope,
@@ -237,6 +248,32 @@ func newGuardApproveCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&global, "global", false, "grant everywhere on this node")
 	cmd.Flags().DurationVar(&ttl, "ttl", 24*time.Hour, "grant lifetime (0 = never expires)")
 	return cmd
+}
+
+// refuseOrgLockedApproval reports the "locked by org policy" refusal
+// when the node's org bundle does NOT mark ruleID overridable. A
+// guard that cannot be constructed degrades to "no bundle applies"
+// (fail-open toward today's behaviour, like every guard CLI surface)
+// — the evaluation-time gate in guard.applyApprovals is the backstop
+// that actually keeps a locked rule hard.
+//
+// One exception (request-grants G3): a verified org SOFTEN grant for the rule
+// makes the approval the developer's per-call confirmation the grant asks
+// for, so it is created; the guard lets it act only while the grant also
+// covers the call.
+func refuseOrgLockedApproval(ctx context.Context, cfg config.Config, st *store.Store, ruleID string) error {
+	home, _ := os.UserHomeDir()
+	g, err := guard.New(guard.Options{Config: cfg.Guard, Home: home})
+	if err != nil {
+		return nil
+	}
+	if _, orgLocked := g.OrgOverrideStatus(ruleID); orgLocked {
+		if _, softened := orgclient.SoftenGrantForRule(ctx, st, ruleID, time.Now()); softened {
+			return nil
+		}
+		return fmt.Errorf("locked by org policy: %s (your organization did not mark this rule overridable; request access with `observer request access %s`)", ruleID, ruleID)
+	}
+	return nil
 }
 
 func newGuardApprovalsCmd() *cobra.Command {
@@ -340,6 +377,9 @@ func runGuardReplay(ctx context.Context, cfg config.Config, st *store.Store, sin
 	if err != nil {
 		return sum, fmt.Errorf("construct guard: %w", err)
 	}
+	// A captured prompt a hook/proxy lane already judged before send is not
+	// re-flagged by the replay's post-hoc prompt lane.
+	g.SetPromptPreSendLookup(preSendPromptLookup(st, nil))
 	const replayCap = 50000
 	inputs, err := st.LoadGuardReplayInputs(ctx, since, replayCap)
 	if err != nil {
@@ -365,7 +405,7 @@ func printReplaySummary(cmd *cobra.Command, label string, sum replaySummary) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "%s: %d actions scanned, %d verdicts\n", label, sum.scanned, sum.verdicts)
 	if sum.capped {
-		fmt.Fprintln(out, "NOTE: the 50k replay cap was hit — narrow --since for full coverage")
+		fmt.Fprintln(out, "NOTE: the 50k replay cap was hit - narrow --since for full coverage")
 	}
 	keys := make([]string, 0, len(sum.byRule))
 	for k := range sum.byRule {
@@ -391,7 +431,7 @@ func newGuardSimulateCmd() *cobra.Command {
 		Short: "Replay captured history against CURRENT policy (dry-run, nothing persists)",
 		Long: "The pre-enforce confidence builder (spec §11.1): what would last\n" +
 			"week have flagged or blocked under today's rules? Evaluates the\n" +
-			"actions table through a fresh engine — the live guard state and\n" +
+			"actions table through a fresh engine - the live guard state and\n" +
 			"the audit table are untouched. --enforce simulates enforce-mode\n" +
 			"decisions regardless of the configured mode.",
 		Args: cobra.NoArgs,
@@ -433,7 +473,7 @@ func newGuardRescanCmd() *cobra.Command {
 		Short: "Re-evaluate captured history and PERSIST new verdicts (after rule changes)",
 		Long: "The deliberate retroactive sweep (spec §7): after a policy change,\n" +
 			"re-judge history and record verdicts the live seam missed.\n" +
-			"Idempotent — an action already carrying a guard event for the same\n" +
+			"Idempotent - an action already carrying a guard event for the same\n" +
 			"rule is skipped, so re-running a rescan never duplicates rows.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

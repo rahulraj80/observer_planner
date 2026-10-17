@@ -1,21 +1,19 @@
+//go:build !sbo_omit_remote
+
 // Package dashboard — Phase-4 session-attach round-2 review regression tests
 // (F1 session-lifetime binding, F2 full-hash viewer keying + logout gating, F4
 // strict terminal-settings decode).
 package dashboard
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/remoteauth"
 )
 
@@ -171,7 +169,7 @@ func TestSensitiveViewerKeyedByFullHashF2b(t *testing.T) {
 
 	// The DISPLAY PREFIX must not target the full-hash-keyed viewer.
 	if n := s.closeRemoteSensitiveViewersForDevice(prefix); n != 0 {
-		t.Fatalf("display prefix closed %d viewers — it must be display-only, never a registry key", n)
+		t.Fatalf("display prefix closed %d viewers - it must be display-only, never a registry key", n)
 	}
 	if atomic.LoadInt32(&closed) != 0 {
 		t.Fatal("viewer cancelled by a display-prefix collision")
@@ -207,7 +205,7 @@ func TestLogoutHookGatedOnLiveSessionF2a(t *testing.T) {
 	// (1) Unknown-cookie logout: Revoke no-ops → hook must NOT fire.
 	logout(t, mc, "totally-unknown-cookie-value")
 	if atomic.LoadInt32(&closed) != 0 {
-		t.Fatal("an unknown-cookie logout closed a viewer — the hook must be gated on a real revoke (F2a)")
+		t.Fatal("an unknown-cookie logout closed a viewer - the hook must be gated on a real revoke (F2a)")
 	}
 
 	// (2) Real logout: the live session is revoked → hook fires with the FULL
@@ -255,28 +253,4 @@ route_proxy = true
 	if rec := putTerminalSection(t, base, `{"RouteProxy":false}`); rec.Code != http.StatusOK {
 		t.Fatalf("valid partial = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-}
-
-// putTerminalSection builds a fresh dashboard over a temp config with the given
-// [terminal.attach] body and PUTs the given JSON to the terminal section.
-func putTerminalSection(t *testing.T, cfgBody, jsonBody string) *httptest.ResponseRecorder {
-	t.Helper()
-	tdir := t.TempDir()
-	cfgPath := filepath.Join(tdir, "config.toml")
-	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	server, err := New(Options{DB: database, ConfigPath: cfgPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/terminal", strings.NewReader(jsonBody)))
-	return rr
 }

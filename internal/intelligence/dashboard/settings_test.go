@@ -32,7 +32,7 @@ monthly_budget_usd = 75
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ monthly_budget_usd = 75
 func TestHandleConfig_NoFileReturnsDefaults(t *testing.T) {
 	tdir := t.TempDir()
 	cfgPath := filepath.Join(tdir, "missing.toml") // never created
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ log_level = "info"
 		t.Fatal(err)
 	}
 
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ log_level = "info"
 // always given one, but tests / future ephemeral modes may not).
 func TestHandleConfigPricing_NoConfigPath(t *testing.T) {
 	tdir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestHandleConfigPricing_NoConfigPath(t *testing.T) {
 // catches if the matching defaultPricing entry didn't get updated.
 func TestHandleConfigPricingDefaults_ShapeAndCoverage(t *testing.T) {
 	tdir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,9 +262,10 @@ func TestHandleConfigPricingDefaults_ShapeAndCoverage(t *testing.T) {
 			t.Errorf("%s has zero rates: %+v", model, entry)
 		}
 	}
-	// LC tier round-trip: claude-sonnet-4-5 should expose its 200K threshold.
-	if s := got.Defaults["claude-sonnet-4-5"]; s.LongContextThreshold != 200_000 {
-		t.Errorf("claude-sonnet-4-5 LC threshold: got %v want 200000", s.LongContextThreshold)
+	// LC tier round-trip: claude-sonnet-4 should expose its 200K threshold
+	// (4.5 is flat since 2026-10-01: Anthropic states no premium for it).
+	if s := got.Defaults["claude-sonnet-4"]; s.LongContextThreshold != 200_000 {
+		t.Errorf("claude-sonnet-4 LC threshold: got %v want 200000", s.LongContextThreshold)
 	}
 	// Gross size sanity: there are 60+ baked-in models per pricing-reference.md.
 	if len(got.Defaults) < 50 {
@@ -284,7 +285,7 @@ log_level = "info"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +343,7 @@ func TestHandleConfigSection_Dashboard(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[observer]\nlog_level = \"info\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,8 +355,8 @@ func TestHandleConfigSection_Dashboard(t *testing.T) {
 
 	// Valid save persists.
 	rr := httptest.NewRecorder()
-	server.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPut,
-		"/api/config/section/dashboard", strings.NewReader(`{"Addr":"127.0.0.1:8082"}`)))
+	server.Handler().ServeHTTP(rr, confirmedReq(t, server, httptest.NewRequest(http.MethodPut,
+		"/api/config/section/dashboard", strings.NewReader(`{"Addr":"127.0.0.1:8082"}`))))
 	if rr.Code != 200 {
 		t.Fatalf("valid save status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -418,7 +419,7 @@ windows_binary_path = "/mnt/c/Users/x/.observer/observer.exe"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +432,7 @@ windows_binary_path = "/mnt/c/Users/x/.observer/observer.exe"
 	body := `{"Enabled":true,"Backend":"both","CaptureUnattributed":true,"PollIntervalMS":5000,"BridgePollIntervalMS":0,"Network":{"Enabled":true,"CaptureRemoteHost":true,"RedactPrivateIPs":true,"CaptureBodies":"proxied","MaxRequestBytes":4096,"MaxResponseBytes":8192,"CaptureHeaders":true,"ScrubBodies":true,"StoreBinary":false}}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/process", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/process", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -504,7 +505,7 @@ max_response_bytes = 8192
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,6 +562,122 @@ max_response_bytes = 8192
 	}
 }
 
+// TestHandleConfigSection_ObservabilityJudgeBudgetPartial pins the Policies
+// module's judge/budget write path (docs/handovers/policies-module-phase-b-*):
+// the observability section save is written by THREE surfaces (the Settings
+// Enabled toggle, the Policies judge form, the Policies budget form), so every
+// field is a pointer and only the sent fields apply. Critically, a judge/budget
+// save must NOT disable the subsystem (Enabled omitted ⇒ preserved) and must
+// never touch the admission criterion table (owned by the admission POLICY
+// persister, not this seam).
+func TestHandleConfigSection_ObservabilityJudgeBudgetPartial(t *testing.T) {
+	tdir := t.TempDir()
+	cfgPath := filepath.Join(tdir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[observability]
+enabled = true
+
+[observability.judge]
+model = "qwen2.5:1.5b-instruct"
+base_url = "http://127.0.0.1:11434/v1"
+timeout_ms = 45000
+
+[observability.admission]
+enabled = true
+mode = "observe"
+
+[[observability.admission.criterion]]
+id = "on-scope"
+type = "valid_use_case"
+definition = "only product questions"
+decision = "ask"
+
+[observability.admission.budget]
+enabled = true
+per_user_5h_usd = 5.0
+per_user_weekly_usd = 25.0
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	server, err := New(Options{DB: database, ConfigPath: cfgPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := func(body string) int {
+		rr := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rr,
+			confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/observability", strings.NewReader(body))))
+		return rr.Code
+	}
+
+	// 1. Judge-only save: the model changes; Enabled, the criterion table, and
+	//    the budget all survive.
+	if code := put(`{"Judge":{"Model":"gpt-4o-mini","BaseURL":"https://openrouter.ai/api/v1","APIKeyEnv":"OPENROUTER_API_KEY","TimeoutMS":30000,"MaxTokens":0,"NumCtx":0}}`); code != 200 {
+		t.Fatalf("judge save status: %d", code)
+	}
+	got, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Observability.Judge.Model != "gpt-4o-mini" {
+		t.Errorf("judge model not applied: %q", got.Observability.Judge.Model)
+	}
+	if !got.Observability.Enabled {
+		t.Error("judge save disabled the subsystem (Enabled omitted must preserve true)")
+	}
+	if len(got.Observability.Admission.Criterion) != 1 || got.Observability.Admission.Criterion[0].ID != "on-scope" {
+		t.Errorf("judge save clobbered the criterion table: %+v", got.Observability.Admission.Criterion)
+	}
+	if got.Observability.Admission.Budget.PerUser5hUSD != 5.0 {
+		t.Errorf("judge save clobbered the budget: %+v", got.Observability.Admission.Budget)
+	}
+
+	// 2. Budget-only save: caps change; the judge (just set) and the criterion
+	//    survive.
+	if code := put(`{"Admission":{"Budget":{"Enabled":true,"PerUser5hUSD":9.0,"PerUserWeeklyUSD":40.0,"PerUserMonthlyUSD":120.0,"UserHeader":""}}}`); code != 200 {
+		t.Fatalf("budget save status: %d", code)
+	}
+	got, err = config.Load(config.LoadOptions{GlobalPath: cfgPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Observability.Admission.Budget.PerUser5hUSD != 9.0 {
+		t.Errorf("budget not applied: %+v", got.Observability.Admission.Budget)
+	}
+	if got.Observability.Judge.Model != "gpt-4o-mini" {
+		t.Errorf("budget save clobbered the judge: %q", got.Observability.Judge.Model)
+	}
+	if len(got.Observability.Admission.Criterion) != 1 {
+		t.Errorf("budget save clobbered the criterion table: %+v", got.Observability.Admission.Criterion)
+	}
+
+	// 3. Enabled-only toggle (the Settings surface): flips the gate without
+	//    touching judge or budget.
+	if code := put(`{"Enabled":false}`); code != 200 {
+		t.Fatalf("enabled toggle status: %d", code)
+	}
+	got, err = config.Load(config.LoadOptions{GlobalPath: cfgPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Observability.Enabled {
+		t.Error("Enabled=false not applied")
+	}
+	if got.Observability.Judge.Model != "gpt-4o-mini" || got.Observability.Admission.Budget.PerUser5hUSD != 9.0 {
+		t.Errorf("enabled toggle clobbered judge/budget: judge=%q budget5h=%v",
+			got.Observability.Judge.Model, got.Observability.Admission.Budget.PerUser5hUSD)
+	}
+
+	// 4. A negative cap is rejected (400) and leaves the file untouched.
+	if code := put(`{"Admission":{"Budget":{"Enabled":true,"PerUser5hUSD":-1}}}`); code != 400 {
+		t.Fatalf("negative cap should be rejected: status %d", code)
+	}
+}
+
 // TestHandleConfigSection_SaveTerminalPartialBody pins F5 + F6: a PARTIAL
 // terminal body preserves the omitted attach field (pointer decode, F5), and the
 // restart_required flag reflects what actually changed — Attach.Enabled binds the
@@ -572,7 +689,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[terminal.attach]\nenabled = true\nroute_proxy = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +728,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 		t.Errorf("F6: a RouteProxy-only save must NOT require a restart")
 	}
 	if att := reload(); !att.Enabled {
-		t.Errorf("F5: {\"RouteProxy\":false} zeroed Attach.Enabled — must be preserved true")
+		t.Errorf("F5: {\"RouteProxy\":false} zeroed Attach.Enabled - must be preserved true")
 	} else if att.RouteProxy {
 		t.Errorf("RouteProxy not persisted false: %+v", att)
 	}
@@ -626,7 +743,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 		t.Errorf("F6: changing Attach.Enabled MUST require a restart")
 	}
 	if att := reload(); att.RouteProxy {
-		t.Errorf("F5: {\"Enabled\":false} flipped Attach.RouteProxy — must be preserved false: %+v", att)
+		t.Errorf("F5: {\"Enabled\":false} flipped Attach.RouteProxy - must be preserved false: %+v", att)
 	} else if att.Enabled {
 		t.Errorf("Enabled not persisted false: %+v", att)
 	}
@@ -652,7 +769,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 	if att := reload(); att.DefaultOn {
 		t.Errorf("DefaultOn not persisted false: %+v", att)
 	} else if att.Enabled {
-		t.Errorf("F5: {\"DefaultOn\":false} flipped Attach.Enabled — must be preserved false: %+v", att)
+		t.Errorf("F5: {\"DefaultOn\":false} flipped Attach.Enabled - must be preserved false: %+v", att)
 	}
 
 	// All three fields in one body round-trip and persist together.
@@ -678,7 +795,7 @@ func TestHandleConfigSection_SaveTerminalStrictDecode(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[terminal.attach]\nenabled = true\nroute_proxy = true\ndefault_on = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +840,7 @@ func TestHandleConfigSection_SaveBrowser(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[observer]\nlog_level = \"info\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,8 +852,8 @@ func TestHandleConfigSection_SaveBrowser(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/browser",
-			strings.NewReader(`{"GranularityCeiling":"usage_only"}`)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/browser",
+			strings.NewReader(`{"GranularityCeiling":"usage_only"}`))))
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -788,7 +905,7 @@ func TestHandleConfigSection_AdvisorCachetrackSecrets(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[observer]\nlog_level = \"info\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -802,7 +919,7 @@ func TestHandleConfigSection_AdvisorCachetrackSecrets(t *testing.T) {
 		t.Helper()
 		rr := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rr,
-			httptest.NewRequest(http.MethodPut, "/api/config/section/"+section, strings.NewReader(body)))
+			confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/"+section, strings.NewReader(body))))
 		if rr.Code != 200 {
 			t.Fatalf("PUT %s: status %d body=%s", section, rr.Code, rr.Body.String())
 		}
@@ -866,7 +983,7 @@ func TestHandleConfigBackup_RestoreSwaps(t *testing.T) {
 	if err := os.WriteFile(bakPath, []byte("[observer]\nlog_level = \"info\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -913,7 +1030,7 @@ func TestHandleConfigBackup_RestoreSwaps(t *testing.T) {
 
 // TestHandleConfigSection_PreservesPricingOnIntelligenceSave guards a
 // subtle interaction: the intelligence section's PUT handler decodes
-// only the editable subset (CodeGraph / APIKeyEnv / SummaryModel /
+// only the editable subset (APIKeyEnv / SummaryModel /
 // MonthlyBudgetUSD) and must NOT clobber the pricing overrides that
 // /api/config/pricing manages separately.
 func TestHandleConfigSection_PreservesPricingOnIntelligenceSave(t *testing.T) {
@@ -926,7 +1043,7 @@ output = 999
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -941,7 +1058,7 @@ output = 999
 	body := `{"MonthlyBudgetUSD":250,"APIKeyEnv":"OBSERVER_API_KEY","SummaryModel":"haiku-4-5"}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/intelligence", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/intelligence", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -968,7 +1085,7 @@ output = 999
 func TestHandleConfigSection_UnknownSection(t *testing.T) {
 	tdir := t.TempDir()
 	cfgPath := filepath.Join(tdir, "config.toml")
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1000,7 +1117,7 @@ func TestHandleConfigSection_UnknownSection(t *testing.T) {
 // kill the test runner. The 500ms delay path is exercised by hand with
 // the smoke-test recipe in docs/.
 func TestHandleAdminRestart_ScheduledResponse(t *testing.T) {
-	t.Skip("os.Exit invocation tested manually — would kill the test runner")
+	t.Skip("os.Exit invocation tested manually - would kill the test runner")
 }
 
 // TestHandleBackfillStatus pins the per-mode shape: every documented
@@ -1008,7 +1125,7 @@ func TestHandleAdminRestart_ScheduledResponse(t *testing.T) {
 // modes report -1 with a "needs scan" note.
 func TestHandleBackfillStatus(t *testing.T) {
 	tdir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1097,7 +1214,7 @@ func TestConfigWrites_FireOnConfigSaved(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[observer]\nlog_level = \"info\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1173,7 +1290,7 @@ func TestHandleConfigSection_Profiles(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[observer]\nlog_level = \"info\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1202,7 +1319,7 @@ func TestHandleConfigSection_Profiles(t *testing.T) {
 		t.Error("saved=false")
 	}
 	if resp.RestartRequired {
-		t.Error("profiles saves hot-reload (P2.5) — restart_required must be false")
+		t.Error("profiles saves hot-reload (P2.5) - restart_required must be false")
 	}
 	if fired != 1 {
 		t.Errorf("OnConfigSaved fired %d times, want 1 (the hot-reload trigger)", fired)
@@ -1253,7 +1370,7 @@ func TestHandleConfigSection_ConcurrentSectionSavesBothPersist(t *testing.T) {
 	}
 	baseline()
 
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1303,11 +1420,11 @@ func TestHandleConfigSection_ConcurrentSectionSavesBothPersist(t *testing.T) {
 			t.Fatalf("iter %d: reload: %v", i, err)
 		}
 		if got.Observer.LogLevel != "error" {
-			t.Fatalf("iter %d: observer save lost — log_level=%q want error (budget=%v)",
+			t.Fatalf("iter %d: observer save lost - log_level=%q want error (budget=%v)",
 				i, got.Observer.LogLevel, got.Intelligence.MonthlyBudgetUSD)
 		}
 		if got.Intelligence.MonthlyBudgetUSD != 999 {
-			t.Fatalf("iter %d: intelligence save lost — monthly_budget_usd=%v want 999 (log_level=%q)",
+			t.Fatalf("iter %d: intelligence save lost - monthly_budget_usd=%v want 999 (log_level=%q)",
 				i, got.Intelligence.MonthlyBudgetUSD, got.Observer.LogLevel)
 		}
 	}
@@ -1368,7 +1485,7 @@ func TestConfigWrite_RemoteManageRaceSectionSave(t *testing.T) {
 	}
 	baseline()
 
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1429,11 +1546,11 @@ func TestConfigWrite_RemoteManageRaceSectionSave(t *testing.T) {
 			t.Fatalf("iter %d: reload: %v", i, err)
 		}
 		if got.Observer.LogLevel != "error" {
-			t.Fatalf("iter %d: section save lost — log_level=%q want error (allow_fresh_agent=%v)",
+			t.Fatalf("iter %d: section save lost - log_level=%q want error (allow_fresh_agent=%v)",
 				i, got.Observer.LogLevel, got.Terminal.Launch.AllowFreshAgent)
 		}
 		if !got.Terminal.Launch.AllowFreshAgent {
-			t.Fatalf("iter %d: terminal-policy save lost — allow_fresh_agent=false want true (log_level=%q)",
+			t.Fatalf("iter %d: terminal-policy save lost - allow_fresh_agent=false want true (log_level=%q)",
 				i, got.Observer.LogLevel)
 		}
 	}
@@ -1470,7 +1587,7 @@ handshake_timeout_ms = 7000
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

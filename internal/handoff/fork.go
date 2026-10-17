@@ -96,7 +96,7 @@ func allResolved(calls []models.ToolCallRef) bool {
 func ResolveFork(msgs []models.TranscriptMessage, fp ForkPoint) (ForkResolution, error) {
 	res := ForkResolution{}
 	if len(msgs) == 0 {
-		res.Reason = "no transcript — handoff proceeds metadata-only"
+		res.Reason = "no transcript - handoff proceeds metadata-only"
 		return res, nil
 	}
 
@@ -142,7 +142,7 @@ func ResolveFork(msgs []models.TranscriptMessage, fp ForkPoint) (ForkResolution,
 				res.ForkTime = m.Time
 				if cut != requested {
 					res.Snapped = true
-					res.Reason = fmt.Sprintf("requested message %d, snapped to %d — %s", requested, cut, snapReason(msgs, requested))
+					res.Reason = fmt.Sprintf("requested message %d, snapped to %d - %s", requested, cut, snapReason(msgs, requested))
 				}
 				return res, nil
 			}

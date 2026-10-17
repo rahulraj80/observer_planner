@@ -9,11 +9,22 @@
 @import "@fontsource/inter/latin-700.css";
 @import "@fontsource/jetbrains-mono/latin-400.css";
 @import "@fontsource/jetbrains-mono/latin-500.css";
-@import "./styles/tokens.css";
+@import "../../shared/styles/tokens.css";
+@import "../../shared/styles/motion.css";
+@import "../../shared/styles/components.css";
+@import "../../shared/styles/illustrations.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* The "New terminal" dock (LaunchDock, z-70) floats above Modal (z-60), so on
+   a phone it covered a dialog's footer buttons. Every Modal / SlideOver marks
+   body while open (shared/lib/scrollLock.ts markOverlay); the dock steps
+   aside until the last one closes. Pinned by src/lib/overlayDock.test.ts. */
+body[data-overlay-open] .sb-launch-dock {
+  display: none;
+}
 
 @layer base {
   html,
@@ -33,40 +44,6 @@
   samp,
   pre {
     @apply font-mono;
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes datatable-stripe {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(400%);
-  }
-}
-
-@layer utilities {
-  .animate-shimmer::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background-image: linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0) 0%,
-      rgba(255, 255, 255, 0.04) 50%,
-      rgba(255, 255, 255, 0) 100%
-    );
-    animation: shimmer 1.6s var(--ease) infinite;
   }
 }
 

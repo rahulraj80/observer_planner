@@ -306,12 +306,17 @@ var minCacheableTable = []minCacheableEntry{
 	// when the provider caches nothing.
 	{"mythos-preview", 2048},
 
-	// 512 tier — Opus 5, Fable 5, Mythos 5. Opus 5 HALVED
+	// 512 tier — Opus 5, Fable 5/5.1, Mythos 5/5.1. Opus 5 HALVED
 	// the Opus 4.8 minimum from 1,024 to 512, so a 512–1,023-token
-	// prefix on these three DOES cache upstream; before these rows
+	// prefix on these DOES cache upstream; before these rows
 	// existed the walk fell through to defaultMinCacheable and
 	// mislabelled those turns kind='below_min' /
-	// cause='below_min_cacheable'.
+	// cause='below_min_cacheable'. Fable 5.1 / Mythos 5.1
+	// (released 2026-09-01) are also 512 per the vendor page
+	// (re-verified 2026-09-02) and resolve via the SAME
+	// "fable-5" / "mythos-5" substring rows — "fable-5" is a
+	// substring of "claude-fable-5-1", so no new entry is needed
+	// (pinned by TestMinCacheableTokens).
 	//
 	// Match-string choice (the walk is a substring scan over the
 	// lowercased id, first match wins, so both shadow directions
@@ -339,6 +344,12 @@ var minCacheableTable = []minCacheableEntry{
 	{"opus-5", 512},
 	{"fable-5", 512},
 	{"mythos-5", 512},
+	// Claude Sonnet 5.5 (claude-sonnet-5-5, launched 2026-09-28) is a
+	// 512 model per Anthropic's models overview, captured and
+	// independently re-fetched 2026-09-28 (Sonnet 5 stays on the 1,024
+	// default). "sonnet-5-5" cannot match claude-sonnet-5 or any other
+	// row's id, and no row above contains it.
+	{"sonnet-5-5", 512},
 
 	// 4,096 tier — Opus 4.5 / 4.6 + Haiku 4.5. NOTE this group is
 	// Opus 4.5 and 4.6 ONLY: Opus 4.7 is a 2,048 model per the
@@ -372,7 +383,8 @@ var minCacheableTable = []minCacheableEntry{
 // legitimately land on this default today include Sonnet 5, Opus
 // 4.8, Sonnet 4.5/4.6, Sonnet 4 and Opus 4/4.1 — treat that as an
 // example list, not an enumeration; any unlisted or non-Anthropic
-// model string lands here as well.
+// model string lands here as well. Claude Sonnet 5.5 does NOT: it has
+// its own 512 row.
 const defaultMinCacheable = 1024
 
 // MinCacheableTokens returns the per-model-family minimum prefix
@@ -392,8 +404,17 @@ const defaultMinCacheable = 1024
 // Every [minCacheableTable] Match string is therefore lowercase by
 // construction. A future provider id scheme that breaks the
 // substring assumption is a one-line table fix.
+// A PUBLISHED minimum (Tokenomics model_economics -> the signed feed ->
+// [SetMinCacheableOverrides]) SUPERSEDES the compiled table for the models it
+// names, and is silent for the rest — see mincacheable_overrides.go for why the
+// table is never deleted. With no overrides installed (the default, and every
+// build before this seam existed) the walk below is byte-identical to what it
+// always was.
 func MinCacheableTokens(model string) int {
 	m := strings.ToLower(model)
+	if v, ok := lookupMinCacheableOverride(m); ok {
+		return v
+	}
 	for _, e := range minCacheableTable {
 		if strings.Contains(m, e.Match) {
 			return e.Min

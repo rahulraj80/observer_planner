@@ -1,0 +1,36 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].@timestamp": "VerifiedOfficial",
+    "[].body": "VerifiedOfficial",
+    "[].endpoint": "VerifiedOfficial",
+    "[].enterprise_id": "VerifiedOfficial",
+    "[].github_request_id": "VerifiedOfficial",
+    "[].type": "VerifiedOfficial",
+    "[].user_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "f978ea82bb251613630c31ffac68868c406109c1d07263f79ee7129e8ccc78ad",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/copilot/usage-records",
+    "query": {
+      "page": "2",
+      "per_page": "25",
+      "phrase": "type:request"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/copilot/usage-records (operationId copilot/get-usage-records). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.usage_records"
+}

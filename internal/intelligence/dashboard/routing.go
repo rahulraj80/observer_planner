@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package dashboard
 
 import (
@@ -8,10 +10,11 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/routingconfig"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -22,6 +25,59 @@ import (
 // calibration overlays, health board. Read-layer only — every endpoint
 // is a point-in-time view over the decision log / calibration tables /
 // api_turns; nothing here mutates routing state.
+
+// decisionsForModel narrows decision rows to the dashboard's global Model
+// filter (modelParam): a decision is "in" a model when the client asked for it
+// OR the router ran the turn on it (modelfilter.Matches over both columns), so
+// filtering by a model shows every decision that moved traffic onto or off it.
+// "" returns rows unchanged.
+func decisionsForModel(rows []store.RouterDecisionDetail, model string) []store.RouterDecisionDetail {
+	if model == "" {
+		return rows
+	}
+	out := make([]store.RouterDecisionDetail, 0, len(rows))
+	for _, d := range rows {
+		if modelfilter.Matches(model, d.OriginalModel, d.SelectedModel) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// routingScope is the global Tool and Project filter on a routing data read
+// (T-521): the session's tool and the project root, both exact, "" = all.
+// It narrows the same views the Model filter narrows (decisions, savings,
+// shadow, health), never the configuration views.
+type routingScope struct {
+	Tool    string
+	Project string
+}
+
+// routingScopeParam reads the scope from the request's tool / project query.
+func routingScopeParam(r *http.Request) routingScope {
+	q := r.URL.Query()
+	return routingScope{Tool: strings.TrimSpace(q.Get("tool")), Project: strings.TrimSpace(q.Get("project"))}
+}
+
+// decisionsInScope keeps the decisions whose session ran under the scope's
+// tool and project. A decision whose session is unknown (no tool / project
+// joined) is outside any narrowed scope: it cannot be shown to belong to it.
+func decisionsInScope(rows []store.RouterDecisionDetail, sc routingScope) []store.RouterDecisionDetail {
+	if sc.Tool == "" && sc.Project == "" {
+		return rows
+	}
+	out := make([]store.RouterDecisionDetail, 0, len(rows))
+	for _, d := range rows {
+		if sc.Tool != "" && d.Tool != sc.Tool {
+			continue
+		}
+		if sc.Project != "" && d.ProjectRoot != sc.Project {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
 
 // routingRuleView is one expanded rule-table row (the §R17.1 "never a
 // black box" surface).
@@ -105,7 +161,7 @@ func (s *Server) handleRoutingStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// handleRoutingDecisions — GET /api/routing/decisions?days&reason&session&applied&limit.
+// handleRoutingDecisions: GET /api/routing/decisions?days&reason&session&applied&limit&model&tool&project.
 func (s *Server) handleRoutingDecisions(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
 	limit := intArg(r, "limit", 100, 1, 1000)
@@ -119,6 +175,7 @@ func (s *Server) handleRoutingDecisions(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, err)
 		return
 	}
+	rows = decisionsInScope(decisionsForModel(rows, modelParam(r)), routingScopeParam(r))
 	filtered := rows[:0:0]
 	for _, d := range rows {
 		if session != "" && d.SessionID != session {
@@ -151,7 +208,7 @@ func (s *Server) handleRoutingDecisions(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleRoutingSavings — GET /api/routing/savings?days.
+// handleRoutingSavings: GET /api/routing/savings?days&model&tool&project.
 func (s *Server) handleRoutingSavings(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
 	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
@@ -165,6 +222,7 @@ func (s *Server) handleRoutingSavings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	rows = decisionsInScope(decisionsForModel(rows, modelParam(r)), routingScopeParam(r))
 	resolver := routing.NewTierResolver()
 	if overrides := routingconfig.TierOverrides(cfg.Routing); overrides != nil {
 		resolver.Reload(overrides)
@@ -247,19 +305,38 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		Errors24h int64   `json:"errors_24h"`
 		Rate24h   float64 `json:"error_rate_24h"`
 	}
+	// The global Model filter is turn grain here: api_turns rows carry
+	// their own model (modelfilter.AndRowIs).
+	mWhere, mArgs := modelfilter.AndRowIs("t.model", modelParam(r))
+	// The Tool / Project filter (T-521) joins the turn's session and project:
+	// a turn with no session row is outside a narrowed scope.
+	sc := routingScopeParam(r)
+	if sc.Tool != "" {
+		mWhere += " AND s.tool = ?"
+		mArgs = append(mArgs, sc.Tool)
+	}
+	if sc.Project != "" {
+		mWhere += " AND p.root_path = ?"
+		mArgs = append(mArgs, sc.Project)
+	}
+	args := append([]any{
+		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
+		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
+		time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339Nano),
+	}, mArgs...)
+	//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
 	rows, err := s.opts.DB.QueryContext(r.Context(), `
-		SELECT COALESCE(model, ''),
-		       SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN timestamp >= ? AND (http_status >= 500 OR http_status = 429) THEN 1 ELSE 0 END),
+		SELECT COALESCE(t.model, ''),
+		       SUM(CASE WHEN t.timestamp >= ? THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN t.timestamp >= ? AND (t.http_status >= 500 OR t.http_status = 429) THEN 1 ELSE 0 END),
 		       COUNT(*),
-		       SUM(CASE WHEN http_status >= 500 OR http_status = 429 THEN 1 ELSE 0 END)
-		FROM api_turns
-		WHERE timestamp >= ?
+		       SUM(CASE WHEN t.http_status >= 500 OR t.http_status = 429 THEN 1 ELSE 0 END)
+		FROM api_turns t
+		LEFT JOIN sessions s ON s.id = t.session_id
+		LEFT JOIN projects p ON p.id = COALESCE(t.project_id, s.project_id)
+		WHERE t.timestamp >= ?`+mWhere+`
 		GROUP BY 1
-		ORDER BY 4 DESC`,
-		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
-		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
-		time.Now().Add(-24*time.Hour).UTC().Format(time.RFC3339Nano))
+		ORDER BY 4 DESC`, args...)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -373,6 +450,10 @@ func (s *Server) handleRoutingShadow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// The model, tool and project filters narrow the decisions being
+	// graded, never the evidence they are graded against (the per-kind/tier evidence is a
+	// property of every model's turns, not of the filtered one).
+	rows = decisionsInScope(decisionsForModel(rows, modelParam(r)), routingScopeParam(r))
 	facts, err := st.LoadModelValueFacts(r.Context(), modelvalue.LoadOptions{WindowDays: days})
 	if err != nil {
 		writeErr(w, err)
@@ -385,22 +466,8 @@ func (s *Server) handleRoutingShadow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, store.BuildAdviseShadowReport(rows, evidence, routing.NewTierResolver().Table(), days))
 }
 
-// enginePriceFn adapts the dashboard's cost engine to the routing
-// package's injected pricing seam (the same adaptation the CLI's
-// routingPriceFn makes). Nil engine → nil, so callers keep the facts'
-// default pricing.
-func enginePriceFn(engine *cost.Engine) routing.PriceFn {
-	if engine == nil {
-		return nil
-	}
-	return func(model string, u routing.PromptUsage) (float64, bool) {
-		return engine.Compute(model, cost.TokenBundle{
-			Input: u.Input, Output: u.Output, CacheRead: u.CacheRead,
-			CacheCreation: u.CacheCreation, CacheCreation1h: u.CacheCreation1h,
-			Reasoning: u.Reasoning, WebSearchRequests: u.WebSearchRequests, Fast: u.Fast,
-		})
-	}
-}
+// enginePriceFn lives in the core file routing_price.go (the model value
+// report uses it in every build).
 
 // handleRoutingSimulate — POST /api/routing/simulate (R1.2): the
 // §R18.1 counterfactual replay as a dashboard surface — the backend
@@ -467,17 +534,30 @@ func (s *Server) handleRoutingSimulate(w http.ResponseWriter, r *http.Request) {
 	mvReport := modelvalue.Build(facts, modelvalue.Options{})
 	turns := modelvalue.AssembleSimTurns(facts, modelvalue.Options{})
 	turns = modelvalue.FilterSimTurnsByKind(turns, routing.TurnKind(req.TurnKind))
+	// Context windows: the same Tokenomics window table the live
+	// router reads (store.LoadModelContextWindows); a load error leaves
+	// the seed rung, and an unknown window never excludes a candidate.
+	windows, _ := st.LoadModelContextWindows(r.Context())
 	snap := &routing.Snapshot{
-		GeneratedAt: facts.GeneratedAt,
-		Price:       facts.Price,
-		Tiers:       routing.NewTierResolver().Table(),
+		GeneratedAt:   facts.GeneratedAt,
+		Price:         facts.Price,
+		Tiers:         routing.NewTierResolver().Table(),
+		ContextWindow: windows.Resolve,
 	}
 	rep := routing.Simulate(policy, snap, turns, mvReport.EvidenceByKindTier())
 
 	writeJSON(w, map[string]any{
 		"window_days": req.Days,
 		"report":      rep,
-		"note": "Advisory replay over recorded turns — deterministic and read-only; " +
+		"note": "Advisory replay over recorded turns - deterministic and read-only; " +
 			"no live traffic was touched and nothing was persisted.",
 	})
+}
+
+// routingTemplateKnown reports whether name is a built-in routing policy
+// template (observer_planner Briefing CTA). The omit build's twin in
+// routing_omit.go answers false, so the CTA offers no policy lever there.
+func routingTemplateKnown(name string) bool {
+	_, ok := routing.TemplateByName(name)
+	return ok
 }

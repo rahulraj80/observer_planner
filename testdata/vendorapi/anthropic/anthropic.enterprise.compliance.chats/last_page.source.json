@@ -1,0 +1,40 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].href": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].model": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "data[].organization_id": "VerifiedOfficial",
+    "data[].organization_uuid": "VerifiedOfficial",
+    "data[].project_id": "VerifiedOfficial",
+    "data[].updated_at": "VerifiedOfficial",
+    "data[].user": "VerifiedOfficial",
+    "data[].user.email_address": "VerifiedOfficial",
+    "data[].user.id": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "last_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "412a200464084c01c1bd1fd7eae203706c4fa349645b5dd1c2478ce298bad092",
+  "http": {
+    "method": "GET",
+    "path": "/v1/compliance/apps/chats",
+    "query": {
+      "after_id": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/compliance/apps/chats. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "generated Compliance API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2ece9f3f845885fdfa0f44bbe7ea6c31fe869a313eabf2c3e6f5babf9e17a0ed",
+  "source_url": "https://platform.claude.com/docs/en/api/compliance.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.compliance.chats"
+}

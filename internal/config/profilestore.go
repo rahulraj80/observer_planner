@@ -145,7 +145,6 @@ func (ps ProfileStore) ResolveCompression(master CompressionConfig, name string)
 	}
 	out := overlay.Compression
 	out.Conversation.Enabled = master.Conversation.Enabled
-	out.CodeGraph = master.CodeGraph
 	stamp := strconv.FormatInt(fi.ModTime().UnixNano(), 10) + "." + strconv.FormatInt(fi.Size(), 10)
 	return out, stamp, nil
 }
@@ -156,7 +155,7 @@ func (ps ProfileStore) ResolveCompression(master CompressionConfig, name string)
 // and errors. Display source for the Settings profile editor.
 func (ps ProfileStore) Read(name string) ([]byte, error) {
 	if name == "" || name == DefaultProfileName {
-		return nil, fmt.Errorf("config: profile %q has no file — it is the master-config passthrough", DefaultProfileName)
+		return nil, fmt.Errorf("config: profile %q has no file - it is the master-config passthrough", DefaultProfileName)
 	}
 	if IsBuiltin(name) {
 		return readRecipe(name)
@@ -258,8 +257,7 @@ func (ps ProfileStore) Delete(name string) error {
 // (e.g. "compression.conversation.target_ratio") — the editing
 // front door behind `observer profile set`. Built-ins are immutable;
 // the same allow-list shape as project files applies (compression.*
-// only — profile files carry parameters, not assignments), and
-// code_graph stays refused.
+// only — profile files carry parameters, not assignments).
 //
 // PRESENCE-PRESERVING (the D16 fix): the write touches ONLY the
 // dotted key. Re-marshaling the parsed CompressionConfig struct — the
@@ -273,16 +271,13 @@ func (ps ProfileStore) Delete(name string) error {
 // before — TOML re-marshal has no comment model).
 func (ps ProfileStore) SetKey(name, dotted, value string) error {
 	if IsBuiltin(name) {
-		return fmt.Errorf("config: %q is built-in and immutable — create a copy first: observer profile create my-%s --from %s", name, name, name)
+		return fmt.Errorf("config: %q is built-in and immutable - create a copy first: observer profile create my-%s --from %s", name, name, name)
 	}
 	if err := ps.Validate(name); err != nil {
 		return err
 	}
 	if strings.SplitN(dotted, ".", 2)[0] != "compression" {
 		return fmt.Errorf("config: profile files accept only compression.* keys (got %q)", dotted)
-	}
-	if strings.HasPrefix(dotted, "compression.code_graph") {
-		return errors.New("config: compression.code_graph is install capability and stays master-owned")
 	}
 	path := ps.userPath(name)
 	body, err := os.ReadFile(path)

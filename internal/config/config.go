@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -12,17 +13,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/marmutapp/superbased-observer/internal/notify/digest"
-	"github.com/marmutapp/superbased-observer/internal/notify/email"
+	"github.com/marmutapp/superbased-observer/internal/notifycfg"
+	"github.com/marmutapp/superbased-observer/internal/sandboxcidr"
+	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/sshspec"
+	"github.com/marmutapp/superbased-observer/internal/updatespec"
 )
 
 // Config is the root configuration for the observer. Field defaults are set
 // by Default(). Partial TOML files (including missing sections) are supported
 // — unspecified fields retain their defaults.
 type Config struct {
+	// Deferred lists the settings Load switched off because this build
+	// cannot honour them yet (D-514), one reason each. Never read from or
+	// written to the file; `observer start` prints them once.
+	Deferred []string `toml:"-" json:"-"`
+
 	Observer     ObserverConfig     `toml:"observer"`
 	Proxy        ProxyConfig        `toml:"proxy"`
 	Dashboard    DashboardConfig    `toml:"dashboard"`
@@ -34,15 +45,34 @@ type Config struct {
 	CacheTrack   CacheTrackConfig   `toml:"cachetrack"`
 	CacheWarm    CacheWarmConfig    `toml:"cachewarm"`
 	Predict      PredictConfig      `toml:"predict"`
+	Loc          LocConfig          `toml:"loc"`
+	Guidance     GuidanceConfig     `toml:"guidance"`
+	Projects     ProjectsConfig     `toml:"projects"`
+	Update       UpdateConfig       `toml:"update"`
+	Tasks        TasksConfig        `toml:"tasks"`
 	Browser      BrowserConfig      `toml:"browser"`
 	Handoff      HandoffConfig      `toml:"handoff"`
 	Terminal     TerminalConfig     `toml:"terminal"`
 	Launch       LaunchConfig       `toml:"launch"`
 	CodeIntel    CodeIntelConfig    `toml:"codeintel"`
-	Advisor      AdvisorConfig      `toml:"advisor"`
-	Routing      RoutingConfig      `toml:"routing"`
-	Guard        GuardConfig        `toml:"guard"`
-	Profiles     ProfilesConfig     `toml:"profiles"`
+	// ShellWrap is the opt-in [shell_wrap] "wrapped command" shell
+	// integration (backlog item 7); see ShellWrapConfig. Zero value = off.
+	ShellWrap ShellWrapConfig `toml:"shell_wrap"`
+	// Archive is the [archive] surface — cold storage for the corpus
+	// archival arc (docs/plans/observer-corpus-archival-lazyload-design-
+	// 2026-08-26.md). LOCAL-ONLY, never distributed to an org server, and
+	// OPT-IN: with the zero value the retention pass behaves exactly as it
+	// did before the arc existed.
+	Archive ArchiveConfig `toml:"archive"`
+	// MCPRelay is the [mcp_relay] surface — the node MCP relay (Agent Access
+	// P4, doc3 §8.2/§12). LOCAL-ONLY, never distributed, and OPT-IN: the zero
+	// value is byte-identical to a build without the relay (no client config
+	// rewrite, no listener, no table cache).
+	MCPRelay MCPRelayConfig `toml:"mcp_relay"`
+	Advisor  AdvisorConfig  `toml:"advisor"`
+	Routing  RoutingConfig  `toml:"routing"`
+	Guard    GuardConfig    `toml:"guard"`
+	Profiles ProfilesConfig `toml:"profiles"`
 	// Benchmark is the [benchmark] surface — the Benchmarks Harness
 	// (docs/plans/benchmarks-harness-plan-2026-07-11.md). LOCAL-ONLY. Holds
 	// only the retention horizon for the node-local benchmark_* tables today;
@@ -53,15 +83,20 @@ type Config struct {
 	// (a fired alert makes an outbound SMTP call). Reused by the node-side
 	// obs-alert loop; the org server has its own [email] block. See
 	// internal/notify/email.
-	Email email.Config `toml:"email"`
+	Email notifycfg.EmailConfig `toml:"email"`
 	// Digest is the [digest] surface — the scheduled personal cost digest
 	// (gap-register G13): a weekly/monthly per-tool/per-model spend rollup
 	// emailed through the shared [email] channel. LOCAL-ONLY. OPT-IN: default
 	// off, and additionally requires [email].enabled. See internal/notify/digest.
-	Digest digest.Config `toml:"digest"`
+	Digest notifycfg.DigestConfig `toml:"digest"`
 	// Observability is the [observability] surface — the generalized
 	// observability subsystem (internal/obs). OPT-IN: default false.
 	Observability ObservabilityConfig `toml:"observability"`
+	// SelfObs is the [selfobs] surface — Plane-A P1-10 platform self-
+	// observability emission (ADR-0004). OPT-IN: default enabled=false.
+	// When enabled with endpoint+credential, decision components emit
+	// system_agent OTLP runs through emit.Sink to the org gateway.
+	SelfObs SelfObsConfig `toml:"selfobs"`
 	// AggregateShare is the [aggregate_share] surface — the opt-in aggregate
 	// rail (docs/plans/g25-optin-aggregate-rail-design-2026-07-11.md). OPT-IN,
 	// default OFF in every path (zero value AND the loader's partial-merge
@@ -79,9 +114,31 @@ type Config struct {
 	// configures it. Holds the security substrate settings + the Phase-0
 	// [remote.notify] outbound-notification sub-block.
 	Remote RemoteConfig `toml:"remote"`
+	// Cloud is the [cloud] surface — config-file base-URL/login-port
+	// settings for the `observer cloud` CLI (Signed-in Free spine). See
+	// CloudConfig for the precedence rule (flag > env > this > built-in
+	// default). LOCAL-ONLY; never distributed via the org policy registry.
+	Cloud CloudConfig `toml:"cloud"`
+	// Pricing is the [pricing] surface: today only the [pricing.feed]
+	// sub-block, the standalone-node pricing feed client (docs/plans/
+	// pricing-sync-tokenomics-to-platform-plan-2026-09-11.md §C.4 / D7: a NEW
+	// top-level block, kept distinct from [intelligence.pricing] which is the
+	// node's OWN authored price table). LOCAL-ONLY and never distributed. The
+	// feed is ON by default (operator decisions 2026-09-20 and D-374: a stale
+	// feed breaks budgets, and only the superbased.app Tokenomics database
+	// keeps it fresh); a standalone node that wants zero egress opts OUT with
+	// `[pricing.feed] enabled = false`. An enrolled node receives prices
+	// through its org rail and never consults the public feed (§C.3/D8). See
+	// PricingFeedConfig.
+	Pricing PricingSectionConfig `toml:"pricing"`
 	// Experiments is the [[experiments]] list — productized profile
 	// A/B runs (usability arc P6.4). See experiments.go.
 	Experiments []ExperimentConfig `toml:"experiments"`
+	// Components is the [components] block: the node operator's component
+	// selection (modular packaging P1). LOCAL-ONLY. The zero value keeps
+	// every compiled component active, exactly as before the block existed.
+	// See ComponentsConfig.
+	Components ComponentsConfig `toml:"components,omitempty"`
 	// LLM configures the optional LLM analysis connections
 	// (docs/design/standup-briefing.md §3.2) — one endpoint you can point
 	// briefing narrative / Q&A / summaries at. LOCAL-ONLY. OPT-IN and never
@@ -259,6 +316,155 @@ type RemoteNotifyConfig struct {
 	Events []string `toml:"events"`
 }
 
+// CloudConfig is the [cloud] surface — config-file settings for the
+// `observer cloud` CLI (Signed-in Free spine, docs/cloud-intelligence.md).
+// MANUAL-ONLY, LOCAL-ONLY: nothing here makes the observer/watcher/proxy
+// touch the network — the `observer cloud` subcommands remain the sole
+// outbound trigger. Values here are the LOWEST-precedence layer: a
+// `--base-url` flag beats the SBO_CLOUD_BASE_URL / SBO_CLOUD_LOGIN_PORT
+// environment variables, which beat these TOML values, which beat the
+// command's built-in default. The zero value (no [cloud] section, or a
+// partial section) reproduces today's behaviour exactly — an install with
+// no [cloud] block still resolves the base URL from --base-url/env only,
+// same as before this section existed.
+type CloudConfig struct {
+	// BaseURL is the cloud service base URL, used only when neither
+	// --base-url nor SBO_CLOUD_BASE_URL is set. Empty means "not
+	// configured here" — the command falls through to its own "pass
+	// --base-url or set SBO_CLOUD_BASE_URL" error. When set, it must parse
+	// as an absolute http:// or https:// URL (see validateCloud).
+	BaseURL string `toml:"base_url"`
+	// LoginPort is the loopback port `observer cloud login`'s WorkOS PKCE
+	// callback listener binds, used only when SBO_CLOUD_LOGIN_PORT is
+	// unset. 0 means "not configured here" — the command falls through to
+	// its own built-in default (9797). Must be 0 or a valid TCP port
+	// (1-65535) — see validateCloud.
+	LoginPort int `toml:"login_port"`
+	// AutoSync opts INTO the background sync service (arc 2 R2a). When true
+	// AND the `observer start` daemon is running, the daemon periodically
+	// spawns `observer cloud sync` as a SUBPROCESS (never in-process — the
+	// daemon links no cloud network package; see cmd/observer/cloudautosync.go
+	// for the zero-egress justification). It stays consent-gated: the spawned
+	// sync sends nothing without a live grant, exactly like a manual run.
+	// Default false — the plane is manual-only until the operator opts in.
+	AutoSync bool `toml:"auto_sync"`
+	// AutoSyncIntervalMinutes is how often the background sync service (R2a)
+	// spawns `observer cloud sync`. 0 means "use the built-in default"
+	// (CloudAutoSyncDefaultMinutes, 15). Read only when AutoSync is true;
+	// must be 0 or >= cloudAutoSyncMinMinutes (5) — see validateCloud.
+	AutoSyncIntervalMinutes int `toml:"auto_sync_interval_minutes"`
+	// AutoEnrich opts INTO automatic per-session enrichment (arc 2 R8: the
+	// "automatically enrich my new sessions" toggle, default OFF and prominent
+	// on the consent/settings surface). SUPERSEDED as of the value-upgrade
+	// plan's W3 (2026-09-15): background enrichment is now governed entirely
+	// by internal/store/cloudpolicy.go's cloud_enrich_policy row (`observer
+	// cloud enable --no-background` / the dashboard's "Run in the background"
+	// switch), which the daemon's auto-enrich loop (cmd/observer/
+	// cloudautoenrich.go) reads live on every tick. This key is still parsed
+	// (an existing config.toml with `auto_enrich = true` must not fail to
+	// load) but has NO behaviour — nothing reads it anymore. Kept only for
+	// the TOML key's sake; `observer cloud status` says so explicitly.
+	AutoEnrich bool `toml:"auto_enrich"`
+	// AutoEnrichIntervalMinutes is how often the background auto-enrich loop
+	// (cmd/observer/cloudautoenrich.go) sweeps for quiet, personal-authority
+	// sessions to enqueue. 0 means "use the built-in default"
+	// (CloudAutoEnrichDefaultMinutes, 5); must be 0 or >=
+	// CloudAutoEnrichMinMinutes (1) — see validateCloud. The loop itself is
+	// inert unless the developer's cloud_enrich_policy row is on with
+	// background enabled; this only tunes the cadence once it is.
+	AutoEnrichIntervalMinutes int `toml:"auto_enrich_interval_minutes"`
+	// AutoEnrichQuietMinutes is how long a session's newest action must be in
+	// the past before the background loop treats it as "ended" and a
+	// candidate for auto-enrollment (sessions.ended_at is NULL for practically
+	// every captured session, so "ended" is always inferred from quiet, never
+	// read off a column). 0 means "use the built-in default"
+	// (CloudAutoEnrichQuietDefaultMinutes, 10); must be 0 or >=
+	// CloudAutoEnrichMinMinutes (1) — see validateCloud.
+	AutoEnrichQuietMinutes int `toml:"auto_enrich_quiet_minutes"`
+	// WorkOSClientID is the PUBLIC WorkOS OAuth client id `observer cloud
+	// login` builds the AuthKit PKCE authorize URL with (and the refresh
+	// broker re-exchanges through). It is NOT a secret — the WorkOS API key
+	// is server-side only and never read on the node. Resolution: the
+	// WORKOS_CLIENT_ID environment variable first, then this key (same
+	// env > [cloud] precedence as base_url / login_port), else the compiled
+	// default (DefaultCloudWorkOSClientID) that Default() seeds here. An
+	// operator can still opt out entirely by setting
+	// `workos_client_id = ""` explicitly in config.toml — an explicit empty
+	// value overrides the seeded default (ordinary TOML partial-merge
+	// semantics: a key present in the file is always applied, even when its
+	// value equals the zero value), landing back in the honest "set
+	// [cloud].workos_client_id or WORKOS_CLIENT_ID" state instead of opening
+	// a browser to nothing. Editable from the dashboard's Cloud account
+	// card; read per `observer cloud` invocation, so no restart.
+	WorkOSClientID string `toml:"workos_client_id"`
+}
+
+// DefaultCloudWorkOSClientID is the compiled-in default for
+// [cloud].workos_client_id: SuperBased's PUBLIC production WorkOS OAuth
+// client id for the `observer cloud` PKCE sign-in flow. It is NOT a secret —
+// a WorkOS client id is meant to be embedded in a public client the same way
+// an OAuth app's client id is. Default() seeds it so a fresh install can sign
+// in without any node-side configuration; the WORKOS_CLIENT_ID environment
+// variable and an explicit [cloud].workos_client_id in config.toml (staging
+// testing uses the staging id client_01M1A55VB1S3JAJQSP79MFEQJ6 this way)
+// both still take precedence over it, and an explicit empty TOML value opts
+// back out to the unconfigured state.
+const DefaultCloudWorkOSClientID = "client_01M1A55VPHXPT59PPZMG2H272X"
+
+const (
+	// CloudAutoSyncDefaultMinutes is the background-sync interval used when
+	// [cloud].auto_sync_interval_minutes is 0 (arc 2 R2a). Lowered from 60 to
+	// 15 by the value-upgrade plan's W3 (2026-09-15): background enrichment
+	// results are only useful once a sync has pulled them back, so a sync
+	// cadence tighter than an hour is what makes "named a few minutes after
+	// the session ends" honest.
+	CloudAutoSyncDefaultMinutes = 15
+	// CloudAutoSyncMinMinutes is the floor for a configured background-sync
+	// interval — a tighter cadence would only re-spawn `observer cloud sync`
+	// pointlessly, since a manual run already drains everything sendable.
+	CloudAutoSyncMinMinutes = 5
+	// CloudAutoEnrichDefaultMinutes is the auto-enrich sweep interval used
+	// when [cloud].auto_enrich_interval_minutes is 0 (value-upgrade plan W3).
+	CloudAutoEnrichDefaultMinutes = 5
+	// CloudAutoEnrichQuietDefaultMinutes is how long a session's newest
+	// action must be in the past before the background loop treats it as
+	// ended, used when [cloud].auto_enrich_quiet_minutes is 0.
+	CloudAutoEnrichQuietDefaultMinutes = 10
+	// CloudAutoEnrichMinMinutes is the shared floor for both auto-enrich
+	// knobs above.
+	CloudAutoEnrichMinMinutes = 1
+)
+
+// ResolvedCloudAutoSyncMinutes returns the effective background-sync interval:
+// the configured value when set, else the built-in default. It is the ONE place
+// the 0-means-default rule is applied, so the daemon scheduler and any status
+// echo agree.
+func (c CloudConfig) ResolvedCloudAutoSyncMinutes() int {
+	if c.AutoSyncIntervalMinutes > 0 {
+		return c.AutoSyncIntervalMinutes
+	}
+	return CloudAutoSyncDefaultMinutes
+}
+
+// ResolvedCloudAutoEnrichIntervalMinutes returns the effective auto-enrich
+// sweep interval: the configured value when set, else the built-in default.
+func (c CloudConfig) ResolvedCloudAutoEnrichIntervalMinutes() int {
+	if c.AutoEnrichIntervalMinutes > 0 {
+		return c.AutoEnrichIntervalMinutes
+	}
+	return CloudAutoEnrichDefaultMinutes
+}
+
+// ResolvedCloudAutoEnrichQuietMinutes returns the effective "how long since
+// the last action counts as ended" window: the configured value when set,
+// else the built-in default.
+func (c CloudConfig) ResolvedCloudAutoEnrichQuietMinutes() int {
+	if c.AutoEnrichQuietMinutes > 0 {
+		return c.AutoEnrichQuietMinutes
+	}
+	return CloudAutoEnrichQuietDefaultMinutes
+}
+
 // ObservabilityConfig is the [observability] surface — the generalized
 // observability subsystem (internal/obs; plan
 // docs/plans/generalized-observability-custom-app-plan-2026-06-27.md). It is
@@ -267,6 +473,28 @@ type RemoteNotifyConfig struct {
 // with no [observability] section keeps the subsystem off and creates no
 // obs_* tables. The subsystem is additionally compiled out by the no_obs
 // build tag for minimal distributions (decision D2).
+// SelfObsConfig is the [selfobs] surface (P1-10 production retrofit,
+// docs/plans/plane-a-p1-10-production-retrofit-plan.md). LOCAL-ONLY.
+// Default OFF — emission is a credential-bearing OTLP call to the org
+// gateway and must never fire without operator consent + keys.
+type SelfObsConfig struct {
+	// Enabled gates sink construction. false ⇒ emit.Nop().
+	Enabled bool `toml:"enabled"`
+	// Endpoint is the OTLP/HTTP gateway endpoint (host:port or full URL).
+	Endpoint string `toml:"endpoint"`
+	// KeyID / Secret compose the ingest credential; Token (if set) wins.
+	KeyID  string `toml:"key_id"`
+	Secret string `toml:"secret"`
+	Token  string `toml:"token"`
+	// Insecure permits plaintext http:// (default requires https://).
+	Insecure bool `toml:"insecure"`
+	// ServiceName overrides the OTLP resource service.name.
+	ServiceName string `toml:"service_name"`
+	// RoutingSampleN controls routing Decide emission: 0 = off, 1 = every
+	// decide, N = 1-of-N sample (plan fork 1; default 32).
+	RoutingSampleN int `toml:"routing_sample_n"`
+}
+
 type ObservabilityConfig struct {
 	// Enabled gates the whole subsystem: the OTLP /v1/traces receiver,
 	// the obs_* schema (applied only when true), ingestion, the
@@ -308,6 +536,30 @@ type ObservabilityConfig struct {
 	// value, same partial-merge rule as the other observability blocks). The
 	// obs_egress_decisions audit table is node-local, never pushed.
 	Egress ObservabilityEgressConfig `toml:"egress"`
+
+	// ProxyTurnTraces is the "gateway rail" (docs/observability.md "proxy
+	// turn (automatic)"): when true (and Enabled is true), a proxied LLM
+	// turn that arrived on an explicit /up/<id> upstream lane — the lane a
+	// co-resident hosted app is pointed at (e.g. Open WebUI via
+	// /up/openrouter) — is synthesized into an obs_traces/obs_spans pair
+	// (chat.turn/chat.completions) at insert time, so it appears in the org
+	// Trajectory explorer without the app instrumenting anything.
+	//
+	// PLANE BOUNDARY: synthesis covers ONLY /up/<id> lane traffic. The
+	// default provider lanes (ANTHROPIC_BASE_URL, codex base_url, gemini)
+	// carry Plane-B coding agents, whose rail is api_turns → sessions → the
+	// coding-agent org rollups; they must never appear in the Hosted Apps
+	// (Plane A) Trajectory explorer. An earlier all-lanes default mixed the
+	// two planes (operator-reported, 2026-08-13) and was reversed. Residual:
+	// a coding agent deliberately routed through a /up/ lane (hermes →
+	// OpenRouter) still synthesizes; disable this key or give that agent a
+	// dedicated upstream id if that matters for your deployment.
+	//
+	// Default() seeds it true so the loader's partial-merge keeps it true
+	// for an existing [observability] section that only sets `enabled` (the
+	// CacheTrack partial-merge rule); it has no effect while Enabled is
+	// false.
+	ProxyTurnTraces bool `toml:"proxy_turn_traces"`
 }
 
 // ObservabilityEgressConfig is the [observability.egress] surface (G22, design
@@ -456,6 +708,16 @@ type ObservabilityJudgeConfig struct {
 	// fields, so it is never sent remotely). 0 = omit. Its effect depends on
 	// the local host honoring the field on its /v1/chat/completions endpoint.
 	NumCtx int `toml:"num_ctx"`
+	// UseOrgRelay routes the judge call through the org server's
+	// POST /api/agent/judge instead of an OpenAI-compatible endpoint held
+	// locally (C1 judge relay, docs/plans/c1-judge-relay-spec-2026-08-15.md
+	// §3). The gateway never holds a judge-provider credential in this mode —
+	// the org server resolves its own sealed provider credential. Model stays
+	// optional under relay: it rides as an optional model_hint (recorded
+	// only; the org's provider selection decides the actual model).
+	// Validated mutually exclusive with a non-empty BaseURL/APIKeyEnv on the
+	// same resolved block (ambiguous transport).
+	UseOrgRelay bool `toml:"use_org_relay"`
 }
 
 // ObservabilityAdmissionConfig is the [observability.admission] surface
@@ -469,8 +731,22 @@ type ObservabilityAdmissionConfig struct {
 	// Empty is treated as "observe" when Enabled.
 	Mode string `toml:"mode"`
 	// Strict = fail-closed on judge error/timeout (Deny). Default false =
-	// fail-open (Allow + recorded admission_error).
+	// fail-open (Allow + recorded admission_error). BACK-COMPAT ALIAS: prefer
+	// OnJudgeError, which is the explicit posture enum. When OnJudgeError is
+	// empty, Strict resolves the posture (strict=true → fail_closed); when
+	// OnJudgeError is set, it wins and Strict is ignored.
 	Strict bool `toml:"strict"`
+	// OnJudgeError is the explicit judge-unavailable posture:
+	// "fail_open" (Allow, today's default) or "fail_closed" (Deny). Empty =
+	// resolve from Strict. This is the enum form of Strict; the invasive
+	// request-queueing posture is deliberately NOT offered here (it would need
+	// a new proxy admit-result shape). LOCAL-ONLY, never distributed.
+	OnJudgeError string `toml:"on_judge_error"`
+	// JudgeRetries is how many EXTRA bounded in-process attempts the admission
+	// engine makes on a judge transport error before the posture fires. 0 =
+	// no retry (today's behavior). A cheap reliability lever for a flaky or
+	// cold-starting judge; it does not change the synchronous verdict contract.
+	JudgeRetries int `toml:"judge_retries"`
 	// Scope is last_user | conversation. P1 = last_user; conversation is P3.
 	Scope string `toml:"scope"`
 	// RetentionDays bounds the obs_admission_events audit table. 0 = keep.
@@ -629,6 +905,7 @@ type GuardConfig struct {
 	Export   GuardExportConfig   `toml:"export"`
 	Dialects GuardDialectsConfig `toml:"dialects"`
 	Cloud    GuardCloudConfig    `toml:"cloud"`
+	Prompt   GuardPromptConfig   `toml:"prompt"`
 }
 
 // GuardRulesConfig is [guard.rules] (spec §16): rule disabling and
@@ -642,6 +919,17 @@ type GuardRulesConfig struct {
 	// ProjectPolicy is the project policy file location relative to
 	// each project root. Default ".observer/guard-policy.toml".
 	ProjectPolicy string `toml:"project_policy"`
+	// TrustedProjectDir is the daemon-local directory holding the
+	// dashboard-authored trusted per-project policy files (one file per
+	// project root, named <sha256(canonical root) as 64 hex chars>.toml). Default
+	// "~/.observer/guard-project-policies". Unlike ProjectPolicy (the
+	// in-repo, agent-writable, escalate-only file), files under this
+	// directory sit inside R-160's ~/.observer/** deny surface — the
+	// agent cannot write them — so they carry user-level weaken/disable
+	// semantics scoped to one project (never below the org floor). The
+	// dashboard writes them directly; guard loads them in the per-project
+	// engine build. Empty disables the trusted per-project layer.
+	TrustedProjectDir string `toml:"trusted_project_dir"`
 	// OrgBundle is the local cache location of the verified org
 	// policy bundle envelope (guard spec §14.2). Default
 	// "~/.observer/org-policy-bundle.json". Written ONLY by the org
@@ -726,7 +1014,81 @@ type GuardBudgetConfig struct {
 	// 0 disables the window.
 	WeeklyUSD  float64 `toml:"weekly_usd"`
 	MonthlyUSD float64 `toml:"monthly_usd"`
-	Hard       bool    `toml:"hard"`
+	// SessionTokens / DailyTokens / WeeklyTokens / MonthlyTokens are the
+	// TOKEN-denominated siblings of the four $ ceilings above, one for one
+	// (org-budget plan §3.3c, rules B-621..B-624). 0 disables the window,
+	// exactly like the $ fields — 0 is "unset", never a cap of zero.
+	//
+	// They exist because a token cap is the denomination an org budget is
+	// authored in (the plan's R3): tokens are the unit the org can enforce
+	// without a rate card, and `int` is the only numeric kind the governance
+	// pin vocabulary carries, so a token cap is expressible end to end where a
+	// float USD cap is not.
+	SessionTokens int64 `toml:"session_tokens"`
+	DailyTokens   int64 `toml:"daily_tokens"`
+	WeeklyTokens  int64 `toml:"weekly_tokens"`
+	MonthlyTokens int64 `toml:"monthly_tokens"`
+	Hard          bool  `toml:"hard"`
+	// FromOrg opts this node into applying the ORGANIZATION's budget, fetched
+	// per caller from GET /api/agent/budget (org-budget plan §3.3c). Default
+	// TRUE (operator decision 2026-09-20): an enrolled node applies its org's
+	// pricing/budget by default — the node-side companion to the default-on
+	// pricing feed. Set it false to opt OUT, which makes the node behave
+	// byte-identically to a build that never had this feature.
+	//
+	// With it on, the composition is capability-branched, never
+	// source-branched: on an INDIVIDUAL node the org's numbers may only LOWER
+	// the four thresholds above (govern.LowerFloat / LowerInt — min with the
+	// "0 means unset" rule); on a MANAGED node whose grant carries
+	// govern.AuthorityEnforceBudget the org's numbers and enforcement mode are
+	// authoritative. Both this key and Hard are pinnable through node
+	// governance (internal/policyfam/nodegov.PinnableKeys) so an org can set
+	// the fleet's POSTURE; the NUMBERS never ride the pin rail, because a pin
+	// is one value for a whole fleet and a cap is per developer.
+	//
+	// The node-side fetch/compose/enforce half is wave W3b; this key exists in
+	// W3a because the governance vocabulary row must resolve against a real
+	// config key (TestEveryPinnableKeyResolvesInConfig).
+	FromOrg bool `toml:"from_org"`
+	// FailClosed is the ORGANIZATION's explicit opt-in to refusing proxied
+	// requests (rule B-625) while a managed node that holds enforce.budget has
+	// no verified org budget in hand: before the first pull after an
+	// enrolment, while the org server has never been reached, or when the
+	// signed document did not verify. Default FALSE (operator ruling D-502,
+	// 2026-10-09): such a node FAILS OPEN on its own [guard.budget] numbers and
+	// says so loudly, because a requirement this node cannot currently satisfy
+	// for reasons outside the request must never stop a developer's session.
+	// A node with NO live enrolment never fails closed, whatever this says.
+	//
+	// It is pinnable through node governance (restrictive-only, Safe=true) so
+	// the org opts a fleet in through its signed node.governance body; a
+	// developer may also set it locally to be stricter. Unlike the other
+	// pinned keys it is NOT restart-bound in the daemon: the org-budget
+	// composition resolves it live on every cycle from the node's own value
+	// and the CURRENT governance pin (REVIEW-4 P4-04), so a left
+	// organization's pin does not outlive its governance. The launcher reads
+	// it from the config it loads for each launch.
+	FailClosed bool `toml:"fail_closed"`
+	// MaxDocumentAge is the freshness window a SIGNED org budget document
+	// must fall inside to be applied: the node refuses a 200 whose issued_at
+	// is older than this, or in the future beyond a small clock skew. A Go
+	// duration string ("1h", "30m"); empty means the 1h default, and an
+	// unparsable value also falls back to the default rather than disabling
+	// the check.
+	//
+	// It closes the REPLAY window the signature alone cannot (fundamentals
+	// finding M3). Version monotonicity refuses an OLDER document, but an
+	// EQUAL-version one is legitimately re-served on every poll — so an
+	// intermediary holding yesterday's correctly signed explicit-none can
+	// replay it against a node whose cache is cold (a restart, a fresh
+	// install) and that node would run uncapped, believing the org said so.
+	// A timestamp INSIDE the signed body is the only thing that dates the
+	// document, and the org is the only party that can mint a fresh one.
+	//
+	// Tighter is safer but not free: the value must exceed the poll interval
+	// or a node that misses one cycle starts refusing documents it should
+	// accept.
+	MaxDocumentAge string `toml:"max_document_age"`
 	// Window gates on the provider's own 5h / weekly usage windows
 	// (utilization 0..1, read from limit_snapshots) — distinct from
 	// the $ caps above; the "limit" guardrails B-610..B-613.
@@ -803,8 +1165,11 @@ type GuardWebhookConfig struct {
 	RoutingKey  string `toml:"routing_key"`
 }
 
-// AdvisorConfig gates the suggestions engine (spec §15.7; plan
+// AdvisorConfig gates the suggestions engine (docs/advisor.md; plan
 // docs/plans/suggestions-engine-implementation-plan-2026-06-10.md).
+// "§15.7" is the engine's long-standing informal handle used across
+// docs/plans — the numbered spec itself only goes to §15.6, so this
+// comment cites the operator doc instead of a section that doesn't exist.
 // Default-ON: read-layer only, local, zero LLM cost. Same partial-merge
 // invariant as CacheTrackConfig — an install with no [advisor] section
 // must get Enabled=true from Default(), never a zero-valued false.
@@ -890,6 +1255,404 @@ type PredictConfig struct {
 	// PriorWindowDays bounds the recency of sessions feeding the
 	// cross-session T prior. Default 30. 0 = no bound.
 	PriorWindowDays int `toml:"prior_window_days"`
+}
+
+// GuidanceConfig is the [guidance] surface — the agent-guidance-file
+// inventory (CLAUDE.md / AGENTS.md / .cursor/rules / skills / commands /
+// subagent definitions and their per-tool equivalents). LOCAL-ONLY: the
+// scan records file NAMES, sizes, hashes and frontmatter metadata, never
+// file bodies (CLAUDE.md "no content in the DB" rule — a body is read on
+// demand through the capped, symlink-safe fsview reader instead).
+//
+// Default-ON, with the CacheTrack partial-merge rule: an install whose
+// config.toml has no [guidance] section MUST get Enabled=true from
+// Default(), not a zero-valued false, and a section that sets only
+// rescan_minutes must keep Enabled=true.
+type GuidanceConfig struct {
+	// Enabled gates the daemon-lifetime scan loop, the CLI's implicit
+	// scan, and the dashboard/MCP read surfaces. When false nothing is
+	// scanned and the surfaces report the disabled state honestly.
+	Enabled bool `toml:"enabled"`
+	// RescanMinutes is the interval between whole-estate rescans (every
+	// known project root). Default 15. <= 0 disables the periodic tick —
+	// the one-shot scan at daemon start still runs.
+	RescanMinutes int `toml:"rescan_minutes"`
+	// MaxFileBytes caps how much of a guidance file the scanner reads to
+	// hash it and parse its frontmatter. Default 524288 (512KB). A larger
+	// file is still inventoried; only its parse is bounded.
+	MaxFileBytes int64 `toml:"max_file_bytes"`
+	// MaxDepth bounds directory recursion below a guidance root (e.g.
+	// `.claude/skills/<name>/SKILL.md`). Default 4.
+	MaxDepth int `toml:"max_depth"`
+	// IncludeUserScope also inventories the operator's HOME-scoped
+	// guidance (`~/.claude/CLAUDE.md`, `~/.claude/skills/…`) alongside the
+	// project-scoped files. Default true — a user-scope skill changes the
+	// agent's behaviour in this project just as much as a project one.
+	IncludeUserScope bool `toml:"include_user_scope"`
+	// MaxRootsPerPass caps how many project roots one pass walks. Roots
+	// are ordered most-recently-active first, so the cap drops the
+	// dormant tail; the tail is not starved, because each pass rotates
+	// its start offset. Default 50. <= 0 means the seeded default.
+	//
+	// It was 200 (a compile-time constant) until a live machine with 404
+	// recorded roots — most of them slow DrvFs mounts — turned a start-up
+	// pass into four CPU-minutes.
+	MaxRootsPerPass int `toml:"max_roots_per_pass"`
+	// RootTimeoutSeconds bounds ONE root's walk. A root that overruns is
+	// reported incomplete and NOT persisted — a partial inventory would
+	// tombstone guidance files that are still there — and is retried on
+	// the next pass. Default 20. <= 0 means the seeded default; there is
+	// deliberately no "unbounded" setting, because an unbounded root is
+	// exactly the failure this bounds.
+	RootTimeoutSeconds int `toml:"root_timeout_seconds"`
+	// RootTimeoutMaxSeconds is the ADAPTIVE CEILING for a root's walk. A
+	// root that overruns RootTimeoutSeconds is granted a larger budget on
+	// its next pass (doubling per consecutive overrun) up to this ceiling,
+	// so a legitimately slow-but-real root — e.g. a large repo on a slow
+	// DrvFs mount — is given the time to finish and finally persist, rather
+	// than overrunning the same fixed budget forever and never landing its
+	// inventory. Default 180. <= 0 means the seeded default; a positive
+	// value below RootTimeoutSeconds is refused by Validate (the ceiling can
+	// never be below the base). 180s gives real headroom over the ~106s a
+	// live DrvFs walk took while still bounding a runaway.
+	RootTimeoutMaxSeconds int `toml:"root_timeout_max_seconds"`
+	// PassTimeoutMinutes bounds a WHOLE pass. Roots not reached inside it
+	// are simply picked up next tick. Default 10. <= 0 means the seeded
+	// default.
+	PassTimeoutMinutes int `toml:"pass_timeout_minutes"`
+	// StartupDelaySeconds delays the first pass after the daemon starts,
+	// so a restart is not immediately CPU-heavy while the proxy, watcher
+	// and dashboard are coming up. Default 90. <= 0 runs the first pass
+	// immediately.
+	StartupDelaySeconds int `toml:"startup_delay_seconds"`
+	// FirstScanPollSeconds is how often the daemon looks for project roots
+	// that have NEVER been scanned and inventories just those, so a brand
+	// new project does not wait up to RescanMinutes for its first (and
+	// only informative) inventory. Default 60. 0 disables the poll
+	// entirely; the periodic pass still covers the root eventually.
+	//
+	// It is deliberately NOT a per-session trigger: a scan is filesystem
+	// work, and firing one every time a session starts in an
+	// already-inventoried project would be the same unbounded cost the
+	// per-root/per-pass budgets exist to prevent. Never-scanned is the one
+	// state where waiting a quarter of an hour shows the operator nothing.
+	FirstScanPollSeconds int `toml:"first_scan_poll_seconds"`
+}
+
+// ProjectsConfig is the [projects] surface — the Projects-page spend/ROI/
+// commit-alignment arc (docs/plans/projects-page-roi-and-commit-alignment-
+// plan-2026-09-21.md §2/§3.2). LOCAL-ONLY: every knob here governs the
+// node's own read-only git-commit scanner (internal/commitscan) and the
+// pure attribution/ROI math (internal/projectroi); nothing is distributed
+// to an org server.
+//
+// Same partial-merge invariant as GuidanceConfig/CacheTrackConfig: an
+// install with no [projects] section — or one that sets only, say,
+// commit_link_window_days — gets the Default() seed for every other
+// field, NOT the zero value, because Load() starts from Default() and
+// unmarshals TOML on top.
+type ProjectsConfig struct {
+	// CommitScan gates the daemon-lifetime read-only `git log` scanner
+	// (plan R2). Default TRUE — commit capture is local, passive, and
+	// network-free, the same posture as Guidance/CacheTrack/Predict.
+	// Disabling it leaves the Projects page's commit ledger and every ROI
+	// proxy that depends on it honestly empty (capture:"never_scanned").
+	CommitScan bool `toml:"commit_scan"`
+	// CommitScanIntervalSeconds is the tick period between scanner passes
+	// over every active project root. Default 120.
+	CommitScanIntervalSeconds int `toml:"commit_scan_interval_seconds"`
+	// CommitLinkWindowDays bounds how long after a prompt a later commit
+	// may still "carry" the files it touched (plan R4.4's attribution
+	// rule) — also sizes the reachability-revalidation lookback
+	// (internal/commitscan's LinkWindow). Default 14.
+	CommitLinkWindowDays int `toml:"commit_link_window_days"`
+	// ActiveProjectDays bounds which projects the scanner considers
+	// ACTIVE (a session started within this many days) and therefore
+	// worth polling (plan R2). Default 30.
+	ActiveProjectDays int `toml:"active_project_days"`
+	// AlignmentJudge gates the §3.6 "J" alignment-grading tier (W5a):
+	// "off" (default) leaves prompt-to-commit grading to the always-on
+	// local heuristic (internal/projectroi) only; "obs_judge" reuses the
+	// SAME judge endpoint/model the operator already configured under
+	// [observability.judge] (or its [observability.eval] override) —
+	// which MAY be a remote/hosted judge, in which case
+	// cmd/observer/alignment_wire.go applies the same egress scrub
+	// (secret redaction + payload cap) the eval/admission judge adapters
+	// already apply to a non-loopback judge. No other value is
+	// recognized; an unrecognized value is treated as "off".
+	AlignmentJudge string `toml:"alignment_judge"`
+	// SkillHistory gates the Projects-page Skills history capture
+	// (S10-SKILLS): the Claude Code hook snapshots of every SKILL.md at
+	// SessionStart / PostToolUse(Skill), and the read-only git step that
+	// runs after each successful commit scan (reflog, skill-directory
+	// trees, working-tree status). Default TRUE - local, passive and
+	// network-free, the same posture as CommitScan. Disabling it stops
+	// new capture; already-captured history still renders.
+	SkillHistory bool `toml:"skill_history"`
+	// SkillHistorySkewSeconds is how close a HEAD move may be to a
+	// session's start before the Skills tab refuses to say which commit
+	// HEAD was on ("head moved near start", both candidates shown).
+	// Covers clock skew between the AI tool's clock and the repository's
+	// (e.g. a Windows tool and a WSL daemon). Default 120.
+	SkillHistorySkewSeconds int `toml:"skill_history_skew_seconds"`
+}
+
+// DefaultPricingFeedURL is the public edge route serving the signed pricing
+// feed (docs/plans/pricing-sync-tokenomics-to-platform-plan-2026-09-11.md §B.4).
+// The body names no org and no subject, so it is cacheable and verified offline
+// against the compiled-in PricingFeedPublicKeyV1.
+const DefaultPricingFeedURL = "https://superbased.app/api/pricing/v1/observer-pricing"
+
+// PricingSectionConfig is the [pricing] surface. It is a thin holder for the
+// [pricing.feed] sub-block today (D7 chose a NEW top-level namespace over
+// [intelligence.pricing.feed] so the feed reads as its own concern). LOCAL-ONLY.
+type PricingSectionConfig struct {
+	// Feed is the [pricing.feed] sub-block — the standalone-node pricing feed
+	// client.
+	Feed PricingFeedConfig `toml:"feed"`
+}
+
+// PricingFeedConfig is the [pricing.feed] surface — the pricing feed client for
+// a STANDALONE (non-enrolled) node (plan §C.3). It is the case that needs a new
+// node->internet path, and it is ON by default (operator decision 2026-09-20,
+// reversing the former zero-egress-by-default invariant D3): with this Default()
+// seed the node fetches prices from the public feed so its costing tracks the
+// Tokenomics source without a per-node opt-in. A standalone operator who wants
+// zero egress opts OUT with `[pricing.feed] enabled = false`.
+//
+// An ENROLLED node (individual or managed) ignores this block entirely — it
+// receives prices through the org rail, which is the one authority per enrolled
+// node (§C.3/D8); the standalone-vs-enrolled resolution lives next to
+// orgpricing.Mode (Wave N), not here.
+//
+// Same partial-merge invariant as CacheTrackConfig/PredictConfig: an install
+// with no [pricing.feed] section gets the Default() seed (URL/interval set,
+// Enabled=true), NOT a zero-valued struct, because Load() starts from
+// Default() and unmarshals TOML on top. LOCAL-ONLY, never distributed.
+type PricingFeedConfig struct {
+	// Enabled gates the whole feed client. Default TRUE (operator decision
+	// 2026-09-20): the feed is live so a standalone node's prices track the
+	// public source. A node that wants zero egress sets this false, which
+	// makes the feed inert — no feed is fetched and no feed source badge
+	// renders — leaving it drivable only by a manual `observer pricing sync`.
+	Enabled bool `toml:"enabled"`
+	// Auto turns on the BACKGROUND poller (in addition to the manual sync).
+	// Default TRUE (operator decision 2026-09-20): an Enabled node polls on
+	// the PollIntervalHours cadence without further setup. Set false to keep
+	// the feed enabled but fetch only on an explicit `observer pricing sync`.
+	Auto bool `toml:"auto"`
+	// URL is the feed endpoint. Default DefaultPricingFeedURL (the public
+	// edge); overridable for testing / a self-hosted mirror.
+	URL string `toml:"url"`
+	// PollIntervalHours is the Auto poller cadence. Default 24 (D2: the feed
+	// moves daily at most and a 304 is cheap). Ignored when Auto is false.
+	PollIntervalHours int `toml:"poll_interval_hours"`
+}
+
+// DefaultLocEditorTokenFile is where the daemon keeps the per-install
+// editor-endpoint secret when [loc].editor_token_file is unset. It sits in
+// the observer home beside observer.db and config.toml; Load() expands the
+// leading "~/" the same way it does for observer.db_path.
+const DefaultLocEditorTokenFile = "~/.observer/loc-editor-token" //nolint:gosec // G101: a PATH, not a credential
+
+// LocConfig is the [loc] surface — lines-of-code tracking
+// (docs/loc-tracking.md). LOCAL-ONLY, never distributed to an org server
+// (same posture as [predict]/[routing]/[cachewarm]). Same partial-merge
+// invariant as CacheTrackConfig: an install with no [loc] section gets
+// the Default() seed, NOT the zero value, because Load() starts from
+// Default() and unmarshals TOML on top.
+//
+// The block holds ONLY the editor-endpoint credential today. The
+// classifier itself has no knobs: it runs over rows the store already
+// holds and its behaviour is versioned by internal/loc.Version, not by
+// config.
+type LocConfig struct {
+	// EditorTokenFile is where the daemon keeps the per-install shared
+	// secret the VS Code extension sends as X-Observer-Token on
+	// POST /api/loc/editor-change. The daemon GENERATES the file on
+	// first start (32 random bytes, hex, mode 0600) and never logs its
+	// contents; the extension reads the same path.
+	//
+	// Default "~/.observer/loc-editor-token" — beside observer.db and
+	// config.toml, so an operator who relocates the observer home by
+	// hand relocates this with it in one edit.
+	//
+	// A file the daemon cannot read is NOT fatal: the endpoint keeps its
+	// loopback + Origin posture and a warning is logged. Blocking daemon
+	// start on a credential that only hardens one reporting endpoint
+	// would trade a whole install for a hardening measure.
+	EditorTokenFile string `toml:"editor_token_file"`
+	// EditorTokenRequired makes the token MANDATORY on
+	// POST /api/loc/editor-change: a request with no token, or with the
+	// wrong one, is refused 401.
+	//
+	// Default FALSE this release. An extension older than the token file
+	// sends nothing, and flipping the default before installs have caught
+	// up would silently stop human-line capture on every one of them.
+	// A request that DOES carry a token is verified either way — a wrong
+	// token is never silently accepted. The default flips to true in a
+	// later release; set it now on an install whose extension is current.
+	EditorTokenRequired bool `toml:"editor_token_required"`
+}
+
+// DefaultUpdateStateDir is where staged downloads, the preserved rollback
+// binary and the pre-apply DB snapshot live.
+const DefaultUpdateStateDir = "~/.observer/updates"
+
+// UpdateConfig is the [update] surface — enterprise update management
+// (docs/plans/enterprise-update-management-plan-2026-09-07.md §3.4).
+//
+// LOCAL-ONLY and NEVER DISTRIBUTED, exactly like [routing]. That is a
+// standing invariant, not an omission: there is no server-side toggle for
+// any key below, and adding one would be the same feature mistake as a
+// remote full_content toggle. An org publishes a signed manifest and a
+// rollout ring; whether THIS machine restarts itself, and when, is decided
+// here and nowhere else.
+//
+// Same partial-merge rule as CacheTrack/Predict/Loc: an install with no
+// [update] section gets the Default() seed, not the zero value.
+type UpdateConfig struct {
+	// Enabled gates the whole feature. False makes it inert: no manifest is
+	// fetched, no banner is shown, no apply is scheduled. Default true —
+	// LEARNING about an update is fail-open and costs no new egress class
+	// (the manifest rides the push cycle the node already runs); APPLYING
+	// one is a separate, fail-closed decision governed by AutoApply.
+	Enabled bool `toml:"enabled"`
+	// Channel pins this node to a release channel ("stable" / "lts" /
+	// "edge"). Empty = whatever the org assigns. A local value overrides the
+	// assignment, but it can only ever pin this node BEHIND what the org
+	// published — it cannot conjure a manifest the org has not signed.
+	Channel string `toml:"channel"`
+	// AutoApply is notify-only (false) vs zero-touch (true).
+	//
+	// It is a *bool, not a bool, because nil and false are genuinely
+	// different answers: nil means "this node's operator did not say", and
+	// the managed-fleet carve-out (§3.9) then supplies the default —
+	// admin_managed / enterprise-granted fleets are zero-touch, BYO nodes
+	// are notify-only. An EXPLICIT value always wins, in both directions, so
+	// an admin-provisioned node can still be pinned to notify-only by its
+	// own TOML. Resolve it with EffectiveAutoApply, never by dereferencing.
+	AutoApply *bool `toml:"auto_apply"`
+	// Window is the local maintenance window, "HH:MM-HH:MM" in the machine's
+	// own timezone (a window that wraps midnight is normal on a fleet spread
+	// across timezones and is handled). Empty = any time the quiescence
+	// checks pass.
+	Window string `toml:"window"`
+	// AllowDowngrade is node consent for an admin-minted downgrade manifest.
+	// Without it a manifest naming a lower version than the installed one is
+	// refused outright (§3.2 rule 7, the TUF rollback defence).
+	AllowDowngrade bool `toml:"allow_downgrade"`
+	// KeepPreviousDays retains the rollback binary AND the pre-apply DB
+	// snapshot. Both, together: a snapshot without its binary cannot roll
+	// anything back, and a binary without its snapshot cannot be restored
+	// across a schema advance.
+	KeepPreviousDays int `toml:"keep_previous_days"`
+	// MaxDownloadBytes is the hard artifact ceiling (256 MB). A stream that
+	// exceeds it is aborted mid-flight — TUF's endless-data defence, applied
+	// on top of the manifest's own declared size_bytes.
+	MaxDownloadBytes int64 `toml:"max_download_bytes"`
+	// StateDir holds staging, the rollback binary and the DB snapshot.
+	StateDir string `toml:"state_dir"`
+	// DrainTimeout is how long an apply waits for in-flight proxied requests
+	// to reach zero after it stops admitting new ones. Exceeded = resume
+	// admission and abort with error_class=drain (ruling R13: there is no
+	// state in which a node is left refusing traffic because an apply gave
+	// up).
+	DrainTimeout string `toml:"drain_timeout"`
+	// HandshakeTimeout is how long the OLD daemon waits for the NEW child's
+	// self-check before killing it and rolling back. It is the window in
+	// which the old process is the supervisor — which is why a supervisor is
+	// recommended (ruling R14) but not required.
+	HandshakeTimeout string `toml:"handshake_timeout"`
+}
+
+// EffectiveAutoApply resolves [update].auto_apply against the managed-fleet
+// default, and reports whether the node's own TOML decided it.
+//
+// managedDefault is update.AutoApplyDefault(...) supplied by the caller;
+// internal/config does not import internal/update, so the predicate stays in
+// one place and this stays a plain precedence rule.
+func (u UpdateConfig) EffectiveAutoApply(managedDefault bool) (effective, explicit bool) {
+	if u.AutoApply != nil {
+		return *u.AutoApply, true
+	}
+	return managedDefault, false
+}
+
+// TasksConfig is the [tasks] surface — session-level task/todo/plan
+// checklist tracking (docs/task-tracking.md,
+// docs/audits/task-tracking-capture-audit-2026-09-07.md). Default-ON,
+// same partial-merge invariant as CacheTrackConfig/PredictConfig: an
+// install with no [tasks] section gets Enabled=true, because it is a
+// pure re-decode of data already captured in actions.raw_tool_input/
+// raw_tool_output (internal/taskflow + internal/store/taskflow.go) —
+// no new capture surface, no adapter change, no proxy hook. LOCAL-ONLY
+// — task_items/task_transitions (migration 109) never enter the org
+// push wire (tests/invariant/privacy_test.go's forbiddenCacheTables).
+type TasksConfig struct {
+	// Enabled gates the ingest-time decode + the (out-of-scope-for-v1)
+	// backfill default. false makes Store.Ingest's task-tracking pass a
+	// pure no-op — the pre-feature baseline.
+	Enabled bool `toml:"enabled"`
+	// MatchMode selects how Snapshot-kind (whole-list-rewrite) items are
+	// identified across consecutive calls when the tool carries no
+	// vendor id. "exact" (the default, per §R2.3.4's measured guidance:
+	// fuzzy matching trades a known, countable loss for an unknown,
+	// silent mis-join) matches on the trimmed content string
+	// (taskflow.ContentKey). "normalized" additionally lowercases and
+	// collapses internal whitespace before hashing
+	// (taskflow.NormalizedContentKey) — tolerates a vendor's own cosmetic
+	// re-wording between two consecutive snapshot calls, at the cost of
+	// silently merging two genuinely different items whose text happens
+	// to normalize the same. CONSUMED: threaded into every taskflow.Decode
+	// call as ActionInput.MatchMode (internal/store/taskflow.go), applied
+	// post-decode by applyMatchMode — see that function's doc comment for
+	// why it is a single recompute seam rather than a parameter threaded
+	// through every one of decoderTable's ~10 decode functions.
+	MatchMode string `toml:"match_mode"`
+	// ConcurrentAttribution selects how a token/action row is bucketed
+	// when two or more tasks are simultaneously in_progress (§R2.3.2).
+	// "shared" (the recommended, measured default — 6.6% of tokens on
+	// the grounding corpus) buckets the row into a per-session `shared`
+	// total rather than splitting it evenly or picking a "dominant"
+	// task, both of which would invent a precision the data does not
+	// contain. "none" drops the row from every task's total instead
+	// (still counted, just not attributed to a specific task) — for an
+	// operator who would rather under-report than see a shared bucket.
+	// There is deliberately no "split" option (see MatchMode's note).
+	// CONSUMED: passed to taskflow.Attributor.SetConcurrentAttribution by
+	// the Phase-2 cost/report layer (internal/store's
+	// LoadSessionTaskReport) — "none" makes Attributor.At report
+	// BucketBetweenTasks instead of BucketShared.
+	ConcurrentAttribution string `toml:"concurrent_attribution"`
+	// IncludeSidechains folds a spawned sub-agent's OWN token_usage rows
+	// (is_sidechain=1, migration 087) into whichever task happened to be
+	// open in the PARENT session at the same wall-clock time. Default
+	// false: sub-agent usage is reported as a separate `sidechain` total
+	// instead (§3.3's option (a) — option (b), resolving a
+	// TaskUpdate.owner string to the actual spawned session, is not
+	// implementable: owner is free text, not a session id, §R2.6 item 6).
+	// CONSUMED: passed straight through as the includeSidechains argument
+	// to Store.LoadTaskTokenRows/LoadTaskActionTimestamps, via an
+	// explicit taskflow.Options each Phase-2 read surface (dashboard/
+	// CLI/MCP) builds from this config directly — not read off a store
+	// instance's TasksOptions(), which none of those per-request/
+	// per-invocation store instances had SetTasksOptions called on.
+	IncludeSidechains bool `toml:"include_sidechains"`
+	// BackfillOnStart re-derives task_items/task_transitions from
+	// historical actions rows once at daemon start (same work as
+	// `observer backfill --tasks`, run automatically). Default false —
+	// the explicit CLI flag is the v1 path; an operator upgrading onto
+	// a build with [tasks] newly enabled runs it once by hand. CONSUMED:
+	// cmd/observer/main.go calls Store.BackfillTaskItems(ctx, 0) once,
+	// in a background goroutine, right after SetTasksEnabled, when this
+	// is true.
+	BackfillOnStart bool `toml:"backfill_on_start"`
+	// RetentionDays bounds how long task_items/task_transitions are kept
+	// before pruning. 0 = never prune (the CacheTrackConfig.RetentionDays
+	// shape) — v1 ships no pruning sweep at all; the field exists so a
+	// future one has a home without a config-shape change.
+	RetentionDays int `toml:"retention_days"`
 }
 
 // BrowserConfig is the [browser] surface — the opt-in browser-chatbot
@@ -1085,7 +1848,7 @@ type HandoffConfig struct {
 // LOCAL-ONLY: it never appears in [org_client.share] and is never distributed
 // to an org. Terminal-wide knobs live at the top; fresh-agent launch is a
 // SEPARATE, default-OFF opt-in under [terminal.launch] — it EXPANDS execution
-// authority, so (unlike the code_graph→codeintel rename) it is never migrated
+// authority, so (unlike a plain key rename) it is never migrated
 // on. [terminal].enabled gates the terminal-wide surface; it does NOT grant
 // fresh-launch (that needs [terminal.launch].allow_fresh_agent too).
 //
@@ -1140,6 +1903,130 @@ type TerminalConfig struct {
 	// Attach is the session-attach block (session-attach design Phase 1).
 	// Default-on: the attach socket is AF_UNIX owner-only 0600.
 	Attach TerminalAttachConfig `toml:"attach"`
+	// Sandbox is the [terminal.sandbox] block — B9 filesystem-isolated
+	// terminals (docs/plans/b9-sandboxed-terminals-implementation-plan-2026-08-08.md
+	// §5). Default-off (Enabled=false): sandboxing is new machinery that
+	// spawns a daemon-side bwrap process tree and (for clone sources)
+	// daemon-side git, so it stays a conscious opt-in like
+	// [terminal.launch].AllowFreshAgent, distinct from that block because
+	// sandboxing only SHRINKS execution authority (fs isolation) rather
+	// than expanding it.
+	Sandbox TerminalSandboxConfig `toml:"sandbox"`
+	// SSH is the [terminal.ssh] block — SSH remote-system terminals
+	// (docs/plans/ssh-remote-profiles-plan-2026-08-27.md). Default-ON
+	// (Enabled=true) as of the 2026-08-28 operator ruling: Enabled only
+	// gates VISIBILITY of the surface, not authority to reach any machine —
+	// launching a session still requires a named [[terminal.ssh.profiles]]
+	// entry, profiles exist only via operator-authored config, and the zero
+	// value (no profiles) can launch nothing regardless of Enabled. Enabled
+	// stays available as an explicit kill switch (set `enabled = false` to
+	// hide the surface entirely, e.g. on a shared/managed install).
+	SSH TerminalSSHConfig `toml:"ssh"`
+}
+
+// TerminalSSHConfig is the [terminal.ssh] block — outbound SSH remote-system
+// terminals (docs/plans/ssh-remote-profiles-plan-2026-08-27.md).
+//
+// DISTINCT FROM [remote] (plan §1). [remote] is INBOUND: it exposes this
+// node's own dashboard over a tailnet and authenticates an external client TO
+// Observer. This block is OUTBOUND: it lets the daemon spawn an `ssh` client
+// that authenticates Observer TO a third-party host. They share no code, no
+// config, and no tables, and neither should ever be implemented in terms of
+// the other.
+//
+// CREDENTIAL DISCIPLINE (operator requirement, plan §0 answer 2): a profile
+// carries a key-file PATH and nothing else. Observer never opens, reads, or
+// stores key material, and there is deliberately no password/passphrase key in
+// this schema — ssh-agent (or an interactive prompt inside the PTY) owns that.
+//
+// AUTHORIZATION SHAPE (plan §3.1): Profiles is an operator-authored ALLOW-LIST,
+// exactly like [terminal.launch].allowed_project_roots. The dashboard SELECTS a
+// profile by name; it can never CREATE one. That is why profiles live in config
+// rather than in a DB table with a CRUD API — a table would make "which remote
+// machines may this daemon shell into" editable by anything that can reach the
+// dashboard.
+//
+// LOCAL-ONLY: like the whole [terminal] tree, it never appears in
+// [org_client.share] and is never distributed by the org policy registry.
+type TerminalSSHConfig struct {
+	// Enabled is the surface visibility switch. Default TRUE — see the block
+	// comment. It does not grant authority to reach any machine: reaching one
+	// always requires a named entry in Profiles, which only an operator
+	// editing config.toml can add. Set to false as an explicit kill switch to
+	// hide the surface (e.g. on a shared/managed install) regardless of
+	// Profiles.
+	Enabled bool `toml:"enabled"`
+	// ConnectTimeoutSeconds bounds the ssh connect (-o ConnectTimeout) so a
+	// dead host cannot hold a PTY slot open forever. 0 uses the sshprofile
+	// default (10).
+	ConnectTimeoutSeconds int `toml:"connect_timeout_seconds"`
+	// KeepaliveSeconds is the ssh -o ServerAliveInterval. 0 uses the sshprofile
+	// default (30). With the fixed ServerAliveCountMax=3, a dead link ends the
+	// PTY (and records the run's exit) instead of hanging forever.
+	KeepaliveSeconds int `toml:"keepalive_seconds"`
+	// Profiles is the operator-authored list of remote systems, written as
+	// repeated [[terminal.ssh.profiles]] blocks. Empty (the default) means no
+	// system can be reached even when Enabled is true.
+	Profiles []SSHProfileConfig `toml:"profiles"`
+}
+
+// SSHProfileConfig is one [[terminal.ssh.profiles]] entry.
+//
+// NAMING NOTE (plan §3.2): internal/config ALREADY has a Profile type and a
+// ProfileStore — those are COMPRESSION profiles served by
+// /api/config/profiles, and are entirely unrelated. This type is deliberately
+// spelled SSHProfileConfig, and its HTTP surface lives under /api/terminal/ssh,
+// so the two can never be confused.
+type SSHProfileConfig struct {
+	// Name is the stable id the dashboard references. [a-z0-9][a-z0-9._-]*
+	Name string `toml:"name"`
+	// Label is an optional human-readable name for the picker.
+	Label string `toml:"label"`
+	// Host is a hostname, an IP literal, or a ~/.ssh/config Host alias.
+	Host string `toml:"host"`
+	// User is an optional login name (passed to ssh via -l).
+	User string `toml:"user"`
+	// Port is an optional TCP port; 0 or 22 omits the -p flag.
+	Port int `toml:"port"`
+	// KeyPath is an optional ABSOLUTE PATH to a private key file. It is handed
+	// to `ssh -i` and is never opened by Observer. Passphrases are ssh-agent's
+	// job; there is no passphrase key here, by design.
+	KeyPath string `toml:"key_path"`
+	// Jump is an optional [user@]host[:port] ProxyJump spec (ssh -J). Multi-hop
+	// comma chains are rejected in v1.
+	//
+	// There is deliberately NO ProxyCommand key: it executes an arbitrary LOCAL
+	// command, and exposing it as a config field reachable from a UI click
+	// would create a local-RCE surface. An operator who needs one sets it in
+	// their own ~/.ssh/config against a Host alias and points Host at that
+	// alias — their own pre-existing authority, not a new one Observer grants.
+	Jump string `toml:"jump"`
+	// DashboardPort is the port THIS remote machine's own Observer dashboard
+	// listens on. 0 (the default) means 8081, the daemon's own built-in bind.
+	//
+	// It exists solely for the dashboard instance switcher, which opens
+	// `ssh -N -L 127.0.0.1:<free>:127.0.0.1:<dashboard_port>` so the operator
+	// can view the REMOTE install's dashboard locally (docs/ssh-terminals.md,
+	// "Instance switcher"). Set it only when the remote daemon was started on a
+	// non-default port.
+	//
+	// This is the ONLY remote port the forward can ever reach, and it is read
+	// from here rather than accepted from a request — which is what keeps the
+	// switcher from being a general-purpose tunnel surface.
+	DashboardPort int `toml:"dashboard_port"`
+	// ReverseProxy opts THIS profile into an additional `-R` remote forward
+	// on the instance-switcher connection, so the remote machine can reach
+	// this machine's own Observer proxy (docs/ssh-terminals.md "Reverse
+	// proxy forward"). Default false. It only helps once the remote AI
+	// tool is itself pointed at the forwarded loopback address — Observer
+	// does not configure the remote tool for you.
+	ReverseProxy bool `toml:"reverse_proxy"`
+	// ReverseProxyPort is the port the `-R` forward binds on the REMOTE
+	// side. 0 (the default) means sshspec.DefaultReverseProxyPort
+	// (8820). The LOCAL side is always this machine's own Observer proxy
+	// port and is not configurable here — see
+	// sshspec.DefaultObserverProxyPort.
+	ReverseProxyPort int `toml:"reverse_proxy_port"`
 }
 
 // TerminalAttachConfig is the [terminal.attach] block — session attach
@@ -1211,12 +2098,25 @@ type TerminalAttachConfig struct {
 // Default() with the same absent-key-preserves-default partial-merge treatment
 // as [terminal.attach]'s booleans.
 //
-// `allow_shell` is intentionally ABSENT — a general browser shell is a
-// separate, separately-reviewed feature, not part of F1.
+// `allow_shell` (AllowShell below) is a SEPARATE default-OFF opt-in for
+// spawning a plain shell (not an AI agent) via a fresh terminal launch —
+// added post-F1. It is independent of AllowFreshAgent: a bare shell can run
+// ANY command, a strictly larger execution-authority expansion than a known,
+// capability-registry-bounded AI-tool launcher, so it is gated by its own
+// explicit toggle even when fresh-agent launch is already on.
 type TerminalLaunchConfig struct {
-	// AllowFreshAgent is the master opt-in for non-handoff launches. Default
-	// FALSE. With it false, POST /api/terminal/launch refuses every request.
+	// AllowFreshAgent is the master opt-in for non-handoff AI-tool launches.
+	// Default FALSE. With it false, POST /api/terminal/launch refuses every
+	// non-shell request.
 	AllowFreshAgent bool `toml:"allow_fresh_agent"`
+	// AllowShell is the opt-in for a fresh PLAIN SHELL launch (the child's
+	// $SHELL, or /bin/bash / /bin/sh as a fallback — never an AI tool).
+	// Default FALSE, and deliberately independent of AllowFreshAgent: turning
+	// on fresh AI-tool launches must not silently also grant an arbitrary
+	// command shell. BurntSushi leaves an absent key untouched, so a
+	// pre-existing [terminal.launch] block that predates this key still
+	// loads with AllowShell=false.
+	AllowShell bool `toml:"allow_shell"`
 	// AllowInstall gates POST /api/terminal/install — the guided one-click
 	// "Install in terminal" affordance (tool-binary-resolution arc). Default
 	// TRUE: the consent is the explicit dashboard click that runs a grounded,
@@ -1243,6 +2143,99 @@ type TerminalLaunchConfig struct {
 	AllowedProjectRoots []string `toml:"allowed_project_roots"`
 }
 
+// TerminalSandboxConfig is the [terminal.sandbox] block — B9 filesystem-
+// isolated terminals (docs/plans/b9-sandboxed-terminals-implementation-plan-2026-08-08.md
+// §5). Separate from [terminal.launch] (the consent-gated AUTHORIZATION
+// block for who may launch what): this block is MECHANISM — bwrap
+// namespace composition, workspace preparation, and the honesty knobs
+// around them. It only ever SHRINKS execution authority (tmpfs-home +
+// selective binds), except the two knobs called out below which EXPAND
+// it and are their own default-off/empty gates, mirroring the
+// AllowShell-shaped-gate discipline elsewhere in [terminal].
+type TerminalSandboxConfig struct {
+	// Enabled is the master opt-in for the whole sandbox feature. Default
+	// FALSE: this is new daemon-spawned machinery (bwrap + git), so it
+	// stays a conscious opt-in even though the mechanism itself only
+	// shrinks authority.
+	Enabled bool `toml:"enabled"`
+	// Backend names the isolation mechanism. "bwrap" is the only value in
+	// v1 (Linux + WSL2, bubblewrap >= 0.4.0).
+	Backend string `toml:"backend"`
+	// HomeMode selects how $HOME is treated inside the sandbox: "tmpfs"
+	// (default — blinds the real home, then punches back exactly the
+	// tool's SandboxSpec state) or "readonly" (an escape hatch that omits
+	// the tmpfs, leaving the whole home readable read-only).
+	HomeMode string `toml:"home_mode"`
+	// DefaultOn pre-checks the dashboard "Run in sandbox" toggle. Default
+	// FALSE.
+	DefaultOn bool `toml:"default_on"`
+	// AllowRemoteClone is the opt-in for the `clone-remote` workspace
+	// source: the DAEMON runs `git clone <url>` with the operator's own
+	// ambient auth before the sandbox starts. Default FALSE — an
+	// authority-EXPANDING knob (daemon-initiated network git), gated like
+	// [terminal.launch].AllowShell.
+	AllowRemoteClone bool `toml:"allow_remote_clone"`
+	// RemoteAllowedHosts restricts AllowRemoteClone to these hosts. Empty
+	// (the default) means any host is allowed once AllowRemoteClone is
+	// true.
+	RemoteAllowedHosts []string `toml:"remote_allowed_hosts"`
+	// AllowWorktreeSource is the opt-in for the `worktree` workspace
+	// source (`git worktree add`), off by default per plan §4/D6: it
+	// needs the main repo's .git bound rw and attributes the session to
+	// the MAIN repo root, not the workspace (ledger G18).
+	AllowWorktreeSource bool `toml:"allow_worktree_source"`
+	// WorkspacesDir overrides where prepared workspaces are minted.
+	// Empty (the default) uses `<observer dir>/workspaces`.
+	WorkspacesDir string `toml:"workspaces_dir"`
+	// WorkspaceRetentionDays is the sweep horizon for prepared workspaces
+	// (full repo copies, not small). 0 (the default) keeps them forever —
+	// B7 needs workspaces to persist past run exit.
+	WorkspaceRetentionDays int `toml:"workspace_retention_days"`
+	// MaskPaths lists extra paths to `--tmpfs`-mask inside the sandbox, on
+	// top of the auto-detected foreign-OS mount roots (e.g. /mnt/c on
+	// WSL). Empty by default.
+	MaskPaths []string `toml:"mask_paths"`
+	// ExtraROBinds is a config escape hatch of additional read-only binds.
+	// Empty by default.
+	ExtraROBinds []string `toml:"extra_ro_binds"`
+	// ExtraRWBinds is a config escape hatch of additional read-write
+	// binds — EXPANDS write authority inside the sandbox. Empty by
+	// default.
+	ExtraRWBinds []string `toml:"extra_rw_binds"`
+	// PrepTimeoutSeconds bounds workspace-preparation subprocesses (git
+	// clone/worktree). Default 300.
+	PrepTimeoutSeconds int `toml:"prep_timeout_seconds"`
+	// Egress selects the sandbox network tier (security ledger SR27-SBX-1):
+	// "internet" (the default, also what an empty value means) gives the
+	// sandbox its own network namespace with the observer model proxy
+	// forwarded in and other traffic sent through a host-side egress gateway
+	// that refuses every host-local address, so the sandboxed agent cannot
+	// reach the dashboard's loopback control plane; "proxy_only" forwards
+	// only the model proxy; "none" forwards nothing; "host" shares the host
+	// network (the v1 behaviour, which leaves the dashboard reachable from
+	// inside the sandbox). A tier this host cannot build fails the launch;
+	// it never falls back to "host".
+	Egress string `toml:"egress"`
+	// EgressAllowCIDRs is an authority-EXPANDING allow-list for the
+	// "internet" tier's egress gateway. The gateway refuses every private
+	// destination by default (RFC 1918, 100.64.0.0/10 carrier-grade NAT and
+	// tailnets, IPv6 unique-local and site-local): that is where the WSL2
+	// NAT gateway (the Windows host), Docker bridge containers and LAN
+	// services live. List a CIDR here (for example "10.20.0.0/16") to let a
+	// sandboxed agent reach a corporate registry or git server on a private
+	// address. Each entry must be a canonical CIDR inside one of those
+	// private ranges; loopback, link-local and the host's own addresses can
+	// never be listed. Empty by default.
+	EgressAllowCIDRs []string `toml:"egress_allow_cidrs"`
+	// AllowToolConfigWrites is an authority-EXPANDING opt-in. Default FALSE:
+	// files a later UNSANDBOXED session executes (the daemon config, the
+	// user guard policy, shell-wrap shims, each tool's hook/MCP/plugin
+	// config, and the workspace's repository config + hooks dir) are
+	// re-bound read-only inside the sandbox. Set true only if a sandboxed
+	// tool must change its own user-level settings.
+	AllowToolConfigWrites bool `toml:"allow_tool_config_writes"`
+}
+
 // TerminalStatusConfig is the [terminal.status] block — agent-status
 // detection (plan §8/F4). Default-on. Per-tool prompt patterns are shipped
 // data, not config.
@@ -1265,6 +2258,32 @@ type TerminalStatusConfig struct {
 type LaunchConfig struct {
 	// Tools maps a registry tool name to its per-tool launch override.
 	Tools map[string]LaunchToolConfig `toml:"tools"`
+
+	// AgentRuntimeDir relocates a launched agent's install/config/cache
+	// tree onto a rename-safe local filesystem. Empty (default) = OFF: no
+	// env is injected and launch behaviour is byte-for-byte unchanged.
+	//
+	// It exists for deployments where the developer's HOME is on a
+	// filesystem that cannot complete the atomic renames npm/bun perform
+	// during a provider-dependency install — most notably a containerized
+	// node whose HOME is an Azure Files / SMB / NFS mount (the Plane-B
+	// test-node). There, an agent like OpenCode installs its provider
+	// module into ~/.config/<tool>/node_modules, the rename fails with
+	// EACCES, and the agent can't load the provider (an opaque
+	// UnknownError before any model call).
+	//
+	// When set, every `observer <tool>` launcher points the agent's
+	// XDG_CONFIG_HOME/XDG_CACHE_HOME/XDG_STATE_HOME plus the npm/bun cache
+	// dirs under this path (see cmd/observer agentRuntimeEnv). It is
+	// deliberately adapter-agnostic — keyed on the capability "this agent
+	// needs a rename-safe runtime dir", never on a tool name — and it does
+	// NOT relocate XDG_DATA_HOME, so agents still write their session
+	// storage under $HOME/.local/share where the watcher captures it.
+	//
+	// The OBSERVER_AGENT_RUNTIME_DIR environment variable overrides this
+	// key, so a container can set it without editing config. LOCAL-ONLY;
+	// never distributed to an org.
+	AgentRuntimeDir string `toml:"agent_runtime_dir"`
 }
 
 // LaunchToolConfig is one [launch.tools.<tool>] entry.
@@ -1293,17 +2312,22 @@ type BenchmarkConfig struct {
 // CodeIntelConfig is the [codeintel] surface — the in-process code-
 // intelligence module (docs/codeintel/). LOCAL-ONLY, never distributed
 // to an org (same posture as [routing]/[predict]/[cachewarm]). Same
-// partial-merge invariant as CacheTrackConfig: an install with no
-// [codeintel] section gets Enabled=true (Default() seeds it); a partial
-// section keeps unset fields at their Default() values.
+// partial-merge invariant as CacheTrackConfig: Default() seeds every
+// field, a TOML section only overrides the keys it names. The module is
+// OPT-IN (operator ruling D-307, 2026-10-05: indexing is CPU and disk
+// heavy, so it runs only when the user asks): an install with no
+// [codeintel] section, or a partial section that does not name
+// `enabled`, gets Enabled=false; an explicit `enabled = true` turns it on.
 //
 // Defaults are conservative: indexing is read-only on the repo; the
 // only model-visible change (compression.code_aggressive) is OFF and
 // opt-in per project AND language.
 type CodeIntelConfig struct {
-	// Enabled gates the whole module. When false the indexer doesn't
-	// run, the native provider reports unavailable, and the CLI/MCP
-	// surfaces stay empty.
+	// Enabled gates the whole module. Default false (opt-in). When false
+	// the indexer doesn't run, the native provider reports unavailable,
+	// the MCP symbol tools answer with the codeintel_disabled warning, and
+	// body-collapse compression is a no-op. Turn it on from Settings >
+	// Intelligence > Code intelligence, or set it to true here.
 	Enabled bool `toml:"enabled"`
 	// Languages, when non-empty, restricts indexing to this subset of
 	// the embedded language set. Empty = all supported languages.
@@ -1340,6 +2364,136 @@ type CodeIntelConfig struct {
 	Semantic    CodeIntelSemanticConfig    `toml:"semantic"`
 }
 
+// MCPRelayConfig is the [mcp_relay] block — the node-side MCP relay of the
+// Agent Access arc (doc3 §8.2, §11.7 P4, §12). The relay fronts the AI
+// clients' MCP servers on this node: it pulls the org's signed
+// tools.mcp_access policy through the four-gate accept, compiles it into the
+// node decision table (internal/mcprelay/localpdp), projects the approved
+// remote entries into every verified client's config
+// (internal/mcprelay/project, journaled before every write), and mediates
+// node-local stdio servers through the stdio wrapper.
+//
+// LOCAL-ONLY (like [guard] / [routing]) and entirely additive: with Enabled
+// false nothing below is read, no client config is rewritten, no listener
+// binds and no table cache is written — byte-identical to a build without
+// the relay. Enabling is per node (per-node opt-in IS the canary).
+type MCPRelayConfig struct {
+	// Enabled turns the relay on. Default false. Turning it on rewrites each
+	// AI client's MCP entry to point at the relay (the original is journaled
+	// in mcp_relay_launch_spec first, so disabling restores it byte-for-byte).
+	Enabled bool `toml:"enabled"`
+	// Mode selects the PRIMARY mediation path: "stdio_wrapper" (default —
+	// the relay is the process the client spawns, process-attested),
+	// "ipc" (owner-only unix socket / named pipe, ipc_bound) or "loopback"
+	// (a loopback HTTP listener the client config points at; configured,
+	// so product-scoped grants are NOT honoured on it).
+	Mode string `toml:"mode"`
+	// GatewayURL is the org MCP gateway base URL (https://…). On a managed
+	// node it comes from the enrolment grant, not from TOML; set it here
+	// only for an individual node that dials a gateway directly.
+	GatewayURL string `toml:"gateway_url"`
+	// AuditMode is the local audit posture (doc3 §12.4, R14.4): "async"
+	// (default — durable local append, sidecar-before-forward when the DB
+	// append fails, a gap record on the next append) or "strict" (block the
+	// call on ANY append failure). The effective posture is strict when
+	// THIS is strict OR a signed policy marks the vserver audit_strict.
+	AuditMode string `toml:"audit_mode"`
+	// Listen is the host:port of the relay's DEDICATED loopback HTTP
+	// listener, serving the streamable-HTTP relay at /mcp/<vserver-slug>.
+	// When set, the daemon binds it on start (whatever Mode is) and projects
+	// each approved vserver into the AI clients' configs as a remote entry
+	// http://<listen>/mcp/<slug> (when remote forwarding is wired). Empty
+	// (the default) binds nothing: no /mcp/ route is served on this node -
+	// the daemon's proxy listener does not host one - and no remote entry is
+	// projected; the stdio wrap still applies. It MUST be a loopback
+	// host:port (127.0.0.1 / localhost / ::1) — the relay is never exposed
+	// beyond this machine.
+	Listen string `toml:"listen"`
+	// IPCPath is the owner-only IPC endpoint for Mode "ipc": a unix socket
+	// path (0700 directory, 0600 socket) on unix; on Windows the value names
+	// the pipe (`\.\pipe\…`). Empty resolves beside the observer database
+	// (~/.observer/mcp-relay.sock). `~` is expanded at load.
+	IPCPath string `toml:"ipc_path"`
+	// PollIntervalSeconds is the relay's local reconcile cadence: how often
+	// it recompiles the node table from the latest ACCEPTED tools.mcp_access
+	// resource and re-projects approved entries into client configs. It is
+	// NOT the signed-policy pull cadence — that is
+	// [org_client].policy_poll_interval_seconds. Default 300; bounds 10–3600.
+	PollIntervalSeconds int `toml:"poll_interval_seconds"`
+}
+
+// MCPRelay vocabularies (closed; validated at load).
+const (
+	MCPRelayModeStdioWrapper = "stdio_wrapper"
+	MCPRelayModeIPC          = "ipc"
+	MCPRelayModeLoopback     = "loopback"
+	MCPRelayAuditAsync       = "async"
+	MCPRelayAuditStrict      = "strict"
+	// DefaultMCPRelayPollIntervalSeconds is the default reconcile cadence.
+	DefaultMCPRelayPollIntervalSeconds = 300
+)
+
+// ArchiveConfig is the [archive] block — cold storage for data that is not
+// garbage but is no longer part of the hot working set
+// (docs/plans/observer-corpus-archival-lazyload-design-2026-08-26.md).
+//
+// The block is LOCAL-ONLY (like [routing] / [cachewarm] / [codeintel]) and
+// entirely additive: an operator who never writes it sees byte-identical
+// behaviour, because Enabled defaults to false.
+type ArchiveConfig struct {
+	// Enabled switches the retention pass's stale-project handling from
+	// DELETE to ARCHIVE. Default false.
+	//
+	// What turning it on changes, precisely: a codeintel project past
+	// [codeintel].retention_days is copied to the archive database, verified
+	// there, and only then removed from the hot one — instead of being
+	// deleted outright, which is what happens today. So enabling it is a
+	// strict improvement on the destructiveness axis even before the
+	// rehydrate surfaces land.
+	//
+	// RESTORING an archived project is `observer archive rehydrate <path>`,
+	// which replays the verified cold copy back into the hot database and
+	// rebuilds the derived search index (shipped in P2 — an earlier version of
+	// this comment said restoring meant a full re-index, and that has been
+	// false since). The replay is refused, honestly and by name, when the cold
+	// copy is missing, incomplete, or was produced by a parser this build no
+	// longer accepts; the command then points at `observer index <path>`, the
+	// disaster-recovery floor that always works because the code index is
+	// derived from the repository on disk.
+	//
+	// Archived PROCESS capture needs no rehydrate at all: the dashboard reads
+	// it straight from cold storage, with nothing copied back.
+	//
+	// What enabling this does NOT do is shrink the database file. Archived rows
+	// leave the hot tables, but SQLite keeps the freed pages on its freelist —
+	// turning them back into free disk is `observer archive reclaim`, which is
+	// operator-invoked and never automatic.
+	Enabled bool `toml:"enabled"`
+	// Path is the archive database file. Empty applies
+	// ~/.observer/archive.db — a sibling of observer.db, matching the
+	// internal/edge/wal precedent of one flat file per subsystem. `~` is
+	// expanded at load.
+	//
+	// It is deliberately a SEPARATE FILE rather than more tables in
+	// observer.db: the entire point is that archived data stops being
+	// carried on every VACUUM, backup, quick_check and dbstat walk of the
+	// hot database.
+	Path string `toml:"path"`
+	// MaxProjectsPerPass caps how many projects one retention pass moves.
+	// Default 8; ≤ 0 applies the default.
+	//
+	// The cap is not a performance tuning knob so much as an incident guard:
+	// an unbounded "drain the whole backlog now" sweep is exactly the
+	// loop-until-done shape that made a single retention pass hang the
+	// machine for minutes. A capped batch on the ordinary startup + periodic
+	// tick converges just as surely.
+	MaxProjectsPerPass int `toml:"max_projects_per_pass"`
+	// BatchRows bounds one streamed copy batch. Default 512; ≤ 0 applies the
+	// default. Keeps a single move's memory proportional to the batch, not to
+	// the project.
+	BatchRows int `toml:"batch_rows"`
+}
+
 // CodeIntelIndexConfig is the [codeintel.index] block — resource +
 // scheduling controls for the offline indexer.
 type CodeIntelIndexConfig struct {
@@ -1356,9 +2510,24 @@ type CodeIntelIndexConfig struct {
 	Workers int `toml:"workers"`
 	// IdleOnly pauses indexing while the machine is busy. Default false.
 	IdleOnly bool `toml:"idle_only"`
-	// DiskBudgetMB caps the index size; cold projects LRU-evict past
-	// this. Default 500. 0 = no cap.
-	DiskBudgetMB int `toml:"disk_budget_mb"`
+	// NOTE: `disk_budget_mb` used to be declared here and was never read
+	// by anything. It is REMOVED, not renamed — see
+	// migrateRemovedCodeIntelKeys for the disposition and the warning an
+	// existing config still gets.
+	//
+	// OnStartTimeoutMinutes bounds the AGGREGATE wall-clock time
+	// runCodeIntelOnStart (cmd/observer/codeintel.go) spends indexing
+	// every known project on one `observer start` boot (T2.4, 2026-08-26
+	// disk/compute remediation plan, P2-H). Per-project consent-gating
+	// (auto_index_limit) and the home/drive-root block
+	// (index.isAutoIndexBlocked) are unaffected — this is an orthogonal
+	// outer bound for a large PROJECT SET (historically a 384K-file
+	// Windows home directory's worth of discovered project roots), not a
+	// per-project limit. When the deadline passes, indexing of any
+	// remaining projects is skipped for this boot; they're picked up
+	// again next start or by `observer index`. Default 10. ≤ 0 disables
+	// the bound (unbounded, matching pre-2026-08-26 behavior).
+	OnStartTimeoutMinutes int `toml:"on_start_timeout_minutes"`
 }
 
 // CodeIntelCompressionConfig is the [codeintel.compression] block — the
@@ -1564,6 +2733,14 @@ type IngestOTelConfig struct {
 	// the source. Stored content is scrubbed for secrets and obeys the same
 	// node-side push gate as locally-captured content.
 	ContentCapture string `toml:"content_capture"`
+	// ContentMaxBytes caps a single otel_content row's stored Content, after
+	// scrubbing. Mirrors the org gateway's classify.Policy.BodyMaxBytes bound
+	// (32 KiB) — an OTel content event is one prompt/tool-I/O body, the same
+	// shape that bound already governs on the server-side capture ladder, and
+	// unlike raw_tool_input/RawJSON's 1 MiB ceiling this stream has no
+	// dashboard full-text-fetch use case pushing for a larger cap. 0 or
+	// negative falls back to the default (partial TOML merge leaves it unset).
+	ContentMaxBytes int `toml:"content_max_bytes"`
 }
 
 // OTelExporterConfig configures the agent-side OpenTelemetry exporter that
@@ -1613,14 +2790,43 @@ type OrgClientConfig struct {
 	// OrgServerURL is the base URL of the customer's org server, e.g.
 	// "https://observer-org.acme.example". Required when Enabled.
 	OrgServerURL string `toml:"org_server_url"`
-	// PushIntervalSeconds is the cadence of the push loop. Default 900 (15m).
+	// PushIntervalSeconds is the cadence of the push loop. Default 120 (2m).
 	PushIntervalSeconds int `toml:"push_interval_seconds"`
+	// SnapshotIntervalSeconds bounds how often the SNAPSHOT wire families
+	// (the teams-tier aggregates and the enterprise per-developer/per-session
+	// wires) recompute, even when their source data changed. The CURSOR wires
+	// — sessions, actions, api_turns, token_usage, guard_events, otel_content
+	// — are unaffected and keep every push tick, so new activity still reaches
+	// the org dashboard at push_interval_seconds.
+	//
+	// This is Lever 2 of the steady-state CPU remediation (plan Track R2): the
+	// change-detection gate already skips a snapshot family whose source data
+	// is untouched, and this knob additionally bounds worst-case CPU on a
+	// CONSTANTLY-changing node, where that gate never gets to skip.
+	//
+	// 0 (the default) means 4× the effective push interval — computed at use,
+	// so a node that tightens or loosens push_interval_seconds keeps the same
+	// 4:1 relationship rather than inheriting a stale absolute. At the shipped
+	// defaults that is 8 minutes. A NEGATIVE value disables the throttle: every
+	// changed family recomputes on every tick (the pre-Track-R2 cadence).
+	//
+	// The staleness this buys is explicit and bounded: a snapshot wire can lag
+	// its source by up to this interval. See docs/teams-operations.md.
+	SnapshotIntervalSeconds int `toml:"snapshot_interval_seconds"`
 	// PolicyPollIntervalSeconds is the cadence of the org policy-bundle
 	// poll (guard spec §14.2). Default 3600 (1h). The poll also fires
 	// once at `observer start`. Only meaningful on an enrolled agent
 	// with the guard enabled — the daemon starts no poll loop
 	// otherwise.
 	PolicyPollIntervalSeconds int `toml:"policy_poll_interval_seconds"`
+	// PolicyStateHeartbeatSeconds is the cadence of the P0-6 effective-
+	// policy-state reporter's heartbeat POST (docs/plans/
+	// plane-a-p0-6-effective-policy-state-plan.md §4.3). Default 300 (5m).
+	// Content-free: only meaningful while the channel is enabled (the local
+	// [org_client.share].policy_state opt-in, or an org raise of it on a
+	// managed node) — the reporter goroutine always runs but stays dormant
+	// otherwise.
+	PolicyStateHeartbeatSeconds int `toml:"policy_state_heartbeat_seconds"`
 	// MaxPushBytes caps the uncompressed JSON size of a single batch.
 	// Default 1 MiB; the client clamps to MaxPushBytesCeiling (16 MiB).
 	MaxPushBytes int64 `toml:"max_push_bytes"`
@@ -1638,6 +2844,100 @@ type OrgClientConfig struct {
 	// zero value = all projects. Combine with Share to narrow what
 	// crosses the wire from both axes.
 	Scope OrgClientScopeConfig `toml:"scope"`
+	// Policy is [org_client.policy] — the Plane-A P0-5 unified policy
+	// resource acceptance configuration (plan §6.4). See
+	// OrgClientPolicyConfig.
+	Policy OrgClientPolicyConfig `toml:"policy"`
+}
+
+// ConfiguredServerURL reports whether org_server_url carries a non-blank
+// value IN CONFIG. It deliberately does NOT fold in Enabled, and it
+// CANNOT fold in whether a persisted org_enrolment DB row exists — this
+// package is pure TOML loading with no database access (CLAUDE.md
+// "Module Boundaries" #1), so it has no way to see that row.
+//
+// This used to be a method named Enrolled() that returned `Enabled &&
+// ConfiguredServerURL()` and was treated as "is this node's org rail
+// running." That was a lie for a real, live shape: `ensureOrgClientBlock`
+// (cmd/observer/org.go) is header-idempotent — an existing [org_client]
+// table header means org_server_url is never (re)written — so a node
+// enrolled before that field existed, or re-enrolled without a full
+// `observer unenroll` first, can carry `enabled = true` with a genuinely
+// blank org_server_url while its org_enrolment DB row (and the org
+// server's own record of the enrolment) is perfectly real. The push,
+// announcement, and routing-policy loops all dial the URL in THAT
+// persisted row (internal/orgclient.Client.PushOnce), not this config
+// field, so the old Enrolled() gate silently killed every org loop on a
+// node that was, in fact, still enrolled.
+//
+// The real construction gate now lives in cmd/observer/start.go
+// (orgClientShouldStart), which combines this method with a
+// hasPersistedEnrolment DB lookup the config package cannot perform
+// itself — see its doc comment for the four-state truth table. Use
+// ConfiguredServerURL only where you genuinely mean "does config alone
+// carry a server URL" (e.g. internal/diag and cmd/observer/privacy.go's
+// best-effort, DB-free disclosure report, which say so explicitly).
+func (c OrgClientConfig) ConfiguredServerURL() bool {
+	return strings.TrimSpace(c.OrgServerURL) != ""
+}
+
+// OrgClientPolicyConfig is [org_client.policy] — the Plane-A P0-5 unified
+// policy resource acceptance configuration
+// (docs/plans/plane-a-p0-5-unified-policy-resource-v1-plan.md §6.4).
+//
+// RESTART REQUIRED: both lists are read once when the daemon constructs its
+// policy-resource fetch options at start (Phase W wires the read site —
+// internal/orgclient.PolicyResourceOptions.AcceptFamilies/
+// PreauthorizeEnforce); changing this section takes effect on the next
+// `observer start`, not on a running daemon.
+//
+// The v1 closed family enum is "admission.input" | "egress.routing_guardrail"
+// | "gateway.providers" | "node.governance"
+// (internal/policyfam.SupportedFamilies is the source of truth; duplicated
+// here as literal strings rather than importing policyfam, matching this
+// codebase's convention of each boundary owning its own copy of a small
+// closed enum — see internal/policystate/collector.go and
+// internal/policyfam/families.go, which do the same).
+type OrgClientPolicyConfig struct {
+	// AcceptFamilies is the closed set of families this node installs into
+	// its durable cache. Default empty = accept nothing: every family is
+	// still polled and reported (plan §6.6 — polling is independent of
+	// this list), but nothing is durably cached/installed until an
+	// operator opts a family in here.
+	AcceptFamilies []string `toml:"accept_families"`
+	// PreauthorizeEnforce MUST be a subset of AcceptFamilies — config.Validate
+	// rejects a config where it is not. A family listed here whose
+	// delivered body requests the family's "enforce" posture installs
+	// live-enforceable; a family in AcceptFamilies but NOT here installs
+	// inert (EnforceAllowed=false, InertReason=not_preauthorized) whenever
+	// its body requests enforce — the signed body and its BodyHash are
+	// never rewritten to reflect this, only the local enforcement gate is.
+	PreauthorizeEnforce []string `toml:"preauthorize_enforce"`
+
+	// NodeWorkspace / NodeEnvironment / NodeService are this node's
+	// targeting attributes over the closed selector vocabulary
+	// (internal/orgcontract.Selectors), used by the P0-10 Phase B
+	// policy-targeting rail
+	// (docs/plans/policy-targeting-rollback-design-2026-08-13.md §2).
+	//
+	// CORROBORATION ONLY — NOT AUTHORIZATION. The org server resolves the
+	// AUTHORITATIVE attributes from the verified bearer's identity and
+	// decides which resource a node is served; these values are never
+	// presented to the server as a claim, and setting them can only make
+	// this node install LESS (a delivered envelope whose signed selectors
+	// contradict a value configured here is rejected selector_mismatch,
+	// keeping the prior last-known-good policy). Setting them cannot
+	// acquire a policy the server did not already choose to serve.
+	//
+	// Each key is independently optional. An attribute left empty is
+	// "unknown to this node": a signed selector naming it is accepted and
+	// logged as uncorroborated rather than blocking, so a fleet that has
+	// not configured attributes yet keeps working across the upgrade.
+	//
+	// RESTART REQUIRED, like the two lists above.
+	NodeWorkspace   string `toml:"node_workspace"`
+	NodeEnvironment string `toml:"node_environment"`
+	NodeService     string `toml:"node_service"`
 }
 
 // OrgClientScopeConfig restricts which projects (by root path) feed
@@ -1687,10 +2987,12 @@ type OrgClientScopeConfig struct {
 // PLANE BOUNDARY (docs/deployment-models.md; audit finding M1). This
 // one struct carries flags for BOTH deployment planes. Grouped below:
 //   - Plane B (this node's OWN coding-agent usage → org admin):
-//     FullContent, TargetActionAllowlist, AdminManaged, RoutingSummary.
+//     FullContent, TargetActionAllowlist, AdminManaged, RoutingSummary,
+//     PolicyState.
 //   - Plane A (general observability of an admin/org-hosted LLM app whose
-//     END-USERS route through Observer): ObsSummary, ObsTraces, ObsContent,
-//     ObsEvalSummary.
+//     END-USERS route through Observer): the nested Obs sub-table
+//     ([org_client.share.obs]: summary, traces, content, eval_summary,
+//     admission, eval_items, egress).
 //
 // The wire paths are already separate (obs tiers compose via the
 // store.ObsOrgProviders func seam; the privacy sentinel forbids obs_*
@@ -1709,41 +3011,132 @@ type OrgClientShareConfig struct {
 	// provisioning; there is no server-side force override (the no-remote-force
 	// invariant holds). Default false — the zero value stays metadata-only.
 	AdminManaged bool `toml:"admin_managed"`
+	// FullToolBodies ships the four `actions` body columns — raw_tool_input,
+	// raw_tool_output, preceding_reasoning, error_message — that the local
+	// dashboard renders inline and that the org-push seam NEVER ships in any
+	// other mode. It is its OWN tier, distinct from FullContent/AdminManaged
+	// (which ship paths/targets but never these bodies), so extraction is
+	// granular per the enterprise-managed control model. Node-side opt-in,
+	// default false; on a MANAGED node the org may RAISE it remotely
+	// (extract.managed authority) — the sanctioned enterprise lift — but on an
+	// individual node it is node-only and can never be server-raised.
+	FullToolBodies bool `toml:"full_tool_bodies"`
 	// RoutingSummary opts the §R19.4 routing aggregate (counts +
 	// dollars by tier/reason ONLY — never decision rows) onto the
 	// push. Its own consent toggle, default false, node-side only —
 	// the org admin cannot force it (model-routing spec §R26.4 +
 	// the share-mode posture).
 	RoutingSummary bool `toml:"routing_summary"`
-	// BriefingAggregates opts the Daily-Briefing AGGREGATE (content-free
-	// counts + sums by (day, tool, project_hash) — docs/design/
-	// standup-briefing.md §4 Phase C) onto the push. Its own consent toggle,
-	// default false, node-side only — the org admin cannot force it (same
-	// posture as routing_summary; never snapshot or analysis content).
-	BriefingAggregates bool `toml:"briefing_aggregates"`
-	// VirtuousCycle opts the Virtuous-Cycle trend (cumulative CTA applies
-	// with projected vs realized savings) onto the push. Its own consent
-	// toggle, default false, node-side only — the org admin cannot force it.
-	// Carries cumulative applies, projected/realized USD, and weekly trend
-	// buckets; never raw CTA ledger content.
-	VirtuousCycle bool `toml:"virtuous_cycle"`
+	// CacheDetail opts the Arc 4 P5c cache-detail aggregate (day × model ×
+	// kind counts + tokens + cost delta from the node-local cache_events log)
+	// onto the wire. CONTENT-FREE — no prompt prefix, no raw scope, no path.
+	// Its own consent toggle, default false, node-side only on an individual
+	// node; on a managed node the org may RAISE it (extract.managed).
+	CacheDetail bool `toml:"cache_detail"`
+	// RoutingDetail opts the Arc 4 P5d routing-detail aggregate (day ×
+	// original_model × selected_model × turn_kind × mode counts + savings from
+	// the node-local router_decisions log) onto the wire. CONTENT-FREE but
+	// MODEL-ID-BEARING (unlike routing_summary). Its own consent toggle,
+	// default false, node-side only on an individual node; on a managed node
+	// the org may RAISE it (extract.managed).
+	RoutingDetail bool `toml:"routing_detail"`
+	// LimitGauge opts the Arc 4 P5e predictions aggregate (per day × provider
+	// rate-limit utilization from the node-local limit_snapshots log) onto the
+	// wire. CONTENT-FREE (utilization stats only). Its own consent toggle,
+	// default false, node-side only on an individual node; on a managed node
+	// the org may RAISE it (extract.managed).
+	LimitGauge bool `toml:"limit_gauge"`
+	// CodeintelDetail opts the Arc 4 P5f codeintel-detail aggregate (per
+	// project-hash × language file/symbol/edge counts from the node-local
+	// code-intelligence index) onto the wire. CONTENT-FREE STRUCTURE counts —
+	// no symbol name, fqn, signature, or raw path; the project path is one-way
+	// hashed. Its own consent toggle, default false, node-side only on an
+	// individual node; on a managed node the org may RAISE it via the DISTINCT
+	// extract.codeintel authority (NOT the umbrella extract.managed — this is
+	// the highest-sensitivity tier and gets its own explicit consent).
+	CodeintelDetail bool `toml:"codeintel_detail"`
+	// ProcessDetail opts the Arc 4 P5g process-detail aggregate (per day ×
+	// tool run/exit/duration counts from the node-local process-observability
+	// log) onto the wire. CONTENT-FREE counts — no exe path, argv, cwd,
+	// network body, or hash. Its own consent toggle, default false, node-side
+	// only on an individual node; on a managed node the org may RAISE it via
+	// the DISTINCT extract.process authority (NOT the umbrella extract.managed
+	// — the process/eBPF trees are a highest-sensitivity tier).
+	ProcessDetail bool `toml:"process_detail"`
+	// TerminalDetail opts the Arc 4 P5h terminal-detail aggregates (per
+	// day×tool×kind terminal run/command counts + per day×kind×decision×principal
+	// remote-audit event counts from the node-local terminal_* / remote_audit
+	// logs) onto the wire. CONTENT-FREE counts — no command, hash, session id,
+	// peer address, or route. Its own consent toggle, default false, node-side
+	// only on an individual node; on a managed node the org may RAISE it via the
+	// DISTINCT extract.terminal authority. The raw terminal_* / remote_audit
+	// tables stay pinned out of the wire otherwise.
+	TerminalDetail bool `toml:"terminal_detail"`
+	// TaskDetail opts the session task/todo checklist (the node-local
+	// task_items / task_transitions tables, agent migration 109) onto the
+	// wire — docs/plans/node-session-detail-trickle-up-to-org-plan-2026-09-10.md
+	// §2 "W2". It is a TWO-LEVEL tier, deliberately unlike its siblings: this
+	// key alone ships the STATUS vocabulary, the vendor `raw_status` spelling,
+	// the ordering/counters and the status transitions, so the org can render
+	// "5 of 9 done, 1 vanished" for a session; the item PROSE (content /
+	// active_form / owner — agent-authored plan text) additionally requires
+	// full_content or admin_managed, exactly as obs.content's raw body does.
+	// Its own consent toggle, default false, node-side only on an individual
+	// node; on a managed node the org may RAISE it via the DISTINCT
+	// extract.tasks authority (NOT the umbrella extract.managed — a work plan
+	// is a high-sensitivity surface and gets its own explicit consent).
+	TaskDetail bool `toml:"task_detail"`
+	// ToolAccountDetail opts the vendor login / account observations (the
+	// node-local tool_account_observations table, agent migration 111) onto
+	// the wire — same plan, §2 "W3". Also a TWO-LEVEL tier: this key alone
+	// ships the binding enums (binding_kind / role / source / scope / stage),
+	// the opaque `account_key` and the observation time, which is everything
+	// the org needs to render "account changed / conflict / unknown" and count
+	// DISTINCT accounts; the raw identity (email / name / account_id — the one
+	// genuine developer-PII field set in the arc) additionally requires
+	// full_content or admin_managed (operator decision D2). Default false,
+	// node-side only on an individual node; org-raisable on a managed node via
+	// the DISTINCT extract.tool_accounts authority.
+	ToolAccountDetail bool `toml:"tool_account_detail"`
+	// MCPActivity opts an INDIVIDUAL (non-org-enrolled) node's HMAC-only daily
+	// MCP relay aggregate (day x virtual server x keyed tool HMAC x decision x
+	// client attestation counts, orgcontract.MCPRelayActivityRow) onto the
+	// wire — Agent Access ruling R8.30.b, docs/plans/agent-access-
+	// implementation-plan-2026-09-23.md §9.5 / §11.7 W4e. No plain server or
+	// tool name, no arguments, no result, no per-call row. Default false,
+	// node-side only, and it applies ONLY to an individual node: an ENROLLED
+	// teams/enterprise node ships the aggregate AND the per-record L2 events
+	// by capture posture (full_content / admin_managed, or the org-signed
+	// EnterpriseGranted raise on an already-enrolled node — R9.5 / R11.10),
+	// where this key neither adds nor removes anything. It is deliberately
+	// NOT an org-raisable share tier (absent from the node-governance share
+	// vocabulary): there is nothing for an org to raise on a node it does not
+	// manage.
+	MCPActivity bool `toml:"mcp_activity"`
+	// PolicyState opts the P0-6 effective-policy-state reverse channel
+	// (docs/plans/plane-a-p0-6-effective-policy-state-plan.md §2.3) onto a
+	// dedicated POST /api/agent/policy-ack. CONTENT-FREE — the report carries
+	// only hash/version/enum/timestamp rows (attribution empty-on-wire,
+	// server-stamped). Its own consent toggle, default false. On an
+	// INDIVIDUAL node the org cannot raise it; on a MANAGED node whose grant
+	// carries the strict `extract.policy_state` authority the org's
+	// node.governance body MAY raise it (the enterprise default body does),
+	// and a directive may lower it off on either — see
+	// internal/govern/sharetiers.go and the Privacy card's source column.
+	PolicyState bool `toml:"policy_state"`
 	// --- Plane A: general observability of an admin/org-hosted LLM app ---
-	// Org-tier observability opt-ins now live under the nested
-	// [org_client.share.obs] sub-table (Obs below) so the config namespace
-	// reflects the plane split (plane-separation audit M1). The four flat
-	// keys after it (obs_summary/obs_traces/obs_content/obs_eval_summary)
-	// are DEPRECATED but still parsed for one release: migrateLegacyOrgShareObs
-	// maps them onto Obs.* at load (deprecation-warning once per key), and
-	// `observer config migrate` (step 2) physically rewrites them.
+	// Org-tier observability opt-ins live under the nested
+	// [org_client.share.obs] sub-table so the config namespace reflects the
+	// plane split (plane-separation audit M1). The four flat keys that
+	// preceded it (org_client.share.obs_summary / obs_traces / obs_content /
+	// obs_eval_summary) are REMOVED from the struct (post-Agent-Access
+	// backlog item 12): while they were declared, every full re-marshal
+	// (WriteToml: dashboard save, `observer config set`) wrote them back and
+	// the deprecation warnings never stopped. A file still carrying them
+	// loads (the decoder ignores keys with no field); the config-migrate
+	// registry (internal/config/migrate, steps 2 and 5) is the one owner of
+	// the removed keys and moves or strips them on disk.
 	Obs OrgClientShareObsConfig `toml:"obs"`
-
-	// Deprecated flat obs share keys — kept parseable for one release for
-	// config-compat. Prefer [org_client.share.obs] (Obs above). Consumers
-	// read Obs.*; the load-time shim copies these onto it when Obs.* is unset.
-	ObsSummary     bool `toml:"obs_summary"`
-	ObsTraces      bool `toml:"obs_traces"`
-	ObsContent     bool `toml:"obs_content"`
-	ObsEvalSummary bool `toml:"obs_eval_summary"`
 }
 
 // OrgClientShareObsConfig is [org_client.share.obs] — the Plane-A org-tier
@@ -1779,6 +3172,10 @@ type OrgClientShareObsConfig struct {
 	// The underlying obs_eval_* tables stay node-local; only this tier's rows
 	// cross the wire, via the obs provider seam.
 	EvalItems bool `toml:"eval_items"`
+	// Egress gates the T8 egress-routing decision feed (W5.3): what the
+	// node's own compiled routing policy decided for outbound model/provider
+	// calls. Default false, node-side only, never server-forced.
+	Egress bool `toml:"egress"`
 }
 
 // Org-client push-size bounds (spec §2.4.2).
@@ -1787,11 +3184,26 @@ const (
 	DefaultMaxPushBytes int64 = 1 << 20
 	// MaxPushBytesCeiling is the hard upper bound the client clamps to (16 MiB).
 	MaxPushBytesCeiling int64 = 16 << 20
-	// DefaultPushIntervalSeconds is the default push cadence (15 minutes).
-	DefaultPushIntervalSeconds = 900
+	// DefaultPushIntervalSeconds is the default push cadence (2 minutes). Kept
+	// deliberately short so a freshly-enrolled node's activity reaches the org
+	// dashboard promptly — the 15-minute default it replaced was the dominant
+	// cause of the "org dashboard is slow to update" complaint (the push loop is
+	// async best-effort telemetry, never in a request path, so a tighter cadence
+	// costs only a small, bounded delta upload). Existing nodes keep whatever
+	// they already wrote to config; this only changes new enrollments.
+	DefaultPushIntervalSeconds = 120
+	// DefaultSnapshotIntervalMultiple is how many push intervals the snapshot
+	// wire families coalesce into when [org_client] snapshot_interval_seconds
+	// is unset (plan Track R2, Lever 2). Deliberately expressed as a MULTIPLE
+	// rather than an absolute default so the ratio survives a node retuning
+	// push_interval_seconds; internal/orgclient resolves it at use.
+	DefaultSnapshotIntervalMultiple = 4
 	// DefaultPolicyPollIntervalSeconds is the default org policy-bundle
 	// poll cadence (1 hour — guard spec §14.2).
 	DefaultPolicyPollIntervalSeconds = 3600
+	// DefaultPolicyStateHeartbeatSeconds is the default P0-6 effective-
+	// policy-state reporter heartbeat cadence (5 minutes).
+	DefaultPolicyStateHeartbeatSeconds = 300
 	// DefaultKeychainID is the default keychain service handle.
 	DefaultKeychainID = "sbo-org-bearer-v1"
 )
@@ -1817,6 +3229,10 @@ const (
 	ContentCaptureFull     = "full"     // store prompts + tool I/O content
 	ContentCaptureMetadata = "metadata" // turns/tokens only; skip content events
 	ContentCaptureNone     = "none"     // alias of metadata
+
+	// DefaultIngestOTelContentMaxBytes is the default per-row cap for
+	// [ingest.otel].content_max_bytes — see the field doc comment.
+	DefaultIngestOTelContentMaxBytes = 32 << 10 // 32 KiB
 )
 
 // CapturesContent reports whether the configured content-capture level stores
@@ -1830,6 +3246,15 @@ func (c IngestOTelConfig) CapturesContent() bool {
 	}
 }
 
+// MaxContentBytes resolves the effective per-row content cap: the configured
+// ContentMaxBytes when positive, else DefaultIngestOTelContentMaxBytes.
+func (c IngestOTelConfig) MaxContentBytes() int {
+	if c.ContentMaxBytes > 0 {
+		return c.ContentMaxBytes
+	}
+	return DefaultIngestOTelContentMaxBytes
+}
+
 // ObserverConfig groups settings for the capture side of the system.
 type ObserverConfig struct {
 	DBPath      string            `toml:"db_path"`
@@ -1841,6 +3266,7 @@ type ObserverConfig struct {
 	Hooks       HooksConfig       `toml:"hooks"`
 	Antigravity AntigravityConfig `toml:"antigravity"`
 	Process     ProcessConfig     `toml:"process"`
+	DB          DBConfig          `toml:"db"`
 
 	// ConfigVersion is the schema-migration stamp written by the config
 	// auto-migration rail (internal/config/migrate). It records the
@@ -1850,6 +3276,57 @@ type ObserverConfig struct {
 	// this field only keeps the key out of the decoder's Undecoded set
 	// and available to any in-process consumer. See MigrateFile.
 	ConfigVersion int `toml:"config_version"`
+}
+
+// DBConfig controls the SQLite connection/pragma layer that
+// internal/db.Open drives for the main observer.db (docs/plans/observer-
+// disk-compute-remediation-plan-2026-08-26.md Phase 1, P0-B). It exists so
+// an operator can tune the memory/disk tradeoff without a rebuild; the
+// zero-value defaults below match internal/db.Options' own built-in
+// defaults, so an unconfigured [observer.db] block is safe.
+type DBConfig struct {
+	// HardHeapLimitMB sets SQLite's process-global PRAGMA hard_heap_limit in
+	// megabytes — the memory backstop that makes TempStore == "memory" safe:
+	// a runaway unindexed sort or VACUUM fails fast with SQLITE_NOMEM
+	// instead of exhausting host RAM. Zero (unset) applies the built-in
+	// 1024 MB (1 GiB) default. A negative value explicitly disables the
+	// pragma (omitted from the DSN entirely) — use with caution, and only
+	// alongside TempStore == "file".
+	HardHeapLimitMB int `toml:"hard_heap_limit_mb"`
+	// TempStore selects SQLite's PRAGMA temp_store: "file" (spill temp
+	// b-trees / VACUUM scratch to disk — the default), "memory" (hold temp
+	// in RAM, bounded by HardHeapLimitMB), or "default" (inherit whatever
+	// the driver/SQLite build ships with). Empty (unset) applies "file".
+	// FILE is the default so the operator's `observer prune --vacuum` still
+	// works on a multi-GB DB (MEMORY would fail SQLITE_NOMEM building the
+	// whole-file temp copy in RAM) and nothing can OOM; see
+	// internal/db.Options.TempStore for the full rationale.
+	TempStore string `toml:"temp_store"`
+	// MaxOpenConns bounds the connection pool (see
+	// database/sql.DB.SetMaxOpenConns). Zero (unset) applies the built-in
+	// default of 16.
+	MaxOpenConns int `toml:"max_open_conns"`
+	// ConnMaxIdleSeconds bounds how long an idle pooled connection is kept
+	// before being closed (see database/sql.DB.SetConnMaxIdleTime). Zero
+	// (unset) applies a 300s (5-minute) default.
+	ConnMaxIdleSeconds int `toml:"conn_max_idle_seconds"`
+	// IntegrityCheckMaxGB caps the AUTOMATIC `PRAGMA quick_check` the
+	// daemon runs once per process, off its readiness path, via
+	// db.RunStartupMaintenance (cmd/observer/diag.go::
+	// runStartupDBMaintenance). quick_check checksums every page of the
+	// file, so its cost scales with the database, not with the work the
+	// daemon came to do — on a 41.8 GB install it was measured as the
+	// dominant startup CPU cost (P1-D, docs/audits/observer-disk-compute-
+	// exhaustion-audit-2026-08-26.md). Above this many GB the automatic
+	// pass is skipped with one calm log line; the schema-034 path-hash
+	// backfill still runs regardless (idempotent, cheap after its
+	// done-marker). `observer doctor` asks the SAME gate
+	// (db.IntegrityCheckShouldSkip): an unscoped doctor over the cap
+	// reports the probe as skipped, a per-tool doctor defers it, and
+	// `observer doctor db` / `observer doctor --integrity` run it on
+	// demand regardless of size. Default 8 (GB). ≤ 0 disables the
+	// gate (quick_check always runs, matching pre-2026-08-26 behavior).
+	IntegrityCheckMaxGB int `toml:"integrity_check_max_gb"`
 }
 
 // AntigravityConfig controls the Antigravity adapter's behavior.
@@ -1933,7 +3410,32 @@ type ProcessConfig struct {
 	// by the retention pass — startup + the [observer.retention].
 	// interval_hours periodic tick (cmd/observer/prune.go::runRetention).
 	// Default 30. ≤ 0 disables the process prune.
+	//
+	// WHAT IT MEANS CHANGES WITH [archive].enabled, and the change is a
+	// strict improvement. With archival OFF it is what it has always been:
+	// the point at which process capture is DELETED, unrecoverably. With
+	// archival ON it becomes the ARCHIVE FILE's own delete horizon, and
+	// ArchiveDays below becomes the (earlier) point at which capture leaves
+	// the hot database. So the same 30 means "hot for 14 days, recoverable
+	// from cold storage for 30" rather than "hot for 30, then gone".
 	RetentionDays int `toml:"retention_days"`
+	// ArchiveDays is the horizon past which process capture is MOVED to
+	// ~/.observer/archive.db instead of staying in the hot database. Default
+	// 14. ≤ 0 disables the archive sweep (capture then stays hot until
+	// RetentionDays deletes it, i.e. today's behaviour).
+	//
+	// Read only when [archive].enabled is true; with archival off this knob
+	// does nothing and the process prune behaves exactly as before.
+	//
+	// The default sits WELL INSIDE RetentionDays deliberately. Process
+	// capture is the arc's ONLY-COPY bucket (design §2.2) — live eBPF/ETW
+	// records of processes that have since exited, with no artifact on disk
+	// to re-derive them from — so the two horizons must not race: capture has
+	// to reach cold storage with room to spare before anything deletes it.
+	// 14 days also keeps the hot working set aligned with the window in which
+	// an operator actually opens a process trail, which is the whole point of
+	// separating hot from cold (design §1.3).
+	ArchiveDays int `toml:"archive_days"`
 	// QueueSize bounds the userspace enrichment queue between the backend
 	// and the store batch writer. Overflow drops newest low-value events
 	// after a health counter (§15). Default 10000.
@@ -2224,6 +3726,36 @@ type RetentionConfig struct {
 	// (daily). ≤ 0 disables the tick (startup + manual prune only —
 	// the pre-v1.20 behavior).
 	IntervalHours int `toml:"interval_hours"`
+	// WALAlertMB is the §1e follow-through (2026-08-22 write-stall arc):
+	// the daemon's WAL watchdog WARNs and attempts a TRUNCATE checkpoint
+	// once observer.db-wal exceeds this size. The 2026-08-21 stall left
+	// the WAL pinned at 15.5 GB for hours because frames were long
+	// checkpointed but the file was never released — bounded visibility
+	// plus a reclaim attempt turns that from silent into actionable.
+	// Default 1024 (1 GiB). ≤ 0 disables the watchdog.
+	WALAlertMB int `toml:"wal_alert_mb"`
+	// WALWatchMinutes is the watchdog cadence. Default 10. ≤ 0 disables.
+	WALWatchMinutes int `toml:"wal_watch_minutes"`
+	// CompactionEventsDays drops compaction_events rows whose timestamp is
+	// older than this. Default 30. 0 keeps them forever.
+	//
+	// Each row carries a whole point-in-time file-state blob
+	// (file_state_snapshot plus ghost_files_after), which averaged ~1.1 MB
+	// per row on the operator's live node — 1.4 GiB in 1,333 rows, with no
+	// horizon of any kind until 2026-09-16. The snapshot exists to
+	// reconstruct what a session knew across a context compaction, which
+	// stops being actionable long before the session's own actions age out,
+	// so its horizon is deliberately much shorter than max_age_days.
+	CompactionEventsDays int `toml:"compaction_events_days"`
+	// CompressionEventsDays drops compression_events rows whose timestamp is
+	// older than this. Default 90. 0 keeps them forever.
+	//
+	// One row per compression decision per proxied turn: small rows, but
+	// 3.59M of them / 915 MB on the live node. The savings figures the
+	// dashboard and `observer compression` report are rolled up from
+	// api_turns, so this table is the per-decision debugging tail behind
+	// them and can age out on its own, longer horizon.
+	CompressionEventsDays int `toml:"compression_events_days"`
 }
 
 // HooksConfig controls hook runtime.
@@ -2263,8 +3795,77 @@ type ProxyConfig struct {
 	// the version suffix (the client's base URL keeps `/v1`), exactly like
 	// the fixed upstreams: e.g. openrouter = "https://openrouter.ai/api".
 	// Empty/unset → only the fixed three upstreams exist (current
-	// behavior; fail-open). LOCAL-ONLY — never distributed to org nodes.
+	// behavior; fail-open). Locally authored here; an org may ALSO
+	// distribute lane entries via the signed `gateway.providers` policy
+	// family (installed through SetLaneTable, never written back into
+	// this file) — the two sources merge at the live lane table, and
+	// this TOML block remains the node-local layer.
 	Upstreams map[string]string `toml:"upstreams"`
+	// AgentUpstreams maps a lane id to the upstream host of a local CODING
+	// AGENT's own provider (Plane B), selected by the same `/up/<id>/`
+	// prefix but kept OUT of the Upstreams lane table: an agent lane only
+	// picks the upstream host, the request keeps pid-derived session
+	// attribution, gets no hosted-app admission or obs-trace synthesis,
+	// and is not part of the gateway.providers lane policy (so a node
+	// with only the default agent lane still reports no local lane
+	// policy). A same-id [proxy.upstreams] lane wins. Default:
+	// OpenCodeZenLane -> https://opencode.ai/zen (OpenCode's built-in Zen
+	// provider; `observer opencode` points it here). The loader merges map
+	// keys over the default.
+	AgentUpstreams map[string]string `toml:"agent_upstreams"`
+	// AutoDefaultLane names the Upstreams lane id the virtual `/up/auto/`
+	// lane falls back to (gateway config plane spec Phase 2) when the
+	// request's top-level model has no `<lane>/` prefix matching a
+	// configured lane. Must name a key present in Upstreams when set
+	// (validated below); "" means no default — an unresolvable auto
+	// request falls through exactly like an unknown /up/<id> today
+	// (fixed upstream, warn-once). Like Upstreams, this is the
+	// node-local layer; the signed `gateway.providers` policy family can
+	// also set the live auto-default via SetLaneTable.
+	AutoDefaultLane string `toml:"auto_default_lane"`
+	// OrgRoute is the node-local bootstrap for the org-wide AI Gateway
+	// route (Phase P5a, docs/plans/plane-b-dual-mode-gateway-rbac-ia-
+	// design-2026-08-29.md §2, Sol S7/S8). It mirrors the Upstreams/
+	// AutoDefaultLane relationship above: this TOML block seeds
+	// Proxy.SetOrgGatewayRoute at startup, and — once wired at the
+	// cmd/observer layer — a signed org policy can supersede it hot with
+	// no restart, the same two-source-one-live-table pattern already
+	// used for [proxy.upstreams]. The zero value (no [proxy.org_route]
+	// section) is fully inert: no SetOrgGatewayRoute call is ever made
+	// for it, so an existing config gets byte-identical proxy behavior.
+	OrgRoute ProxyOrgRouteConfig `toml:"org_route"`
+}
+
+// ProxyOrgRouteConfig is the node-local bootstrap shape for
+// Proxy.SetOrgGatewayRoute(mode, primary, fallbacks) — see ProxyConfig.OrgRoute.
+type ProxyOrgRouteConfig struct {
+	// Mode is fed to SetOrgGatewayRoute verbatim — it must be exactly ""
+	// (node mode, the default: org-route stays inert) or "gateway" (all
+	// default-lane traffic, per Sol S8's fall-through guard, redirects to
+	// Primary). There is deliberately no "node" synonym for the empty
+	// string: this field carries the same wire vocabulary
+	// SetOrgGatewayRoute already validates, not a separate translation
+	// layer that could drift from it.
+	Mode string `toml:"mode"`
+	// Primary is the AI Gateway base URL. Required when Mode == "gateway";
+	// ignored (and must be empty) when Mode == "".
+	Primary string `toml:"primary"`
+	// Fallbacks lists additional gateway/provider URLs for the fallback
+	// ladder (Sol S10). The runtime executor (Luna L16,
+	// internal/proxy/gatewayfallback.go) walks primary → each fallback →
+	// TerminalPolicy on exhaustion.
+	Fallbacks []string `toml:"fallbacks"`
+	// TerminalPolicy is the fallback-ladder terminal rung reached after
+	// primary + every fallback endpoint is exhausted: "" or "hold" (the
+	// fail-closed default), "break_glass" (permission only — the lease rides
+	// the enrolment rail), or "direct" (auto-fallback to the developer's
+	// direct provider, which requires DirectFallbackCustodyAck). Fed verbatim
+	// to Proxy.SetOrgGatewayRouteWithFallback, which validates it.
+	TerminalPolicy string `toml:"terminal_policy"`
+	// DirectFallbackCustodyAck acknowledges the custody downgrade that
+	// TerminalPolicy == "direct" entails. Ignored for other terminals; the
+	// proxy setter refuses to honor a "direct" terminal without it.
+	DirectFallbackCustodyAck bool `toml:"direct_fallback_custody_ack"`
 }
 
 // DashboardConfig controls the local analytics dashboard listener. LOCAL-ONLY
@@ -2287,32 +3888,32 @@ type DashboardConfig struct {
 	// path). Validated as host:port with a numeric port at load; the
 	// remote-bind policy is enforced separately at bind time.
 	Addr string `toml:"addr"`
+	// OrgAnnouncements gates rail R3 of the announcements plan (§4):
+	// whether the banner shows announcements published by the org this
+	// node is enrolled with. Default TRUE — enrolment already implies
+	// consent to org communication, so silently swallowing the admin's
+	// message would be the dishonest default; and on a solo install the
+	// switch is inert (there is no org cache to read).
+	//
+	// This is the node operator's OWN opt-out and it lives only here:
+	// the org admin has no remote toggle for it, the same posture as
+	// [org_client.share].full_content. Turning it off never affects
+	// push, enrolment, or the release rail — the dashboard simply stops
+	// reading the cached document.
+	//
+	// Default() seeds it true so the loader's partial-merge keeps it
+	// true for an existing config that has a [dashboard] section with
+	// only `addr` in it (the CacheTrack partial-merge rule) — without
+	// that seed, adding the key would have silently disabled the rail
+	// for every install that had ever set a dashboard address.
+	OrgAnnouncements bool `toml:"org_announcements"`
 }
 
 // CompressionConfig groups all four compression layers' toggles.
 type CompressionConfig struct {
-	CodeGraph    CodeGraphConfig    `toml:"code_graph"`
 	Shell        ShellConfig        `toml:"shell"`
 	Indexing     IndexingConfig     `toml:"indexing"`
 	Conversation ConversationConfig `toml:"conversation"`
-}
-
-// CodeGraphConfig is the DEPRECATED [compression.code_graph] block.
-//
-// Deprecated: the external code-graph companion was
-// decommissioned in Phase 4 in favour of the in-process [codeintel]
-// module. The block is parsed for one release window only so existing
-// configs don't break: on load, migrateLegacyCodeGraph maps `enabled`
-// onto [codeintel].enabled and `auto_index` onto
-// [codeintel.index].on_start, emits a per-key deprecation warning, then
-// the values are otherwise unused. `auto_install` and `path` have no
-// in-process analog (no binary is downloaded, no graph.db is read) and
-// are reported as removed. See docs/codeintel/migration-from-codegraph.md.
-type CodeGraphConfig struct {
-	Enabled     bool   `toml:"enabled"`
-	AutoInstall bool   `toml:"auto_install"`
-	AutoIndex   bool   `toml:"auto_index"`
-	Path        string `toml:"path"`
 }
 
 // ShellConfig controls shell output filtering.
@@ -2323,6 +3924,10 @@ type ShellConfig struct {
 
 // IndexingConfig controls FTS5 tool output indexing.
 type IndexingConfig struct {
+	// Enabled is the one switch for every writer of action_excerpts: the
+	// watcher and the hook processes both obey it (T-420). Off skips only the
+	// FTS5 excerpt insert; capture is unchanged, and search_past_outputs and
+	// the dashboard search find only excerpts indexed while it was on.
 	Enabled         bool `toml:"enabled"`
 	MaxExcerptBytes int  `toml:"max_excerpt_bytes"`
 	Embeddings      bool `toml:"embeddings"`
@@ -2477,13 +4082,70 @@ type StashConfig struct {
 // page's Budget card or `observer config set
 // intelligence.project_budgets_usd.<root> <usd>`.
 type IntelligenceConfig struct {
-	CodeGraph         IntelligenceCodeGraphConfig `toml:"code_graph"`
-	Pricing           PricingConfig               `toml:"pricing"`
-	APIKeyEnv         string                      `toml:"api_key_env"`
-	SummaryModel      string                      `toml:"summary_model"`
-	MonthlyBudgetUSD  float64                     `toml:"monthly_budget_usd"`
-	ProjectBudgetsUSD map[string]float64          `toml:"project_budgets_usd"`
-	MCP               IntelligenceMCPConfig       `toml:"mcp"`
+	Pricing           PricingConfig         `toml:"pricing"`
+	APIKeyEnv         string                `toml:"api_key_env"`
+	SummaryModel      string                `toml:"summary_model"`
+	MonthlyBudgetUSD  float64               `toml:"monthly_budget_usd"`
+	ProjectBudgetsUSD map[string]float64    `toml:"project_budgets_usd"`
+	MCP               IntelligenceMCPConfig `toml:"mcp"`
+	// OrgEnrichment opts this node into pulling Cloud Intelligence enrichment
+	// from the ORG server it is enrolled with, instead of the hosted personal
+	// plane (org-served-cloud-intelligence plan §2.1, W3). Read-only here; the
+	// managed-node RAISE of this key is a govern authority (W5) under the
+	// enterprise posture (an extract.intel grant on a managed enrolment), so
+	// this is the node-authored default and, on an individual node, the
+	// "never server-forced" floor. Default false:
+	// a node that never sets it makes no org-intelligence request at all.
+	OrgEnrichment bool `toml:"org_enrichment"`
+	// Scoring tunes the daemon's automatic session quality scoring
+	// (spec §15.2, internal/intelligence/scoring.AutoScorer).
+	Scoring IntelligenceScoringConfig `toml:"scoring"`
+}
+
+// IntelligenceScoringConfig tunes the daemon-lifetime session quality scorer
+// (spec §15.2). Default-ON with the partial-merge rule: Default() seeds Auto
+// true, so an install whose config.toml has no [intelligence.scoring] block
+// inherits it. Local, read-only over actions/token_usage/cache_events, zero
+// LLM cost, writes only the sessions score columns. Zero / negative numeric
+// values fall back to the built-in defaults (see the accessor methods), so a
+// half-written block never disables scoring by accident.
+type IntelligenceScoringConfig struct {
+	// Auto runs the scorer inside `observer start`. false leaves scoring to
+	// the manual `observer score` CLI.
+	Auto bool `toml:"auto"`
+	// IntervalMinutes is the pause between scoring passes (default 5).
+	IntervalMinutes int `toml:"interval_minutes"`
+	// IdleMinutes is how long a session must be quiet before it is scored
+	// (default 30) - the stand-in for "session ended", which most tools
+	// never record.
+	IdleMinutes int `toml:"idle_minutes"`
+	// MaxPerPass bounds the sessions scored in one pass (default 200), so a
+	// large never-scored history is worked off gradually.
+	MaxPerPass int `toml:"max_per_pass"`
+}
+
+// Interval returns the pass interval, defaulting to 5 minutes.
+func (c IntelligenceScoringConfig) Interval() time.Duration {
+	if c.IntervalMinutes <= 0 {
+		return 5 * time.Minute
+	}
+	return time.Duration(c.IntervalMinutes) * time.Minute
+}
+
+// Idle returns the idle threshold, defaulting to 30 minutes.
+func (c IntelligenceScoringConfig) Idle() time.Duration {
+	if c.IdleMinutes <= 0 {
+		return 30 * time.Minute
+	}
+	return time.Duration(c.IdleMinutes) * time.Minute
+}
+
+// PassLimit returns the per-pass cap, defaulting to 200.
+func (c IntelligenceScoringConfig) PassLimit() int {
+	if c.MaxPerPass <= 0 {
+		return 200
+	}
+	return c.MaxPerPass
 }
 
 // IntelligenceMCPConfig groups settings for the V7-12 retrieval-surface
@@ -2642,20 +4304,54 @@ func hasUnsupportedDenyGlob(pattern string) bool {
 	return false
 }
 
-// IntelligenceCodeGraphConfig is the DEPRECATED [intelligence.code_graph]
-// block.
-//
-// Deprecated: superseded by the in-process [codeintel] module (Phase 4).
-// Parsed for one release window; on load `enabled` maps onto
-// [codeintel].enabled with a deprecation warning. See
-// docs/codeintel/migration-from-codegraph.md.
-type IntelligenceCodeGraphConfig struct {
-	Enabled bool `toml:"enabled"`
-}
-
 // PricingConfig carries per-model input/output/cache pricing.
+//
+// Models holds CURRENT rates — one entry per model id, replacing the
+// baked-in row wholesale. Dated optionally holds a HISTORICAL rate
+// timeline per model id, so a provider's mid-life price change doesn't
+// silently reprice everything that came before it. Zero Dated entries =
+// zero behaviour change.
 type PricingConfig struct {
 	Models map[string]ModelPricing `toml:"models"`
+	// Dated maps a model id to its rate timeline, newest-last (order in
+	// file doesn't matter; the cost engine sorts by effective_from).
+	// The rate for usage at time T is the LAST entry whose
+	// effective_from is <= T; if T precedes every entry, or the model
+	// has no timeline, Models / the baked-in table applies.
+	//
+	// Because the flat table always represents CURRENT rates, a price
+	// CUT needs BOTH periods spelled out — the historical one AND the
+	// new one:
+	//
+	//	[[intelligence.pricing.dated."gpt-5.6-terra"]]
+	//	effective_from = ""            # empty = since forever
+	//	input = 2.50
+	//	output = 15
+	//	cache_read = 0.25
+	//
+	//	[[intelligence.pricing.dated."gpt-5.6-terra"]]
+	//	effective_from = "2026-08-01"  # bare date = midnight UTC
+	//	input = 1.75
+	//	output = 10
+	//	cache_read = 0.175
+	//
+	// effective_from accepts a bare date or an RFC3339 stamp. A row with
+	// an unparseable date is SKIPPED (never fails closed) and reported
+	// through cost.Engine.PricingWarnings.
+	Dated map[string][]DatedModelPricing `toml:"dated"`
+}
+
+// DatedModelPricing is one period of a model's rate timeline: the rates
+// that took effect at EffectiveFrom. Every ModelPricing field is
+// available (including the long-context and fast-multiplier tiers) —
+// a provider can change any of them.
+//
+// EffectiveFrom is inclusive: usage at exactly this instant bills at
+// THIS entry's rates. Empty means "since forever", the idiomatic way to
+// spell a timeline's oldest period.
+type DatedModelPricing struct {
+	EffectiveFrom string `toml:"effective_from"`
+	ModelPricing
 }
 
 // ModelPricing is per-million-token pricing for a single model. CacheCreation
@@ -2700,7 +4396,7 @@ func Default() Config {
 				PollIntervalSeconds: 2,
 				MaxFileSizeMB:       50,
 				EnabledAdapters: []string{
-					"claude-code", "codex", "cline", "cline-cli", "roo-code", "cursor", "copilot", "copilot-cli", "cowork", "opencode", "openclaw", "pi", "gemini-cli", "antigravity", "antigravity-cli", "hermes", "kilo-code", "kilo-code-cli", "qwen-code", "kiro-cli", "crush", "kimi-code", "grok", "devin", "qoder", "aider", "goose", "chatgpt-web", "claude-web", "perplexity-web", "gemini-web", "copilot-web", "droid", "open-interpreter", "command-code",
+					"claude-code", "codex", "cline", "cline-cli", "roo-code", "zoo-code", "cursor", "copilot", "copilot-cli", "cowork", "opencode", "openclaw", "pi", "gemini-cli", "antigravity", "antigravity-cli", "hermes", "kilo-code", "kilo-code-cli", "qwen-code", "kiro-cli", "crush", "kimi-code", "grok", "devin", "qoder", "aider", "goose", "chatgpt-web", "claude-web", "perplexity-web", "gemini-web", "copilot-web", "droid", "open-interpreter", "command-code", "muse", "prime-agent", "deepseek", "junie", "zcode", "mistral-code", "freebuff", "grokbot", "kiro-crew", "poolside", "zed",
 				},
 			},
 			Freshness: FreshnessConfig{
@@ -2722,6 +4418,10 @@ func Default() Config {
 				PruneOnStartup:        true,
 				ObserverLogMaxAgeDays: 30,
 				IntervalHours:         24,
+				WALAlertMB:            1024,
+				WALWatchMinutes:       10,
+				CompactionEventsDays:  30,
+				CompressionEventsDays: 90,
 			},
 			Hooks: HooksConfig{
 				TimeoutMS:    500,
@@ -2737,6 +4437,7 @@ func Default() Config {
 				Backend:              "auto",
 				CaptureUnattributed:  false,
 				RetentionDays:        30,
+				ArchiveDays:          14,
 				QueueSize:            10000,
 				BatchSize:            250,
 				PollIntervalMS:       2000,
@@ -2792,15 +4493,34 @@ func Default() Config {
 					HandshakeTimeoutMS: 10000,
 				},
 			},
+			// SQLite connection/pragma tuning (docs/plans/observer-disk-
+			// compute-remediation-plan-2026-08-26.md Phase 1, P0-B). These
+			// mirror internal/db.Options' own built-in defaults; spelled out
+			// here so a partial [observer.db] section inherits sane values
+			// rather than zeros (the CacheTrack partial-merge rule).
+			DB: DBConfig{
+				HardHeapLimitMB:     1024,
+				TempStore:           "file",
+				MaxOpenConns:        16,
+				ConnMaxIdleSeconds:  300,
+				IntegrityCheckMaxGB: 8,
+			},
+		},
+		// Cloud seeds only the compiled-in public WorkOS client id — every
+		// other [cloud] key defaults to its zero value (manual-only until an
+		// operator opts in; see CloudConfig).
+		Cloud: CloudConfig{
+			WorkOSClientID: DefaultCloudWorkOSClientID,
 		},
 		// Org client is OFF by default (solo-local invariant). The defaults
 		// below only take effect once a user sets [org_client] enabled = true.
 		OrgClient: OrgClientConfig{
-			Enabled:                   false,
-			PushIntervalSeconds:       DefaultPushIntervalSeconds,
-			PolicyPollIntervalSeconds: DefaultPolicyPollIntervalSeconds,
-			MaxPushBytes:              DefaultMaxPushBytes,
-			KeychainID:                DefaultKeychainID,
+			Enabled:                     false,
+			PushIntervalSeconds:         DefaultPushIntervalSeconds,
+			PolicyPollIntervalSeconds:   DefaultPolicyPollIntervalSeconds,
+			PolicyStateHeartbeatSeconds: DefaultPolicyStateHeartbeatSeconds,
+			MaxPushBytes:                DefaultMaxPushBytes,
+			KeychainID:                  DefaultKeychainID,
 		},
 		// OTel exporter is OFF by default (solo-local invariant). The
 		// defaults below only take effect once a user sets
@@ -2823,7 +4543,16 @@ func Default() Config {
 				HTTPAddr:         DefaultIngestOTelHTTPAddr,
 				AllowNonLoopback: false,
 				ContentCapture:   ContentCaptureFull,
+				ContentMaxBytes:  DefaultIngestOTelContentMaxBytes,
 			},
+		},
+		// Dashboard: the org-announcements rail (announcements plan §4)
+		// is default-ON. Seeded here so the partial-merge rule holds —
+		// an existing config with only [dashboard].addr set must keep
+		// the rail on, not inherit a zero-value false. Addr stays empty
+		// (the built-in 127.0.0.1:8081 default resolves in cmd).
+		Dashboard: DashboardConfig{
+			OrgAnnouncements: true,
 		},
 		// CacheTrack is default-ON per spec §11: local, passive,
 		// network-free, hashes/counts/enums only. An install with
@@ -2865,6 +4594,100 @@ func Default() Config {
 			YoungSessionMessages:   3,
 			DefaultTurnsPerMessage: 12,
 			PriorWindowDays:        30,
+		},
+		// Guidance (the agent-guidance-file inventory) is default-ON for
+		// the same reasons CacheTrack is: local, passive, network-free,
+		// and it records names/sizes/hashes — never file bodies. Same
+		// partial-merge rule — an install with no [guidance] section gets
+		// Enabled=true here, and a section that sets only rescan_minutes
+		// must not silently downgrade Enabled to a zero-valued false.
+		Guidance: GuidanceConfig{
+			Enabled:               true,
+			RescanMinutes:         15,
+			MaxFileBytes:          512 * 1024,
+			MaxDepth:              4,
+			IncludeUserScope:      true,
+			MaxRootsPerPass:       50,
+			RootTimeoutSeconds:    20,
+			RootTimeoutMaxSeconds: 180,
+			PassTimeoutMinutes:    10,
+			StartupDelaySeconds:   90,
+			FirstScanPollSeconds:  60,
+		},
+		// Projects (the read-only git-commit-history scanner behind the
+		// Projects-page ROI/commit-alignment arc) is default-ON for the
+		// same reasons Guidance is: local, passive, network-free. Same
+		// partial-merge rule — an install with no [projects] section gets
+		// CommitScan=true here, not a zero-valued false.
+		Projects: ProjectsConfig{
+			CommitScan:                true,
+			CommitScanIntervalSeconds: 120,
+			CommitLinkWindowDays:      14,
+			ActiveProjectDays:         30,
+			// AlignmentJudge default OFF (W5a): unlike CommitScan, calling
+			// a configured judge is a per-turn LLM cost (and, for a
+			// remote judge, egress) the operator opts into explicitly —
+			// not a passive local capture.
+			AlignmentJudge:          "off",
+			SkillHistory:            true,
+			SkillHistorySkewSeconds: 120,
+		},
+		// Pricing feed (standalone-node pricing sync) is ON by default,
+		// including its background poller (Auto). This is a deliberate
+		// reversal (operator decision 2026-09-20) of the former
+		// zero-egress-by-default invariant (D3): prices should track the
+		// Tokenomics source without a per-node opt-in. A standalone node
+		// that wants zero egress opts OUT with `[pricing.feed] enabled =
+		// false`. Same partial-merge rule as Predict — an install with no
+		// [pricing.feed] section gets this seed (Enabled=true), not a
+		// zero-valued struct with an empty URL.
+		Pricing: PricingSectionConfig{
+			Feed: PricingFeedConfig{
+				Enabled:           true,
+				Auto:              true,
+				URL:               DefaultPricingFeedURL,
+				PollIntervalHours: 24,
+			},
+		},
+		// Loc (lines-of-code tracking) carries only the editor-endpoint
+		// credential. Same partial-merge rule as CacheTrack/Predict — an
+		// install with no [loc] section gets this seed, so the daemon
+		// generates and reads the token file at the standard path without
+		// the operator writing a config line. Required=false this release
+		// (see the field comment); LOCAL-ONLY.
+		Loc: LocConfig{
+			EditorTokenFile:     DefaultLocEditorTokenFile,
+			EditorTokenRequired: false,
+		},
+		// Update (enterprise update management) is DEFAULT-ON for the
+		// notify half and DEFAULT-OFF for the apply half, which is the
+		// §2.4 failure-mode direction expressed as a seed: learning that
+		// you are behind is fail-open and costs no new egress class,
+		// applying an update is fail-closed. AutoApply is left nil — not
+		// false — so the managed-fleet carve-out (§3.9) can supply the
+		// default without overriding a node that answered for itself.
+		// LOCAL-ONLY, never distributed.
+		Update: UpdateConfig{
+			Enabled:          true,
+			AutoApply:        nil,
+			KeepPreviousDays: 14,
+			MaxDownloadBytes: 268435456,
+			StateDir:         DefaultUpdateStateDir,
+			DrainTimeout:     "90s",
+			HandshakeTimeout: "60s",
+		},
+		// Tasks (session-level task/todo/plan checklist tracking) is
+		// default-ON: it is a pure re-decode of data already captured in
+		// actions.raw_tool_input/raw_tool_output, no new capture surface.
+		// Same partial-merge rule as CacheTrack/Predict — an install with
+		// no [tasks] section keeps Enabled=true.
+		Tasks: TasksConfig{
+			Enabled:               true,
+			MatchMode:             "exact",
+			ConcurrentAttribution: "shared",
+			IncludeSidechains:     false,
+			BackfillOnStart:       false,
+			RetentionDays:         0,
 		},
 		// AggregateShare (opt-in aggregate rail) is OFF by default in every
 		// path. Unlike CacheTrack/Predict, the partial-merge default keeps
@@ -2976,26 +4799,56 @@ func Default() Config {
 			// guided-install kill-switch defaults ON — the consent is the
 			// dashboard click, so this only lets an operator turn it OFF.
 			Launch: TerminalLaunchConfig{AllowInstall: true},
+			// Sandbox (B9): the master switch stays off, but the mechanism
+			// defaults are seeded so an operator flipping just `enabled =
+			// true` gets the documented v1 shape (bwrap, tmpfs home, 300s
+			// prep timeout) rather than an unusable all-zero block.
+			Sandbox: TerminalSandboxConfig{
+				Enabled:                false,
+				Backend:                "bwrap",
+				HomeMode:               "tmpfs",
+				DefaultOn:              false,
+				AllowRemoteClone:       false,
+				AllowWorktreeSource:    false,
+				WorkspaceRetentionDays: 0,
+				PrepTimeoutSeconds:     300,
+				Egress:                 "internet",
+			},
+			// [terminal.ssh] — default ON for VISIBILITY (2026-08-28 operator
+			// ruling); the surface still launches nothing without an
+			// operator-authored [[terminal.ssh.profiles]] entry, so a fresh
+			// install with no profiles remains inert. The two timeouts are
+			// seeded to the sshprofile defaults so `observer config` prints
+			// the real values; a 0 in a hand-written config still resolves to
+			// the same numbers at argv-composition time.
+			SSH: TerminalSSHConfig{
+				Enabled:               true,
+				ConnectTimeoutSeconds: 10,
+				KeepaliveSeconds:      30,
+			},
 		},
 		// Benchmark (the Benchmarks Harness) is CLI-driven; the only default
 		// is the retention horizon for the node-local benchmark_* tables.
 		Benchmark: BenchmarkConfig{
 			RetentionDays: 180,
 		},
-		// CodeIntel (the in-process code-intelligence module) is
-		// default-ON for indexing (read-only on the repo, zero LLM cost),
-		// but the only model-visible change (compression.code_aggressive)
-		// stays OFF. Same partial-merge rule as CacheTrack.
+		// CodeIntel (the in-process code-intelligence module) is OPT-IN
+		// (D-307): indexing is read-only on the repo and costs no LLM
+		// tokens, but it is CPU and disk heavy, so it runs only once the
+		// user turns it on. The non-zero defaults below only decide HOW it
+		// behaves after that. The only model-visible change
+		// (compression.code_aggressive) stays OFF even then. Same
+		// partial-merge rule as CacheTrack.
 		CodeIntel: CodeIntelConfig{
-			Enabled:        true,
+			Enabled:        false,
 			AutoIndexLimit: 25000,
 			MaxFileBytes:   2_000_000,
 			RetentionDays:  90,
 			Index: CodeIntelIndexConfig{
-				OnStart:      true,
-				Watch:        true,
-				Mode:         "auto",
-				DiskBudgetMB: 500,
+				OnStart:               true,
+				Watch:                 true,
+				Mode:                  "auto",
+				OnStartTimeoutMinutes: 10,
 			},
 			Compression: CodeIntelCompressionConfig{},
 			Semantic: CodeIntelSemanticConfig{
@@ -3003,7 +4856,25 @@ func Default() Config {
 				SimilarTo: true,
 			},
 		},
-		// Advisor (the suggestions engine, spec §15.7) is default-ON:
+		// Archive (cold storage, corpus archival arc) is OPT-IN: disabled
+		// means the retention pass behaves exactly as it did before the arc.
+		// The non-zero defaults below only decide HOW it behaves once an
+		// operator turns it on.
+		Archive: ArchiveConfig{
+			Enabled:            false,
+			Path:               "~/.observer/archive.db",
+			MaxProjectsPerPass: 8,
+			BatchRows:          512,
+		},
+		// MCPRelay is default OFF (byte-identical); the non-zero defaults
+		// only decide HOW it behaves once a node opts in.
+		MCPRelay: MCPRelayConfig{
+			Enabled:             false,
+			Mode:                MCPRelayModeStdioWrapper,
+			AuditMode:           MCPRelayAuditAsync,
+			PollIntervalSeconds: DefaultMCPRelayPollIntervalSeconds,
+		},
+		// Advisor (the suggestions engine, docs/advisor.md) is default-ON:
 		// read-layer only, local, zero LLM cost. Same partial-merge
 		// rule as CacheTrack — an install with no [advisor] section
 		// gets Enabled=true. Detector thresholds default in the
@@ -3023,6 +4894,20 @@ func Default() Config {
 		// alone must yield advise mode on the value template, never
 		// zero-valued strings.
 		Routing: defaultRouting(),
+		SelfObs: SelfObsConfig{
+			Enabled:        false,
+			RoutingSampleN: 32,
+		},
+		// Observability itself defaults OFF (Enabled: false, the zero
+		// value — unlike CacheTrack this subsystem has real setup cost:
+		// the obs_* schema + OTLP receiver). ProxyTurnTraces is seeded
+		// true so that once an operator DOES flip Enabled on, an
+		// [observability] section that only sets `enabled = true`
+		// still gets the gateway rail (the CacheTrack partial-merge
+		// rule) rather than silently landing on a zero-valued false.
+		Observability: ObservabilityConfig{
+			ProxyTurnTraces: true,
+		},
 		// Guard (security & control layer, guard spec §16) is
 		// default-ON in OBSERVE mode (D2): local, deterministic,
 		// flags + alerts but never blocks until the operator flips
@@ -3036,10 +4921,19 @@ func Default() Config {
 			Mode:          "observe",
 			Strict:        false,
 			RetentionDays: 365,
+			// Budget.FromOrg is ON by default (operator decision
+			// 2026-09-20) so an enrolled node applies its org's
+			// pricing/budget by default — the node-side companion to
+			// the default-on pricing feed. The composition stays
+			// lowering-only on an individual node (see the FromOrg
+			// field comment); the numeric caps stay zero (unset). A
+			// node opts OUT with `[guard.budget] from_org = false`.
+			Budget: GuardBudgetConfig{FromOrg: true},
 			Rules: GuardRulesConfig{
-				UserPolicy:    "~/.observer/guard-policy.toml",
-				ProjectPolicy: ".observer/guard-policy.toml",
-				OrgBundle:     "~/.observer/org-policy-bundle.json",
+				UserPolicy:        "~/.observer/guard-policy.toml",
+				ProjectPolicy:     ".observer/guard-policy.toml",
+				TrustedProjectDir: "~/.observer/guard-project-policies",
+				OrgBundle:         "~/.observer/org-policy-bundle.json",
 			},
 			Taint: GuardTaintConfig{
 				Enabled:    true,
@@ -3068,6 +4962,36 @@ func Default() Config {
 			Cloud: GuardCloudConfig{
 				PayloadMaxBytes: 4096,
 			},
+			// Prompt (prompt-submit intervention, §8.1) is default-ON
+			// with the reconsider-once posture: certain PII and
+			// certain secrets interrupt the developer once, everything
+			// else is off/warn. Same partial-merge rule as the rest of
+			// [guard] — an install with a bare `[guard.prompt]` (or no
+			// section at all) gets these seeded values, never zero
+			// values.
+			Prompt: GuardPromptConfig{
+				Enabled:            true,
+				Mode:               "ask-once",
+				HookLane:           true,
+				ProxyLane:          true,
+				EnforceIndependent: true,
+				ReconsiderTTL:      "30m",
+				ReconsiderMinDelay: "3s",
+				SuppressInCode:     true,
+				MaxFindings:        64,
+				Detectors: map[string]string{
+					"credit_card": "ask-once",
+					"iban":        "ask-once",
+					"us_ssn":      "ask-once",
+					"uk_nino":     "ask-once",
+					"in_aadhaar":  "ask-once",
+					"in_pan":      "ask-once",
+					"email":       "off",
+					"phone_e164":  "off",
+					"phone_nanp":  "off",
+					"github_pat":  "block",
+				},
+			},
 		},
 		Profiles: defaultProfiles(),
 		Proxy: ProxyConfig{
@@ -3085,13 +5009,15 @@ func Default() Config {
 				"https://chatgpt.com/",
 				"https://api.openai.com/",
 			},
+			// OpenCodeZenLane: OpenCode's built-in "opencode" provider
+			// (OpenCode Zen, e.g. the free big-pickle model) talks to
+			// opencode.ai/zen, not to OPENAI_BASE_URL, so before this lane
+			// existed a Zen session bypassed the proxy entirely: no
+			// accurate tokens and no prompt-lane intervention (demo node 1,
+			// 2026-10-02). `observer opencode` points that provider here.
+			AgentUpstreams: map[string]string{OpenCodeZenLane: "https://opencode.ai/zen"},
 		},
 		Compression: CompressionConfig{
-			CodeGraph: CodeGraphConfig{
-				Enabled:     true,
-				AutoInstall: true,
-				AutoIndex:   true,
-			},
 			Shell: ShellConfig{
 				Enabled:         true,
 				ExcludeCommands: []string{"curl", "playwright"},
@@ -3165,8 +5091,13 @@ func Default() Config {
 			},
 		},
 		Intelligence: IntelligenceConfig{
-			CodeGraph: IntelligenceCodeGraphConfig{Enabled: true},
-			Pricing:   PricingConfig{Models: map[string]ModelPricing{}},
+			Pricing: PricingConfig{Models: map[string]ModelPricing{}},
+			Scoring: IntelligenceScoringConfig{
+				Auto:            true,
+				IntervalMinutes: 5,
+				IdleMinutes:     30,
+				MaxPerPass:      200,
+			},
 			MCP: IntelligenceMCPConfig{
 				GetFile: IntelligenceMCPGetFileConfig{
 					Enabled: true,
@@ -3221,6 +5152,16 @@ type LoadOptions struct {
 	ProjectPath string
 	// Env is the environment lookup function. Defaults to os.Getenv.
 	Env func(string) string
+	// GovernanceSidecar overrides the governance sidecar path (admin-
+	// controlled Plane B, Phase 1b §1.3). Empty means "resolve the default
+	// beside the DB". Set to config.NoGovernanceSidecar to disable the read
+	// entirely — used by the solo-parity invariant test and by
+	// `observer config show --local`.
+	GovernanceSidecar string
+	// GovernanceNow overrides the clock the sidecar's expiry rule is
+	// evaluated against. Nil means time.Now. Injected so the offboarding
+	// rule is testable without sleeping.
+	GovernanceNow func() time.Time
 }
 
 // Load merges defaults ← global TOML ← project TOML ← environment overrides.
@@ -3242,7 +5183,30 @@ func ResolveGlobalPath(override string) (string, error) {
 	return filepath.Join(home, ".observer", "config.toml"), nil
 }
 
+// Load merges defaults ← global TOML ← project TOML ← env ← GOVERNANCE.
+//
+// Governance is LAST for one honest reason: last-writer-wins is the only
+// merge order in which a pinned value is the value the process actually
+// uses. It is NOT an anti-escape control — the sidecar's own location is
+// derived from Observer.DBPath, which is settable from the global TOML, a
+// project TOML and the env, so pointing db_path elsewhere yields no sidecar
+// in one line. §1.8 concedes that class honestly.
+//
+// Load NEVER fails because of governance (review B4): if the merged config
+// fails Validate WITH the overlay, the whole overlay is discarded and the
+// ungoverned config is returned. A governance-caused Load error would turn
+// every hook invocation on every node into an early return with a stderr
+// line, losing fleet-wide ingest for a policy typo.
 func Load(opts LoadOptions) (Config, error) {
+	cfg, _, err := LoadGovernance(opts)
+	return cfg, err
+}
+
+// LoadGovernance is Load plus the record of what the governance sidecar did.
+// The disclosure surfaces (`observer org grant show`, `observer doctor
+// governance`) and the daemon's startup identity (§1.6, pending_restart) use
+// the outcome; every other caller uses Load and ignores it.
+func LoadGovernance(opts LoadOptions) (Config, GovernanceOutcome, error) {
 	if opts.Env == nil {
 		opts.Env = os.Getenv
 	}
@@ -3265,13 +5229,13 @@ func Load(opts LoadOptions) (Config, error) {
 	}
 	globalMeta, err := mergeTOMLFile(&cfg, globalPath)
 	if err != nil {
-		return Config{}, err
+		return Config{}, GovernanceOutcome{}, err
 	}
 	metas := []toml.MetaData{globalMeta}
 	if opts.ProjectPath != "" {
 		projMeta, err := mergeTOMLFile(&cfg, opts.ProjectPath)
 		if err != nil {
-			return Config{}, err
+			return Config{}, GovernanceOutcome{}, err
 		}
 		metas = append(metas, projMeta)
 	}
@@ -3292,27 +5256,62 @@ func Load(opts LoadOptions) (Config, error) {
 		}
 	}
 
-	// Phase 4 decommission: map the deprecated [compression.code_graph]
-	// and [intelligence.code_graph] blocks onto [codeintel] and warn once
-	// per legacy key. Honored for one release window, then removed.
-	for _, w := range migrateLegacyCodeGraph(&cfg, metas) {
-		emitDeprecationOnce(w)
-	}
-
-	// M1 plane-separation: map the deprecated flat [org_client.share]
-	// obs_* keys onto the nested [org_client.share.obs] sub-table and warn
-	// once per legacy key. Honored for one release window, then removed.
-	for _, w := range migrateLegacyOrgShareObs(&cfg, metas) {
+	// Corpus-archival P4: [codeintel] keys that were removed outright rather
+	// than renamed. Nothing to map — the warning IS the migration.
+	for _, w := range migrateRemovedCodeIntelKeys(&cfg, metas) {
 		emitDeprecationOnce(w)
 	}
 
 	cfg.Observer.DBPath = expandHome(cfg.Observer.DBPath)
+	cfg.Archive.Path = expandHome(cfg.Archive.Path)
+	cfg.MCPRelay.IPCPath = expandHome(cfg.MCPRelay.IPCPath)
 	cfg.Compression.Conversation.Stash.Dir = expandHome(cfg.Compression.Conversation.Stash.Dir)
+	cfg.Loc.EditorTokenFile = expandHome(cfg.Loc.EditorTokenFile)
+	cfg.Update.StateDir = expandHome(cfg.Update.StateDir)
 
-	if err := Validate(cfg); err != nil {
-		return Config{}, err
+	// D-514: a setting this build cannot honour yet is switched off here,
+	// with one reason, instead of failing Validate (deferred.go).
+	cfg.Deferred = deferUnsupported(&cfg)
+
+	// Governance overlay — the LAST merge step (§1.3). Everything above is
+	// the ungoverned config; the overlay is applied to a COPY so a
+	// Validate failure can fall back to it without re-parsing.
+	now := time.Now
+	if opts.GovernanceNow != nil {
+		now = opts.GovernanceNow
 	}
-	return cfg, nil
+	at := now()
+	file, gout := readGovernanceSidecar(cfg, opts.GovernanceSidecar, at)
+	if file == nil {
+		if err := Validate(cfg); err != nil {
+			return Config{}, gout, err
+		}
+		return cfg, gout, nil
+	}
+	governed := cfg
+	// Request-grants G8: a feature-access exception lifts its pin (the
+	// node's own value stands) until its own instant. Exceptions live in
+	// their OWN file beside the sidecar, bound to this posture's hash, so
+	// the sidecar body stays readable by released builds.
+	pinned, excepted := governancePinsInForce(file, gout.Path, at)
+	gout.Excepted = excepted
+	applyGovernancePins(&governed, pinned, &gout)
+	governed.Deferred = append(append([]string(nil), governed.Deferred...), deferUnsupported(&governed)...)
+	if err := Validate(governed); err != nil {
+		// Review B4: a well-formed, correctly-typed pinned value that
+		// Validate rejects must NEVER make Load fail. Six of the nine
+		// hook.go config.Load sites return before db.Open, so the fleet
+		// would lose ingest and the developer would see a stderr line on
+		// every tool call. Discard the WHOLE overlay, record why, and
+		// return the ungoverned config.
+		gout.Discarded, gout.DiscardErr = true, err.Error()
+		gout.Applied = nil
+		if verr := Validate(cfg); verr != nil {
+			return Config{}, gout, verr
+		}
+		return cfg, gout, nil
+	}
+	return governed, gout, nil
 }
 
 // deprecationEmit guards one-per-process printing of config deprecation
@@ -3321,9 +5320,9 @@ func Load(opts LoadOptions) (Config, error) {
 // goroutine, hooks auto-register) — each re-parses the same file and,
 // pre-dedup, re-printed the identical block of deprecation lines, drowning
 // the `dashboard → http://…` readiness banner. The dedup suppresses only
-// the repeated PRINTING; the key MAPPING in migrateLegacyCodeGraph /
-// migrateLegacyOrgShareObs still runs on every Load, and the FIRST
-// occurrence of each distinct message is always shown.
+// the repeated PRINTING; the key checks (migrateRemovedCodeIntelKeys)
+// still run on every Load, and the FIRST occurrence of each distinct
+// message is always shown.
 var deprecationEmit struct {
 	mu       sync.Mutex
 	seen     map[string]struct{}
@@ -3347,7 +5346,7 @@ func emitDeprecationOnce(msg string) {
 	fmt.Fprintln(os.Stderr, "config: deprecation: "+msg)
 	if !deprecationEmit.hintDone {
 		deprecationEmit.hintDone = true
-		fmt.Fprintln(os.Stderr, "config: deprecation: the keys above are deprecated aliases still honored this run — "+
+		fmt.Fprintln(os.Stderr, "config: deprecation: the keys above are deprecated aliases still honored this run - "+
 			"edit ~/.observer/config.toml to adopt the new keys (or run `observer config migrate`); this notice prints once per process.")
 	}
 }
@@ -3397,19 +5396,38 @@ func mergeTOMLFile(cfg *Config, path string) (toml.MetaData, error) {
 	return meta, nil
 }
 
-// migrateLegacyCodeGraph maps the deprecated codegraph config blocks onto
-// the [codeintel] family and returns one deprecation message per legacy
-// key actually present across the loaded files (Phase 4 decommission, plan
-// §11.5). The mapping is honored only when the corresponding [codeintel]
-// key was NOT explicitly set, so a config carrying both keeps [codeintel]
-// authoritative. Keys with no in-process analog (the external binary
-// download + graph.db path) are reported as removed, not remapped — the
-// concerns disappear with the third-party binary.
+// migrateRemovedCodeIntelKeys reports [codeintel] keys that have been REMOVED
+// outright — no replacement key to map onto, so there is nothing to migrate,
+// only something to say. Its contract: a config still carrying the key LOADS
+// FINE (BurntSushi ignores keys with no struct field), so the only
+// consequence is the warning below.
 //
-// metas carries the BurntSushi decode metadata for each loaded file so we
-// can distinguish "key present" from "default value"; toml.MetaData's zero
-// value answers IsDefined==false, so an absent file contributes nothing.
-func migrateLegacyCodeGraph(cfg *Config, metas []toml.MetaData) []string {
+// Today that is exactly one key.
+//
+// codeintel.index.disk_budget_mb — declared since the codeintel module landed,
+// documented as "caps the index size; cold projects LRU-evict past this",
+// defaulted to 500, and read by NOTHING outside config.go. No LRU eviction ever
+// existed. The corpus-archival design (§2.1 / open question 3,
+// docs/plans/observer-corpus-archival-lazyload-design-2026-08-26.md) ruled out
+// leaving it defined-but-inert and offered two dispositions: implement it as a
+// size-based archive trigger, or retire it. It is RETIRED, because a size
+// trigger has no honest input:
+//
+//   - A truthful per-project byte figure means summing row payloads across
+//     codeintel_nodes/edges/embeddings — a full scan of the largest tables in
+//     the database, on the automatic retention path. That is precisely the
+//     O(corpus)-work-on-a-hot-path class that caused the 2026-08-26 disk/compute
+//     exhaustion incident (docs/audits/observer-disk-compute-exhaustion-audit-2026-08-26.md).
+//     dbstat cannot help: it reports per-b-tree pages, never per-project.
+//   - The cheap alternative — row counts times a bytes-per-row constant — is a
+//     fabricated number dressed as a measurement, and it would drive an
+//     IRREVERSIBLE-looking decision about which projects leave the hot database.
+//
+// The age-based horizons the operator already sets do the same job on inputs
+// that are cheap AND real: [codeintel].retention_days selects stale projects
+// through an indexed O(distinct projects) query, and [archive].enabled turns
+// that selection from a delete into a reversible move to cold storage.
+func migrateRemovedCodeIntelKeys(_ *Config, metas []toml.MetaData) []string {
 	defined := func(keys ...string) bool {
 		for _, m := range metas {
 			if m.IsDefined(keys...) {
@@ -3418,93 +5436,45 @@ func migrateLegacyCodeGraph(cfg *Config, metas []toml.MetaData) []string {
 		}
 		return false
 	}
-	codeintelEnabledSet := defined("codeintel", "enabled")
-	codeintelOnStartSet := defined("codeintel", "index", "on_start")
-	compressionEnabledSet := defined("compression", "code_graph", "enabled")
-
 	var warnings []string
-	// [compression.code_graph]
-	if compressionEnabledSet {
+	if defined("codeintel", "index", "disk_budget_mb") {
 		warnings = append(warnings,
-			"compression.code_graph.enabled is deprecated; use codeintel.enabled (see docs/codeintel/configuration.md)")
-		if !codeintelEnabledSet {
-			cfg.CodeIntel.Enabled = cfg.Compression.CodeGraph.Enabled
-		}
-	}
-	if defined("compression", "code_graph", "auto_index") {
-		warnings = append(warnings,
-			"compression.code_graph.auto_index is deprecated; use codeintel.index.on_start")
-		if !codeintelOnStartSet {
-			cfg.CodeIntel.Index.OnStart = cfg.Compression.CodeGraph.AutoIndex
-		}
-	}
-	if defined("compression", "code_graph", "auto_install") {
-		warnings = append(warnings,
-			"compression.code_graph.auto_install is removed; the code index is in-process (no third-party binary is downloaded)")
-	}
-	if defined("compression", "code_graph", "path") {
-		warnings = append(warnings,
-			"compression.code_graph.path is removed; the in-process code index has no external graph.db")
-	}
-	// [intelligence.code_graph]
-	if defined("intelligence", "code_graph", "enabled") {
-		warnings = append(warnings,
-			"intelligence.code_graph.enabled is deprecated; use codeintel.enabled (see docs/codeintel/configuration.md)")
-		if !codeintelEnabledSet && !compressionEnabledSet {
-			cfg.CodeIntel.Enabled = cfg.Intelligence.CodeGraph.Enabled
-		}
-	}
-	return warnings
-}
-
-// migrateLegacyOrgShareObs maps the deprecated flat [org_client.share] obs_*
-// keys onto the nested [org_client.share.obs] sub-table and returns one
-// deprecation message per legacy key actually present across the loaded
-// files (plane-separation audit M1). The mapping is honored only when the
-// corresponding nested key was NOT explicitly set, so a config carrying both
-// keeps the nested [org_client.share.obs] value authoritative — mirroring
-// migrateLegacyCodeGraph. metas distinguishes "key present" from "default
-// value" (see that function's note on toml.MetaData).
-func migrateLegacyOrgShareObs(cfg *Config, metas []toml.MetaData) []string {
-	defined := func(keys ...string) bool {
-		for _, m := range metas {
-			if m.IsDefined(keys...) {
-				return true
-			}
-		}
-		return false
-	}
-	sh := &cfg.OrgClient.Share
-	var warnings []string
-	type mapping struct {
-		flatKey   string
-		flatVal   bool
-		nestedKey string
-		nestedSet bool
-		dst       *bool
-	}
-	mappings := []mapping{
-		{"obs_summary", sh.ObsSummary, "summary", defined("org_client", "share", "obs", "summary"), &sh.Obs.Summary},
-		{"obs_traces", sh.ObsTraces, "traces", defined("org_client", "share", "obs", "traces"), &sh.Obs.Traces},
-		{"obs_content", sh.ObsContent, "content", defined("org_client", "share", "obs", "content"), &sh.Obs.Content},
-		{"obs_eval_summary", sh.ObsEvalSummary, "eval_summary", defined("org_client", "share", "obs", "eval_summary"), &sh.Obs.EvalSummary},
-	}
-	for _, mp := range mappings {
-		if !defined("org_client", "share", mp.flatKey) {
-			continue
-		}
-		warnings = append(warnings,
-			"org_client.share."+mp.flatKey+" is deprecated; use org_client.share.obs."+mp.nestedKey)
-		if !mp.nestedSet {
-			*mp.dst = mp.flatVal
-		}
+			"codeintel.index.disk_budget_mb is removed; it was never implemented (no size-based eviction ever ran). "+
+				"Bound the code index with codeintel.retention_days, and set [archive].enabled = true to archive stale "+
+				"projects to cold storage instead of deleting them (docs/codeintel/configuration.md)")
 	}
 	return warnings
 }
 
 // Validate checks semantic constraints on cfg.
-//
-//nolint:gocyclo // validation function with many independent checks; splitting would not improve readability
+// validateObservabilityJudges checks the admission budget floors and both
+// [observability.judge] blocks (shared + admission override): tuning fields
+// non-negative, and the C1 relay's ambiguous-transport rule — use_org_relay
+// combined with base_url/api_key_env on the SAME raw block is an error, since
+// the relay ignores both (docs/plans/c1-judge-relay-spec-2026-08-15.md §3).
+func validateObservabilityJudges(cfg Config) error {
+	if b := cfg.Observability.Admission.Budget; b.PerUser5hUSD < 0 || b.PerUserWeeklyUSD < 0 || b.PerUserMonthlyUSD < 0 {
+		return errors.New("config: observability.admission.budget.per_user_*_usd must be >= 0")
+	}
+	for _, jc := range []ObservabilityJudgeConfig{cfg.Observability.Judge, cfg.Observability.Admission.Judge} {
+		if jc.TimeoutMS < 0 || jc.MaxTokens < 0 || jc.NumCtx < 0 {
+			return errors.New("config: observability judge timeout_ms/max_tokens/num_ctx must be >= 0")
+		}
+		if jc.UseOrgRelay && (jc.BaseURL != "" || jc.APIKeyEnv != "") {
+			return errors.New("config: observability judge use_org_relay=true is ambiguous with base_url/api_key_env set on the same block - the relay ignores both")
+		}
+	}
+	switch strings.TrimSpace(cfg.Observability.Admission.OnJudgeError) {
+	case "", "fail_open", "fail_closed":
+	default:
+		return fmt.Errorf("config: observability.admission.on_judge_error %q not in {fail_open, fail_closed}", cfg.Observability.Admission.OnJudgeError)
+	}
+	if cfg.Observability.Admission.JudgeRetries < 0 {
+		return errors.New("config: observability.admission.judge_retries must be >= 0")
+	}
+	return nil
+}
+
 func Validate(cfg Config) error {
 	if cfg.Observer.DBPath == "" {
 		return errors.New("config: observer.db_path is required")
@@ -3523,7 +5493,16 @@ func Validate(cfg Config) error {
 	if cfg.Proxy.Enabled && (cfg.Proxy.Port <= 0 || cfg.Proxy.Port > 65535) {
 		return fmt.Errorf("config: proxy.port %d out of range", cfg.Proxy.Port)
 	}
+	if err := validateProxyUpstreams(cfg.Proxy); err != nil {
+		return err
+	}
+	if err := validateProxyOrgRoute(cfg.Proxy.OrgRoute); err != nil {
+		return err
+	}
 	if err := validateDashboard(cfg.Dashboard); err != nil {
+		return err
+	}
+	if err := validateUpdate(cfg.Update); err != nil {
 		return err
 	}
 	if err := validateCompression(cfg.Compression); err != nil {
@@ -3535,26 +5514,23 @@ func Validate(cfg Config) error {
 	if err := validateRemote(cfg.Remote); err != nil {
 		return err
 	}
-	if cfg.CacheWarm.Enabled {
-		switch cfg.CacheWarm.Keepwarm.Mode {
-		case "", "off", "advise", "enforce":
-		default:
-			return fmt.Errorf("config: cachewarm.keepwarm.mode %q not in {off, advise, enforce}", cfg.CacheWarm.Keepwarm.Mode)
-		}
+	if err := validateCacheWarmAndBrowser(cfg); err != nil {
+		return err
 	}
-	if err := validateBrowser(cfg.Browser); err != nil {
+	if err := validatePricingFeed(cfg.Pricing.Feed); err != nil {
 		return err
 	}
 	if err := validateGuard(cfg.Guard); err != nil {
 		return err
 	}
-	if b := cfg.Observability.Admission.Budget; b.PerUser5hUSD < 0 || b.PerUserWeeklyUSD < 0 || b.PerUserMonthlyUSD < 0 {
-		return errors.New("config: observability.admission.budget.per_user_*_usd must be >= 0")
+	if err := validateTasks(cfg.Tasks); err != nil {
+		return err
 	}
-	for _, jc := range []ObservabilityJudgeConfig{cfg.Observability.Judge, cfg.Observability.Admission.Judge} {
-		if jc.TimeoutMS < 0 || jc.MaxTokens < 0 || jc.NumCtx < 0 {
-			return errors.New("config: observability judge timeout_ms/max_tokens/num_ctx must be >= 0")
-		}
+	if err := validateGuidance(cfg.Guidance); err != nil {
+		return err
+	}
+	if err := validateObservabilityJudges(cfg); err != nil {
+		return err
 	}
 	if err := validateObservabilityAlerts(cfg.Observability.Alerts); err != nil {
 		return err
@@ -3574,11 +5550,245 @@ func Validate(cfg Config) error {
 	if err := validateTerminal(cfg.Terminal); err != nil {
 		return err
 	}
+	// observer_planner fork: [llm] analysis connections + [licenses].
 	if err := validateLLM(cfg.LLM); err != nil {
 		return err
 	}
 	if err := validateLicense(cfg.Licenses); err != nil {
 		return err
+	}
+	if err := validateOrgClientPolicy(cfg.OrgClient.Policy); err != nil {
+		return err
+	}
+	if err := validateCloud(cfg.Cloud); err != nil {
+		return err
+	}
+	if err := validateMCPRelay(cfg.MCPRelay); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateMCPRelay checks the [mcp_relay] block: closed mode / audit_mode
+// vocabularies, an https gateway URL, a LOOPBACK-only listen address and a
+// bounded reconcile cadence. Every check runs regardless of Enabled so a
+// typo is caught before the node opts in, never at the moment it does.
+func validateMCPRelay(m MCPRelayConfig) error {
+	switch m.Mode {
+	case "", MCPRelayModeStdioWrapper, MCPRelayModeIPC, MCPRelayModeLoopback:
+	default:
+		return fmt.Errorf("config: mcp_relay.mode %q must be one of stdio_wrapper, ipc, loopback", m.Mode)
+	}
+	switch m.AuditMode {
+	case "", MCPRelayAuditAsync, MCPRelayAuditStrict:
+	default:
+		return fmt.Errorf("config: mcp_relay.audit_mode %q must be async or strict", m.AuditMode)
+	}
+	if u := strings.TrimSpace(m.GatewayURL); u != "" && !strings.HasPrefix(u, "https://") {
+		return fmt.Errorf("config: mcp_relay.gateway_url %q must be an https:// URL", m.GatewayURL)
+	}
+	if addr := strings.TrimSpace(m.Listen); addr != "" {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return fmt.Errorf("config: mcp_relay.listen %q must be host:port: %w", addr, err)
+		}
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("config: mcp_relay.listen %q needs a port in 1-65535 (got %q)", addr, port)
+		}
+		if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("config: mcp_relay.listen %q must be a loopback address (127.0.0.1, localhost or ::1) - the relay is never exposed beyond this machine", addr)
+		}
+	}
+	if m.PollIntervalSeconds != 0 && (m.PollIntervalSeconds < 10 || m.PollIntervalSeconds > 3600) {
+		return fmt.Errorf("config: mcp_relay.poll_interval_seconds %d out of range (10-3600)", m.PollIntervalSeconds)
+	}
+	return nil
+}
+
+// validateCloud checks the [cloud] block (D15). Both fields are optional —
+// an absent/empty [cloud] section always passes (LoginPort's zero value
+// means "unset", not "port 0"). When set, BaseURL must parse as an absolute
+// http(s) URL and LoginPort must be a valid TCP port.
+func validateCloud(c CloudConfig) error {
+	if c.LoginPort < 0 || c.LoginPort > 65535 {
+		return fmt.Errorf("config: cloud.login_port %d out of range (0-65535; 0 means unset - use the command's built-in default)", c.LoginPort)
+	}
+	if c.AutoSyncIntervalMinutes < 0 || (c.AutoSyncIntervalMinutes > 0 && c.AutoSyncIntervalMinutes < CloudAutoSyncMinMinutes) {
+		return fmt.Errorf("config: cloud.auto_sync_interval_minutes %d out of range (0 means the built-in default; otherwise >= %d)", c.AutoSyncIntervalMinutes, CloudAutoSyncMinMinutes)
+	}
+	if c.AutoEnrichIntervalMinutes < 0 || (c.AutoEnrichIntervalMinutes > 0 && c.AutoEnrichIntervalMinutes < CloudAutoEnrichMinMinutes) {
+		return fmt.Errorf("config: cloud.auto_enrich_interval_minutes %d out of range (0 means the built-in default; otherwise >= %d)", c.AutoEnrichIntervalMinutes, CloudAutoEnrichMinMinutes)
+	}
+	if c.AutoEnrichQuietMinutes < 0 || (c.AutoEnrichQuietMinutes > 0 && c.AutoEnrichQuietMinutes < CloudAutoEnrichMinMinutes) {
+		return fmt.Errorf("config: cloud.auto_enrich_quiet_minutes %d out of range (0 means the built-in default; otherwise >= %d)", c.AutoEnrichQuietMinutes, CloudAutoEnrichMinMinutes)
+	}
+	if s := strings.TrimSpace(c.BaseURL); s != "" {
+		u, err := url.Parse(s)
+		if err != nil {
+			return fmt.Errorf("config: cloud.base_url %q is not a valid URL: %w", c.BaseURL, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("config: cloud.base_url %q must be http or https (got %q)", c.BaseURL, u.Scheme)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("config: cloud.base_url %q has no host", c.BaseURL)
+		}
+	}
+	return nil
+}
+
+// validateCacheWarmAndBrowser checks [cachewarm] keepwarm mode and the
+// [browser] ceiling/timeout bounds. Extracted from Validate to keep that
+// function under the gocyclo threshold after [org_client.policy] landed.
+func validateCacheWarmAndBrowser(cfg Config) error {
+	if cfg.CacheWarm.Enabled {
+		switch cfg.CacheWarm.Keepwarm.Mode {
+		case "", "off", "advise", "enforce":
+		default:
+			return fmt.Errorf("config: cachewarm.keepwarm.mode %q not in {off, advise, enforce}", cfg.CacheWarm.Keepwarm.Mode)
+		}
+	}
+	if err := validateBrowser(cfg.Browser); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validatePricingFeed checks the [pricing.feed] block (plan §C.4): a
+// non-negative poll interval and, when the feed is enabled, a well-formed
+// http/https URL. The URL is only required/checked when enabled so a node that
+// has never touched the block (the default seed carries the public URL anyway)
+// is never failed for it.
+func validatePricingFeed(c PricingFeedConfig) error {
+	if c.PollIntervalHours < 0 {
+		return fmt.Errorf("config: pricing.feed.poll_interval_hours %d must be >= 0", c.PollIntervalHours)
+	}
+	if !c.Enabled {
+		return nil
+	}
+	s := strings.TrimSpace(c.URL)
+	if s == "" {
+		return errors.New("config: pricing.feed.url is required when pricing.feed.enabled = true")
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("config: pricing.feed.url %q is not a valid URL: %w", c.URL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("config: pricing.feed.url %q must be http or https (got %q)", c.URL, u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("config: pricing.feed.url %q has no host", c.URL)
+	}
+	return nil
+}
+
+// policyResourceSupportedFamilies is the v1 closed family enum — see
+// OrgClientPolicyConfig's doc comment for why this is a local copy rather
+// than an internal/policyfam import.
+var policyResourceSupportedFamilies = map[string]bool{
+	"admission.input":          true,
+	"egress.routing_guardrail": true,
+	// Config plane Phase 3 (gateway-config-plane spec): the signed provider
+	// lane-table family. Missing from this local copy until 2026-08-15, which
+	// made accept_families reject the family and every gateway resource land
+	// delivered_unaccepted — the sync test in policyfam_sync_test.go now pins
+	// this map to policyfam.SupportedFamilies so the next family can't repeat
+	// the drift.
+	"gateway.providers": true,
+	// Admin-controlled Plane B (docs/plans/admin-controlled-plane-b-spec-2026-08-15.md
+	// Phase 1a): the node-governance family. Added here in the SAME change
+	// as policyfam.FamilyNodeGovernance — policyfam_sync_test.go fails the
+	// build otherwise, which is the drift gate gateway.providers taught us
+	// to want.
+	"node.governance": true,
+	// Org-parity W5.1 (docs/plans/org-parity-full-depth-plan-2026-08-24.md
+	// §4): the per-feature enable/disable + limits family. Added here in the
+	// SAME change as policyfam.FamilyNodeFeatures for the same drift-gate
+	// reason as node.governance above.
+	"node.features": true,
+	// planeb.admission (2026-09-02, G1-JUDGED-ADM): the Plane-B judged-
+	// admission body — gateway request-path judged admission + the default-OFF
+	// node-lane flip (design §4.6).
+	"planeb.admission": true,
+	// tools.mcp_access (Agent Access P4, doc3 §6.2/§12.4): the signed MCP
+	// grant family the node relay's local PDP compiles. Added in the same
+	// spirit as the rows above — policyfam.FamilyMCPAccess shipped in P1/P2
+	// and this copy lagged, which the sync test caught (the same drift class
+	// gateway.providers taught us to gate).
+	"tools.mcp_access": true,
+	// node.components (modular packaging P4, lane MP-GOV): the managed
+	// component-set family. Added in the SAME change as
+	// policyfam.FamilyNodeComponents (policyfam_sync_test.go pins the two).
+	"node.components": true,
+}
+
+// validateOrgClientPolicy checks [org_client.policy]: every listed family
+// must be one of the v1 closed set, and preauthorize_enforce must be a
+// subset of accept_families (plan §6.4 — preauthorizing enforcement for a
+// family the node doesn't even accept is a config mistake, not a valid
+// "half-opted-in" state).
+func validateOrgClientPolicy(p OrgClientPolicyConfig) error {
+	accepted := make(map[string]bool, len(p.AcceptFamilies))
+	for _, f := range p.AcceptFamilies {
+		if !policyResourceSupportedFamilies[f] {
+			return fmt.Errorf("config: org_client.policy.accept_families contains unsupported family %q (want one of admission.input, egress.routing_guardrail, gateway.providers, node.governance, node.features, planeb.admission, tools.mcp_access)", f)
+		}
+		accepted[f] = true
+	}
+	for _, f := range p.PreauthorizeEnforce {
+		if !policyResourceSupportedFamilies[f] {
+			return fmt.Errorf("config: org_client.policy.preauthorize_enforce contains unsupported family %q (want one of admission.input, egress.routing_guardrail, gateway.providers, node.governance, node.features, planeb.admission, tools.mcp_access)", f)
+		}
+		if !accepted[f] {
+			return fmt.Errorf("config: org_client.policy.preauthorize_enforce contains %q, which is not in accept_families (preauthorize_enforce must be a subset of accept_families)", f)
+		}
+	}
+	attrs := []struct {
+		key   string
+		value string
+	}{
+		{"node_workspace", p.NodeWorkspace},
+		{"node_environment", p.NodeEnvironment},
+		{"node_service", p.NodeService},
+	}
+	for _, a := range attrs {
+		if err := validatePolicyNodeAttr(a.key, a.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxPolicyNodeAttrBytes bounds one [org_client.policy] node attribute. The
+// value must match an org-side attribute exactly to corroborate anything, so
+// a long value is a config mistake, not a use case.
+const maxPolicyNodeAttrBytes = 128
+
+// validatePolicyNodeAttr checks one node targeting attribute: optional, but
+// when set it must be a bounded, single-line, non-padded string. The
+// comparison against a signed selector is byte-exact after the server's own
+// trim, so a value with surrounding whitespace or an embedded control
+// character could never corroborate — rejecting it loudly at load beats
+// silently never matching.
+func validatePolicyNodeAttr(key, value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > maxPolicyNodeAttrBytes {
+		return fmt.Errorf("config: org_client.policy.%s is %d bytes, over the %d-byte maximum", key, len(value), maxPolicyNodeAttrBytes)
+	}
+	if strings.TrimSpace(value) != value {
+		return fmt.Errorf("config: org_client.policy.%s %q has leading or trailing whitespace (it must match the org-side attribute exactly)", key, value)
+	}
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("config: org_client.policy.%s is not valid UTF-8", key)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("config: org_client.policy.%s %q contains a control character", key, value)
+		}
 	}
 	return nil
 }
@@ -3614,6 +5824,115 @@ func validateTerminal(c TerminalConfig) error {
 		if d < 0 {
 			return fmt.Errorf("config: terminal.idle_timeout %q must not be negative (use \"0\" to disable idle reaping)", c.IdleTimeout)
 		}
+	}
+	if err := validateTerminalSandbox(c.Sandbox); err != nil {
+		return err
+	}
+	if err := validateTerminalSSH(c.SSH); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateTerminalSSH checks the [terminal.ssh] block. Like
+// validateTerminalSandbox it runs UNCONDITIONALLY (not gated on Enabled), so a
+// typo'd host or a relative key_path is caught loudly at load time rather than
+// silently at the operator's first click.
+//
+// It delegates every field rule to internal/sshspec - the single owner of
+// the closed-vocabulary validators — so config and the launch path can never
+// disagree about what a valid profile is. The launch path re-validates anyway
+// (with the filesystem check), mirroring the ValidateProjectRoot-at-spawn
+// discipline.
+func validateTerminalSSH(c TerminalSSHConfig) error {
+	if c.ConnectTimeoutSeconds < 0 {
+		return errors.New("config: terminal.ssh.connect_timeout_seconds must be >= 0")
+	}
+	if c.KeepaliveSeconds < 0 {
+		return errors.New("config: terminal.ssh.keepalive_seconds must be >= 0")
+	}
+	seen := make(map[string]bool, len(c.Profiles))
+	for i, p := range c.Profiles {
+		if err := SSHProfile(p).Validate(); err != nil {
+			return fmt.Errorf("config: terminal.ssh.profiles[%d]: %w", i, err)
+		}
+		if seen[p.Name] {
+			return fmt.Errorf("config: terminal.ssh.profiles[%d]: duplicate name %q", i, p.Name)
+		}
+		seen[p.Name] = true
+	}
+	return nil
+}
+
+// SSHProfile converts one config entry into the pure-package Profile the
+// validator and argv composer operate on. It is the ONE translation point
+// between the TOML shape and internal/sshspec (module-boundary rule #2), so
+// a field added to the config block has exactly one place to be threaded.
+func SSHProfile(p SSHProfileConfig) sshspec.Profile {
+	return sshspec.Profile{
+		Name:             p.Name,
+		Label:            p.Label,
+		Host:             p.Host,
+		User:             p.User,
+		Port:             p.Port,
+		KeyPath:          p.KeyPath,
+		Jump:             p.Jump,
+		DashboardPort:    p.DashboardPort,
+		ReverseProxy:     p.ReverseProxy,
+		ReverseProxyPort: p.ReverseProxyPort,
+	}
+}
+
+// SSHProfiles converts the whole configured list. Callers wiring the terminal
+// service use this so the daemon holds pure Profiles, never TOML structs.
+func SSHProfiles(c TerminalSSHConfig) []sshspec.Profile {
+	if len(c.Profiles) == 0 {
+		return nil
+	}
+	out := make([]sshspec.Profile, 0, len(c.Profiles))
+	for _, p := range c.Profiles {
+		out = append(out, SSHProfile(p))
+	}
+	return out
+}
+
+// SSHOptions maps the block's connection-tuning knobs onto the pure package's
+// Options. A zero value resolves to the sshprofile defaults.
+func SSHOptions(c TerminalSSHConfig) sshspec.Options {
+	return sshspec.Options{
+		ConnectTimeoutSeconds: c.ConnectTimeoutSeconds,
+		KeepaliveSeconds:      c.KeepaliveSeconds,
+	}
+}
+
+// validateTerminalSandbox checks semantic constraints on the [terminal.sandbox]
+// block (B9). Runs unconditionally (not gated on Enabled) so a typo'd
+// backend/home_mode is caught at load time even before an operator flips the
+// master switch on.
+func validateTerminalSandbox(c TerminalSandboxConfig) error {
+	switch c.Backend {
+	case "", "bwrap":
+	default:
+		return fmt.Errorf("config: terminal.sandbox.backend %q not in {bwrap}", c.Backend)
+	}
+	switch c.HomeMode {
+	case "", "tmpfs", "readonly":
+	default:
+		return fmt.Errorf("config: terminal.sandbox.home_mode %q not in {tmpfs, readonly}", c.HomeMode)
+	}
+	if c.WorkspaceRetentionDays < 0 {
+		return errors.New("config: terminal.sandbox.workspace_retention_days must be >= 0")
+	}
+	if c.PrepTimeoutSeconds < 0 {
+		return errors.New("config: terminal.sandbox.prep_timeout_seconds must be >= 0")
+	}
+	switch c.Egress {
+	case "", "host", "internet", "proxy_only", "none":
+	default:
+		return fmt.Errorf("config: terminal.sandbox.egress %q not in {host, internet, proxy_only, none}", c.Egress)
+	}
+	if _, err := sandboxcidr.ParseAllowCIDRs(c.EgressAllowCIDRs); err != nil {
+		return fmt.Errorf("config: terminal.sandbox.egress_allow_cidrs: %w", err)
 	}
 	return nil
 }
@@ -3695,7 +6014,7 @@ func validateRemote(c RemoteConfig) error {
 				return err
 			}
 		case "lan":
-			return fmt.Errorf("config: remote.mode %q is deferred (Phase 3, operator decision 2026-07-12 — tailnet-HTTPS-only for v1); use \"tailscale\"", c.Mode)
+			return fmt.Errorf("config: remote.mode %q is deferred (Phase 3, operator decision 2026-07-12 - tailnet-HTTPS-only for v1); use \"tailscale\"", c.Mode)
 		default:
 			return fmt.Errorf("config: remote.mode %q not in {off, tailscale, lan}", c.Mode)
 		}
@@ -3737,10 +6056,10 @@ func validateRemote(c RemoteConfig) error {
 			idle = DefaultRemoteSessionIdleMinutes
 		}
 		if idle > ttl {
-			return fmt.Errorf("config: remote.session_idle_minutes %d exceeds remote.session_ttl_minutes %d — the absolute cap would expire the session first, making the idle window unreachable", idle, ttl)
+			return fmt.Errorf("config: remote.session_idle_minutes %d exceeds remote.session_ttl_minutes %d - the absolute cap would expire the session first, making the idle window unreachable", idle, ttl)
 		}
 		if c.Enabled && len(c.TrustedHosts) == 0 && strings.EqualFold(strings.TrimSpace(c.Mode), "tailscale") {
-			return errors.New("config: remote.trusted_hosts must name the tailnet host (the Host the browser sends) when remote.mode = \"tailscale\" — `observer remote enable --tailscale` populates it")
+			return errors.New("config: remote.trusted_hosts must name the tailnet host (the Host the browser sends) when remote.mode = \"tailscale\" - `observer remote enable --tailscale` populates it")
 		}
 	}
 	if c.Notify.Enabled {
@@ -3768,6 +6087,51 @@ func validateDashboard(d DashboardConfig) error {
 	return ValidateDashboardAddr(d.Addr)
 }
 
+// validateUpdate enforces the [update] surface.
+//
+// It refuses rather than clamps, and it does so at LOAD time, because every
+// one of these values is consulted at the worst possible moment — while the
+// daemon is quiesced with its binary half-swapped. A drain timeout that
+// silently became zero there would abort every apply with error_class=drain
+// and nobody would know why.
+//
+// The window's grammar is validated through update.ParseWindow rather than
+// re-implemented here: one owner for "what is a maintenance window", so the
+// config check and the apply gate can never disagree about a string like
+// "22:00-02:00".
+func validateUpdate(u UpdateConfig) error {
+	if _, err := updatespec.ParseWindow(u.Window); err != nil {
+		return fmt.Errorf("config: update.window: %w", err)
+	}
+	if u.Channel != "" && !updatespec.KnownChannel(updatespec.Channel(u.Channel)) {
+		return fmt.Errorf("config: update.channel %q not in {stable, lts, edge} (empty = whatever the org assigns)", u.Channel)
+	}
+	if u.KeepPreviousDays < 0 {
+		return errors.New("config: update.keep_previous_days must be >= 0 (0 disables retention pruning)")
+	}
+	if u.MaxDownloadBytes < 0 {
+		return errors.New("config: update.max_download_bytes must be >= 0")
+	}
+	for _, d := range []struct {
+		key, val string
+	}{
+		{"update.drain_timeout", u.DrainTimeout},
+		{"update.handshake_timeout", u.HandshakeTimeout},
+	} {
+		if strings.TrimSpace(d.val) == "" {
+			continue
+		}
+		parsed, err := time.ParseDuration(d.val)
+		if err != nil {
+			return fmt.Errorf("config: %s %q is not a duration (e.g. \"90s\"): %w", d.key, d.val, err)
+		}
+		if parsed <= 0 {
+			return fmt.Errorf("config: %s must be > 0", d.key)
+		}
+	}
+	return nil
+}
+
 // ValidateDashboardAddr validates a dashboard listen address string. It is a
 // pure SHAPE check — host:port must parse and the port must be a base-10
 // integer in 1–65535. Empty is valid (the built-in default applies). It
@@ -3792,7 +6156,7 @@ func ValidateDashboardAddr(addr string) error {
 		return fmt.Errorf("config: dashboard.addr %q needs a numeric port (got %q)", addr, port)
 	}
 	if n < 1 || n > 65535 {
-		return fmt.Errorf("config: dashboard.addr %q port %d out of range (1–65535)", addr, n)
+		return fmt.Errorf("config: dashboard.addr %q port %d out of range (1-65535)", addr, n)
 	}
 	return nil
 }
@@ -3804,7 +6168,7 @@ func ValidateDashboardAddr(addr string) error {
 func validateTailscaleBackendAddr(addr string) error {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
-		return errors.New("config: remote.tailscale_backend_addr is required when remote.mode = \"tailscale\" (a loopback IP:port for `tailscale serve` to forward to) — `observer remote enable --tailscale` pins one")
+		return errors.New("config: remote.tailscale_backend_addr is required when remote.mode = \"tailscale\" (a loopback IP:port for `tailscale serve` to forward to) - `observer remote enable --tailscale` pins one")
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -3815,7 +6179,7 @@ func validateTailscaleBackendAddr(addr string) error {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("config: remote.tailscale_backend_addr host %q must be an explicit loopback IP (127.0.0.1 / ::1) — the tailnet-serve backend is loopback-only (plan §4.4)", host)
+		return fmt.Errorf("config: remote.tailscale_backend_addr host %q must be an explicit loopback IP (127.0.0.1 / ::1) - the tailnet-serve backend is loopback-only (plan §4.4)", host)
 	}
 	return nil
 }
@@ -3949,6 +6313,95 @@ func validateObservabilityAlerts(a ObservabilityAlertsConfig) error {
 	return nil
 }
 
+// OpenCodeZenLane is the default [proxy.agent_upstreams] lane id for
+// OpenCode's built-in Zen provider (see Default()).
+const OpenCodeZenLane = "opencode-zen"
+
+// validateProxyUpstreams enforces the gateway config plane spec's two
+// [proxy.upstreams]/auto_default_lane invariants: "auto" is a reserved
+// virtual lane id (Phase 2 — it can never be a real configured lane,
+// since Proxy.SetUpstreams routes it through resolveAutoLane, not the
+// upstream map), and a configured auto_default_lane must name a lane
+// that actually exists in upstreams (an unresolvable default is a config
+// mistake, not a runtime fail-open case).
+func validateProxyUpstreams(p ProxyConfig) error {
+	if _, reserved := p.Upstreams["auto"]; reserved {
+		return errors.New(`config: proxy.upstreams "auto" is a reserved lane id (the virtual auto lane) and cannot be configured directly`)
+	}
+	if p.AutoDefaultLane != "" {
+		if _, ok := p.Upstreams[p.AutoDefaultLane]; !ok {
+			return fmt.Errorf("config: proxy.auto_default_lane %q must name a lane configured in proxy.upstreams", p.AutoDefaultLane)
+		}
+	}
+	return nil
+}
+
+// validateProxyOrgRoute enforces [proxy.org_route]'s shape before it ever
+// reaches Proxy.SetOrgGatewayRoute, so a malformed node-local bootstrap
+// fails at config load (a clear, early error) rather than being silently
+// skipped at startup wiring time. Mirrors validateProxyUpstreams' style:
+// the zero value (Mode == "") is always valid and inert.
+func validateProxyOrgRoute(r ProxyOrgRouteConfig) error {
+	switch r.Mode {
+	case "":
+		if r.Primary != "" || len(r.Fallbacks) > 0 {
+			return errors.New(`config: proxy.org_route.primary/fallbacks require mode = "gateway"`)
+		}
+		return nil
+	case "gateway":
+		if r.Primary == "" {
+			return errors.New(`config: proxy.org_route.primary is required when proxy.org_route.mode = "gateway"`)
+		}
+	default:
+		return fmt.Errorf(`config: proxy.org_route.mode %q not in {"", "gateway"}`, r.Mode)
+	}
+	if _, err := url.Parse(r.Primary); err != nil {
+		return fmt.Errorf("config: proxy.org_route.primary %q: %w", r.Primary, err)
+	}
+	for i, fb := range r.Fallbacks {
+		if _, err := url.Parse(fb); err != nil {
+			return fmt.Errorf("config: proxy.org_route.fallbacks[%d] %q: %w", i, fb, err)
+		}
+	}
+	return nil
+}
+
+func validateTasks(t TasksConfig) error {
+	switch t.MatchMode {
+	case "", "exact", "normalized":
+	default:
+		return fmt.Errorf("config: tasks.match_mode %q not in {exact, normalized}", t.MatchMode)
+	}
+	switch t.ConcurrentAttribution {
+	case "", "shared", "none":
+	default:
+		return fmt.Errorf("config: tasks.concurrent_attribution %q not in {shared, none}", t.ConcurrentAttribution)
+	}
+	return nil
+}
+
+// validateGuidance rejects the one [guidance] value that has no sensible
+// meaning. Every other key in the block resolves a <= 0 value to its seeded
+// budget (an unbounded pass is the failure those budgets exist to prevent),
+// but first_scan_poll_seconds is a CADENCE, so 0 legitimately means "never
+// poll" and only a negative value is nonsense.
+func validateGuidance(g GuidanceConfig) error {
+	if g.FirstScanPollSeconds < 0 {
+		return fmt.Errorf("config: guidance.first_scan_poll_seconds %d must be >= 0 (0 disables the poll)",
+			g.FirstScanPollSeconds)
+	}
+	// The adaptive ceiling can never sit below the base budget: a max below
+	// the base would mean the very first grant already exceeds the cap. <= 0
+	// stays "use the seeded default" (resolved in guidanceBudgets), exactly
+	// like root_timeout_seconds itself, so only a positive-but-too-small
+	// value is a mistake worth refusing.
+	if g.RootTimeoutMaxSeconds > 0 && g.RootTimeoutSeconds > 0 && g.RootTimeoutMaxSeconds < g.RootTimeoutSeconds {
+		return fmt.Errorf("config: guidance.root_timeout_max_seconds %d must be >= root_timeout_seconds %d (the adaptive ceiling cannot be below the base budget)",
+			g.RootTimeoutMaxSeconds, g.RootTimeoutSeconds)
+	}
+	return nil
+}
+
 func validateGuard(g GuardConfig) error {
 	if !g.Enabled {
 		return nil
@@ -3969,15 +6422,25 @@ func validateGuard(g GuardConfig) error {
 		return fmt.Errorf("config: guard.proxy.egress_action %q not in {flag, mask, deny}", g.Proxy.EgressAction)
 	}
 	if g.Rules.CEL {
-		return errors.New("config: guard.rules.cel is not yet supported (CEL user rules are deferred — matchers v1)")
+		return errors.New("config: guard.rules.cel is not yet supported (CEL user rules are deferred - matchers v1)")
 	}
 	b := g.Budget
-	if b.SessionUSD < 0 || b.DailyUSD < 0 || b.WeeklyUSD < 0 || b.MonthlyUSD < 0 {
-		return errors.New("config: guard.budget.*_usd must be >= 0")
+	for _, usd := range []float64{b.SessionUSD, b.DailyUSD, b.WeeklyUSD, b.MonthlyUSD} {
+		if math.IsNaN(usd) || math.IsInf(usd, 0) || usd < 0 {
+			return errors.New("config: guard.budget.*_usd must be finite and >= 0")
+		}
+	}
+	// The token ceilings follow the same rule as the $ ones: 0 disables the
+	// window and a negative value is a mistake, never "everything is over
+	// budget". Refusing it here is what keeps govern.LowerInt's own
+	// negative-is-unset guard a defence against a REMOTE body rather than a
+	// second owner of local validation.
+	if b.SessionTokens < 0 || b.DailyTokens < 0 || b.WeeklyTokens < 0 || b.MonthlyTokens < 0 {
+		return errors.New("config: guard.budget.*_tokens must be >= 0")
 	}
 	w := b.Window
 	for _, u := range []float64{w.Util5hWarn, w.Util5hDeny, w.UtilWeeklyWarn, w.UtilWeeklyDeny} {
-		if u < 0 || u > 1 {
+		if math.IsNaN(u) || math.IsInf(u, 0) || u < 0 || u > 1 {
 			return fmt.Errorf("config: guard.budget.window utilization %.2f must be in [0, 1]", u)
 		}
 	}
@@ -3986,6 +6449,61 @@ func validateGuard(g GuardConfig) error {
 	}
 	if w.UtilWeeklyDeny > 0 && w.UtilWeeklyWarn > 0 && w.UtilWeeklyDeny < w.UtilWeeklyWarn {
 		return errors.New("config: guard.budget.window.util_weekly_deny must be >= util_weekly_warn")
+	}
+	if err := validateGuardPrompt(g.Prompt); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateGuardPrompt validates [guard.prompt] (§8.1). Unlike
+// GuardProxyConfig/GuardMCPConfig — which have no Enabled field of their
+// own and are therefore validated unconditionally whenever the outer
+// [guard].enabled is true — GuardPromptConfig does carry its own Enabled
+// flag. Following the same precedent (no sub-config in validateGuard
+// conditions its checks on a sub-Enabled flag; only the top-level
+// g.Enabled gates the whole function), this still validates
+// unconditionally: a malformed [guard.prompt] should fail loudly even
+// while prompt.enabled=false, the same way a malformed
+// [guard.proxy]/[guard.mcp] would.
+func validateGuardPrompt(p GuardPromptConfig) error {
+	if !guardPromptModes[p.Mode] {
+		return fmt.Errorf("config: guard.prompt.mode %q not in {off, warn, ask-once, block, redact}", p.Mode)
+	}
+	for id, mode := range p.Detectors {
+		if !knownPromptDetectors[id] {
+			return fmt.Errorf("config: guard.prompt.detectors names unknown detector %q", id)
+		}
+		if !guardPromptModes[mode] {
+			return fmt.Errorf("config: guard.prompt.detectors[%q] %q not in {off, warn, ask-once, block, redact}", id, mode)
+		}
+	}
+	if err := scrub.ValidatePatterns(p.Allow); err != nil {
+		return fmt.Errorf("config: guard.prompt.allow: %w", err)
+	}
+	ttl, err := p.ReconsiderTTLDuration()
+	if err != nil {
+		return fmt.Errorf("config: guard.prompt.reconsider_ttl %q: %w", p.ReconsiderTTL, err)
+	}
+	if ttl <= 0 {
+		return fmt.Errorf("config: guard.prompt.reconsider_ttl %q must be > 0", p.ReconsiderTTL)
+	}
+	if p.ReconsiderMinDelay != "" {
+		d, err := time.ParseDuration(p.ReconsiderMinDelay)
+		if err != nil {
+			return fmt.Errorf("config: guard.prompt.reconsider_min_delay %q: %w", p.ReconsiderMinDelay, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("config: guard.prompt.reconsider_min_delay %q must be >= 0", p.ReconsiderMinDelay)
+		}
+		// A floor at/over reconsider_ttl is NOT a load error: the default
+		// is on and an operator may have set a sub-3s TTL before this key
+		// existed — a hard refusal to start over a key they never set is
+		// worse than the engine ignoring the floor (which it does; see
+		// EvaluatePrompt's ask-once ladder).
+	}
+	if p.MaxFindings < 0 {
+		return errors.New("config: guard.prompt.max_findings must be >= 0")
 	}
 	return nil
 }

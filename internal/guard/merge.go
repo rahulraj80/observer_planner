@@ -62,6 +62,11 @@ type mergeState struct {
 	extra     []policy.Rule
 	overrides []policy.Override
 	issues    []string
+	// disable accumulates the per-layer top-level `disable = [...]`
+	// lists (today only the trusted-project layer contributes). The
+	// caller (buildEngine) unions it into the per-project engine's
+	// Config.Disabled — the merge is where the layer set is known.
+	disable []string
 }
 
 // mergeLayers folds the parsed layers into the engine inputs:
@@ -69,7 +74,7 @@ type mergeState struct {
 // order is the final tie-break and higher trust should win full ties)
 // and the effective override list, with one-way checks applied
 // against the catalog reference and the org floor.
-func mergeLayers(org, user, project *policyFile) (extra []policy.Rule, overrides []policy.Override, issues []string) {
+func mergeLayers(org, user, project, trusted *policyFile) (extra []policy.Rule, overrides []policy.Override, disable []string, issues []string) {
 	// Multi-row IDs (R-152's write/read split) reduce to the STRICTEST
 	// row per ID — for relaxation checks the conservative reference is
 	// the strictest current stance (documented approximation: an
@@ -87,7 +92,12 @@ func mergeLayers(org, user, project *policyFile) (extra []policy.Rule, overrides
 	m.applyOrg(org)
 	m.applyUser(user)
 	m.applyProject(project)
-	return m.extra, m.overrides, m.issues
+	// The trusted per-project layer folds LAST (guard-rule-management-ui
+	// plan §3.2): applied after the in-repo project layer with
+	// weaken-allowed semantics, so an operator relaxation lands over an
+	// agent-writable escalation — but the org floor still hard-blocks.
+	m.applyTrustedProject(trusted)
+	return m.extra, m.overrides, m.disable, m.issues
 }
 
 // applyOrg folds the org layer (G13): rules join the table first
@@ -113,7 +123,7 @@ func (m *mergeState) applyOrg(org *policyFile) {
 		}
 		if ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"org override on %s dropped: %q would relax the effective decision (the org layer is a strictness floor; it may only escalate — spec §4.6/§14.2)",
+				"org override on %s dropped: %q would relax the effective decision (the org layer is a strictness floor; it may only escalate - spec §4.6/§14.2)",
 				ov.RuleID, ov.Decision,
 			))
 			continue
@@ -144,6 +154,7 @@ func (m *mergeState) applyUser(user *policyFile) {
 		m.effective[s.ID] = &stance{observe: s.Observe, enforce: s.Enforce, enforced: s.Enforced}
 	}
 	for _, ov := range user.overrides {
+		m.noteUngrantableOverridable(ov)
 		s := m.effective[ov.RuleID]
 		if s == nil {
 			m.overrides = append(m.overrides, toPolicyOverride(ov))
@@ -151,8 +162,25 @@ func (m *mergeState) applyUser(user *policyFile) {
 		}
 		if m.floor[ov.RuleID] && ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"user override on %s dropped: %q would relax the org policy floor (org > user — spec §4.6)",
+				"user override on %s dropped: %q would relax the org policy floor (org > user - spec §4.6)",
 				ov.RuleID, ov.Decision,
+			))
+			continue
+		}
+		if m.dropBelowOrgEnforceOff("user", ov) {
+			continue
+		}
+		// R-160/R-161 are the guard's own integrity rules: no below-org
+		// layer may weaken them (treated like a floored rule REGARDLESS of
+		// m.floor). Escalation still passes — a stricter decision is not
+		// < the effective stance. policy.New is the hard backstop even if
+		// this drop is somehow missed; recording the issue here is what
+		// makes `observer guard status` surface WHY the edit did nothing
+		// instead of it being a silent no-op.
+		if policy.IsIntegrityRuleID(ov.RuleID) && ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"user override on %s dropped: %s is an integrity rule and cannot be relaxed below the org (guard-rule-management-ui plan §3.4 / §2)",
+				ov.RuleID, ov.RuleID,
 			))
 			continue
 		}
@@ -171,6 +199,7 @@ func (m *mergeState) applyProject(project *policyFile) {
 	}
 	m.extra = append(m.extra, project.rules...)
 	for _, ov := range project.overrides {
+		m.noteUngrantableOverridable(ov)
 		s := m.effective[ov.RuleID]
 		if s == nil {
 			m.overrides = append(m.overrides, toPolicyOverride(ov))
@@ -178,13 +207,166 @@ func (m *mergeState) applyProject(project *policyFile) {
 		}
 		if ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"project override on %s dropped: %q would relax the effective decision (project layer may only escalate — spec §4.6)",
+				"project override on %s dropped: %q would relax the effective decision (project layer may only escalate - spec §4.6)",
 				ov.RuleID, ov.Decision,
+			))
+			continue
+		}
+		if ov.EnforceOff {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"project override on %s dropped: `enforce = false` would cap the rule at flag (project layer may only escalate - spec §4.6)",
+				ov.RuleID,
 			))
 			continue
 		}
 		m.apply(s, ov)
 	}
+}
+
+// noteUngrantableOverridable records the load issue for an
+// `overridable = true` key on a layer that cannot grant it. ONLY the
+// org layer grants overridability (the org bundle is the authority
+// that withheld or allowed the block in the first place); a user or
+// project file asking for it is a policy-authoring mistake, reported
+// the same way a dropped relaxation is — loudly, without failing the
+// rest of the file. `observer guard lint` surfaces the identical
+// string.
+func (m *mergeState) noteUngrantableOverridable(ov rawOverride) {
+	if !ov.Overridable {
+		return
+	}
+	m.issues = append(m.issues, fmt.Sprintf(
+		"%s override on %s: `overridable` ignored - only the org policy bundle grants a per-rule override (spec §4.6/§14.2)",
+		ov.Layer, ov.RuleID,
+	))
+}
+
+// applyTrustedProject folds the dashboard-authored, daemon-local trusted
+// per-project layer (guard-rule-management-ui plan §3.2). It mirrors
+// applyUser (NOT applyProject): overrides apply UNCONDITIONALLY except
+// against the org floor — this layer sits under ~/.observer, inside
+// R-160's deny surface, so the agent cannot write it, and the operator
+// may relax/disable a rule for a specific project. An org-floored rule
+// can NEVER be relaxed here (the floor map, populated by applyOrg, still
+// hard-blocks). Its top-level `disable` list is threaded onto
+// mergeState.disable for buildEngine to union into Config.Disabled.
+//
+// Because it folds AFTER applyProject and its overrides append last,
+// policy.New (which applies overrides in order, last-wins) lets a trusted
+// relaxation override both the built-in default and any in-repo project
+// escalation of the same rule — the operator layer outranks the
+// agent-writable one, while both stay below the org floor.
+func (m *mergeState) applyTrustedProject(trusted *policyFile) {
+	if trusted == nil {
+		return
+	}
+	// A trusted `disable` is subject to the SAME org floor as a trusted
+	// override: disabling an org-floored rule would remove it entirely
+	// (policy.New's disable path only exempts protected BUDGET rows), so
+	// it would silently defeat the org floor for non-budget floored rules
+	// (e.g. R-160/R-161 if the org floored them). Drop those IDs with a
+	// recorded issue; a non-floored built-in stays disable-able (the
+	// operator's per-project (c)/(d) power — the ONLY hard limit is the
+	// org floor).
+	for _, id := range trusted.disable {
+		if m.floor[id] {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"trusted project disable of %s dropped: an org-floored rule cannot be disabled (org > trusted project - spec §4.6)", id))
+			continue
+		}
+		// R-160/R-161 are the guard's own integrity rules — never
+		// disable-able below the org, treated like a floored ID REGARDLESS
+		// of m.floor. Dropping R-160 here would let an agent write
+		// ~/.observer/** (including the trusted layer itself) freely.
+		// policy.New's disable filter is the hard backstop; this recorded
+		// issue makes the drop visible in `observer guard status` and the
+		// LintTrustedProject save-gate instead of a silent no-op.
+		if policy.IsIntegrityRuleID(id) {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"trusted project disable of %s dropped: %s is an integrity rule and cannot be disabled below the org (guard-rule-management-ui plan §3.4 / §2)", id, id))
+			continue
+		}
+		m.disable = append(m.disable, id)
+	}
+	m.extra = append(m.extra, trusted.rules...)
+	for _, s := range trusted.rules {
+		if m.floor[s.ID] {
+			// A trusted rule reusing an org rule ID adds a row but cannot
+			// lower the recorded floor stance (same as applyUser).
+			f := m.effective[s.ID]
+			f.observe = policy.StricterOf(f.observe, s.Observe)
+			f.enforce = policy.StricterOf(f.enforce, s.Enforce)
+			f.enforced = f.enforced || s.Enforced
+			continue
+		}
+		m.effective[s.ID] = &stance{observe: s.Observe, enforce: s.Enforce, enforced: s.Enforced}
+	}
+	for _, ov := range trusted.overrides {
+		m.noteUngrantableOverridable(ov)
+		s := m.effective[ov.RuleID]
+		if s == nil {
+			m.overrides = append(m.overrides, toPolicyOverride(ov))
+			continue
+		}
+		// For a floored rule this drops a trusted relaxation whenever it
+		// falls below the CURRENT effective stance (s), which may already
+		// sit ABOVE the org floor because a user / in-repo layer escalated
+		// it. That is deliberately conservative: it can never take a rule
+		// below the org floor (the whole point), and refusing to relax
+		// below a stricter local stance too is a safe v1 simplification,
+		// not a behavior we need to loosen.
+		if m.floor[ov.RuleID] && ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"trusted project override on %s dropped: %q would relax the org policy floor (org > trusted project - spec §4.6)",
+				ov.RuleID, ov.Decision,
+			))
+			continue
+		}
+		if m.dropBelowOrgEnforceOff("trusted project", ov) {
+			continue
+		}
+		// R-160/R-161 are the guard's own integrity rules: no below-org
+		// layer may weaken them (treated like a floored rule REGARDLESS of
+		// m.floor). Escalation still passes. policy.New is the hard
+		// backstop; the recorded issue surfaces the drop in the
+		// LintTrustedProject save-gate and `observer guard status`.
+		if policy.IsIntegrityRuleID(ov.RuleID) && ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"trusted project override on %s dropped: %s is an integrity rule and cannot be relaxed below the org (guard-rule-management-ui plan §3.4 / §2)",
+				ov.RuleID, ov.RuleID,
+			))
+			continue
+		}
+		// Trusted project outranks built-in + in-repo project: apply
+		// unconditionally (the org floor, when present, was checked above).
+		m.apply(s, ov)
+	}
+}
+
+// dropBelowOrgEnforceOff drops (with a recorded issue) an explicit
+// `enforce = false` from a below-org layer that may otherwise relax
+// (user, trusted project) when the rule is org-floored or one of the
+// guard's integrity rules: capping it at flag would weaken what that
+// layer may not weaken (Sol A2-06). It reports whether ov was dropped.
+func (m *mergeState) dropBelowOrgEnforceOff(layer string, ov rawOverride) bool {
+	if !ov.EnforceOff {
+		return false
+	}
+	switch {
+	case m.floor[ov.RuleID]:
+		m.issues = append(m.issues, fmt.Sprintf(
+			"%s override on %s dropped: `enforce = false` would cap an org-floored rule at flag (org > %s - spec §4.6)",
+			layer, ov.RuleID, layer,
+		))
+		return true
+	case policy.IsIntegrityRuleID(ov.RuleID):
+		m.issues = append(m.issues, fmt.Sprintf(
+			"%s override on %s dropped: %s is an integrity rule and cannot be capped at flag below the org (guard-rule-management-ui plan §3.4 / §2)",
+			layer, ov.RuleID, ov.RuleID,
+		))
+		return true
+	}
+	return false
 }
 
 // apply commits an accepted override to the stance reference and the
@@ -200,7 +382,16 @@ func (m *mergeState) apply(s *stance, ov rawOverride) {
 // toPolicyOverride converts a parsed override into the engine's
 // mechanical form.
 func toPolicyOverride(ov rawOverride) policy.Override {
-	out := policy.Override{RuleID: ov.RuleID, Enforced: ov.Enforced, Source: ov.Layer}
+	out := policy.Override{
+		RuleID:     ov.RuleID,
+		Enforced:   ov.Enforced,
+		EnforceOff: ov.EnforceOff,
+		Source:     ov.Layer,
+		// Structural gate, not a caller courtesy: overridability is
+		// carried ONLY off the org layer, so no other call path can
+		// grant it even by mistake.
+		Overridable: ov.Overridable && ov.Layer == layerOrg,
+	}
 	if ov.HasDec {
 		d := ov.Decision
 		out.Decision = &d

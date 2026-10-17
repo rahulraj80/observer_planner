@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedSDK",
+    "data[]": "VerifiedSDK",
+    "data[].added_at": "VerifiedSDK",
+    "data[].api_key_last_used_at": "VerifiedSDK",
+    "data[].email": "VerifiedSDK",
+    "data[].id": "VerifiedSDK",
+    "data[].is_scim_managed": "VerifiedSDK",
+    "data[].is_service_account": "VerifiedSDK",
+    "data[].name": "VerifiedSDK",
+    "data[].object": "VerifiedSDK",
+    "data[].role": "VerifiedSDK",
+    "first_id": "Inferred",
+    "has_more": "VerifiedSDK",
+    "last_id": "VerifiedSDK",
+    "object": "Inferred"
+  },
+  "fixture_sha256": "9a4177d8f49c68c1a4972e0f3a8e8a9d6b8a1663303a822b4c1fcc57c13afa1c",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/users",
+    "query": {
+      "limit": "2"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the organization_user SDK type; role is a free string in the SDK (owner and reader are the documented Platform roles).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-python main, fetched 2026-10-07",
+  "source_kind": "sdk_type",
+  "source_sha256": "7f58b01a913417731ca6ada9f9a388d6d5d9dc34c3b2e395133c718bc9536530",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/admin/organization/organization_user.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.users"
+}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -53,7 +55,7 @@ func seedAction(t *testing.T, database *sql.DB, idx int) int64 {
 // TestSignalRecorder_RecordRetrieveStashed pins one row landing per
 // successful Record call.
 func TestSignalRecorder_RecordRetrieveStashed(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -80,7 +82,7 @@ func TestSignalRecorder_RecordRetrieveStashed(t *testing.T) {
 // TestSignalRecorder_RecordSearchHit pins action_id is preserved on
 // "search_hit" signals.
 func TestSignalRecorder_RecordSearchHit(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -125,7 +127,7 @@ func TestSignalRecorder_NilSafe(t *testing.T) {
 // TestPatternMiner_ReportAggregates pins the K43 aggregate shape: per-
 // type counts + top-shas + top-actions, scoped to the lookback window.
 func TestPatternMiner_ReportAggregates(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -211,7 +213,7 @@ func seedStashEvent(t *testing.T, database *sql.DB, count int) {
 // when no retrieves but ≥10 stashes.
 func TestPatternMiner_RetrieveRateAndHints(t *testing.T) {
 	t.Run("zero retrieves on many stashes → info hint", func(t *testing.T) {
-		database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+		database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +237,7 @@ func TestPatternMiner_RetrieveRateAndHints(t *testing.T) {
 		}
 	})
 	t.Run("retrieve_rate >= 5% → consider hint", func(t *testing.T) {
-		database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+		database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,7 +259,7 @@ func TestPatternMiner_RetrieveRateAndHints(t *testing.T) {
 		}
 	})
 	t.Run("zero stashes → no hints", func(t *testing.T) {
-		database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+		database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -275,7 +277,7 @@ func TestPatternMiner_RetrieveRateAndHints(t *testing.T) {
 // TestPatternMiner_Report_OutsideWindowExcluded pins that signals
 // older than the lookback window aren't counted.
 func TestPatternMiner_Report_OutsideWindowExcluded(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "k.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

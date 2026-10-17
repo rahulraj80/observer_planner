@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing && !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -12,10 +14,12 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/selfobs/emit"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -25,7 +29,7 @@ import (
 func liveRouterFixture(t *testing.T, mode string) (*liveRouter, *store.Store, int64) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -278,6 +282,76 @@ func TestRunRoutingCalibration_EndToEnd(t *testing.T) {
 	n, err := s.CountModelCalibrations(context.Background())
 	if err != nil || n == 0 {
 		t.Fatalf("calibration cells = %d err=%v, want > 0", n, err)
+	}
+}
+
+// TestWireRouting_RoutingEnabledGate is the W5 proof (plan
+// docs/plans/org-observer-fundamentals-fix-plan-2026-09-13.md R4) that
+// cmd/observer/proxy.go's wireRouting gate ("if !cfg.Routing.Enabled ...
+// return nil, nil") reads whatever value ends up on cfg.Routing.Enabled —
+// so a governance-pinned routing.enabled=true (proven to reach cfg in
+// internal/config's TestGovernancePinnedRoutingEnabledYieldsARouter) is
+// enough to get a router with NO change to this function.
+func TestWireRouting_RoutingEnabledGate(t *testing.T) {
+	ctx := context.Background()
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	s := store.New(database)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	disabled := config.Default()
+	disabled.Routing.Enabled = false
+	if demotions, handle := wireRouting(ctx, disabled, s, &proxy.Options{}, logger, emit.Nop()); demotions != nil || handle != nil {
+		t.Fatalf("Routing.Enabled=false yielded a router: demotions != nil = %v, handle = %+v", demotions != nil, handle)
+	}
+
+	enabled := config.Default()
+	enabled.Routing.Enabled = true
+	enabled.Routing.Mode = "advise"
+	enabled.Routing.Policy = "value"
+	if demotions, handle := wireRouting(ctx, enabled, s, &proxy.Options{}, logger, emit.Nop()); demotions == nil || handle == nil {
+		t.Fatalf("Routing.Enabled=true (the shape a governance pin produces) did not yield a router: demotions != nil = %v, handle = %+v", demotions != nil, handle)
+	}
+}
+
+// TestRoutingEffectiveModeManagedEnforce pins the Arc 4 P3b §R23 lift on the
+// live router: the effective mode honors the org body's mode ONLY when the
+// managed-enforce predicate is true (managed tenancy + enforce.routing), with
+// no coercion — observe/off leaves routing advisory — and is exactly the
+// node-local mode on every non-managed node.
+func TestRoutingEffectiveModeManagedEnforce(t *testing.T) {
+	cases := []struct {
+		name      string
+		localMode string
+		orgMode   string
+		managed   bool
+		want      string
+	}{
+		{"no managed, no org", "advise", "", false, "advise"},
+		{"managed enforce over local advise", "advise", "enforce", true, "enforce"},
+		{"managed but predicate false", "advise", "enforce", false, "advise"},
+		{"managed observe stays advisory", "advise", "observe", true, "advise"},
+		{"managed empty org falls back local", "advise", "", true, "advise"},
+		{"local enforce preserved when unmanaged", "enforce", "", false, "enforce"},
+		{"managed org observe lowers local enforce", "enforce", "observe", true, "advise"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lr := &liveRouter{mode: tc.localMode, orgMode: tc.orgMode}
+			lr.SetManagedEnforce(func() bool { return tc.managed })
+			if got := lr.effectiveMode(); got != tc.want {
+				t.Errorf("effectiveMode() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// A router with no effMode ever stored falls back to the local mode.
+	bare := &liveRouter{mode: "enforce"}
+	if got := bare.effectiveMode(); got != "enforce" {
+		t.Errorf("bare effectiveMode() = %q, want the local enforce", got)
 	}
 }
 

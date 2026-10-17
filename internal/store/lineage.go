@@ -8,15 +8,28 @@ import (
 )
 
 // SessionLineageChild is a compact descriptor of a session spawned from
-// (forked or subagent-of) a parent codex session — surfaced in the
-// parent's session-detail "spawned sessions" list. Token/cost rollups are
-// deliberately NOT included: the per-session cost is a heavy per-turn CTE
-// (handleSessionDetail) and building a fresh aggregate here would violate
-// the single-owner rule for no user-visible gain in the child rows.
+// (forked or subagent-of) a parent session — surfaced in the parent's
+// session-detail "spawned sessions" list. Since the 2026-08-21 operator
+// ruling that per-sub-agent usage must be visible on the parent's detail
+// view (opencode sub-agents are separate sessions, unlike claude-code's
+// same-session sidechains), each child carries rollups: its SpendTurns (the
+// one session rule, so the child's figures equal its own session header),
+// their token sums and recorded cost, and its action count.
 type SessionLineageChild struct {
 	ID           string
 	ThreadSource string
 	StartedAt    string
+	// InputTokens / OutputTokens sum the child's SpendTurns (api_turns ∪
+	// token_usage under the one session rule - the child header's input and
+	// output); CostUSD sums their RECORDED cost (zero when the adapter
+	// doesn't record one - a caller that prices uses Turns, as the session
+	// header does). ActionCount is the child's actions row count (zero when
+	// pruned or not yet ingested).
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+	ActionCount  int64
+	Turns        []SpendTurn
 }
 
 // SessionLineageView is the codex fork/subagent lineage for one session
@@ -32,9 +45,55 @@ type SessionLineageView struct {
 	// ParentInDB reports whether a session row exists for ForkedFromID.
 	// Only queried when ForkedFromID is non-empty; false otherwise.
 	ParentInDB bool
-	// Children are the sessions whose forked_from_id equals this session
-	// id, ordered by start time. Nil when there are none.
+	// Children are the sessions whose forked_from_id OR parent_thread_id
+	// equals this session id (codex user-forks stamp forked_from_id;
+	// codex + opencode sub-agent spawns stamp parent_thread_id), ordered
+	// by start time. Nil when there are none.
 	Children []SessionLineageChild
+}
+
+// SubagentChildIDs returns the session ids of sub-agents spawned from
+// parentID, for folding a sub-agent's own lines-of-code back under the
+// parent's session card (see internal/store/locread.go::LoadSessionLOC).
+//
+// The link is the lineage the adapters already record: a session whose
+// parent_thread_id is parentID and whose thread_source is 'subagent'
+// (claude-code dedicated-file children, opencode, openclaw, codex, devin).
+// It deliberately does NOT encode the claude-code `<parent>:agent:<id>` id
+// convention — LoadSessionLOC adds an id-prefix LIKE for the orphan case
+// (a child whose session row was never materialized) on top of this — so
+// this helper stays a plain, capability-based lineage read with no
+// tool-name or id-string knowledge. A separate-session sub-agent that
+// records no lineage row (the clinecli model) is NOT folded; it stays a
+// first-class session shown apart, its own card honest about its lines.
+//
+// An empty slice (never an error) is returned for a session with no
+// sub-agent children, so callers can union unconditionally.
+func (s *Store) SubagentChildIDs(ctx context.Context, parentID string) ([]string, error) {
+	if parentID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM sessions
+		 WHERE parent_thread_id = ? AND thread_source = 'subagent'`, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("store.SubagentChildIDs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store.SubagentChildIDs: scan: %w", err)
+		}
+		if id != "" && id != parentID {
+			out = append(out, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store.SubagentChildIDs: rows: %w", err)
+	}
+	return out, nil
 }
 
 // LoadSessionLineage resolves the codex fork/subagent lineage for a single
@@ -73,22 +132,41 @@ func (s *Store) LoadSessionLineage(ctx context.Context, sessionID string) (Sessi
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, COALESCE(thread_source, ''), started_at
-		 FROM sessions WHERE forked_from_id = ?
-		 ORDER BY started_at`, sessionID)
+		`SELECT s.id, COALESCE(s.thread_source, ''), s.started_at,
+		        (SELECT COUNT(*) FROM actions a WHERE a.session_id = s.id)
+		 FROM sessions s
+		 WHERE s.forked_from_id = ? OR s.parent_thread_id = ?
+		 ORDER BY s.started_at`, sessionID, sessionID)
 	if err != nil {
 		return v, fmt.Errorf("store.LoadSessionLineage: children: %w", err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var c SessionLineageChild
-		if err := rows.Scan(&c.ID, &c.ThreadSource, &c.StartedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ThreadSource, &c.StartedAt, &c.ActionCount); err != nil {
+			rows.Close()
 			return v, fmt.Errorf("store.LoadSessionLineage: scan child: %w", err)
 		}
 		v.Children = append(v.Children, c)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return v, fmt.Errorf("store.LoadSessionLineage: children rows: %w", err)
+	}
+	rows.Close()
+	ids := make([]string, len(v.Children))
+	for i := range v.Children {
+		ids[i] = v.Children[i].ID
+	}
+	spend, err := s.LoadSessionsSpendTurns(ctx, ids)
+	if err != nil {
+		return v, fmt.Errorf("store.LoadSessionLineage: child spend: %w", err)
+	}
+	for i := range v.Children {
+		turns := spend[v.Children[i].ID]
+		tot := SumSpendTurns(turns)
+		v.Children[i].InputTokens, v.Children[i].OutputTokens = tot.InputTokens, tot.OutputTokens
+		v.Children[i].CostUSD = tot.RecordedCostUSD
+		v.Children[i].Turns = turns
 	}
 	return v, nil
 }

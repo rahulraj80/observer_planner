@@ -1,0 +1,41 @@
+{
+  "categories": [
+    "Feature",
+    "Project",
+    "Comet"
+  ],
+  "data": [
+    {
+      "start_time": 1746144000,
+      "end_time": 1746230400,
+      "results": [
+        {
+          "user_email": "carol@example.com",
+          "count": 3,
+          "by_categories": {
+            "Feature": [
+              {
+                "category": "labs",
+                "count": 3
+              }
+            ],
+            "Project": [
+              {
+                "category": "Launch plan space",
+                "count": 3
+              }
+            ],
+            "Comet": [
+              {
+                "category": "comet",
+                "count": 1
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

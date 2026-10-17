@@ -54,8 +54,9 @@ func (a *Adapter) WatchPaths() []string { return a.roots }
 
 // IsSessionFile implements adapter.Adapter. A path qualifies only when it
 // is BOTH under one of this adapter's watch roots AND matches the qwen
-// transcript shape `.qwen/projects/<slug>/chats/<uuid>.jsonl` (the
-// companion `<uuid>.runtime.json` and any other file are rejected).
+// transcript shape `<qwen-home>/projects/<slug>/chats/<uuid>.jsonl` (the
+// companion `<uuid>.runtime.json`, the top-level `journal.jsonl`, and any
+// other file are rejected).
 func (a *Adapter) IsSessionFile(path string) bool {
 	if !matchesShape(path) {
 		return false
@@ -67,9 +68,18 @@ func (a *Adapter) IsSessionFile(path string) bool {
 // independent of watch roots. Comparison is on a slash-normalized,
 // lower-cased copy so Windows separators and case-insensitive mounts
 // match too.
+//
+// The shape deliberately does NOT hardcode the `.qwen` home segment: with
+// $QWEN_HOME set, the very same transcript tree lives under an operator-
+// chosen directory (`$QWEN_HOME/projects/<slug>/chats/`). The install root
+// is enforced separately by IsSessionFile's UnderAnyWatchRoot gate (the
+// same division of labour the kimicode adapter uses), so the shape need
+// only distinguish a chat transcript from the other files under the root —
+// notably the top-level `journal.jsonl`, which sits outside any `chats/`
+// directory and is not a session log.
 func matchesShape(path string) bool {
 	lower := strings.ReplaceAll(strings.ToLower(path), `\`, "/")
-	if !strings.Contains(lower, "/.qwen/projects/") {
+	if !strings.Contains(lower, "/projects/") {
 		return false
 	}
 	if !strings.Contains(lower, "/chats/") {
@@ -87,10 +97,41 @@ func matchesShape(path string) bool {
 // defaultRoots returns ~/.qwen/projects under every cross-mount-resolved
 // $HOME so a WSL2 observer picks up Windows-side sessions on
 // /mnt/c/Users/<u>/.qwen and vice versa.
+//
+// $QWEN_HOME wins on the native side when set: the Qwen Code bundle
+// resolves its own storage root from QWEN_HOME before falling back to
+// os.homedir()/.qwen, so an operator who relocated the home sees their
+// sessions under $QWEN_HOME/projects and nowhere else. Like clinecli's
+// CLINE_DIR handling, the env var is only meaningful for THIS process's
+// environment, so it is not re-resolved per cross-mount home — the
+// per-home defaults below still contribute their own `.qwen/projects`
+// paths. The value is absolutized before use (see adapter.AbsEnvRoot) so a
+// relative QWEN_HOME can never become a relative watch root. Empty/
+// duplicate candidates are dropped so WatchPaths never carries the same
+// directory twice.
 func defaultRoots() []string {
 	var roots []string
+	seen := map[string]struct{}{}
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		p = filepath.Clean(p)
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		roots = append(roots, p)
+	}
+
+	if home := adapter.AbsEnvRoot("QWEN_HOME"); home != "" {
+		add(filepath.Join(home, "projects"))
+	}
 	for _, h := range crossmount.AllHomes() {
-		roots = append(roots, filepath.Join(h.Path, ".qwen", "projects"))
+		if h.Path == "" {
+			continue
+		}
+		add(filepath.Join(h.Path, ".qwen", "projects"))
 	}
 	return roots
 }
@@ -124,12 +165,15 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		res.SessionProcessSeeds = runtimeSeeds(path)
 	}
 	st := &parseState{
-		adapter:     a,
-		path:        path,
-		rootCache:   map[string]string{},
-		pendingCall: map[string]int{},
-		byName:      map[string][]int{},
-		firstOffset: fromOffset,
+		adapter:       a,
+		path:          path,
+		rootCache:     map[string]string{},
+		remoteCache:   map[string]string{},
+		identityCache: map[string]git.Identity{},
+		pendingCall:   map[string]int{},
+		byName:        map[string][]int{},
+		versionSeen:   map[string]bool{},
+		firstOffset:   fromOffset,
 	}
 
 	// bufio.Reader.ReadString (not Scanner) so the byte cursor advances by
@@ -140,10 +184,12 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	lineNum := 0
 	for {
 		if ctx.Err() != nil {
+			st.applyIdentities(&res)
 			return res, ctx.Err()
 		}
 		lineStr, readErr := reader.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
+			st.applyIdentities(&res)
 			return res, fmt.Errorf("qwencode.ParseSessionFile: read: %w", readErr)
 		}
 		hasNewline := strings.HasSuffix(lineStr, "\n")
@@ -178,7 +224,35 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			break
 		}
 	}
+	st.flagPendingOutcomes(&res)
+	st.applyIdentities(&res)
 	return res, nil
+}
+
+// flagPendingOutcomes marks every tool call still waiting for its result
+// at EOF. Its Success=true is a placeholder, so the store holds
+// failure-context bookkeeping for the row until the matching
+// ActionOutcomeUpdate reports the real outcome.
+func (st *parseState) flagPendingOutcomes(res *adapter.ParseResult) {
+	for _, idx := range st.pendingCall {
+		if idx < len(res.ToolEvents) {
+			res.ToolEvents[idx].OutcomePending = true
+		}
+	}
+}
+
+// applyIdentities backfills the Project Identity Resolver v2 bundle onto
+// every event in res, keyed by resolved project root (a qwen-code
+// transcript can carry more than one distinct cwd/root — see
+// identityCache).
+func (st *parseState) applyIdentities(res *adapter.ParseResult) {
+	byRoot := make(map[string]git.Identity, len(st.identityCache))
+	for cwd, root := range st.rootCache {
+		if root != "" {
+			byRoot[root] = st.identityCache[cwd]
+		}
+	}
+	adapter.ApplyProjectIdentityByRoot(res, byRoot)
 }
 
 // runtimeSidecar is the shape of the `<uuid>.runtime.json` file qwen
@@ -262,6 +336,21 @@ type parseState struct {
 	// records that (rarely) omit them still resolve a project root.
 	lastCwd    string
 	lastBranch string
+	// remoteCache memoizes cwd → normalized git remote (see projectRoot).
+	// Unlike lastBranch, the record never states its own remote, so this
+	// comes ONLY from git.Resolve.
+	remoteCache map[string]string
+	// identityCache memoizes cwd → the Project Identity Resolver v2
+	// bundle (2026-09-06, §3.1 / W1) resolved alongside
+	// rootCache/remoteCache. Applied at the end of ParseSessionFile via
+	// adapter.ApplyProjectIdentityByRoot, keyed by resolved root.
+	identityCache map[string]git.Identity
+	// versionSeen tracks sessionIDs for which a tool-version stamp has
+	// already been emitted this parse (Issue 2, migration 125), so the
+	// per-record `version` field yields at most one SessionToolVersion
+	// per session per parse. The store write is first-wins-unless-empty
+	// regardless; this just avoids O(records) duplicate stamps.
+	versionSeen map[string]bool
 }
 
 // handle dispatches one record onto the appropriate emit path.
@@ -271,6 +360,15 @@ func (st *parseState) handle(rec *rawRecord, res *adapter.ParseResult) {
 	}
 	if rec.GitBranch != "" {
 		st.lastBranch = rec.GitBranch
+	}
+	// Issue 2: the qwen-code build version rides on every record's
+	// Claude-Code envelope. Emit at most one stamp per session per parse.
+	if rec.Version != "" && rec.SessionID != "" && !st.versionSeen[rec.SessionID] {
+		st.versionSeen[rec.SessionID] = true
+		res.SessionToolVersions = append(res.SessionToolVersions, models.SessionToolVersion{
+			SessionID: rec.SessionID,
+			Version:   rec.Version,
+		})
 	}
 	switch rec.Type {
 	case "user":
@@ -285,29 +383,33 @@ func (st *parseState) handle(rec *rawRecord, res *adapter.ParseResult) {
 }
 
 // projectRoot resolves the record cwd (translating a foreign-OS path
-// before git.Resolve) and memoizes the result.
-func (st *parseState) projectRoot() string {
+// before git.Resolve) and memoizes the result, along with its normalized
+// git remote.
+func (st *parseState) projectRoot() (root, remote string) {
 	cwd := st.lastCwd
 	if cwd == "" {
-		return ""
+		return "", ""
 	}
 	cwd = crossmount.TranslateForeignPath(cwd)
 	if root, ok := st.rootCache[cwd]; ok {
-		return root
+		return root, st.remoteCache[cwd]
 	}
-	info, err := git.Resolve(cwd)
+	id, err := git.ResolveIdentity(cwd, git.IdentityOptions{})
 	if err != nil {
 		st.rootCache[cwd] = cwd
-		return cwd
+		return cwd, ""
 	}
-	st.rootCache[cwd] = info.Root
-	return info.Root
+	st.rootCache[cwd] = id.Root
+	// id.Remote is already NormalizeRemote'd by ResolveIdentity.
+	st.remoteCache[cwd] = id.Remote
+	st.identityCache[cwd] = id
+	return id.Root, st.remoteCache[cwd]
 }
 
 // emitUserPrompt records a user prompt, and (only when parsing from the
 // top of the file, on the transcript root record) a session-start marker.
 func (st *parseState) emitUserPrompt(rec *rawRecord, res *adapter.ParseResult) {
-	root := st.projectRoot()
+	root, remote := st.projectRoot()
 	if st.firstOffset == 0 && !st.sessionStarted && rec.ParentUUID == nil {
 		st.sessionStarted = true
 		res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
@@ -317,6 +419,7 @@ func (st *parseState) emitUserPrompt(rec *rawRecord, res *adapter.ParseResult) {
 			ProjectRoot:   root,
 			Timestamp:     parseTimestamp(rec.Timestamp),
 			GitBranch:     st.lastBranch,
+			GitRemote:     remote,
 			Tool:          models.ToolQwenCode,
 			ActionType:    models.ActionSessionStart,
 			Target:        "startup",
@@ -337,6 +440,7 @@ func (st *parseState) emitUserPrompt(rec *rawRecord, res *adapter.ParseResult) {
 		ProjectRoot:   root,
 		Timestamp:     parseTimestamp(rec.Timestamp),
 		GitBranch:     st.lastBranch,
+		GitRemote:     remote,
 		Tool:          models.ToolQwenCode,
 		ActionType:    models.ActionUserPrompt,
 		Target:        truncate(scrubbed, 200),
@@ -352,7 +456,7 @@ func (st *parseState) emitAssistant(rec *rawRecord, res *adapter.ParseResult) {
 	if rec.Message == nil {
 		return
 	}
-	root := st.projectRoot()
+	root, remote := st.projectRoot()
 	ts := parseTimestamp(rec.Timestamp)
 	callIdx := 0
 	for _, part := range rec.Message.Parts {
@@ -369,6 +473,7 @@ func (st *parseState) emitAssistant(rec *rawRecord, res *adapter.ParseResult) {
 				ProjectRoot:   root,
 				Timestamp:     ts,
 				GitBranch:     st.lastBranch,
+				GitRemote:     remote,
 				Model:         rec.Model,
 				Tool:          models.ToolQwenCode,
 				ActionType:    mapToolName(fc.Name),
@@ -391,6 +496,7 @@ func (st *parseState) emitAssistant(rec *rawRecord, res *adapter.ParseResult) {
 				ProjectRoot:   root,
 				Timestamp:     ts,
 				GitBranch:     st.lastBranch,
+				GitRemote:     remote,
 				Model:         rec.Model,
 				Tool:          models.ToolQwenCode,
 				ActionType:    models.ActionAssistantMessage,
@@ -460,17 +566,49 @@ func toolResultOutput(rec *rawRecord) string {
 // stampResult finds the pending ToolEvent for callID and records its
 // outcome. A non-empty status of anything other than "success" marks the
 // event failed.
+//
+// When no pending call matches, the functionCall was emitted in an
+// EARLIER parse window and its row is already persisted (optimistically
+// successful): the outcome goes out as an ActionOutcomeUpdate keyed by
+// the same "tool:<callID>" SourceEventID callEventID produced. Only a
+// non-empty callID qualifies — the empty-id fallback id embeds the
+// record uuid + position, neither of which the result record carries.
 func (st *parseState) stampResult(callID, status, output string, res *adapter.ParseResult) {
+	var scrubbed string
+	if output != "" {
+		scrubbed = st.adapter.scrubber.String(contentcap.Cap(output, contentcap.DefaultMaxBytes))
+	}
 	idx, ok := st.pendingCall[callID]
 	if !ok || idx >= len(res.ToolEvents) {
+		if callID == "" {
+			return
+		}
+		// An absent status is NOT a verdict — in-window it leaves
+		// Success untouched, and cross-tick it must do the same: the
+		// persisted row may already read failed (a ui_telemetry
+		// tool_call event in the earlier window stamps status), and
+		// asserting success here would silently repair it. Output
+		// still ships; an error message would be equally invented.
+		// DurationMs stays 0 — the call is in the prior window and
+		// UpdateActionOutcome no-ops a zero.
+		up := models.ActionOutcomeUpdate{
+			SourceFile:    st.path,
+			SourceEventID: "tool:" + callID,
+			SuccessKnown:  status != "",
+			Success:       status == "success",
+			ToolOutput:    scrubbed,
+		}
+		if up.SuccessKnown && !up.Success && scrubbed != "" {
+			up.ErrorMessage = truncate(scrubbed, 500)
+		}
+		res.OutcomeUpdates = append(res.OutcomeUpdates, up)
 		return
 	}
 	ev := &res.ToolEvents[idx]
 	if status != "" {
 		ev.Success = status == "success"
 	}
-	if output != "" {
-		scrubbed := st.adapter.scrubber.String(contentcap.Cap(output, contentcap.DefaultMaxBytes))
+	if scrubbed != "" {
 		ev.ToolOutput = scrubbed
 		if !ev.Success {
 			ev.ErrorMessage = truncate(scrubbed, 500)
@@ -481,7 +619,7 @@ func (st *parseState) stampResult(callID, status, output string, res *adapter.Pa
 
 // emitSystem dispatches system records by subtype: ui_telemetry events
 // (api_response → TokenEvent + tool_call enrichment + api_error →
-// ActionAPIError) and slash_command → an informational ActionUnknown row.
+// ActionAPIError) and slash_command → an ActionUserPromptExpansion row.
 func (st *parseState) emitSystem(rec *rawRecord, res *adapter.ParseResult) {
 	if rec.SystemPayload == nil {
 		return
@@ -513,12 +651,14 @@ func (st *parseState) emitTelemetry(rec *rawRecord, res *adapter.ParseResult) {
 // emitTokenEvent turns an api_response event into a NET-token TokenEvent.
 func (st *parseState) emitTokenEvent(rec *rawRecord, ev *rawUIEvent, res *adapter.ParseResult) {
 	tp := tokenBundle(ev)
+	root, remote := st.projectRoot()
 	res.TokenEvents = append(res.TokenEvents, models.TokenEvent{
 		SourceFile:      st.path,
 		SourceEventID:   "tok:" + rec.UUID,
 		SessionID:       rec.SessionID,
-		ProjectRoot:     st.projectRoot(),
+		ProjectRoot:     root,
 		GitBranch:       st.lastBranch,
+		GitRemote:       remote,
 		Timestamp:       parseTimestamp(firstNonEmpty(ev.Timestamp, rec.Timestamp)),
 		Tool:            models.ToolQwenCode,
 		Model:           ev.Model,
@@ -565,13 +705,15 @@ func (st *parseState) emitAPIError(rec *rawRecord, ev *rawUIEvent, res *adapter.
 	if ev.StatusCode > 0 {
 		target = fmt.Sprintf("%s (HTTP %d)", ev.Model, ev.StatusCode)
 	}
+	root, remote := st.projectRoot()
 	res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
 		SourceFile:    st.path,
 		SourceEventID: "api_error:" + rec.UUID,
 		SessionID:     rec.SessionID,
-		ProjectRoot:   st.projectRoot(),
+		ProjectRoot:   root,
 		Timestamp:     parseTimestamp(firstNonEmpty(ev.Timestamp, rec.Timestamp)),
 		GitBranch:     st.lastBranch,
+		GitRemote:     remote,
 		Model:         ev.Model,
 		Tool:          models.ToolQwenCode,
 		ActionType:    models.ActionAPIError,
@@ -583,23 +725,32 @@ func (st *parseState) emitAPIError(rec *rawRecord, ev *rawUIEvent, res *adapter.
 	})
 }
 
-// emitSlashCommand records a slash-command invocation as an informational
-// ActionUnknown row (only the initial invocation phase, to avoid noise).
+// emitSlashCommand records a slash-command invocation as an
+// ActionUserPromptExpansion row (only the initial invocation phase, to
+// avoid noise): the user typed a `/command` shorthand that the CLI
+// expands into the real prompt, the same family as claude-code's own
+// slash-command expansion. Kept in sync with
+// internal/tooltax/table.go's qwen-code "qwen-code.slash_command" row
+// by internal/tooltax's TestStepFinishEmitSitesAgreeWithTooltax
+// (WP-T6 finding — this site previously hardcoded ActionUnknown, which
+// drifted against the tooltax table).
 func (st *parseState) emitSlashCommand(rec *rawRecord, res *adapter.ParseResult) {
 	cmd := strings.TrimSpace(rec.SystemPayload.RawCommand)
 	if cmd == "" || (rec.SystemPayload.Phase != "" && rec.SystemPayload.Phase != "invocation") {
 		return
 	}
 	scrubbed := st.adapter.scrubber.String(cmd)
+	root, remote := st.projectRoot()
 	res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
 		SourceFile:    st.path,
 		SourceEventID: "slash:" + rec.UUID,
 		SessionID:     rec.SessionID,
-		ProjectRoot:   st.projectRoot(),
+		ProjectRoot:   root,
 		Timestamp:     parseTimestamp(rec.Timestamp),
 		GitBranch:     st.lastBranch,
+		GitRemote:     remote,
 		Tool:          models.ToolQwenCode,
-		ActionType:    models.ActionUnknown,
+		ActionType:    models.ActionUserPromptExpansion,
 		Target:        truncate(scrubbed, 200),
 		RawToolName:   "qwen-code.slash_command",
 		RawToolInput:  scrubbed,

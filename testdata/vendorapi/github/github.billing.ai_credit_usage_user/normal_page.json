@@ -1,0 +1,21 @@
+{
+  "timePeriod": {
+    "year": 2025
+  },
+  "user": "monalisa",
+  "usageItems": [
+    {
+      "product": "Copilot AI Credits",
+      "sku": "AI Credit",
+      "model": "GPT-5",
+      "unitType": "ai-credits",
+      "pricePerUnit": 0.01,
+      "grossQuantity": 100,
+      "grossAmount": 1.0,
+      "discountQuantity": 0,
+      "discountAmount": 0.0,
+      "netQuantity": 100,
+      "netAmount": 1.0
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schemas": [
+    "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+  ],
+  "totalResults": 3,
+  "itemsPerPage": 2,
+  "startIndex": 1,
+  "Resources": [
+    {
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "id": "2819c223-7f76-453a-919d-413861904646",
+      "userName": "bjensen",
+      "name": {
+        "formatted": "Ms. Barbara J Jensen, III"
+      },
+      "displayName": "Babs Jensen",
+      "active": true,
+      "emails": [
+        {
+          "value": "bjensen@example.com",
+          "type": "work",
+          "primary": true
+        },
+        {
+          "value": "babs@jensen.org",
+          "type": "home"
+        }
+      ],
+      "meta": {
+        "resourceType": "User",
+        "created": "2010-01-23T04:56:22Z",
+        "lastModified": "2011-05-13T04:42:34Z"
+      }
+    },
+    {
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "id": "c75ad752-64ae-4823-840d-ffa80929976c",
+      "userName": "jsmith",
+      "active": false,
+      "meta": {
+        "resourceType": "User",
+        "created": "2026-02-01T09:00:00Z",
+        "lastModified": "2026-02-01T09:00:00Z"
+      }
+    }
+  ]
+}

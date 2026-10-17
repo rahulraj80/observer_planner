@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "usage_report_exports": "VerifiedOfficial",
+    "usage_report_exports[]": "VerifiedOfficial",
+    "usage_report_exports[].actor": "VerifiedOfficial",
+    "usage_report_exports[].created_at": "VerifiedOfficial",
+    "usage_report_exports[].download_urls": "VerifiedOfficial",
+    "usage_report_exports[].download_urls[]": "VerifiedOfficial",
+    "usage_report_exports[].end_date": "VerifiedOfficial",
+    "usage_report_exports[].id": "VerifiedOfficial",
+    "usage_report_exports[].report_type": "VerifiedOfficial",
+    "usage_report_exports[].start_date": "VerifiedOfficial",
+    "usage_report_exports[].status": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7a613ebd025bbf757ab6ffe7d95568505e43e8d2e346c709ae21ca63bb3bd9e5",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/settings/billing/reports",
+    "status": 200
+  },
+  "notes": "Verbatim example usage-report-export-list of GET /enterprises/{enterprise}/settings/billing/reports (operationId billing/list-usage-report-exports).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.billing.usage_report_exports"
+}

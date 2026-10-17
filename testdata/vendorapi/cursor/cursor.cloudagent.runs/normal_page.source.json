@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].agentId": "VerifiedOfficial",
+    "items[].createdAt": "VerifiedOfficial",
+    "items[].git": "VerifiedOfficial",
+    "items[].git.branches": "VerifiedOfficial",
+    "items[].git.branches[]": "VerifiedOfficial",
+    "items[].git.branches[].branch": "VerifiedOfficial",
+    "items[].git.branches[].repoUrl": "VerifiedOfficial",
+    "items[].id": "VerifiedOfficial",
+    "items[].status": "VerifiedOfficial",
+    "items[].updatedAt": "VerifiedOfficial"
+  },
+  "fixture_sha256": "d6446a2fc4c7390a47431010090f9786f406e807a7a9bfa16502f08d071e493d",
+  "http": {
+    "method": "GET",
+    "path": "/v1/agents/{id}/runs",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Runs\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.runs"
+}

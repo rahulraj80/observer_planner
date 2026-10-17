@@ -21,6 +21,9 @@ const (
 	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 )
 
+// AgentTooOldBody defines model for AgentTooOldBody.
+type AgentTooOldBody = orgcontract.AgentTooOldBody
+
 // EnrollRequest defines model for EnrollRequest.
 type EnrollRequest = orgcontract.EnrollRequest
 
@@ -36,7 +39,7 @@ type Error struct {
 	Message *string `json:"message,omitempty"`
 }
 
-// PolicyBundle defines model for PolicyBundle.
+// PolicyBundle orgcontract.PolicyBundle. `binding` ({org_id, subject}) is present only on a v2 (bound) delivery, which a node asks for with `policy_caps=binding-v2`; it is absent from every v1 bundle.
 type PolicyBundle = orgcontract.PolicyBundle
 
 // PushEnvelope defines model for PushEnvelope.
@@ -47,6 +50,9 @@ type PushResponse = orgcontract.PushResponse
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
+
+// ingestCredentialContextKey is the context key for ingestCredential security scheme
+type ingestCredentialContextKey string
 
 // samlSessionContextKey is the context key for samlSession security scheme
 type samlSessionContextKey string
@@ -67,6 +73,26 @@ type PushBatchParams struct {
 
 // GetPolicyBundleParams defines parameters for GetPolicyBundle.
 type GetPolicyBundleParams struct {
+	// PolicyCaps Capability tokens the calling agent advertises, repeated or
+	// comma-separated (the grammar every policy rail reads). The one
+	// token this route reads is `binding-v2`
+	// (orgcontract.PolicyBindingCapability, D-282): the agent asks for
+	// a v2 (bound) signature. The server then also signs, over the
+	// `sbo-policy-bundle-v2` domain, the org id and the VERIFIED bearer
+	// subject, carries them in the bundle's `binding` field, and adds a
+	// binding tag to the ETag (so a node that starts asking for a
+	// binding is never answered 304 into the unbound bundle it holds).
+	// A request without the token gets the v1 bytes and ETag exactly
+	// as before, which is all a released node ever asks for. A server
+	// that predates the token ignores it and keeps serving v1; a node
+	// that has once held a bound bundle refuses an unbound one from
+	// then on (a signature downgrade), so after a rollback to such a
+	// server bound nodes keep their last bundle and report
+	// `sig_invalid` until it rolls forward. The token authenticates and
+	// widens nothing: the binding names only the caller's own org and
+	// subject.
+	PolicyCaps *[]string `form:"policy_caps,omitempty" json:"policy_caps,omitempty"`
+
 	// IfNoneMatch The ETag of the agent's cached bundle version.
 	IfNoneMatch *string `json:"If-None-Match,omitempty"`
 }
@@ -349,6 +375,33 @@ func NewGetPolicyBundleRequest(server string, params *GetPolicyBundleParams) (*h
 		return nil, err
 	}
 
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.PolicyCaps != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "policy_caps", *params.PolicyCaps, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
@@ -465,6 +518,7 @@ type PushBatchResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *PushResponse
 	JSON401      *Error
+	JSON426      *AgentTooOldBody
 	JSON429      *Error
 }
 
@@ -627,6 +681,13 @@ func ParsePushBatchResponse(rsp *http.Response) (*PushBatchResponse, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 426:
+		var dest AgentTooOldBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON426 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest Error

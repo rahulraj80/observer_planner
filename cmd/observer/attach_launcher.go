@@ -83,7 +83,10 @@ type launcherAttachOutcome struct {
 // attach gate.
 func launcherAttach(ctx context.Context, spec launcherAttachSpec) (launcherAttachOutcome, error) {
 	capab, _ := integration.For(spec.tool)
-	grounded := capab.Attach != nil
+	// attachInBuild is false in a build without the terminals component: there
+	// is no attach server to reach, so a default-on attach stays a silent bare
+	// launch (D-514) instead of claiming the daemon is unreachable.
+	grounded := capab.Attach != nil && attachInBuild
 
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: spec.configPath})
 	if err != nil {
@@ -144,7 +147,12 @@ func launcherAttach(ctx context.Context, spec launcherAttachSpec) (launcherAttac
 	// shell-exported-only key reaches the daemon-spawned child as it would a bare
 	// launch. capab is the registry row already resolved at the top of this func
 	// — dispatch on capability DATA, never a tool-name branch (CLAUDE.md #3).
-	env = composeAttachEnv(env, cfg.Terminal.Attach.ForwardAuthEnv, capab.AuthEnv, spec.authEnvExtra, os.Environ())
+	// A CONDITIONAL route (ProxyRoute.Gate) is decided by the daemon-spawned
+	// inner launcher, so it must see the caller's gate inputs (credential,
+	// model and base-URL variable NAMES the gate reads) exactly as a bare
+	// launch would; otherwise a shell-exported COPILOT_MODEL, say, would be
+	// invisible to the decision. Nil for an ungated route.
+	env = composeAttachEnv(env, cfg.Terminal.Attach.ForwardAuthEnv, capab.AuthEnv, attachExtraEnvKeys(capab, spec.authEnvExtra), os.Environ())
 
 	extra := attachExtraArgs(npr, spec.proxyOverride, spec.proxyFlag, spec.configPath, spec.passthrough, spec.toolArgs)
 
@@ -157,6 +165,13 @@ func launcherAttach(ctx context.Context, spec launcherAttachSpec) (launcherAttac
 		extraArgs:  extra,
 		stderr:     spec.stderr,
 	})
+}
+
+// attachExtraEnvKeys is the launcher-supplied env NAMES forwarded across the
+// attach socket on top of the registry AuthEnv row: the launcher's dynamic
+// keys plus, for a gated route, every name the gate decision reads.
+func attachExtraEnvKeys(capab integration.Capability, launcherExtra []string) []string {
+	return mergeAuthKeys(launcherExtra, capab.Proxy.GateEnvNames())
 }
 
 // registerAttachFlags mirrors claude.go's conditional registration: --attach and

@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Authentication Error, Invalid proxy server token passed.",
+    "type": "auth_error",
+    "param": "None",
+    "code": "401"
+  }
+}

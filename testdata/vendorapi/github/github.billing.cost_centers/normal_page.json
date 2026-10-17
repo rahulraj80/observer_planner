@@ -1,0 +1,45 @@
+{
+  "costCenters": [
+    {
+      "id": "2eeb8ffe-6903-11ee-8c99-0242ac120002",
+      "name": "Cost Center Name",
+      "state": "active",
+      "azure_subscription": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      "resources": [
+        {
+          "type": "User",
+          "name": "Monalisa"
+        },
+        {
+          "type": "Team",
+          "name": "enterprise-team-1"
+        }
+      ],
+      "ai_credit_pool_enabled": true,
+      "ai_credit_pool_state": {
+        "target_amount": 21000.0,
+        "current_amount": 7250.5
+      }
+    },
+    {
+      "id": "3ffb9ffe-6903-11ee-8c99-0242ac120003",
+      "name": "Another Cost Center",
+      "state": "active",
+      "resources": [
+        {
+          "type": "User",
+          "name": "Octocat"
+        },
+        {
+          "type": "Team",
+          "name": "enterprise-team-2"
+        },
+        {
+          "type": "Repo",
+          "name": "octocat/hello-world"
+        }
+      ],
+      "ai_credit_pool_enabled": false
+    }
+  ]
+}

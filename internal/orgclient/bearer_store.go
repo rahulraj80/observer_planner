@@ -3,6 +3,7 @@ package orgclient
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,24 +15,47 @@ import (
 
 // keyring record names stored under the configured service (KeychainID).
 const (
-	recBearer   = "bearer"            // the signed bearer envelope (string)
-	recAgentKey = "agent-signing-key" // base64(std) of the Ed25519 private key
-	recProbe    = "__sbo_probe__"     // backend-availability probe
+	recBearer     = "bearer"              // the signed bearer envelope (string)
+	recAgentKey   = "agent-signing-key"   // base64(std) of the Ed25519 private key
+	recVirtualKey = "gateway-virtual-key" // JSON virtualKeyRecord (P5a, AI Gateway auth-substitution)
+	// recBreakGlassLeases is declared in breakglass.go (the fourth, optional slot).
+	recProbe = "__sbo_probe__" // backend-availability probe
 )
 
 // ErrNoSecret is returned by Load* when nothing has been stored yet (a
 // not-enrolled agent). Callers treat it as "not enrolled", not as a failure.
 var ErrNoSecret = errors.New("orgclient: secret not present")
 
-// BearerStore persists the two agent secrets — the server-issued bearer and
-// the agent's Ed25519 signing key — outside the agent DB. Implementations are
-// either OS-keychain-backed or a 0600-mode file fallback.
+// virtualKeyRecord is the on-disk/keychain shape of the third BearerStore
+// slot. Generation pins the record to the routing-generation snapshot
+// (internal/proxy) that installed it, so a stale virtual key surviving a
+// config reload (or a node restart between an install and its ack) can be
+// told apart from the one the currently-live snapshot actually expects.
+type virtualKeyRecord struct {
+	Key        string `json:"key"`
+	Generation uint64 `json:"generation"`
+}
+
+// BearerStore persists the agent's local secrets outside the agent DB:
+// the server-issued bearer, the agent's Ed25519 signing key, and (P5a) the
+// AI Gateway virtual key used to auth-substitute for the developer's own
+// provider credential in Gateway Mode (docs/plans/plane-b-dual-mode-gateway-
+// rbac-ia-design-2026-08-29.md §2.3, Sol S2). Implementations are either
+// OS-keychain-backed or a 0600-mode file fallback.
 type BearerStore interface {
 	SaveBearer(bearer string) error
 	LoadBearer() (string, error)
 	SaveAgentKey(key ed25519.PrivateKey) error
 	LoadAgentKey() (ed25519.PrivateKey, error)
-	// Clear removes both secrets (used by unenrol). Absence is not an error.
+	// SaveVirtualKey persists the AI Gateway virtual key alongside the
+	// routing-generation it was issued for.
+	SaveVirtualKey(key string, generation uint64) error
+	// LoadVirtualKey returns the stored virtual key and the generation it
+	// was saved under. Returns ErrNoSecret when nothing has been saved yet
+	// (Gateway Mode not yet provisioned, or cleared by unenrol/rotation).
+	LoadVirtualKey() (key string, generation uint64, err error)
+	// Clear removes all three secrets (used by unenrol). Absence is not an
+	// error.
 	Clear() error
 	// Backend names the active store ("keychain" or "file") for diagnostics.
 	Backend() string
@@ -50,6 +74,19 @@ type BearerStore interface {
 // keyring-daemon), keychainUsable() returns true on the next probe, we
 // remove the sentinel, and the WARN can fire again on a future downgrade.
 func OpenBearerStore(service, fallbackDir string, logger *slog.Logger) BearerStore {
+	return openBearerStore(service, fallbackDir, logger, true)
+}
+
+// OpenBearerStoreQuiet is OpenBearerStore without the downgrade warning and
+// without arming its sentinel, for a caller on a node that is not enrolled
+// (T-735, D-547): `observer proxy start` on a never-enrolled node warned
+// about the org bearer keychain it would never use. The warning stays armed
+// for the first enrolment, which opens the store with OpenBearerStore.
+func OpenBearerStoreQuiet(service, fallbackDir string) BearerStore {
+	return openBearerStore(service, fallbackDir, nil, false)
+}
+
+func openBearerStore(service, fallbackDir string, logger *slog.Logger, warn bool) BearerStore {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -59,7 +96,10 @@ func OpenBearerStore(service, fallbackDir string, logger *slog.Logger) BearerSto
 		// Recovered from a previous downgrade — clear the sentinel so a
 		// future downgrade warns again.
 		_ = os.Remove(sentinel)
-		return &keychainStore{service: service}
+		return &keychainStore{service: service, fallbackDir: fallbackDir}
+	}
+	if !warn {
+		return &fileStore{dir: storeDir, service: service, fallbackDir: fallbackDir}
 	}
 	if _, err := os.Stat(sentinel); err != nil {
 		logger.Warn(
@@ -70,7 +110,15 @@ func OpenBearerStore(service, fallbackDir string, logger *slog.Logger) BearerSto
 		_ = os.MkdirAll(storeDir, 0o700)
 		_ = os.WriteFile(sentinel, []byte("1"), 0o600)
 	}
-	return &fileStore{dir: storeDir, service: service}
+	return &fileStore{dir: storeDir, service: service, fallbackDir: fallbackDir}
+}
+
+// agentAccessKeyClearer is implemented by the two real BearerStore backends:
+// it names the agent-access key store living under the SAME service and
+// fallback directory, so Unenroll clears that key (keychain record AND 0600
+// file) even when no AgentAccessKeyStore was injected (ledger AA-5).
+type agentAccessKeyClearer interface {
+	agentAccessKeys() AgentAccessKeyStore
 }
 
 // keychainUsable probes the keyring with a throwaway record. A full
@@ -88,9 +136,18 @@ func keychainUsable(service string) bool {
 
 // --- keychain-backed store -------------------------------------------------
 
-type keychainStore struct{ service string }
+type keychainStore struct {
+	service string
+	// fallbackDir is the directory OpenBearerStore was given; it locates
+	// the agent-access key's file fallback for Unenroll's clear.
+	fallbackDir string
+}
 
 func (s *keychainStore) Backend() string { return "keychain" }
+
+func (s *keychainStore) agentAccessKeys() AgentAccessKeyStore {
+	return agentAccessKeyStoreForClear(s.service, s.fallbackDir, true)
+}
 
 func (s *keychainStore) SaveBearer(bearer string) error {
 	if err := keyring.Set(s.service, recBearer, bearer); err != nil {
@@ -128,9 +185,58 @@ func (s *keychainStore) LoadAgentKey() (ed25519.PrivateKey, error) {
 	return decodeAgentKey(v)
 }
 
+func (s *keychainStore) SaveVirtualKey(key string, generation uint64) error {
+	v, err := encodeVirtualKey(key, generation)
+	if err != nil {
+		return err
+	}
+	if err := keyring.Set(s.service, recVirtualKey, v); err != nil {
+		return fmt.Errorf("orgclient.SaveVirtualKey: %w", err)
+	}
+	return nil
+}
+
+func (s *keychainStore) LoadVirtualKey() (string, uint64, error) {
+	v, err := keyring.Get(s.service, recVirtualKey)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", 0, ErrNoSecret
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("orgclient.LoadVirtualKey: %w", err)
+	}
+	return decodeVirtualKey(v)
+}
+
+// SaveBreakGlassLeases implements BreakGlassLeaseStore (fourth slot). An empty
+// payload removes the record.
+func (s *keychainStore) SaveBreakGlassLeases(raw []byte) error {
+	if len(raw) == 0 {
+		if err := keyring.Delete(s.service, recBreakGlassLeases); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return fmt.Errorf("orgclient.SaveBreakGlassLeases: %w", err)
+		}
+		return nil
+	}
+	if err := keyring.Set(s.service, recBreakGlassLeases, string(raw)); err != nil {
+		return fmt.Errorf("orgclient.SaveBreakGlassLeases: %w", err)
+	}
+	return nil
+}
+
+// LoadBreakGlassLeases implements BreakGlassLeaseStore.
+func (s *keychainStore) LoadBreakGlassLeases() ([]byte, error) {
+	v, err := keyring.Get(s.service, recBreakGlassLeases)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return nil, ErrNoSecret
+	}
+	if err != nil {
+		return nil, fmt.Errorf("orgclient.LoadBreakGlassLeases: %w", err)
+	}
+	return []byte(v), nil
+}
+
 func (s *keychainStore) Clear() error {
 	var errs []error
-	for _, rec := range []string{recBearer, recAgentKey} {
+	for _, rec := range []string{recBearer, recAgentKey, recVirtualKey, recBreakGlassLeases} {
 		if err := keyring.Delete(s.service, rec); err != nil && !errors.Is(err, keyring.ErrNotFound) {
 			errs = append(errs, err)
 		}
@@ -146,9 +252,15 @@ func (s *keychainStore) Clear() error {
 type fileStore struct {
 	dir     string
 	service string
+	// fallbackDir is the directory OpenBearerStore was given (dir's parent).
+	fallbackDir string
 }
 
 func (s *fileStore) Backend() string { return "file" }
+
+func (s *fileStore) agentAccessKeys() AgentAccessKeyStore {
+	return agentAccessKeyStoreForClear(s.service, s.fallbackDir, false)
+}
 
 func (s *fileStore) path(rec string) string {
 	return filepath.Join(s.dir, s.service+"."+rec)
@@ -190,9 +302,45 @@ func (s *fileStore) LoadAgentKey() (ed25519.PrivateKey, error) {
 	return decodeAgentKey(v)
 }
 
+func (s *fileStore) SaveVirtualKey(key string, generation uint64) error {
+	v, err := encodeVirtualKey(key, generation)
+	if err != nil {
+		return err
+	}
+	return s.write(recVirtualKey, v)
+}
+
+func (s *fileStore) LoadVirtualKey() (string, uint64, error) {
+	v, err := s.read(recVirtualKey)
+	if err != nil {
+		return "", 0, err
+	}
+	return decodeVirtualKey(v)
+}
+
+// SaveBreakGlassLeases implements BreakGlassLeaseStore (0600 file slot).
+func (s *fileStore) SaveBreakGlassLeases(raw []byte) error {
+	if len(raw) == 0 {
+		if err := os.Remove(s.path(recBreakGlassLeases)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("orgclient.SaveBreakGlassLeases: %w", err)
+		}
+		return nil
+	}
+	return s.write(recBreakGlassLeases, string(raw))
+}
+
+// LoadBreakGlassLeases implements BreakGlassLeaseStore.
+func (s *fileStore) LoadBreakGlassLeases() ([]byte, error) {
+	v, err := s.read(recBreakGlassLeases)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(v), nil
+}
+
 func (s *fileStore) Clear() error {
 	var errs []error
-	for _, rec := range []string{recBearer, recAgentKey} {
+	for _, rec := range []string{recBearer, recAgentKey, recVirtualKey, recBreakGlassLeases} {
 		if err := os.Remove(s.path(rec)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
@@ -201,6 +349,24 @@ func (s *fileStore) Clear() error {
 		return fmt.Errorf("orgclient.fileStore.Clear: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// encodeVirtualKey and decodeVirtualKey are the shared JSON codec for the
+// third BearerStore slot, used by both backends.
+func encodeVirtualKey(key string, generation uint64) (string, error) {
+	b, err := json.Marshal(virtualKeyRecord{Key: key, Generation: generation})
+	if err != nil {
+		return "", fmt.Errorf("orgclient: encode virtual key: %w", err)
+	}
+	return string(b), nil
+}
+
+func decodeVirtualKey(v string) (string, uint64, error) {
+	var rec virtualKeyRecord
+	if err := json.Unmarshal([]byte(v), &rec); err != nil {
+		return "", 0, fmt.Errorf("orgclient: decode virtual key: %w", err)
+	}
+	return rec.Key, rec.Generation, nil
 }
 
 // decodeAgentKey validates a stored Ed25519 private key.

@@ -288,10 +288,10 @@ func (b Budget) validate() error {
 		return nil
 	}
 	if b.MaxTotalUSD <= 0 {
-		return fmt.Errorf("benchmark: budget.max_total_usd must be > 0 (or set budget.unlimited = true) — a zero/absent cap means unbounded spend")
+		return fmt.Errorf("benchmark: budget.max_total_usd must be > 0 (or set budget.unlimited = true) - a zero/absent cap means unbounded spend")
 	}
 	if b.MaxCellUSD <= 0 {
-		return fmt.Errorf("benchmark: budget.max_cell_usd must be > 0 (or set budget.unlimited = true) — a zero/absent per-attempt cap leaves each cell unbounded")
+		return fmt.Errorf("benchmark: budget.max_cell_usd must be > 0 (or set budget.unlimited = true) - a zero/absent per-attempt cap leaves each cell unbounded")
 	}
 	return nil
 }

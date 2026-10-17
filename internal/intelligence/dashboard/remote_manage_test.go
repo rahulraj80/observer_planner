@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -6,66 +8,53 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/remotecfg"
 )
 
-// newManageServer builds a Server with a writable config path (so the remote
-// management writes work) + a real DB + a ready controller.
-func newManageServer(t *testing.T) (*Server, http.Handler) {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "observer.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
+func TestConfirmCookieReusedAcrossManagementGETs(t *testing.T) {
+	_, h := newManageServer(t)
+	var ck *http.Cookie
+	var echoValue string
+	ck, echoValue = getConfirm(t, h)
+	for _, path := range []string{"/api/terminal/policy", "/api/terminal/sandbox/config", "/api/terminal/ssh/profiles", "/api/remote/config"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "127.0.0.1:8080"
+		req.AddCookie(ck)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			ConfirmToken string `json:"confirm_token"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ConfirmToken != echoValue {
+			t.Fatalf("GET %s rotated shared token: got %q want original", path, body.ConfirmToken)
+		}
 	}
-	t.Cleanup(func() { _ = database.Close() })
-	cfgPath := filepath.Join(dir, "config.toml")
-	body := "[observer]\ndb_path = \"" + filepath.ToSlash(dbPath) + "\"\n"
-	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	rc, _ := newReadyRemoteController(t)
-	s, err := New(Options{DB: database, ConfigPath: cfgPath, Remote: rc})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return s, s.Handler() // loopback path — Local routes reachable
-}
 
-// getConfirm performs GET /api/remote/config and returns the confirm cookie +
-// token the SPA would echo.
-func getConfirm(t *testing.T, h http.Handler) (*http.Cookie, string) {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/remote/config", nil)
+	// The token captured before all sibling GETs remains valid for the save.
+	req := httptest.NewRequest(http.MethodPut, "/api/terminal/policy", strings.NewReader(`{
+		"allow_fresh_agent":false,
+		"allowed_tools":[],
+		"allowed_project_roots":[],
+		"allow_shell":false
+	}`))
 	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(remoteConfirmHeader, echoValue)
+	req.AddCookie(ck)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/remote/config = %d", rec.Code)
+		t.Fatalf("policy save after sibling GETs = %d: %s", rec.Code, rec.Body.String())
 	}
-	var resp struct {
-		ConfirmToken string `json:"confirm_token"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	var ck *http.Cookie
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == remoteConfirmCookie {
-			ck = c
-		}
-	}
-	if ck == nil || resp.ConfirmToken == "" {
-		t.Fatalf("no confirm cookie/token: cookie=%v token=%q", ck, resp.ConfirmToken)
-	}
-	if ck.Value != resp.ConfirmToken {
-		t.Fatalf("cookie/token mismatch: %q vs %q", ck.Value, resp.ConfirmToken)
-	}
-	return ck, resp.ConfirmToken
 }
 
 // TestArmVerbsRequireConfirmToken pins §10 CSRF hardening negatives across
@@ -398,7 +387,7 @@ func TestAddDeviceKeepsSessionsWhileRotateInvalidates(t *testing.T) {
 		t.Error("add-device hot-reloads the live controller → restart_required must be false")
 	}
 	if mc.sessions.Count() != 2 {
-		t.Fatalf("add-device disconnected devices (sessions %d, want 2) — it must keep existing devices connected", mc.sessions.Count())
+		t.Fatalf("add-device disconnected devices (sessions %d, want 2) - it must keep existing devices connected", mc.sessions.Count())
 	}
 
 	// Rotate: the destructive control — unpairs every device.

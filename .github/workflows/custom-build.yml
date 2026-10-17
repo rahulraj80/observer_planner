@@ -1,0 +1,237 @@
+# Custom build from a component manifest (modular packaging plan 5.3 and
+# phase P7, lane MP-CUST): the shape of the vendor build service (Q4,
+# docs/custom-builds.md). DRY RUN ONLY, exactly like distro-staging.yml:
+# it resolves one `sbo-distro.v1` manifest through the catalog, builds the
+# custom binary for the five release platforms with its evidence set, packs
+# the custom archives with the canonical manifest beside them, signs them
+# and a release index with an EPHEMERAL key generated on the runner and
+# deleted with it, and keeps everything as short-lived workflow artifacts.
+# It never creates a release, never attaches an asset, never publishes to
+# any channel, never pushes a tag, never touches a real signing key and has
+# no id-token permission. It runs only when started by hand (Actions ->
+# custom-build -> Run workflow) with a manifest that is already committed in
+# the repository; a v* tag push does not trigger it.
+#
+# Per artifact (cmd/sbo-components build --manifest):
+#   observer-<custom distro>-<os>-<arch>[.exe]   the binary, stamped with the
+#                                                manifest (-X ...customManifest)
+#   .buildinfo.txt / .cdx.json / .proof.json     go version -m, CycloneDX SBOM,
+#                                                proof record (--run on linux/amd64)
+#   .vex.json                                    govulncheck -mode binary, OpenVEX
+#   reproducible double build                    a second build must be cmp-identical
+# Per manifest:
+#   <custom distro>.sbo-distro.json              the canonical manifest
+#   resolution.json                              the catalog's resolution
+#   web-proof.json / .modules.json               the custom web bundle's forbidden
+#                                                module list and chunk module graph
+# Bundle (job `bundle`): archives under the custom distro name
+# (observer-<version>-<custom distro>-<os>-<arch>.<ext>), SHA256SUMS, a raw
+# Ed25519 .sig per archive and release-index.json (+ .sig), the files an org
+# server's `observer-org update import` admits. With a throwaway key nothing
+# here is trusted by any node: the run proves the shape and the tooling.
+
+name: custom-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: 'Path of a committed sbo-distro.v1 manifest (TOML)'
+        required: true
+        default: 'docs/examples/custom-distro.example.toml'
+      version:
+        description: 'Version label stamped into main.version and the archive names (nothing is tagged)'
+        required: false
+        default: 'v0.0.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MANIFEST: ${{ inputs.manifest }}
+  BUILD_VERSION: ${{ inputs.version }}
+
+jobs:
+  resolve:
+    name: resolve the manifest and build the custom web bundle
+    if: github.repository == 'marmutapp/superbased-observer-private'
+    runs-on: ubuntu-latest
+    outputs:
+      distro: ${{ steps.resolve.outputs.distro }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+      - name: resolve (refuses an inconsistent set and names why)
+        id: resolve
+        run: |
+          set -euo pipefail
+          case "$MANIFEST" in
+            *..*|/*) echo "manifest must be a repository-relative path" >&2; exit 2 ;;
+          esac
+          [[ "$MANIFEST" =~ ^[A-Za-z0-9._/-]+\.toml$ ]] || { echo "manifest must be a .toml path" >&2; exit 2; }
+          [[ "$BUILD_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "version must be vX.Y.Z[-pre]" >&2; exit 2; }
+          mkdir -p resolved
+          go run ./cmd/sbo-components manifest --manifest "$MANIFEST" -o resolved/canonical.json
+          go run ./cmd/sbo-components manifest --manifest "$MANIFEST" --json > resolved/resolution.json
+          distro="$(jq -r .distro resolved/resolution.json)"
+          [[ "$distro" =~ ^custom-[0-9a-f]{64}$ ]]
+          cp resolved/canonical.json "resolved/$distro.sbo-distro.json"
+          echo "distro=$distro" >> "$GITHUB_OUTPUT"
+      - name: custom page registry and web build (fails on a forbidden module in any chunk)
+        run: |
+          set -euo pipefail
+          go run ./web/compgen -manifest resolved/canonical.json -proof resolved/web-proof.json
+          cd web
+          npm ci
+          SBO_DISTRO_PROOF="$GITHUB_WORKSPACE/resolved/web-proof.json" npm run build
+          test -f dist/index.html
+      - uses: actions/upload-artifact@v5
+        with:
+          name: custom-resolved
+          path: resolved/
+          retention-days: 3
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v5
+        with:
+          name: custom-web-dist
+          path: web/dist/
+          retention-days: 3
+          if-no-files-found: error
+
+  build:
+    name: custom ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
+      - uses: actions/download-artifact@v6
+        with:
+          name: custom-web-dist
+          path: web/dist/
+      - name: embed the custom bundle
+        run: scripts/sync-web-embed.sh web/dist internal/intelligence/dashboard/webapp/dist
+      - name: build + proof + SBOM
+        run: >-
+          go run ./cmd/sbo-components build --manifest "$MANIFEST"
+          --goos ${{ matrix.goos }} --goarch ${{ matrix.goarch }}
+          --version "$BUILD_VERSION" --out staged --proof
+      - name: reproducible double build
+        run: |
+          set -euo pipefail
+          go run ./cmd/sbo-components build --manifest "$MANIFEST" --goos ${{ matrix.goos }} --goarch ${{ matrix.goarch }} \
+            --version "$BUILD_VERSION" --out rebuild --no-sbom
+          for f in rebuild/observer-custom-*; do
+            case "$f" in *.txt|*.json) continue ;; esac
+            cmp "$f" "staged/$(basename "$f")"
+            echo "reproducible: $(basename "$f")"
+          done
+          rm -rf rebuild
+      - name: govulncheck (binary mode, OpenVEX)
+        run: |
+          set -euo pipefail
+          for f in staged/observer-custom-*; do
+            case "$f" in *.txt|*.json) continue ;; esac
+            go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 -mode binary -format openvex "$f" > "$f.vex.json"
+          done
+      - uses: actions/upload-artifact@v5
+        with:
+          name: custom-staged-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: staged/
+          retention-days: 3
+          if-no-files-found: error
+
+  bundle:
+    name: custom bundle (ephemeral key, never published)
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    env:
+      DISTRO: ${{ needs.resolve.outputs.distro }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: custom-staged-*
+          path: in/
+          merge-multiple: true
+      - uses: actions/download-artifact@v6
+        with:
+          name: custom-resolved
+          path: resolved/
+      - name: pack custom archives
+        run: |
+          set -euo pipefail
+          [[ "$DISTRO" =~ ^custom-[0-9a-f]{64}$ ]]
+          mkdir -p bundle
+          cp "resolved/$DISTRO.sbo-distro.json" bundle/
+          for bin in in/observer-"$DISTRO"-*; do
+            base="$(basename "$bin")"
+            case "$base" in *.txt|*.json) continue ;; esac
+            plat="${base#observer-$DISTRO-}"; plat="${plat%.exe}"
+            IFS=- read -r goos goarch <<<"$plat"
+            case "$goos" in windows) os=win32 ;; *) os="$goos" ;; esac
+            case "$goarch" in amd64) arch=x64 ;; *) arch="$goarch" ;; esac
+            name="observer-${BUILD_VERSION}-${DISTRO}-${os}-${arch}"
+            work="$(mktemp -d)"
+            if [ "$goos" = windows ]; then
+              cp "$bin" "$work/observer.exe"; cp "$bin" "$work/superbased.exe"
+              (cd "$work" && zip -q -X "$GITHUB_WORKSPACE/bundle/$name.zip" observer.exe superbased.exe)
+            else
+              cp "$bin" "$work/observer"; chmod 0755 "$work/observer"; ln -s observer "$work/superbased"
+              tar -C "$work" --owner=0 --group=0 --numeric-owner -czf "bundle/$name.tar.gz" observer superbased
+            fi
+            rm -rf "$work"
+          done
+          (cd bundle && sha256sum observer-* > SHA256SUMS)
+          ls -l bundle
+      - name: sign with an ephemeral key and build the custom release index
+        run: |
+          set -euo pipefail
+          keydir="$(mktemp -d)"
+          trap 'rm -rf "$keydir"' EXIT
+          go run ./scripts/vendorsign keygen -out "$keydir"
+          key="$(ls "$keydir"/*.key 2>/dev/null | head -1)"
+          go run ./scripts/vendorsign sign -key "$key" -allow-unpinned-key bundle/observer-*
+          go run ./scripts/vendorsign index -key "$key" -allow-unpinned-key -dir bundle -version "$BUILD_VERSION"
+          test -s bundle/release-index.json && test -s bundle/release-index.json.sig
+          jq -e --arg d "$DISTRO" '[.artifacts[] | select(.distro == $d)] | length == 5' bundle/release-index.json
+      - name: cosign and SLSA (printed, never run)
+        run: |
+          echo "The vendor build service would run, per archive and for release-index.json:"
+          echo "  cosign sign-blob --yes --bundle <file>.cosign.bundle <file>"
+          echo "  slsa-github-generator generic provenance over SHA256SUMS"
+          echo "and sign with the vendor key, never this ephemeral one."
+          echo "This workflow has no id-token permission and runs neither."
+      - uses: actions/upload-artifact@v5
+        with:
+          name: custom-bundle
+          path: bundle/
+          retention-days: 3
+          if-no-files-found: error

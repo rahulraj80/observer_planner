@@ -1,38 +1,81 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
+import {
+  CalendarDays,
+  Check,
+  Info,
+  List,
+  Pencil,
+  Star,
+  Table2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import {
   ActiveFilterChips,
   ChartShell,
   type FilterChip,
-  ModelDot,
+  Icon,
+  LiveDot,
+  ModelMark,
   PageHeader,
   Pill,
   SegmentedControl,
+  SlideOver,
+  SurfaceBadge,
+  type SurfaceKind,
   ToolBadge,
   Tooltip,
   TruncatedPath,
 } from "@/components/primitives";
+import { AnchoredPopover } from "@/components/primitives/AnchoredPopover";
 import { shortModel } from "@/lib/models";
+import { orgIntelSessionsBanner, orgPlaneEnrichAction, SESSION_ENRICH_PLANE_COPY, sessionEffectiveTitle, sessionEnrichPlane, type OrgIntelStatusResponse } from "@/lib/orgIntel";
 import { HelpInd } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
+import { CommandJobButton } from "@/components/CommandJobButton";
+import { Summary } from "@/components/Summary";
 import { DataTable, Pagination } from "@/components/DataTable";
 import { ChartState } from "@/components/ChartState";
 import { SessionDetailPanel } from "@/components/SessionDetailPanel";
+import { TagPill } from "@/components/TagPill";
+import { FavoriteStar, RatingChip, TagEditor } from "@/components/TagEditor";
+import { postSessionTags } from "@/lib/api";
 import { useFilters, windowDaysApprox, windowParams } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
+import { pushToast } from "@/components/Toast";
+import { cloudFetchEvents } from "@/lib/cloud";
+import type { CloudStatusWithDigestPlan } from "@/lib/cloud";
+import { CloudDigestCard } from "@/components/CloudDigestCard";
+import { CloudEnrichmentSummary } from "@/components/CloudEnrichmentSummary";
+import { OrgSessionsBannerView } from "@/components/OrgSessionsBanner";
+import { CloudRow } from "@/components/sessiondetail/CloudRow";
+import { OrgIntelCard } from "@/components/sessiondetail/OrgIntelCard";
+import { cloudProgressAction, cloudProgressMeta } from "@/lib/cloudProgress";
+import { vocabIcon } from "@shared/lib/vocabIcons";
+import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
 import {
   fmtCompact,
+  fmtDateTime,
   fmtDuration,
   fmtInt,
   fmtPct,
+  fmtCost,
   fmtUSD,
+  costLabel,
+  getCostDisplayMode,
+  localeString,
 } from "@/lib/format";
+import { csvText } from "@/lib/costExport";
 import type {
   AttachSessionsResponse,
   SessionRow,
   SessionsCalendarResponse,
   SessionsResponse,
+  TagRollup,
+  TagRollupResponse,
 } from "@/lib/types";
 import {
   activeFilterCount,
@@ -43,21 +86,83 @@ import {
   type SessionFilters,
   SessionsFiltersDrawer,
 } from "./sessions/FiltersDrawer";
+import { navIcon } from "@/lib/nav";
+
+// One glyph per sessions section card title (the ChartShell `icon` slot): the
+// chart or table shape the section shows, never decoration.
+const SECTION_ICONS = {
+  allSessions: List,
+} satisfies Record<string, LucideIcon>;
 
 const PAGE_LIMIT = 50;
 
+// selectLiveRunIds / selectActiveIds narrow the two liveness polls to the id
+// lists the table reads (useApi `select`), so a poll that changes nothing
+// the table shows keeps the sets, the column defs and every row as they are.
+function selectLiveRunIds(d: AttachSessionsResponse): string[] {
+  const out: string[] = [];
+  for (const r of d.sessions ?? []) {
+    if (r.session_id && !r.exited) out.push(r.session_id);
+  }
+  return out;
+}
+
+function selectActiveIds(d: { active_ids?: string[] }): string[] {
+  return (d.active_ids ?? []).filter((id) => !!id);
+}
+// SESSIONS_POLL_MS is the list poll (see the useApi call below).
+const SESSIONS_POLL_MS = 30_000;
+
+// SORT_OPTIONS backs the toolbar's Sort menu. Since the Rating column was
+// removed (rating is now a click-popover only, not a whole column), there is
+// no clickable header left for "best/worst rated first" — this menu is how
+// that server-side sort_by=rating ordering stays reachable, alongside a few
+// other sorts that are handy without hunting for the right column header.
+// Remaining columns (Session/Tool/Project/quality/errors/redundancy/token
+// buckets…) are still sortable via a header click, which drives the same
+// `sorting` state untouched by this menu.
+type SortOption = { id: string; desc: boolean; label: string };
+const SORT_OPTIONS: SortOption[] = [
+  { id: "started_at", desc: true, label: "Started (newest first)" },
+  { id: "cost", desc: true, label: "Cost (highest first)" },
+  { id: "elapsed", desc: true, label: "Elapsed (longest first)" },
+  { id: "actions", desc: true, label: "Actions (most first)" },
+  { id: "ai_code_lines", desc: true, label: "AI code lines (most first)" },
+  { id: "rating", desc: true, label: "Rating (best first)" },
+  { id: "rating", desc: false, label: "Rating (worst first)" },
+  { id: "favorite", desc: true, label: "Favorites first" },
+];
+
 type View = "table" | "calendar";
 
+// SURFACE_FILTER_OPTIONS backs the toolbar's Client dropdown — one row per
+// value of the closed capture-surface vocabulary (SurfaceBadge's
+// SurfaceKind), walked as data rather than hand-written <option>s so a new
+// kind is one row here. "" = no filter. The filter is SERVER-side
+// (`surface=` on /api/sessions), like tags/favorites and unlike the drawer:
+// the drawer only sees the loaded page, and a client filter there would
+// silently hide matching sessions on other pages.
+const SURFACE_FILTER_OPTIONS: ReadonlyArray<{ value: SurfaceKind | ""; label: string }> = [
+  { value: "", label: "Client: any" },
+  { value: "cli", label: "cli - terminal" },
+  { value: "ide", label: "ide - editor / plugin" },
+  { value: "desktop", label: "desktop - desktop app" },
+  { value: "sdk", label: "sdk - programmatic" },
+  { value: "web", label: "web - browser" },
+];
+
 export function SessionsPage() {
-  const { win, customRange, tool, project, query: globalQuery } = useFilters();
+  const { win, customRange, tool, model, project, query: globalQuery } = useFilters();
   const winParams = windowParams(win, customRange);
   // CalendarView needs a plain day-count for its grid span; sub-day
   // windows round up to a day.
   const calendarDays = windowDaysApprox(win, customRange);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
 
   const [view, setView] = useState<View>("table");
+  const [enrichmentSession, setEnrichmentSession] = useState<SessionRow | null>(null);
   const [page, setPage] = useState(1);
   // Server-side sort. The table is controlled (manualSorting): a header click
   // updates this state, which feeds sort_by/sort_dir into the fetch so the
@@ -69,6 +174,12 @@ export function SessionsPage() {
   ]);
   const sortBy = sorting[0]?.id ?? "started_at";
   const sortDir = sorting[0]?.desc === false ? "asc" : "desc";
+  // Only truthy when the current sort exactly matches one of the toolbar's
+  // named options — a header click on a column the menu doesn't cover (e.g.
+  // "Project") leaves the button reading plain "Sort".
+  const sortOption = SORT_OPTIONS.find(
+    (o) => o.id === sortBy && o.desc === (sortDir === "desc"),
+  );
   const [localQuery, setLocalQuery] = useState("");
   // pickedDay is set when the user clicks a CalendarView cell — drives
   // a server-side from_date/to_date filter on /api/sessions so the
@@ -115,36 +226,106 @@ export function SessionsPage() {
     );
   };
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [filters, setFilters] = useState<SessionFilters>(() => loadFilters());
   useEffect(() => {
     saveFilters(filters);
   }, [filters]);
   const drawerCount = activeFilterCount(filters);
 
+  // Session classification (docs/plans/session-classification-tags-plan-2026-07-31.md).
+  // tagFilters + favoriteOnly are SERVER-side params, deliberately NOT part of
+  // the drawer's client-side applyFilters: that path only sees the loaded page,
+  // so a tag filter there would silently hide matching sessions on other pages.
+  // Nothing is persisted — the server owns tags/favorites, and the filter is a
+  // transient view choice.
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  // surfaceFilter is the Client dropdown's value: one closed-vocabulary kind
+  // or "" for any. Server-side (all pages) and transient, exactly like
+  // favoriteOnly — the stamp is the server's fact, the filter a view choice.
+  const [surfaceFilter, setSurfaceFilter] = useState<SurfaceKind | "">("");
+  const tagKey = tagFilters.join(",");
+  // annotations holds per-session optimistic overrides for the
+  // classification fields, merged over the fetched rows. Each entry is
+  // replaced by the server's post-mutation truth on success and reverted on
+  // failure, so it never drifts from the backend.
+  const [annotations, setAnnotations] = useState<
+    Record<
+      string,
+      { tags?: string[]; favorite?: boolean; has_note?: boolean; rating?: number; title?: string }
+    >
+  >({});
+  const addTagFilter = (tag: string) => {
+    setTagFilters((cur) => (cur.includes(tag) ? cur : [...cur, tag]));
+  };
+  // toggleTagFilter is what the Tags panel's pills use: they render their
+  // own selected state (aria-pressed), so a second click on a selected pill
+  // has to mean "deselect" — an add-only handler left the operator with no
+  // way to drop a tag from the pill itself. Row pills and the detail panel
+  // keep the add-only handler: those pills carry no selected state, so
+  // toggling there would silently clear a filter the operator can't see.
+  const toggleTagFilter = (tag: string) => {
+    setTagFilters((cur) =>
+      cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag],
+    );
+  };
+
   // Reset page when filters change (incl. picked calendar day).
-  const filterKey = `${win}|${tool}|${project}|${pickedDay ?? ""}|${sortBy}|${sortDir}`;
+  const filterKey = `${win}|${tool}|${project}|${model}|${pickedDay ?? ""}|${sortBy}|${sortDir}|${tagKey}|${favoriteOnly}|${surfaceFilter}`;
   const lastKey = useMemo(() => filterKey, [filterKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => setPage(1), [lastKey]);
 
+  // The detail drawer and the enrichment panel are modal (scrim + scroll
+  // lock): while either is open, nothing behind them is visible to refresh.
+  const tableCovered = selected != null || enrichmentSession !== null;
   const sessions = useApi<SessionsResponse>(
     "/api/sessions",
     {
       page,
       limit: PAGE_LIMIT,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       ...winParams,
       from_date: pickedDay ?? undefined,
       to_date: pickedDay ?? undefined,
       sort_by: sortBy,
       sort_dir: sortDir,
+      // Repeated `tag=` params (AND semantics, server-side) + favorite=1.
+      tag: tagFilters.length > 0 ? tagFilters : undefined,
+      favorite: favoriteOnly ? 1 : undefined,
+      // Capture-surface kind, exact match server-side; "" is dropped by
+      // buildUrl so "any" sends nothing.
+      surface: surfaceFilter || undefined,
     },
-    [page, win, customRange, tool, project, pickedDay, sortBy, sortDir],
-    // Live-capture refresh: 5s while the tab is visible. Lets fresh
-    // Antigravity-CLI .pb files (and any other in-progress session)
-    // appear without requiring the operator to manually reload.
-    { refreshMs: 5000 },
+    [
+      page,
+      win,
+      customRange,
+      tool,
+      project,
+      model,
+      pickedDay,
+      sortBy,
+      sortDir,
+      tagKey,
+      favoriteOnly,
+      surfaceFilter,
+    ],
+    // Live-capture refresh: every 30 s while the tab is visible and the
+    // table is not covered by a modal panel. Lets fresh Antigravity-CLI .pb
+    // files (and any other in-progress session) appear without a manual
+    // reload. It was 5 s, but on a large database one /api/sessions costs
+    // several seconds server-side, so a 5 s poll kept a request permanently
+    // in flight and re-rendered the table on every settle. The per-row live
+    // signal does not depend on this cadence: the "live" pills come from the
+    // cheap /api/live + /api/attach/sessions polls below. While the session
+    // drawer (or the enrichment panel) covers the table, the poll pauses;
+    // on close the query cache revalidates at once if the list is overdue.
+    { refreshMs: tableCovered ? 0 : SESSIONS_POLL_MS },
   );
 
   // Per-day rollup over the full window — drives the Calendar view
@@ -156,10 +337,11 @@ export function SessionsPage() {
     view === "calendar" ? "/api/sessions/calendar" : null,
     {
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       ...winParams,
     },
-    [view, win, customRange, tool, project],
+    [view, win, customRange, tool, model, project],
   );
 
   // Live attach sessions (session-attach Phase 2): polled every 15s WHILE the
@@ -173,19 +355,19 @@ export function SessionsPage() {
   // "new terminal" session gets the chip too once the correlation sweep links
   // it (~10-30s after launch). A dashboard without the attach seam 503s →
   // empty set → no chips.
-  const attach = useApi<AttachSessionsResponse>(
+  // Paused while the table is covered (see tableCovered); resumes, with an
+  // immediate revalidation when overdue, the moment the panel closes.
+  //
+  // Only the ids of running runs are read, selected BY VALUE: the payload
+  // carries per-run fields that move on every poll, and a new liveSet
+  // rebuilds the column defs and re-renders every row.
+  const liveRunIds = useApi<AttachSessionsResponse, string[]>(
     "/api/attach/sessions",
     undefined,
     [],
-    { refreshMs: 15000 },
-  );
-  const liveSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of attach.data?.sessions ?? []) {
-      if (r.session_id && !r.exited) s.add(r.session_id);
-    }
-    return s;
-  }, [attach.data]);
+    { refreshMs: tableCovered ? 0 : 15000, select: selectLiveRunIds },
+  ).data;
+  const liveSet = useMemo(() => new Set(liveRunIds ?? []), [liveRunIds]);
 
   // Canonical liveness for BARE (non-attachable) sessions: /api/live
   // marks a session active if any row landed in the last 15 minutes.
@@ -195,21 +377,182 @@ export function SessionsPage() {
   // ids_only mode: EVERY active session id in the window (the card-view
   // default caps at the newest 8, which would silently drop the ninth
   // concurrent session's "live · watch" pill).
-  const live = useApi<{ active_ids?: string[] }>(
+  const activeIds = useApi<{ active_ids?: string[] }, string[]>(
     "/api/live",
     { window_minutes: 15, ids_only: 1 },
     [],
-    { refreshMs: 15000 },
-  );
-  const activeSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const id of live.data?.active_ids ?? []) {
-      if (id) s.add(id);
-    }
-    return s;
-  }, [live.data]);
+    { refreshMs: tableCovered ? 0 : 15000, select: selectActiveIds },
+  ).data;
+  const activeSet = useMemo(() => new Set(activeIds ?? []), [activeIds]);
 
-  const rows = sessions.data?.rows ?? [];
+  // Tag vocabulary + per-tag rollup. Drives the Tags panel and is reloaded
+  // after every classification mutation so counts/cost stay honest.
+  const tagRollup = useApi<TagRollupResponse>("/api/sessions/tags", undefined, []);
+
+  // Cloud Intelligence background-by-default (value-upgrade plan §W3,
+  // 2026-09-15): the developer's own enrichment policy (`observer cloud
+  // enable`) drives whether this page polls for freshly-arrived AI titles,
+  // and the honest "waiting on provider" banner reads the last sync's
+  // outcome. 30s cadence, paused while the tab is hidden (useApi's default).
+  const cloudStatus = useApi<CloudStatusWithDigestPlan>(
+    "/api/cloud/status",
+    undefined,
+    [],
+    { refreshMs: 30000 },
+  );
+  const cloudSignedIn = !!cloudStatus.data?.sign_in?.signed_in;
+  const cloudProviderWaiting = cloudStatus.data?.provider_state === "waiting";
+  const [cloudBannerDismissed, setCloudBannerDismissed] = useState(false);
+  // The org plane's status (ruling Q6): when the listed sessions are on the
+  // org plane, the banner above the table describes org enrichment instead of
+  // personal sign-in.
+  const orgIntelStatus = useApi<OrgIntelStatusResponse>("/api/intel/status", undefined, [], { refreshMs: 300000 });
+
+  // Polls GET /api/cloud/events every 30s while the policy is on. The FIRST
+  // response only records which result ids already exist (nothing to
+  // announce retroactively for a page that just opened); a later poll that
+  // introduces a NEW result id raises "N session(s) named by Cloud
+  // Intelligence" and reloads the table so the new title renders.
+  const cloudSeenResultIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!cloudSignedIn) return undefined;
+    let cancelled = false;
+    const poll = () => {
+      cloudFetchEvents()
+        .then((resp) => {
+          if (cancelled) return;
+          const results = resp.results ?? [];
+          if (cloudSeenResultIdsRef.current === null) {
+            cloudSeenResultIdsRef.current = new Set(results.map((res) => res.result_id));
+            return;
+          }
+          const seen = cloudSeenResultIdsRef.current;
+          const fresh = results.filter((res) => !seen.has(res.result_id));
+          for (const res of results) seen.add(res.result_id);
+          if (fresh.length > 0) {
+            pushToast(
+              `${fresh.length} session${fresh.length === 1 ? "" : "s"} named by Cloud Intelligence`,
+              "success",
+            );
+            sessions.reload();
+          }
+        })
+        .catch(() => {
+          // Best-effort poll; a transient failure just waits for the next tick.
+        });
+    };
+    poll();
+    const id = window.setInterval(poll, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudSignedIn]);
+
+  const rawRows = sessions.data?.rows ?? [];
+  // SERVER TRUTH WINS ON EVERY FETCH. The optimistic override map is a bridge
+  // across exactly one gap — between a classification POST and the next
+  // /api/sessions response — and is dropped WHOLESALE the moment a fresh page
+  // lands. Without this the map was write-only: a tag added from the CLI or a
+  // second device could never appear on a row that had ever been touched here,
+  // and a POST whose response failed AFTER the server had already committed
+  // left the reverted (wrong) value pinned forever.
+  //
+  // sessions.data changes identity only when the payload actually differs
+  // (useApi's byte-identical guard), so idle 5s polls don't churn state — and a
+  // byte-identical response carries no new server truth to adopt anyway.
+  useEffect(() => {
+    if (sessions.data == null) return;
+    setAnnotations((cur) => (Object.keys(cur).length === 0 ? cur : {}));
+  }, [sessions.data]);
+
+  // Merge optimistic annotations over the fetched page.
+  const rows = useMemo(
+    () =>
+      rawRows.map((r) => {
+        const a = annotations[r.id];
+        return a ? { ...r, ...a } : r;
+      }),
+    // rawRows identity is stable between polls thanks to useApi's
+    // byte-identical guard, so this only recomputes on real change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessions.data, annotations],
+  );
+  const orgSessionsBanner = useMemo(
+    () => orgIntelSessionsBanner(orgIntelStatus.data?.status, rows.map(sessionEnrichPlane)),
+    [orgIntelStatus.data, rows],
+  );
+
+  // patchAnnotation records an optimistic (or server-confirmed) override.
+  const patchAnnotation = (
+    id: string,
+    patch: { tags?: string[]; favorite?: boolean; has_note?: boolean; rating?: number; title?: string },
+  ) => {
+    setAnnotations((cur) => ({ ...cur, [id]: { ...cur[id], ...patch } }));
+  };
+
+  // toggleFavorite flips the star optimistically, then reconciles against the
+  // server's reply; a failed POST reverts to the pre-click value.
+  const toggleFavorite = async (row: SessionRow) => {
+    const before = row.favorite === true;
+    patchAnnotation(row.id, { favorite: !before });
+    try {
+      const r = await postSessionTags(row.id, { favorite: !before });
+      patchAnnotation(row.id, {
+        favorite: r.favorite,
+        tags: r.tags,
+        has_note: (r.note ?? "") !== "",
+        rating: r.rating,
+      });
+      tagRollup.reload();
+    } catch {
+      patchAnnotation(row.id, { favorite: before });
+    }
+  };
+
+  // setRating writes the 1-10 overall score optimistically (0 = clear), then
+  // reconciles against the server's reply; a failed POST reverts to the
+  // pre-click value.
+  const setRating = async (row: SessionRow, next: number) => {
+    const before = row.rating ?? 0;
+    patchAnnotation(row.id, { rating: next });
+    try {
+      const r = await postSessionTags(row.id, { rating: next });
+      patchAnnotation(row.id, {
+        rating: r.rating,
+        favorite: r.favorite,
+        tags: r.tags,
+        has_note: (r.note ?? "") !== "",
+      });
+    } catch {
+      patchAnnotation(row.id, { rating: before });
+    }
+  };
+
+  // setTitle writes the developer's own session title optimistically (""
+  // clears it, falling back to the AI title), then reconciles against the
+  // server's reply; a failed POST reverts to the pre-edit value. Throws on
+  // failure so the inline editor can surface the error inline rather than
+  // silently reverting.
+  const setTitle = async (row: SessionRow, next: string) => {
+    const before = row.title ?? "";
+    patchAnnotation(row.id, { title: next });
+    try {
+      const r = await postSessionTags(row.id, { title: next });
+      patchAnnotation(row.id, {
+        title: r.title ?? "",
+        favorite: r.favorite,
+        tags: r.tags,
+        has_note: (r.note ?? "") !== "",
+        rating: r.rating,
+      });
+    } catch (e) {
+      patchAnnotation(row.id, { title: before });
+      throw e;
+    }
+  };
+
   const query = localQuery || globalQuery;
   const filtered = useMemo(() => {
     let out = rows;
@@ -258,7 +601,13 @@ export function SessionsPage() {
     }
     if (filters.minCostUsd || filters.maxCostUsd) {
       c.push({
-        label: `cost: ${rangeLabel(filters.minCostUsd, filters.maxCostUsd, "$")}`,
+        // A cost range carried in from a shared link names dollars, which
+        // the token-usage view does not show (T-204): the chip says a cost
+        // filter is set and still clears it.
+        label: costLabel(
+          `cost: ${rangeLabel(filters.minCostUsd, filters.maxCostUsd, "$")}`,
+          "cost filter set (amounts hidden)",
+        ),
         onClear: () =>
           setFilters((f) => ({ ...f, minCostUsd: "", maxCostUsd: "" })),
       });
@@ -292,24 +641,68 @@ export function SessionsPage() {
     return c;
   }, [filters]);
 
+  // Classification chips are SEPARATE from drawerChips: these clear
+  // server-side params (tag=/favorite=), not the drawer's page-local state.
+  const classificationChips = useMemo<FilterChip[]>(() => {
+    const c: FilterChip[] = [];
+    if (favoriteOnly) {
+      c.push({
+        label: (
+          <span className="inline-flex items-center gap-1">
+            <Icon icon={Star} size={10} fill="currentColor" /> favorites
+          </span>
+        ),
+        title: "Show all sessions again",
+        onClear: () => setFavoriteOnly(false),
+      });
+    }
+    for (const t of tagFilters) {
+      c.push({
+        label: `tag: ${t}`,
+        title: `Stop filtering by "${t}"`,
+        onClear: () => setTagFilters((cur) => cur.filter((x) => x !== t)),
+      });
+    }
+    if (surfaceFilter) {
+      c.push({
+        label: `client: ${surfaceFilter}`,
+        title: "Show sessions from every client again",
+        onClear: () => setSurfaceFilter(""),
+      });
+    }
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favoriteOnly, tagKey, surfaceFilter]);
+
   const showScoring = (sessions.data?.scored_count ?? 0) > 0;
   const columns = useMemo<ColumnDef<SessionRow, unknown>[]>(
-    () => buildColumns(showScoring, liveSet, activeSet, setWatch),
+    () =>
+      buildColumns(showScoring, liveSet, activeSet, setWatch, {
+        onToggleFavorite: (r) => void toggleFavorite(r),
+        onSetRating: (r, rating) => void setRating(r, rating),
+        onTagClick: addTagFilter,
+        onTagsChange: (id, tags) => {
+          patchAnnotation(id, { tags });
+          tagRollup.reload();
+        },
+        onSetTitle: (r, title) => setTitle(r, title),
+      }, setEnrichmentSession),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [showScoring, liveSet, activeSet],
   );
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-6 p-4 sm:p-6">
       <PageHeader
+        icon={navIcon("sessions")}
         title="Sessions"
         sub="One row per AI-coding session. Click a row to see action breakdown, token buckets, cost summary, and a full messages timeline with expandable tool calls."
         helpId="tab.sessions"
         right={
           <SegmentedControl<View>
             options={[
-              { value: "table", label: "Table" },
-              { value: "calendar", label: "Calendar" },
+              { value: "table", label: "Table", icon: Table2 },
+              { value: "calendar", label: "Calendar", icon: CalendarDays },
             ]}
             value={view}
             onChange={setView}
@@ -317,7 +710,21 @@ export function SessionsPage() {
           />
         }
       />
-      {!showScoring && sessions.data && <ScoringHintBanner />}
+      {!showScoring && sessions.data && <ScoringHintBanner onScored={() => sessions.reload()} />}
+      {orgSessionsBanner && <OrgSessionsBannerView banner={orgSessionsBanner} />}
+      {cloudStatus.data && (!orgSessionsBanner || orgSessionsBanner.mode === "mixed") && <CloudEnrichmentSummary data={cloudStatus.data} />}
+      {cloudProviderWaiting && !cloudBannerDismissed && (
+        <CloudProviderWaitingBanner onDismiss={() => setCloudBannerDismissed(true)} />
+      )}
+
+      <TagsRollupPanel
+        rows={tagRollup.data?.tags ?? []}
+        active={tagFilters}
+        onPick={toggleTagFilter}
+        onClearAll={() => setTagFilters([])}
+      />
+
+      {projectParam && <CloudDigestCard projectRoot={projectParam} />}
 
       <ChartShell
         title={
@@ -328,20 +735,126 @@ export function SessionsPage() {
             )}
           </span>
         }
+        icon={SECTION_ICONS.allSessions}
         sub="click any row for the per-session breakdown"
+        stale={sessions.isStale}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="search"
               placeholder="filter by id, project…"
               value={localQuery}
               onChange={(e) => setLocalQuery(e.target.value)}
-              className="h-7 w-[240px] rounded-2 border border-line-2 bg-bg-2 px-2 font-mono text-[11px] text-fg-1 placeholder:text-fg-4 focus:border-accent focus:outline-none"
+              className="h-7 w-full min-w-0 rounded-2 sm:w-[240px] border border-line-2 bg-bg-2 px-2 font-mono text-[11px] text-fg-1 placeholder:text-fg-4 focus:border-accent focus:outline-none"
             />
             <Tooltip
               content={
+                surfaceFilter
+                  ? `Showing ${surfaceFilter} sessions only - pick "any" to show all`
+                  : "Filter by how the tool was driven: terminal, editor, desktop app, SDK, or browser (server-side, all pages)"
+              }
+              maxWidth={320}
+            >
+              <select
+                aria-label="Filter sessions by client"
+                value={surfaceFilter}
+                onChange={(e) => setSurfaceFilter(e.target.value as SurfaceKind | "")}
+                className={
+                  surfaceFilter
+                    ? "h-7 rounded-2 border border-accent/50 bg-accent-soft px-2 text-[11px] text-accent focus:outline-none"
+                    : "h-7 rounded-2 border border-line-2 bg-bg-2 px-2 text-[11px] text-fg-2 hover:bg-bg-3 focus:border-accent focus:outline-none"
+                }
+              >
+                {SURFACE_FILTER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
+            <Tooltip
+              content={
+                favoriteOnly
+                  ? "Showing favorited sessions only - click to show all"
+                  : "Show only sessions you starred (server-side filter, all pages)"
+              }
+            >
+              <button
+                type="button"
+                aria-pressed={favoriteOnly}
+                onClick={() => setFavoriteOnly((v) => !v)}
+                className={
+                  favoriteOnly
+                    ? "inline-flex items-center gap-1.5 rounded-2 border border-warn/50 bg-warn-soft px-2.5 py-1 text-[11px] text-warn"
+                    : "inline-flex items-center gap-1.5 rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-2 hover:bg-bg-3"
+                }
+              >
+                <Icon icon={Star} size="xs" fill={favoriteOnly ? "currentColor" : "none"} />
+                Favorites
+              </button>
+            </Tooltip>
+            <Tooltip
+              content={
+                sortOption
+                  ? `Sorted by ${sortOption.label.toLowerCase()} - click to change`
+                  : "Choose a sort order (also reaches Rating best/worst-first, which has no column any more)"
+              }
+              maxWidth={320}
+            >
+              <button
+                ref={sortTriggerRef}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={sortMenuOpen}
+                onClick={() => setSortMenuOpen((o) => !o)}
+                className={
+                  sortMenuOpen
+                    ? "inline-flex items-center gap-1.5 rounded-2 border border-accent/50 bg-accent-soft px-2.5 py-1 text-[11px] text-accent"
+                    : "inline-flex items-center gap-1.5 rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-2 hover:bg-bg-3"
+                }
+              >
+                Sort{sortOption ? `: ${sortOption.label}` : ""}
+              </button>
+            </Tooltip>
+            <AnchoredPopover
+              open={sortMenuOpen}
+              anchorRef={sortTriggerRef}
+              ariaLabel="Sort sessions"
+              width={220}
+              onDismiss={() => setSortMenuOpen(false)}
+            >
+              <div role="menu" className="py-1">
+                {SORT_OPTIONS.map((opt) => {
+                  const active =
+                    opt.id === sortBy && opt.desc === (sortDir === "desc");
+                  return (
+                    <button
+                      key={`${opt.id}-${opt.desc}`}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        setSorting([{ id: opt.id, desc: opt.desc }]);
+                        setSortMenuOpen(false);
+                      }}
+                      className={clsx(
+                        "flex w-full items-center justify-between px-3 py-1.5 text-left text-[11.5px] focus:outline-none",
+                        active
+                          ? "bg-accent-soft text-accent"
+                          : "text-fg-2 hover:bg-bg-2 hover:text-fg-0 focus:bg-bg-2 focus:text-fg-0",
+                      )}
+                    >
+                      {opt.label}
+                      {active && <Icon icon={Check} size="xs" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </AnchoredPopover>
+            <Tooltip
+              content={
                 drawerCount > 0
-                  ? `${drawerCount} drawer filter${drawerCount === 1 ? "" : "s"} active — click to edit`
+                  ? `${drawerCount} drawer filter${drawerCount === 1 ? "" : "s"} active - click to edit`
                   : "Open the filters drawer (model, cost, duration, sidechain…)"
               }
               maxWidth={320}
@@ -376,7 +889,9 @@ export function SessionsPage() {
           </div>
         }
       >
-        {(pickedDay || drawerChips.length > 0) && (
+        {(pickedDay ||
+          drawerChips.length > 0 ||
+          classificationChips.length > 0) && (
           <ActiveFilterChips
             className="mb-3"
             chips={[
@@ -388,11 +903,15 @@ export function SessionsPage() {
                     } as FilterChip,
                   ]
                 : []),
+              ...classificationChips,
               ...drawerChips,
             ]}
             onClearAll={() => {
               setPickedDay(null);
               setFilters(EMPTY_FILTERS);
+              setTagFilters([]);
+              setFavoriteOnly(false);
+              setSurfaceFilter("");
             }}
           />
         )}
@@ -416,13 +935,15 @@ export function SessionsPage() {
             <ChartState
               loading={sessions.loading && !sessions.data}
               error={sessions.error}
+              denied={sessions.denied}
+              deniedPermission={sessions.deniedPermission}
               empty={!sessions.loading && filtered.length === 0}
               emptyHint={
                 pickedDay
                   ? `No sessions on ${pickedDay}. Clear the day filter to see all sessions.`
                   : query
                     ? `No sessions match "${query}". Clear the search or widen filters.`
-                    : "No sessions in window. Run `observer init` to register hooks with your AI tools."
+                    : "No sessions in window. Set up your AI tools in Settings > Connected tools: each tool's Set up registers its hooks, MCP and proxy route, one confirm per write."
               }
               height={240}
             >
@@ -431,7 +952,18 @@ export function SessionsPage() {
                 columns={columns}
                 onRowClick={(r) => setSelected(r.id)}
                 rowKey={(r) => r.id}
-                minWidth={840}
+                zebra
+                // Every column declares meta.width (COL_W), so the fixed
+                // layout can hold the budget: no single long project path or
+                // tool label can inflate its column and push Output / Total $
+                // off the right edge. minWidth is the sum of that budget;
+                // below it the wrapper scrolls, with a visible scrollbar and
+                // an edge fade rather than a silently clipped table.
+                layout="fixed"
+                minWidth={
+                  SESSIONS_MIN_WIDTH +
+                  (showScoring ? SESSIONS_SCORING_WIDTH : 0)
+                }
                 loading={sessions.loading}
                 sorting={sorting}
                 onSortingChange={setSorting}
@@ -461,12 +993,42 @@ export function SessionsPage() {
         )}
       </ChartShell>
 
+      <SlideOver open={enrichmentSession !== null} onClose={() => setEnrichmentSession(null)}
+        title={SESSION_ENRICH_PLANE_COPY[enrichmentSession ? sessionEnrichPlane(enrichmentSession) : "personal"].drawerTitle}
+        subtitle={enrichmentSession?.title || enrichmentSession?.cloud_title || enrichmentSession?.org_title || enrichmentSession?.project} width={640}>
+        {enrichmentSession && sessionEnrichPlane(enrichmentSession) === "org" && <div className="space-y-4 p-4">
+          <p className="text-[11.5px] leading-relaxed text-fg-3">{SESSION_ENRICH_PLANE_COPY.org.drawerNote}</p>
+          <OrgIntelCard key={enrichmentSession.id} sessionId={enrichmentSession.id} />
+        </div>}
+        {enrichmentSession && sessionEnrichPlane(enrichmentSession) === "personal" && <div className="space-y-4 p-4">
+          <p className="text-[11.5px] leading-relaxed text-fg-3">{SESSION_ENRICH_PLANE_COPY.personal.drawerNote}</p>
+          <CloudRow key={enrichmentSession.id} sessionId={enrichmentSession.id} onChanged={() => { sessions.reload(); cloudStatus.reload(); }} />
+          {cloudStatus.data && <details className="space-y-2">
+            <Summary className="w-fit text-caption font-medium text-fg-3">Enrichment settings and allowance</Summary>
+            <CloudEnrichmentSummary data={cloudStatus.data} />
+          </details>}
+        </div>}
+      </SlideOver>
+
       <SessionDetailPanel
         sessionId={selected}
         open={selected != null}
         watch={watch}
         onClose={() => setSelected(null)}
         onOpenSession={(id) => setSelected(id)}
+        onFilterTag={(tag) => {
+          addTagFilter(tag);
+          setSelected(null);
+        }}
+        onAnnotationChange={(id, next) => {
+          patchAnnotation(id, {
+            tags: next.tags,
+            favorite: next.favorite,
+            has_note: (next.note ?? "") !== "",
+            rating: next.rating,
+          });
+          tagRollup.reload();
+        }}
       />
 
       <SessionsFiltersDrawer
@@ -486,10 +1048,10 @@ export function SessionsPage() {
 function rangeLabel(min: string, max: string, prefix: string): string {
   const lo = min.trim();
   const hi = max.trim();
-  if (lo && hi) return `${prefix}${lo}–${prefix}${hi}`;
+  if (lo && hi) return `${prefix}${lo}-${prefix}${hi}`;
   if (lo) return `≥ ${prefix}${lo}`;
   if (hi) return `≤ ${prefix}${hi}`;
-  return "—";
+  return "-";
 }
 
 function durationLabel(d: SessionFilters["duration"]): string {
@@ -497,9 +1059,9 @@ function durationLabel(d: SessionFilters["duration"]): string {
     case "short":
       return "<5m";
     case "medium":
-      return "5–30m";
+      return "5-30m";
     case "long":
-      return "30m–2h";
+      return "30m-2h";
     case "xlong":
       return ">2h";
     default:
@@ -507,22 +1069,154 @@ function durationLabel(d: SessionFilters["duration"]): string {
   }
 }
 
-function ScoringHintBanner() {
+// TagsRollupPanel — the v1 per-label analysis surface (plan §5): one row per
+// tag with its session count and cost, click-through = filter the list to
+// that tag. Renders NOTHING until the operator has tagged something, so an
+// untouched dashboard gains no empty furniture.
+function TagsRollupPanel({
+  rows,
+  active,
+  onPick,
+  onClearAll,
+}: {
+  rows: TagRollup[];
+  active: string[];
+  // Called on every pill click. The pill renders its own selected state,
+  // so this handler TOGGLES: clicking a selected pill drops that tag.
+  onPick: (tag: string) => void;
+  onClearAll: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (rows.length === 0) return null;
+  const sorted = [...rows].sort(
+    (a, b) => b.cost_usd - a.cost_usd || b.sessions - a.sessions,
+  );
+  // A SELECTED tag is always rendered, even when it sorts below the
+  // collapsed cut-off: otherwise the only pill that can switch that filter
+  // off is hidden behind "+n more".
+  const shown = expanded
+    ? sorted
+    : sorted.filter((r, i) => i < 8 || active.includes(r.tag));
+  const totalCost = sorted.reduce((a, r) => a + r.cost_usd, 0);
+  return (
+    <section className="rounded-3 border border-line-2 bg-bg-2 p-3">
+      <header className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+          Tags
+        </h3>
+        <span className="flex items-baseline gap-2 font-mono text-[10.5px] text-fg-3">
+          {active.length > 0 && (
+            <button
+              type="button"
+              onClick={onClearAll}
+              className="rounded-2 border border-accent/40 bg-accent-soft px-1.5 py-0.5 font-sans text-[10.5px] text-accent transition-colors hover:bg-accent-soft/70"
+            >
+              Clear all ({active.length})
+            </button>
+          )}
+          <span>
+            {fmtInt(sorted.length)} label{sorted.length === 1 ? "" : "s"} ·{" "}
+            <span className="text-fg-1">{fmtUSD(totalCost)}</span>
+          </span>
+        </span>
+      </header>
+      <div className="flex flex-wrap gap-1.5">
+        {shown.map((r) => {
+          const on = active.includes(r.tag);
+          return (
+            <Tooltip
+              key={r.tag}
+              content={`${fmtInt(r.sessions)} session${r.sessions === 1 ? "" : "s"} · ${fmtUSD(r.cost_usd)} · ${fmtCompact(r.tokens)} tokens. Click to ${on ? "stop filtering by" : "filter by"} "${r.tag}".`}
+            >
+              <button
+                type="button"
+                onClick={() => onPick(r.tag)}
+                aria-pressed={on}
+                className={
+                  "inline-flex items-center gap-1.5 rounded-2 border px-1.5 py-1 transition-colors " +
+                  (on
+                    ? "border-accent bg-accent-soft"
+                    : "border-line-2 bg-bg-3 hover:bg-bg-4")
+                }
+              >
+                <TagPill tag={r.tag} />
+                <span className="font-mono text-[10px] tabular-nums text-fg-3">
+                  {fmtInt(r.sessions)}
+                </span>
+                <span className="font-mono text-[10px] tabular-nums text-fg-2">
+                  {fmtUSD(r.cost_usd)}
+                </span>
+              </button>
+            </Tooltip>
+          );
+        })}
+        {sorted.length > shown.length && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-[10.5px] text-fg-3 hover:bg-bg-4 hover:text-fg-1"
+          >
+            +{sorted.length - shown.length} more
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// CloudProviderWaitingBanner (value-upgrade plan §W3): shown above the table
+// when the last `observer cloud sync` reported the hosted enrichment
+// provider is not accepting jobs yet, so a developer who just turned Cloud
+// Intelligence on understands why titles haven't appeared - nothing is lost,
+// the queue just hasn't drained yet. Dismissable for the rest of this page
+// load only (re-appears on a fresh load while still waiting).
+function CloudProviderWaitingBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="flex items-start gap-3 rounded-3 border border-info/30 bg-info-soft/60 px-4 py-2.5 text-[11.5px]">
+      <Icon icon={Info} size="md" className="mt-px shrink-0 text-info" />
+      <div className="flex-1 text-fg-2">
+        Cloud Intelligence: your sessions are queued. The hosted enrichment
+        provider is not accepting jobs yet, so titles will appear once it is.
+        Nothing is lost.
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 text-fg-3 hover:text-fg-1"
+        aria-label="Dismiss"
+      >
+        <Icon icon={X} size="sm" />
+      </button>
+    </div>
+  );
+}
+
+// ScoringHintBanner: the no-score state. "Score all now" runs `observer
+// score` (the same command, as a dashboard job), which scores every session
+// that has no score yet; the table reloads when it finishes.
+function ScoringHintBanner({ onScored }: { onScored: () => void }) {
   return (
     <div className="flex items-start gap-3 rounded-3 border border-warn/30 bg-warn-soft/60 px-4 py-2.5 text-[11.5px]">
-      <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border border-warn/40 text-warn">
-        i
-      </span>
-      <div className="text-fg-2">
+      <Icon icon={Info} size="md" className="mt-px shrink-0 text-warn" />
+      <div className="min-w-0 flex-1 text-fg-2">
         <b className="text-fg-1">
-          Quality / Errors / Redundancy scoring is hidden.
+          No session in this view has a quality score yet.
         </b>{" "}
-        Run{" "}
-        <code className="rounded-1 border border-line-3 bg-bg-3 px-1.5 py-0.5 font-mono text-[11px] text-fg-1">
-          observer score
-        </code>{" "}
-        to populate the columns. Sessions get a 0–100 quality score and a
-        redundancy index that flags repeat-work patterns.
+        The running daemon scores each session once it has been idle for a
+        while (30 minutes by default), and the Quality / Errors / Redundancy
+        columns appear as soon as one is scored. Sessions get a 0-100 quality
+        score and a redundancy index that flags repeat-work patterns.
+        <CommandJobButton
+          job="score"
+          className="mt-2"
+          confirmLabel="Score every unscored session?"
+          armedNote="Writes quality scores for every session that has none yet. Local only, no model involved."
+          runningLabel="Scoring…"
+          doneText="Scored. The table now shows the new scores."
+          onDone={onScored}
+        >
+          Score all now
+        </CommandJobButton>
       </div>
     </div>
   );
@@ -589,16 +1283,13 @@ function CalendarView({
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-line-1 pb-2.5">
         <div className="flex items-baseline gap-2">
           <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-fg-1">
-            {fmtHeader(first)} – {fmtHeader(last)}
+            {fmtHeader(first)} - {fmtHeader(last)}
           </span>
           <span className="font-mono text-[10.5px] text-fg-3">
             {byDay.size} active day{byDay.size === 1 ? "" : "s"}
           </span>
           {loading && (
-            <span
-              aria-label="loading"
-              className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
-            />
+            <LiveDot tone="info" label="Loading" className="h-2 w-2" />
           )}
         </div>
         <div className="flex items-baseline gap-3 font-mono text-[10.5px] text-fg-3">
@@ -674,7 +1365,7 @@ function CalendarView({
                   </span>
                 </div>
               ) : (
-                <span className="mt-auto text-[10px] text-fg-4">—</span>
+                <span className="mt-auto text-[10px] text-fg-4">-</span>
               )}
             </button>
             </Tooltip>
@@ -726,34 +1417,333 @@ function nextDay(d: Date): Date {
   return out;
 }
 
+// TagsCtx bundles the classification callbacks the table cells need. Passed
+// as one object so buildColumns doesn't grow a fourth positional callback.
+type TagsCtx = {
+  onToggleFavorite: (row: SessionRow) => void;
+  onSetRating: (row: SessionRow, rating: number) => void;
+  onTagClick: (tag: string) => void;
+  onTagsChange: (sessionId: string, tags: string[]) => void;
+  // onSetTitle returns the underlying promise (rather than firing-and-
+  // forgetting like the others) so the inline title editor can await it and
+  // show an error instead of silently reverting.
+  onSetTitle: (row: SessionRow, title: string) => Promise<void>;
+};
+
+// MAX_ROW_TAGS caps how many pills a row shows before collapsing the rest
+// into a "+n" affordance. Two keeps the column inside its width budget
+// (COL_W.tags) without wrapping every tagged row onto three lines.
+const MAX_ROW_TAGS = 2;
+
+// COL_W is the Sessions table's width budget, in px, one entry per column.
+// It exists because the table has 15 columns and the operator's report was
+// that the last two (Output, Total $) fell off the right edge at default
+// zoom on a ~2000px display: with auto layout a single long value (a deep
+// project path, a 16-character tool label like "Open Interpreter") inflates
+// its own column and pushes everything after it out of view.
+//
+// The table renders with layout="fixed", so these numbers are authoritative
+// and any surplus container width is redistributed across them in
+// proportion. Each is sized to its HEADER plus its typical value, and the
+// three text columns that can hold an unbounded string (project, tool,
+// models) also set meta.truncate so they clip instead of growing.
+//
+// Sum without the optional scoring columns: 1386px. That fits inside the
+// ~1620px of table area a 1920px viewport leaves after the sidebar and the
+// page/card padding, with room to spare; at 1440px the wrapper scrolls the
+// last ~140px, with a visible scrollbar and an edge fade to say so.
+const COL_W = {
+  favorite: 44,
+  session: 116,
+  // 110 is the width at which the two most common labels ("Claude Code",
+  // "Antigravity CLI") still read; longer ones ellipsize with the badge's
+  // own tooltip carrying the full name.
+  tool: 120,
+  // Client: one small pill. The cell renders the compact badge (glyph +
+  // host, T-803: "cli · cla..." was all that fit), so 104 holds the common
+  // hosts ("claude-code", "vscode"); the pill's own tooltip carries the
+  // full gloss + host, and the cell truncates rather than growing.
+  client: 104,
+  project: 132,
+  tags: 116,
+  models: 108,
+  // 110 keeps "Sep 07, 12:31" on ONE line: at 98 it wrapped and every row
+  // in the table grew a second line for it.
+  started: 110,
+  // The numeric columns are sized by their HEADER, not their values: the
+  // label plus its help dot plus the sort caret is wider than "481.1K".
+  elapsed: 80,
+  actions: 80,
+  aiCode: 80,
+  input: 68,
+  cacheR: 82,
+  cacheW: 86,
+  output: 78,
+  cost: 78,
+  quality: 68,
+  errors: 66,
+  redundancy: 120,
+} as const;
+
+// SESSIONS_MIN_WIDTH is the sum of COL_W: below it the DataTable wrapper
+// scrolls horizontally rather than squeezing the numerics into two lines.
+const SESSIONS_MIN_WIDTH =
+  COL_W.favorite +
+  COL_W.session +
+  COL_W.tool +
+  COL_W.client +
+  COL_W.project +
+  COL_W.tags +
+  COL_W.models +
+  COL_W.started +
+  COL_W.elapsed +
+  COL_W.actions +
+  COL_W.aiCode +
+  COL_W.input +
+  COL_W.cacheR +
+  COL_W.cacheW +
+  COL_W.output +
+  COL_W.cost;
+
+const SESSIONS_SCORING_WIDTH =
+  COL_W.quality + COL_W.errors + COL_W.redundancy;
+
+// SESSION_TITLE_MAX_LENGTH mirrors the server's <= 200-char rule
+// (store.MaxTitleLen).
+const SESSION_TITLE_MAX_LENGTH = 200;
+
+// SessionTitleCell renders the Session column's primary text — the EFFECTIVE
+// title (the developer's own title > the AI/cloud title > the plain id
+// fallback) — with inline editing. The id itself never disappears: it stays
+// the CopyOnClick value and the "click to copy" tooltip target, so a titled
+// row is still one click from its real id.
+//
+// A hover-revealed pencil, or a double-click on the title, opens a text
+// input; Enter saves (POST /api/session/<id>/tags {title}), Escape cancels,
+// and an empty save clears the title (falls back to the AI/cloud title, then
+// the plain id).
+function SessionTitleCell({
+  row,
+  onSetTitle,
+}: {
+  row: SessionRow;
+  onSetTitle: (row: SessionRow, title: string) => Promise<void>;
+}) {
+  const userTitle = row.title ?? "";
+  // Effective title: yours, then the personal-plane AI title, then the
+  // org-plane AI title (lib/orgIntel sessionEffectiveTitle, design 3.2).
+  const eff = sessionEffectiveTitle(row);
+  const effectiveTitle = eff.text;
+  // The primary text duplicates the cloud-enriched dot's tooltip exactly
+  // when it's showing the cloud title with no user override — so the dot is
+  // hidden in that one case (see the cell renderer below).
+  const usingAI = eff.source === "cloud" || eff.source === "org";
+  const fallback = `${(row.id.split(":agent:").at(-1) ?? row.id).slice(0, 12)}…`;
+  const primaryText = effectiveTitle || fallback;
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(userTitle);
+  const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  function openEditor() {
+    setDraft(userTitle);
+    setErr(null);
+    setEditing(true);
+  }
+
+  async function save() {
+    const value = draft.trim().slice(0, SESSION_TITLE_MAX_LENGTH);
+    if (value === userTitle) {
+      setEditing(false);
+      return;
+    }
+    setErr(null);
+    try {
+      await onSetTitle(row, value);
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  if (editing) {
+    return (
+      <span className="flex flex-col gap-0.5">
+        <input
+          ref={inputRef}
+          value={draft}
+          maxLength={SESSION_TITLE_MAX_LENGTH}
+          placeholder="Title this session"
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void save()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void save();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setEditing(false);
+            }
+          }}
+          className="w-full rounded-1 border border-line-2 bg-bg-3 px-1 py-0.5 text-caption text-fg-1 outline-none focus:border-accent"
+        />
+        {err && <span className="text-[9px] text-danger">{err}</span>}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="group/title inline-flex min-w-0 max-w-full items-center gap-1"
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        openEditor();
+      }}
+    >
+      {usingAI && (
+        <Pill variant="accent" className="shrink-0 whitespace-nowrap" title={eff.source === "org" ? "Title from your organization's session enrichment" : undefined}>
+          {eff.source === "org" ? "org" : "AI"}
+        </Pill>
+      )}
+      <CopyOnClick
+        value={row.id}
+        className="min-w-0 font-mono text-[11px] text-accent hover:text-accent-strong"
+      >
+        <span className="truncate">{primaryText}</span>
+      </CopyOnClick>
+      <Tooltip content={userTitle ? "Edit your title" : "Set your own title"}>
+        <button
+          type="button"
+          aria-label={userTitle ? "Edit your title" : "Set your own title"}
+          onClick={(e) => {
+            e.stopPropagation();
+            openEditor();
+          }}
+          className="shrink-0 opacity-0 transition-opacity hover:text-accent focus:opacity-100 group-hover/title:opacity-100"
+        >
+          <Icon icon={Pencil} size={10} />
+        </button>
+      </Tooltip>
+    </span>
+  );
+}
+
 function buildColumns(
   showScoring: boolean,
   liveSet: Set<string>,
   activeSet: Set<string>,
   onWatch: (id: string) => void,
+  tagsCtx: TagsCtx,
+  onEnrich: (session: SessionRow) => void,
 ): ColumnDef<SessionRow, unknown>[] {
-  // Column order matches design/page-sessions.jsx exactly:
-  // Session / Tool / Project / Model(s) / Started / Elapsed / Actions /
-  // Sub / Input / Cache R / Cache W / Output / API $ / Tool $ / Total $
-  // Reliability and scoring (optional) come after.
+  // Column order matches design/page-sessions.jsx exactly (Client, the
+  // capture-surface pill, was added beside Tool after the design snapshot):
+  // Session / Tool / Client / Project / Model(s) / Started / Elapsed /
+  // Actions / Sub / Input / Cache R / Cache W / Output / API $ / Tool $ /
+  // Total $. Reliability and scoring (optional) come after.
   const cols: ColumnDef<SessionRow, unknown>[] = [
+    {
+      // Favorite star + a compact rating trigger sharing one narrow column.
+      // There is no dedicated Rating column any more (issue: rating should be
+      // reachable only via a click-popover, not a whole column that's empty
+      // for most rows) — server-side "best/worst first" sort now lives in the
+      // toolbar's Sort menu instead of a clickable header. Still
+      // server-sortable via sort_by=favorite (the header click toggles it).
+      id: "favorite",
+      header: () => <Icon icon={Star} size="xs" label="Favorites" />,
+      accessorFn: (r) => (r.favorite ? 1 : 0),
+      meta: { width: COL_W.favorite },
+      cell: ({ row }) => {
+        const rating = row.original.rating ?? 0;
+        return (
+          <span className="flex items-center gap-1">
+            <FavoriteStar
+              favorite={row.original.favorite === true}
+              onToggle={() => tagsCtx.onToggleFavorite(row.original)}
+            />
+            <RatingChip
+              compact
+              rating={rating}
+              onRate={(next) => tagsCtx.onSetRating(row.original, next)}
+              // Rated rows always show the number; unrated rows only reveal
+              // the "rate" affordance on row hover/keyboard focus so the
+              // column doesn't fill up with muted placeholder icons.
+              className={
+                rating > 0
+                  ? undefined
+                  : "opacity-0 focus:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+              }
+            />
+          </span>
+        );
+      },
+    },
     {
       id: "session",
       header: () => <>Session<HelpInd id="column.sessions.id" /></>,
       accessorKey: "id",
+      meta: { width: COL_W.session },
+      // flex-wrap, not nowrap: the id + copy affordance already fills the
+      // column, so a "live" pill drops to a second line instead of pushing
+      // the column (and every column after it) wider.
       cell: ({ row }) => (
-        <span className="flex items-center gap-1.5">
-          <CopyOnClick
-            value={row.original.id}
-            className="font-mono text-[11px] text-accent hover:text-accent-strong"
-          >
-            {row.original.id.slice(0, 12)}…
-          </CopyOnClick>
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <SessionTitleCell row={row.original} onSetTitle={tagsCtx.onSetTitle} />
+          <Tooltip content={SESSION_ENRICH_PLANE_COPY[sessionEnrichPlane(row.original)].tooltip}>
+          <button type="button" className="inline-flex items-center gap-1 rounded-1 border border-accent/30 px-1.5 py-0.5 text-micro font-medium text-accent hover:bg-accent/10"
+            onClick={(event) => { event.stopPropagation(); onEnrich(row.original); }}
+            onKeyDown={(event) => event.stopPropagation()}>
+            {/* An upload under way (cloudProgressMeta inFlight) pulses its
+                VOCAB_ICONS.cloudProgress glyph (CloudUpload). */}
+            {cloudProgressMeta(row.original.cloud_enrichment).inFlight && (
+              <Icon
+                icon={vocabIcon("cloudProgress", row.original.cloud_enrichment?.state)}
+                size={10}
+                className="shrink-0 animate-pulse"
+              />
+            )}
+            {sessionEnrichPlane(row.original) === "org"
+              ? orgPlaneEnrichAction(row.original)
+              : cloudProgressAction(row.original.cloud_enrichment, !!row.original.cloud_enriched)}
+          </button>
+          </Tooltip>
+          {row.original.id.includes(":agent:") && (
+            <span className="text-[10px] text-fg-3">subagent</span>
+          )}
+          {row.original.cloud_enriched &&
+            // Cloud-enriched marker — makes an AI-summarized session spottable
+            // in the list. Hidden when the primary text is ALREADY showing the
+            // cloud title (no user title set): the dot would otherwise repeat
+            // exactly what's already on the row. Still shown when a user title
+            // is displayed instead (the dot's tooltip then surfaces the
+            // DIFFERENT AI title) or when enrichment exists with no title yet.
+            !(!row.original.title && row.original.cloud_title) && (
+              <Tooltip
+                content={
+                  row.original.cloud_title
+                    ? `Cloud enrichment: ${row.original.cloud_title}`
+                    : "Cloud-enriched session"
+                }
+              >
+                <span
+                  tabIndex={0}
+                  aria-label="Cloud-enriched session"
+                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+                />
+              </Tooltip>
+            )}
           {liveSet.has(row.original.id) ? (
             <Pill
               variant="success"
-              title="Running as an attachable `observer --attach` session — open it and click Jump in to join the live terminal."
+              title="Running as an attachable `observer --attach` session - open it and click Jump in to join the live terminal."
             >
+              <LiveDot tone="success" className="h-1.5 w-1.5 shrink-0" />
               live · joinable
             </Pill>
           ) : (
@@ -779,8 +1769,9 @@ function buildColumns(
               >
                 <Pill
                   variant="success"
-                  title="Running outside observer — watch the conversation read-only; joining requires an observer-launched session"
+                  title="Running outside observer - watch the conversation read-only; joining requires an observer-launched session"
                 >
+                  <LiveDot tone="success" className="h-1.5 w-1.5 shrink-0" />
                   live · watch
                 </Pill>
               </span>
@@ -793,21 +1784,114 @@ function buildColumns(
       id: "tool",
       header: () => <>Tool<HelpInd id="column.sessions.tool" /></>,
       accessorKey: "tool",
-      cell: ({ row }) => <ToolBadge tool={row.original.tool} />,
+      meta: { width: COL_W.tool, truncate: true },
+      // The badge's label is the tool's display name, which runs to 16
+      // characters ("Open Interpreter", "Perplexity (web)"). min-w-0 on
+      // both the wrapper and the badge lets the label shrink; the arbitrary
+      // child selector puts the ellipsis on the label span itself, which is
+      // the only text node in the shared primitive. The badge's own tooltip
+      // still carries the full name.
+      cell: ({ row }) => (
+        <span className="flex min-w-0">
+          <ToolBadge
+            tool={row.original.tool}
+            pip={false}
+            className="min-w-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
+          />
+        </span>
+      ),
+    },
+    {
+      // Client: the capture-surface pill (cli / ide / desktop / sdk / web +
+      // host). SurfaceBadge renders NOTHING when neither field is present —
+      // absent is unknown, never "cli" — so an unstamped row shows a blank
+      // cell rather than a fabricated default. Not sortable: there is no
+      // server sort key for it, and the table is manualSorting, so a header
+      // click would otherwise send a sort_by the server ignores.
+      id: "client",
+      header: () => <>Client<HelpInd id="column.sessions.client" /></>,
+      accessorFn: (r) => r.surface ?? "",
+      enableSorting: false,
+      meta: { width: COL_W.client, truncate: true },
+      cell: ({ row }) => (
+        <span className="flex min-w-0">
+          <SurfaceBadge
+            compact
+            surface={row.original.surface}
+            host={row.original.surface_host}
+            className="min-w-0 max-w-full [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
+          />
+        </span>
+      ),
     },
     {
       id: "project",
       header: () => <>Project<HelpInd id="column.sessions.project" /></>,
       accessorKey: "project",
+      meta: { width: COL_W.project, truncate: true },
       cell: ({ row }) =>
         row.original.project ? (
+          // TruncatedPath keeps the TAIL (the basename) readable and puts
+          // the ellipsis at the head; the full path stays on hover/focus.
           <TruncatedPath
             value={row.original.project}
-            className="max-w-[240px] font-mono text-[11px] text-fg-3"
+            className="font-mono text-[11px] text-fg-3"
           />
         ) : (
           <Pill>none</Pill>
         ),
+    },
+    {
+      // Tags: up to MAX_ROW_TAGS pills + a "+n" overflow, followed by the
+      // editor trigger. Clicking a pill filters the list to that tag
+      // (server-side); clicking the trigger opens the popover editor.
+      id: "tags",
+      header: () => <>Tags</>,
+      enableSorting: false,
+      meta: { width: COL_W.tags },
+      cell: ({ row }) => {
+        const tags = row.original.tags ?? [];
+        const shown = tags.slice(0, MAX_ROW_TAGS);
+        const hidden = tags.slice(MAX_ROW_TAGS);
+        return (
+          // No max-width: the cell already has a hard width budget, and
+          // flex-wrap keeps the pills inside it instead of overflowing.
+          <span className="flex flex-wrap items-center gap-1">
+            {shown.map((t) => (
+              <TagPill key={t} tag={t} onClick={tagsCtx.onTagClick} />
+            ))}
+            {hidden.length > 0 && (
+              <Tooltip content={hidden.join(", ")}>
+                <span
+                  tabIndex={0}
+                  className="cursor-help font-mono text-[10px] text-fg-3 focus:outline-none"
+                >
+                  +{hidden.length}
+                </span>
+              </Tooltip>
+            )}
+            {row.original.has_note && (
+              <Tooltip content="This session has a note - open it to read.">
+                <span
+                  tabIndex={0}
+                  aria-label="has note"
+                  className="inline-flex cursor-help text-fg-3 focus:outline-none"
+                >
+                  <Icon icon={Pencil} size={10} />
+                </span>
+              </Tooltip>
+            )}
+            <TagEditor
+              sessionId={row.original.id}
+              tags={tags}
+              label={tags.length > 0 ? "edit" : "+ tag"}
+              onTagsChange={(next) =>
+                tagsCtx.onTagsChange(row.original.id, next)
+              }
+            />
+          </span>
+        );
+      },
     },
     {
       id: "models",
@@ -815,10 +1899,11 @@ function buildColumns(
       // Not server-sortable (no single ordering key); keep the header inert
       // rather than offering a sort affordance the backend would ignore.
       enableSorting: false,
+      meta: { width: COL_W.models, truncate: true },
       cell: ({ row }) => {
         const ms = row.original.models ?? [];
         if (ms.length === 0) {
-          return <span className="text-fg-4">—</span>;
+          return <span className="text-fg-4">-</span>;
         }
         const primary = ms[0];
         const extras = ms.slice(1);
@@ -833,10 +1918,11 @@ function buildColumns(
           >
             <span
               tabIndex={0}
-              className="inline-flex cursor-help items-center gap-1.5 focus:outline-none"
+              className="flex min-w-0 cursor-help items-center gap-1.5 focus:outline-none"
             >
-              <ModelDot model={primary} />
-              <span className="max-w-[160px] truncate font-mono text-[10.5px] text-fg-1">
+              {/* Family mark (no own tooltip: the cell's tooltip lists every model). */}
+              <ModelMark model={primary} tooltip={false} />
+              <span className="min-w-0 truncate font-mono text-[10.5px] text-fg-1">
                 {shortModel(primary)}
               </span>
               {extras.length > 0 && (
@@ -853,8 +1939,9 @@ function buildColumns(
       id: "started_at",
       header: () => <>Started<HelpInd id="column.sessions.started" /></>,
       accessorKey: "started_at",
+      meta: { width: COL_W.started },
       cell: ({ row }) => (
-        <Tooltip content={row.original.started_at}>
+        <Tooltip content={fmtDateTime(row.original.started_at)}>
           <span
             tabIndex={0}
             className="cursor-help font-mono text-[11px] text-fg-3 focus:outline-none"
@@ -868,7 +1955,7 @@ function buildColumns(
       id: "elapsed",
       header: () => <>Elapsed<HelpInd id="column.sessions.elapsed" /></>,
       accessorKey: "duration_seconds",
-      meta: { align: "right" },
+      meta: { align: "right", width: COL_W.elapsed },
       cell: ({ row }) => (
         <span className="tabular-nums text-fg-2">
           {fmtDuration(row.original.duration_seconds * 1000)}
@@ -879,7 +1966,7 @@ function buildColumns(
       id: "actions",
       header: () => <>Actions<HelpInd id="column.sessions.actions" /></>,
       accessorKey: "total_actions",
-      meta: { align: "right" },
+      meta: { align: "right", width: COL_W.actions },
       cell: ({ row }) => (
         <span className="tabular-nums text-fg-1">
           {fmtInt(row.original.total_actions)}
@@ -887,17 +1974,67 @@ function buildColumns(
       ),
     },
     {
+      // AI code lines (lines-of-code tracking §3.4). Server-sortable via
+      // sort_by=ai_code_lines. There is deliberately NO human column and no
+      // share here: with no editor capture the human side is unmeasured
+      // rather than zero, and a table cell has no room for the capture
+      // caveat that would make either honest. The share lives only where
+      // /api/loc/summary supplies human_capture.
+      id: "ai_code_lines",
+      header: () => (
+        <Tooltip content="Code lines the agent added or modified. Comments and blank lines are excluded; deleted lines are not included. The muted percentage is the comment share: comment lines over code plus comment lines the agent wrote in code files.">
+          <span>
+            AI code
+            <HelpInd id="column.sessions.ai_code_lines" />
+          </span>
+        </Tooltip>
+      ),
+      accessorKey: "ai_code_lines",
+      meta: { align: "right", mono: true, width: COL_W.aiCode },
+      cell: ({ row }) => {
+        // omitempty on the wire: absent means NOT COUNTED, never zero. A
+        // session that was never counted is not a session that wrote no
+        // code, so it gets a dash and the backfill hint instead of a 0.
+        const v = row.original.ai_code_lines;
+        if (v === undefined || v === null) {
+          return (
+            <Tooltip content="No agent code lines recorded: either this session changed no code, or its line counts have not been computed yet. Settings > Backfill > loc populates history.">
+              <span tabIndex={0} className="text-fg-4 focus:outline-none">
+                -
+              </span>
+            </Tooltip>
+          );
+        }
+        // The comment share is server-computed (internal/loc.SplitAuthored)
+        // over the same rows as the number, and rendered by the one shared
+        // renderer; the cell does no arithmetic. Absent split = no suffix.
+        return (
+          <span className="whitespace-nowrap">
+            <span className="tabular-nums text-fg-1">{fmtCompact(v)}</span>
+            {row.original.ai_split && (
+              <CodeCommentSplit
+                split={row.original.ai_split}
+                variant="share"
+                compact
+                className="ml-1 text-[10px] text-fg-3"
+              />
+            )}
+          </span>
+        );
+      },
+    },
+    {
       id: "input",
       header: () => <>Input<HelpInd id="column.sessions.input_tokens" /></>,
       accessorKey: "input_tokens",
-      meta: { align: "right", mono: true },
+      meta: { align: "right", mono: true, width: COL_W.input },
       cell: ({ row }) =>
         row.original.input_tokens > 0 ? (
           <span className="tabular-nums text-fg-1">
             {fmtCompact(row.original.input_tokens)}
           </span>
         ) : (
-          <span className="text-fg-4">—</span>
+          <span className="text-fg-4">-</span>
         ),
     },
     {
@@ -906,14 +2043,14 @@ function buildColumns(
         <>Cache R<HelpInd id="column.sessions.cache_read_tokens" /></>
       ),
       accessorKey: "cache_read_tokens",
-      meta: { align: "right", mono: true },
+      meta: { align: "right", mono: true, width: COL_W.cacheR },
       cell: ({ row }) =>
         row.original.cache_read_tokens > 0 ? (
           <span className="tabular-nums text-fg-1">
             {fmtCompact(row.original.cache_read_tokens)}
           </span>
         ) : (
-          <span className="text-fg-4">—</span>
+          <span className="text-fg-4">-</span>
         ),
     },
     {
@@ -922,10 +2059,10 @@ function buildColumns(
         <>Cache W<HelpInd id="column.sessions.cache_creation_tokens" /></>
       ),
       accessorKey: "cache_creation_tokens",
-      meta: { align: "right", mono: true },
+      meta: { align: "right", mono: true, width: COL_W.cacheW },
       cell: ({ row }) => {
         const total = row.original.cache_creation_tokens;
-        if (total <= 0) return <span className="text-fg-4">—</span>;
+        if (total <= 0) return <span className="text-fg-4">-</span>;
         const tier1h = row.original.cache_creation_1h_tokens || 0;
         const tier5m = Math.max(0, total - tier1h);
         const pct1h = total > 0 ? (tier1h / total) * 100 : 0;
@@ -964,14 +2101,14 @@ function buildColumns(
       id: "output",
       header: () => <>Output<HelpInd id="column.sessions.output_tokens" /></>,
       accessorKey: "output_tokens",
-      meta: { align: "right", mono: true },
+      meta: { align: "right", mono: true, width: COL_W.output },
       cell: ({ row }) =>
         row.original.output_tokens > 0 ? (
           <span className="tabular-nums text-fg-1">
             {fmtCompact(row.original.output_tokens)}
           </span>
         ) : (
-          <span className="text-fg-4">—</span>
+          <span className="text-fg-4">-</span>
         ),
     },
     {
@@ -980,13 +2117,15 @@ function buildColumns(
       // SessionDetailPanel's CostStat tile per operator feedback that
       // the Sessions table had too many cost cols. Hover shows the
       // 3-way split as a tooltip so the data isn't hidden.
-      header: () => <>Total $<HelpInd id="column.sessions.cost" /></>,
+      // The cell renders the row's token total in the org's token-usage view,
+      // so the header names tokens there too.
+      header: () => <>{costLabel("Total $", "Total tok")}<HelpInd id="column.sessions.cost" /></>,
       accessorKey: "cost_usd",
-      meta: { align: "right" },
+      meta: { align: "right", width: COL_W.cost },
       cell: ({ row }) => {
         const total = row.original.cost_usd;
         if (total <= 0) {
-          return <span className="text-fg-4">—</span>;
+          return <span className="text-fg-4">-</span>;
         }
         const color =
           total >= 50
@@ -996,6 +2135,19 @@ function buildColumns(
               : "text-fg-0";
         const api = row.original.ai_cost_usd;
         const tool = row.original.tool_cost_usd;
+        // In the org's token-usage view (lib/costDisplay.tsx) fmtCost renders
+        // this row's token total instead of dollars, and the dollar split
+        // tooltip renders hidden values - so it is not offered.
+        const rowTokens =
+          row.original.input_tokens +
+          row.original.output_tokens +
+          row.original.cache_read_tokens +
+          row.original.cache_creation_tokens;
+        if (getCostDisplayMode() === "tokens") {
+          return (
+            <span className="font-semibold tabular-nums text-fg-0">{fmtCost(total, rowTokens)}</span>
+          );
+        }
         const split =
           api > 0 || tool > 0
             ? `api ${fmtUSD(api)} · tool ${fmtUSD(tool)}`
@@ -1013,7 +2165,7 @@ function buildColumns(
               tabIndex={0}
               className={`cursor-help font-semibold tabular-nums focus:outline-none ${color}`}
             >
-              {fmtUSD(total)}
+              {fmtCost(total, rowTokens)}
             </span>
           </Tooltip>
         );
@@ -1027,17 +2179,17 @@ function buildColumns(
         id: "quality",
         header: () => <>Quality<HelpInd id="column.sessions.quality" /></>,
         accessorFn: (r) => r.quality_score ?? -1,
-        meta: { align: "right" },
+        meta: { align: "right", width: COL_W.quality },
         cell: ({ row }) =>
           row.original.quality_score != null
             ? fmtPct(row.original.quality_score)
-            : "—",
+            : "-",
       },
       {
         id: "errors",
         header: () => <>Errors<HelpInd id="column.sessions.errors" /></>,
         accessorFn: (r) => r.error_rate ?? -1,
-        meta: { align: "right" },
+        meta: { align: "right", width: COL_W.errors },
         cell: ({ row }) =>
           row.original.error_rate != null ? (
             <span
@@ -1048,28 +2200,30 @@ function buildColumns(
               {fmtPct(row.original.error_rate)}
             </span>
           ) : (
-            "—"
+            "-"
           ),
       },
       {
         id: "redundancy",
         header: () => <>Redund.<HelpInd id="column.sessions.redundancy" /></>,
         accessorFn: (r) => r.redundancy_ratio ?? -1,
-        meta: { align: "right" },
+        meta: { align: "right", width: COL_W.redundancy },
         cell: ({ row }) => {
           const r = row.original;
-          if (r.redundancy_ratio == null) return "—";
+          if (r.redundancy_ratio == null) return "-";
           // Spec §14.1 wasteful subset rendered as
           // "0.30 (0.20 wasteful)" when present. Sessions
           // without cache_events keep the legacy single value.
           if (r.redundancy_ratio_wasteful != null) {
             return (
-              <span title="total / wasteful subset (spec §14.1)">
-                {fmtPct(r.redundancy_ratio)}
-                <span className="ml-1 text-fg-3">
-                  ({fmtPct(r.redundancy_ratio_wasteful)} wasteful)
+              <Tooltip content="total / wasteful subset">
+                <span tabIndex={0} className="focus:outline-none">
+                  {fmtPct(r.redundancy_ratio)}
+                  <span className="ml-1 text-fg-3">
+                    ({fmtPct(r.redundancy_ratio_wasteful)} wasteful)
+                  </span>
                 </span>
-              </span>
+              </Tooltip>
             );
           }
           return fmtPct(r.redundancy_ratio);
@@ -1082,11 +2236,12 @@ function buildColumns(
 }
 
 // Format an ISO timestamp as "MMM DD HH:MM" — matches design's
-// dim mono treatment for the Started column.
+// dim mono treatment for the Started column. localeString is the cached,
+// byte-identical toLocaleString (one formatter, not one per cell).
 function fmtTimestamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-US", {
+  return localeString(d, "en-US", {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -1100,43 +2255,28 @@ function fmtTimestamp(iso: string): string {
 // doesn't expose per-session yet).
 function exportSessionsCsv(rows: SessionRow[]) {
   if (!rows.length) return;
-  const header = [
-    "session_id",
-    "tool",
-    "project",
-    "started_at",
-    "duration_seconds",
-    "total_actions",
-    "sidechain_action_count",
-    "input_tokens",
-    "cache_read_tokens",
-    "cache_creation_tokens",
-    "output_tokens",
-    "ai_cost_usd",
-    "tool_cost_usd",
-    "cost_usd",
-    "cost_reliability",
-  ].join(",");
-  const lines = rows.map((r) =>
-    [
-      escapeCsv(r.id),
-      escapeCsv(r.tool),
-      escapeCsv(r.project),
-      escapeCsv(r.started_at),
-      r.duration_seconds,
-      r.total_actions,
-      r.sidechain_action_count,
-      r.input_tokens,
-      r.cache_read_tokens,
-      r.cache_creation_tokens,
-      r.output_tokens,
-      r.ai_cost_usd,
-      r.tool_cost_usd,
-      r.cost_usd,
-      escapeCsv(r.cost_reliability),
-    ].join(","),
-  );
-  const blob = new Blob([[header, ...lines].join("\n")], {
+  // The export follows the developer cost display through lib/costExport
+  // (T-204): the `_usd` columns are left out in the token-usage view.
+  const csv = csvText<SessionRow>(rows, [
+    { header: "session_id", value: (r) => r.id },
+    { header: "tool", value: (r) => r.tool },
+    { header: "surface", value: (r) => r.surface },
+    { header: "surface_host", value: (r) => r.surface_host },
+    { header: "project", value: (r) => r.project },
+    { header: "started_at", value: (r) => r.started_at },
+    { header: "duration_seconds", value: (r) => r.duration_seconds },
+    { header: "total_actions", value: (r) => r.total_actions },
+    { header: "sidechain_action_count", value: (r) => r.sidechain_action_count },
+    { header: "input_tokens", value: (r) => r.input_tokens },
+    { header: "cache_read_tokens", value: (r) => r.cache_read_tokens },
+    { header: "cache_creation_tokens", value: (r) => r.cache_creation_tokens },
+    { header: "output_tokens", value: (r) => r.output_tokens },
+    { header: "ai_cost_usd", value: (r) => r.ai_cost_usd },
+    { header: "tool_cost_usd", value: (r) => r.tool_cost_usd },
+    { header: "cost_usd", value: (r) => r.cost_usd },
+    { header: "cost_reliability", value: (r) => r.cost_reliability },
+  ]);
+  const blob = new Blob([csv], {
     type: "text/csv;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
@@ -1148,9 +2288,3 @@ function exportSessionsCsv(rows: SessionRow[]) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-
-function escapeCsv(s: string | undefined | null): string {
-  if (!s) return "";
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-

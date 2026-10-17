@@ -16,6 +16,7 @@ import {
   revertCta,
   suspendCta,
 } from "@/lib/briefingCta";
+import { navIcon } from "@/lib/nav";
 
 // Daily briefing (docs/design/standup-briefing.md Phase A + Stage 2
 // "Apply CTA"). Data-only: the server composes the day's cost/usage facts
@@ -34,8 +35,8 @@ import {
 //     surfaces snoozed/paused cards with a one-click Resume.
 //
 // Layout: the narrative and the open questions are pinned above everything
-// else; the data sections below them are user-configurable — which to show
-// and in what order — persisted per-browser in localStorage
+// else; the data sections below them are user-configurable - which to show
+// and in what order - persisted per-browser in localStorage
 // (`sb_briefing_sections`). Ordering keeps every id present so a hidden
 // section keeps its spot in the list.
 
@@ -197,7 +198,7 @@ function saveSectionsState(s: BriefingSectionsState) {
   try {
     localStorage.setItem(SECTIONS_KEY, JSON.stringify(s));
   } catch {
-    /* storage blocked — the layout still applies for this tab */
+    /* storage blocked - the layout still applies for this tab */
   }
 }
 
@@ -340,7 +341,7 @@ function CardCtaFooter({
       <div className="flex items-center justify-between gap-3 border-t border-line-1 px-4 py-2.5">
         <div className="flex items-center gap-2 text-[11px] text-fg-3">
           <Pill variant="warn">suspended</Pill>
-          <span>{applied ? "paused" : "snoozed"} — hidden until resumed</span>
+          <span>{applied ? "paused" : "snoozed"} - hidden until resumed</span>
         </div>
         <button
           type="button"
@@ -549,7 +550,7 @@ export function BriefingPage() {
   if (api.error) {
     return (
       <div className="p-6">
-        <PageHeader title="Daily briefing" sub="Yesterday's cost and usage story." />
+        <PageHeader icon={navIcon("briefing")} title="Daily briefing" sub="Yesterday's cost and usage story." />
         <div className="mt-4 rounded-3 border border-warn/30 bg-warn/5 px-4 py-3 text-[12px] text-warn">
           Briefing unavailable: {api.error.message}
         </div>
@@ -560,7 +561,7 @@ export function BriefingPage() {
   if (!b) {
     return (
       <div className="p-6">
-        <PageHeader title="Daily briefing" sub="Yesterday's cost and usage story." />
+        <PageHeader icon={navIcon("briefing")} title="Daily briefing" sub="Yesterday's cost and usage story." />
         <div className="mt-4 text-[12px] text-fg-3">Loading…</div>
       </div>
     );
@@ -577,9 +578,9 @@ export function BriefingPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
+      <PageHeader icon={navIcon("briefing")}
         title="Daily briefing"
-        sub="One page that tells yesterday's story: what ran, what it cost, and what the data says you could change. Data-only — every number is recomputable from the same scan, and every opportunity carries its own drill-down math."
+        sub="One page that tells yesterday's story: what ran, what it cost, and what the data says you could change. Data-only - every number is recomputable from the same scan, and every opportunity carries its own drill-down math."
         right={
           <div className="flex items-center gap-2">
             <span
@@ -630,13 +631,13 @@ export function BriefingPage() {
         }
       />
 
-      {/* Narrative — pinned. */}
+      {/* Narrative - pinned. */}
       <div className="flex items-start gap-3 rounded-3 border border-line-2 bg-bg-2 px-4 py-3">
         <SparklesIcon size={14} className="mt-0.5 shrink-0 text-accent" />
         <p className="text-[13px] leading-relaxed text-fg-1">{b.narrative}</p>
       </div>
 
-      {/* Open questions — pinned, after the narrative. */}
+      {/* Open questions - pinned, after the narrative. */}
       {questions.length > 0 && (
         <section>
           <h2 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-fg-3">
@@ -653,7 +654,7 @@ export function BriefingPage() {
         </section>
       )}
 
-      {/* CTA status banner — applies/suspends/resumes land here. */}
+      {/* CTA status banner - applies/suspends/resumes land here. */}
       {ctaError && (
         <div className="rounded-3 border border-danger/30 bg-danger-soft px-4 py-2.5 text-[12px] text-danger">
           {ctaError}
@@ -703,7 +704,7 @@ export function BriefingPage() {
                   )}
                 </div>
 
-                {/* Suspended strip — snoozed/paused cards with one-click Resume. */}
+                {/* Suspended strip - snoozed/paused cards with one-click Resume. */}
                 {suspensions.length > 0 && (
                   <div className="mb-3 rounded-3 border border-line-2 bg-bg-2 p-3">
                     <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-fg-3">

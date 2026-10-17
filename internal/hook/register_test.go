@@ -3,10 +3,14 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func setupRegistry(t *testing.T) *Registry {
@@ -599,7 +603,7 @@ func TestRegisterClaudeCodeCrossBinaryPathRefresh(t *testing.T) {
 // binary refresh: when settings.json holds an observer-shaped hook
 // entry pointing at a DIFFERENT binary path (e.g. npm-bundled
 // observer in node_modules) and the user uninstalls from the
-// current binary, filterClaudeGroups MUST recognise the stale
+// current binary, filterClaudeGroupsRaw MUST recognise the stale
 // entry as ours via isObserverClaudeEntry and remove it — NOT
 // leave it orphaned because the byte-exact prefix-match misses.
 func TestUnregisterClaudeCodeRemovesCrossBinaryEntries(t *testing.T) {
@@ -935,12 +939,12 @@ func TestRegisterClaudeCodeRefreshesOnConfigPathChange(t *testing.T) {
 // crossmount auto-detect doesn't depend on /mnt/c presence.
 func TestRegisterCursorWindowsFreshInstall(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir() // stand-in for /mnt/c/Users/<u>
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	cursorDir := filepath.Join(winHome, ".cursor")
 	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	r, err := NewRegistry(Options{
 		BinaryPath:        "/home/marmutapp/superbased-observer/bin/observer",
 		HomeDir:           wslHome,
@@ -1003,11 +1007,11 @@ func TestRegisterCursorWindowsFreshInstall(t *testing.T) {
 // ambiguous on a host with multiple WSL distros — better to fail
 // loudly at install time than write a broken hooks.json.
 func TestRegisterCursorWindowsRequiresDistro(t *testing.T) {
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	if err := os.MkdirAll(filepath.Join(winHome, ".cursor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	t.Setenv("WSL_DISTRO_NAME", "")
 	r, err := NewRegistry(Options{
 		BinaryPath:        "/x",
@@ -1036,12 +1040,12 @@ func TestRegisterCursorWindowsRequiresDistro(t *testing.T) {
 // binary paths (e.g. /tmp smoke-test vs production install).
 func TestRegisterCursorWindowsCrossBinaryPathRefresh(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	cursorDir := filepath.Join(winHome, ".cursor")
 	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 
 	// First install: binary at /tmp/observer-A.
 	first, err := NewRegistry(Options{
@@ -1094,7 +1098,8 @@ func TestRegisterCursorWindowsCrossBinaryPathRefresh(t *testing.T) {
 // overwritten. Force=false → return error; Force=true → overwrite.
 func TestRegisterCursorWindowsRespectsForeignEntry(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	cursorDir := filepath.Join(winHome, ".cursor")
 	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -1105,7 +1110,6 @@ func TestRegisterCursorWindowsRespectsForeignEntry(t *testing.T) {
 	if err := os.WriteFile(hooksPath, []byte(foreign), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	r, err := NewRegistry(Options{
 		BinaryPath:        "/tmp/observer",
 		HomeDir:           wslHome,
@@ -1128,11 +1132,11 @@ func TestRegisterCursorWindowsRespectsForeignEntry(t *testing.T) {
 // already-installed hooks.json and asserts no events get re-added.
 func TestRegisterCursorWindowsIdempotent(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	if err := os.MkdirAll(filepath.Join(winHome, ".cursor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	r, err := NewRegistry(Options{
 		BinaryPath:        "/opt/observer/bin/observer",
 		HomeDir:           wslHome,
@@ -1155,6 +1159,583 @@ func TestRegisterCursorWindowsIdempotent(t *testing.T) {
 	}
 	if len(res.AlreadySet) != len(cursorEvents) {
 		t.Errorf("AlreadySet %d want %d", len(res.AlreadySet), len(cursorEvents))
+	}
+}
+
+// TestIsDanglingObserverWindowsCursorShim table-tests the narrowed
+// predicate (F2, docs/audits/cursor-windows-capture-diagnosis-2026-08-07.md
+// §4) in isolation: it must recognise the operator's exact stale
+// /tmp/cursor-tee-shim.sh entry as ours, but refuse to classify a
+// merely wsl.exe-shaped foreign command (missing our config path, or
+// missing the event token) as observer-owned.
+func TestIsDanglingObserverWindowsCursorShim(t *testing.T) {
+	t.Parallel()
+	const ourConfig = "/home/marmutapp/.observer/config.toml"
+	cases := []struct {
+		name       string
+		cmd        string
+		event      string
+		configPath string
+		want       bool
+	}{
+		{
+			name:       "operator's exact stale tee-shim entry",
+			cmd:        `wsl.exe -d Ubuntu-20.04 -- /tmp/cursor-tee-shim.sh afterAgentResponse --config '/home/marmutapp/.observer/config.toml'`,
+			event:      "afterAgentResponse",
+			configPath: ourConfig,
+			want:       true,
+		},
+		{
+			name:       "wsl.exe shape but different event named",
+			cmd:        `wsl.exe -d Ubuntu-20.04 -- /tmp/cursor-tee-shim.sh stop --config '/home/marmutapp/.observer/config.toml'`,
+			event:      "afterAgentResponse",
+			configPath: ourConfig,
+			want:       false,
+		},
+		{
+			name:       "wsl.exe shape but a DIFFERENT config path",
+			cmd:        `wsl.exe -d Ubuntu-20.04 -- /tmp/some-other-tool.sh afterAgentResponse --config '/home/someone/else/config.toml'`,
+			event:      "afterAgentResponse",
+			configPath: ourConfig,
+			want:       false,
+		},
+		{
+			name:       "wsl.exe shape, no --config at all",
+			cmd:        `wsl.exe -d Ubuntu-20.04 -- /some/other/script.sh afterAgentResponse`,
+			event:      "afterAgentResponse",
+			configPath: ourConfig,
+			want:       false,
+		},
+		{
+			name:       "not wsl.exe-shaped at all (real user hook)",
+			cmd:        `powershell.exe -File C:\me\myhook.ps1`,
+			event:      "afterAgentResponse",
+			configPath: ourConfig,
+			want:       false,
+		},
+		{
+			name:       "registrar has no ConfigPath configured — never attributable",
+			cmd:        `wsl.exe -d Ubuntu-20.04 -- /tmp/cursor-tee-shim.sh afterAgentResponse --config '/home/marmutapp/.observer/config.toml'`,
+			event:      "afterAgentResponse",
+			configPath: "",
+			want:       false,
+		},
+		{
+			name:       "legacy MSYS-prefixed shape also recognised",
+			cmd:        `MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu-20.04 -- /tmp/cursor-tee-shim.sh stop --config '/home/marmutapp/.observer/config.toml'`,
+			event:      "stop",
+			configPath: ourConfig,
+			want:       true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isDanglingObserverWindowsCursorShim(c.cmd, c.event, c.configPath); got != c.want {
+				t.Errorf("isDanglingObserverWindowsCursorShim(%q, %q, %q) = %v want %v", c.cmd, c.event, c.configPath, got, c.want)
+			}
+		})
+	}
+}
+
+// TestRegisterCursorWindowsSelfHealsStaleTeeShim is the F2 confirming
+// evidence: the operator's EXACT stale hooks.json shape — every
+// cursorEvents entry carrying BOTH the dead /tmp/cursor-tee-shim.sh
+// debug entry AND the legacy MSYS_NO_PATHCONV=1-prefixed entry — must
+// now self-heal under Force:false. Before F2 this aborted every
+// event with "already has a non-observer hook" because
+// isObserverWindowsCursorEntry didn't recognise the tee-shim shape.
+// See docs/audits/cursor-windows-capture-diagnosis-2026-08-07.md §2.2/§4 F2.
+func TestRegisterCursorWindowsSelfHealsStaleTeeShim(t *testing.T) {
+	t.Parallel()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
+	cursorDir := filepath.Join(winHome, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const ourConfig = "/home/marmutapp/.observer/config.toml"
+	hooks := map[string][]cursorHookEntry{}
+	for _, event := range cursorEvents {
+		hooks[event] = []cursorHookEntry{
+			{Command: fmt.Sprintf(
+				`wsl.exe -d Ubuntu-20.04 -- /tmp/cursor-tee-shim.sh %s --config '%s'`,
+				event, ourConfig,
+			)},
+			{Command: fmt.Sprintf(
+				`MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu-20.04 -- /home/marmutapp/superbased-observer/bin/observer hook cursor %s`,
+				event,
+			)},
+		}
+	}
+	body, err := json.Marshal(map[string]any{"version": 1, "hooks": hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+	if err := os.WriteFile(hooksPath, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewRegistry(Options{
+		BinaryPath:        "/home/marmutapp/superbased-observer/bin/observer",
+		HomeDir:           wslHome,
+		ChecksumsPath:     filepath.Join(wslHome, ".observer", "hook_checksums.json"),
+		WindowsCursorHome: winHome,
+		WSLDistro:         "Ubuntu-20.04",
+		ConfigPath:        ourConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.Register("cursor-windows")
+	if res.Error != nil {
+		t.Fatalf("Register (Force=false) on the exact stale operator file: %v", res.Error)
+	}
+	if len(res.HooksAdded) != len(cursorEvents) {
+		t.Errorf("HooksAdded = %d want %d (%v)", len(res.HooksAdded), len(cursorEvents), res.HooksAdded)
+	}
+
+	written, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(written, &settings); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, written)
+	}
+	hooksBlock, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("hooks block missing")
+	}
+	for _, event := range cursorEvents {
+		entries, ok := hooksBlock[event].([]any)
+		if !ok {
+			t.Errorf("event %s missing", event)
+			continue
+		}
+		if len(entries) != 1 {
+			t.Errorf("event %s has %d entries, want exactly 1 (self-heal should have dropped both stale entries): %v", event, len(entries), entries)
+			continue
+		}
+		first, _ := entries[0].(map[string]any)
+		cmd, _ := first["command"].(string)
+		wantPrefix := "wsl.exe -d Ubuntu-20.04 -- /home/marmutapp/superbased-observer/bin/observer hook cursor " + event
+		if !strings.HasPrefix(cmd, wantPrefix) {
+			t.Errorf("event %s cmd = %q want prefix %q", event, cmd, wantPrefix)
+		}
+		if strings.Contains(cmd, "cursor-tee-shim") {
+			t.Errorf("event %s: dead tee-shim entry survived self-heal: %q", event, cmd)
+		}
+	}
+}
+
+// TestRegisterCursorWindowsSelfHealPreservesGenuineForeignEntry pins
+// the safety half of F2: a mixed file where one event ALSO carries a
+// real user-authored hook (not wsl.exe-shaped, not ours by any
+// predicate) must still refuse that event without --force — the
+// narrowed self-heal predicate must never widen far enough to
+// swallow a genuine foreign entry.
+func TestRegisterCursorWindowsSelfHealPreservesGenuineForeignEntry(t *testing.T) {
+	t.Parallel()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
+	cursorDir := filepath.Join(winHome, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const ourConfig = "/home/marmutapp/.observer/config.toml"
+	hooks := map[string][]cursorHookEntry{}
+	for _, event := range cursorEvents {
+		hooks[event] = []cursorHookEntry{
+			{Command: fmt.Sprintf(
+				`wsl.exe -d Ubuntu-20.04 -- /tmp/cursor-tee-shim.sh %s --config '%s'`,
+				event, ourConfig,
+			)},
+		}
+	}
+	// A real user-authored hook on ONE event, alongside the stale shim.
+	hooks["beforeSubmitPrompt"] = append(hooks["beforeSubmitPrompt"], cursorHookEntry{
+		Command: `powershell.exe -File C:\me\myhook.ps1`,
+	})
+	body, err := json.Marshal(map[string]any{"version": 1, "hooks": hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+	if err := os.WriteFile(hooksPath, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewRegistry(Options{
+		BinaryPath:        "/home/marmutapp/superbased-observer/bin/observer",
+		HomeDir:           wslHome,
+		ChecksumsPath:     filepath.Join(wslHome, ".observer", "hook_checksums.json"),
+		WindowsCursorHome: winHome,
+		WSLDistro:         "Ubuntu-20.04",
+		ConfigPath:        ourConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.Register("cursor-windows")
+	if res.Error == nil {
+		t.Fatal("expected error: beforeSubmitPrompt still carries a genuine foreign entry, self-heal must not silently overwrite it")
+	}
+	if !strings.Contains(res.Error.Error(), "non-observer") {
+		t.Errorf("error message = %q want it to mention 'non-observer'", res.Error)
+	}
+	if !strings.Contains(res.Error.Error(), "beforeSubmitPrompt") {
+		t.Errorf("error message = %q want it to name the offending event beforeSubmitPrompt", res.Error)
+	}
+
+	// Nothing should have been written — registerCursorWindows returns
+	// before writing on the first conflicting event. Round-trip through
+	// JSON (rather than a raw substring match) since json.Marshal
+	// escapes the Windows path's backslashes.
+	written, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(written, &settings); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, written)
+	}
+	hooksBlock, _ := settings["hooks"].(map[string]any)
+	entries, _ := hooksBlock["beforeSubmitPrompt"].([]any)
+	var foundForeign bool
+	for _, e := range entries {
+		m, _ := e.(map[string]any)
+		if cmd, _ := m["command"].(string); cmd == `powershell.exe -File C:\me\myhook.ps1` {
+			foundForeign = true
+		}
+	}
+	if !foundForeign {
+		t.Errorf("genuine foreign entry must be preserved on disk after a failed register attempt; beforeSubmitPrompt entries = %v", entries)
+	}
+}
+
+// TestIsOrphanedObserverCursorHTTPHook is the table for the
+// IsOrphanedObserverCursorHTTPHook predicate: it must recognise the lost
+// 2026-09-08 build's loopback-HTTP hook shape and nothing else — in
+// particular a user's own curl hook to a different host, path, or without
+// the observer token header must never be misclassified as ours.
+func TestIsOrphanedObserverCursorHTTPHook(t *testing.T) {
+	t.Parallel()
+	const orphan = `curl.exe -sS --max-time 3 -X POST -H "Content-Type: application/json" ` +
+		`-H "X-Observer-Token: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" ` +
+		`--data-binary '@-' http://127.0.0.1:8081/api/cursor/hook/beforeSubmitPrompt`
+
+	cases := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"orphan http hook, curl.exe, 127.0.0.1", orphan, true},
+		{"orphan http hook, bare curl, localhost", strings.Replace(
+			strings.Replace(orphan, "curl.exe", "curl", 1),
+			"127.0.0.1", "localhost", 1), true},
+		{"orphan http hook, IPv6 loopback", strings.Replace(orphan, "127.0.0.1", "[::1]", 1), true},
+		{"different event name still matches (path-based, not event-scoped)", strings.Replace(
+			orphan, "beforeSubmitPrompt", "stop", 1), true},
+		{"non-loopback host stays foreign", strings.Replace(orphan, "127.0.0.1", "10.0.0.5", 1), false},
+		{"loopback but no X-Observer-Token header stays foreign", strings.Replace(
+			orphan, ` -H "X-Observer-Token: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"`, "", 1), false},
+		{"loopback + token but different path stays foreign", strings.Replace(
+			orphan, "/api/cursor/hook/beforeSubmitPrompt", "/api/other/route", 1), false},
+		{"not a curl invocation stays foreign", strings.Replace(orphan, "curl.exe", "wget.exe", 1), false},
+		{"canonical bridge command is not the http shape", `wsl.exe -d Ubuntu-20.04 -- /home/u/observer hook cursor stop`, false},
+		{"user's own curl hook to a real remote service", `curl.exe -X POST -H "X-Observer-Token: whatever" https://example.com/api/cursor/hook/stop`, false},
+		{"empty command", "", false},
+		// Codex S10-CURSOR pass 2 finding 9: the exact lost-build grammar only.
+		{"token not 64 hex stays foreign", strings.Replace(orphan,
+			"aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", "my-own-token", 1), false},
+		{"token 63 hex stays foreign", strings.Replace(orphan,
+			"aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", "abbccddeeff00112233445566778899aabbccddeeff00112233445566778899", 1), false},
+		{"path embedded deeper stays foreign", strings.Replace(orphan,
+			"/api/cursor/hook/beforeSubmitPrompt", "/proxy/api/cursor/hook/beforeSubmitPrompt", 1), false},
+		{"extra path segment stays foreign", strings.Replace(orphan,
+			"/api/cursor/hook/beforeSubmitPrompt", "/api/cursor/hook/beforeSubmitPrompt/x", 1), false},
+		{"unknown event segment stays foreign", strings.Replace(orphan,
+			"/api/cursor/hook/beforeSubmitPrompt", "/api/cursor/hook/myOwnThing", 1), false},
+		{"query string stays foreign", orphan + "?fwd=1", false},
+		{"https stays foreign", strings.Replace(orphan, "http://", "https://", 1), false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsOrphanedObserverCursorHTTPHook(tc.cmd); got != tc.want {
+				t.Errorf("IsOrphanedObserverCursorHTTPHook(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRegisterCursorWindowsSelfHealsOrphanedHTTPHook covers the live
+// incident this predicate fixes: a Windows-side hooks.json where every
+// Cursor event holds only the lost 2026-09-08 build's loopback-HTTP curl
+// entry (a route no committed build has ever served, so every such hook
+// silently drops). registerCursorWindows must heal every event to the
+// canonical wsl.exe bridge command with NO --force and no error.
+func TestRegisterCursorWindowsSelfHealsOrphanedHTTPHook(t *testing.T) {
+	t.Parallel()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome)
+	cursorDir := filepath.Join(winHome, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	hooks := map[string][]cursorHookEntry{}
+	for _, event := range cursorEvents {
+		hooks[event] = []cursorHookEntry{
+			{Command: fmt.Sprintf(
+				`curl.exe -sS --max-time 3 -X POST -H "Content-Type: application/json" `+
+					`-H "X-Observer-Token: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" `+
+					`--data-binary '@-' http://127.0.0.1:8081/api/cursor/hook/%s`, event,
+			)},
+		}
+	}
+	body, err := json.Marshal(map[string]any{"version": 1, "hooks": hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+	if err := os.WriteFile(hooksPath, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewRegistry(Options{
+		BinaryPath:        "/home/marmutapp/superbased-observer/bin/observer",
+		HomeDir:           wslHome,
+		ChecksumsPath:     filepath.Join(wslHome, ".observer", "hook_checksums.json"),
+		WindowsCursorHome: winHome,
+		WSLDistro:         "Ubuntu-20.04",
+		ConfigPath:        "/home/marmutapp/.observer/config.toml",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.Register("cursor-windows")
+	if res.Error != nil {
+		t.Fatalf("Register (Force=false) on an all-orphaned-HTTP-hook file: %v", res.Error)
+	}
+	if len(res.HooksAdded) != len(cursorEvents) {
+		t.Errorf("HooksAdded = %d want %d (%v)", len(res.HooksAdded), len(cursorEvents), res.HooksAdded)
+	}
+
+	written, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(written, &settings); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, written)
+	}
+	hooksBlock, _ := settings["hooks"].(map[string]any)
+	for _, event := range cursorEvents {
+		entries, _ := hooksBlock[event].([]any)
+		if len(entries) != 1 {
+			t.Fatalf("event %s: got %d entries after heal, want exactly 1: %v", event, len(entries), entries)
+		}
+		m, _ := entries[0].(map[string]any)
+		cmd, _ := m["command"].(string)
+		if !strings.HasPrefix(cmd, "wsl.exe -d Ubuntu-20.04 -- ") || !strings.Contains(cmd, " hook cursor "+event) {
+			t.Errorf("event %s: healed command = %q, want the canonical wsl.exe bridge", event, cmd)
+		}
+		if strings.Contains(cmd, "curl") {
+			t.Errorf("event %s: orphaned curl entry survived healing: %q", event, cmd)
+		}
+	}
+}
+
+// TestRegisterCursorWindowsRejectsForeignCurlHook is the negative
+// counterpart: a curl-based hook that is close to the orphaned shape but
+// fails one of the three required conditions (loopback host, observer
+// token header, /api/cursor/hook/ path) must still be treated as a
+// genuine foreign entry — registerCursorWindows must refuse without
+// --force, exactly like any other user-authored hook.
+func TestRegisterCursorWindowsRejectsForeignCurlHook(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{"non-loopback host", `curl.exe -H "X-Observer-Token: abc" http://10.0.0.5:8081/api/cursor/hook/stop`},
+		{"loopback without observer token header", `curl.exe http://127.0.0.1:8081/api/cursor/hook/stop`},
+		{"loopback+token but unrelated path", `curl.exe -H "X-Observer-Token: abc" http://127.0.0.1:8081/api/other/route`},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wslHome := t.TempDir()
+			winHome := nestedWinHome(t, wslHome)
+			cursorDir := filepath.Join(winHome, ".cursor")
+			if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			hooks := map[string][]cursorHookEntry{}
+			for _, event := range cursorEvents {
+				hooks[event] = []cursorHookEntry{{Command: tc.cmd}}
+			}
+			body, err := json.Marshal(map[string]any{"version": 1, "hooks": hooks})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hooksPath := filepath.Join(cursorDir, "hooks.json")
+			if err := os.WriteFile(hooksPath, body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			r, err := NewRegistry(Options{
+				BinaryPath:        "/home/marmutapp/superbased-observer/bin/observer",
+				HomeDir:           wslHome,
+				ChecksumsPath:     filepath.Join(wslHome, ".observer", "hook_checksums.json"),
+				WindowsCursorHome: winHome,
+				WSLDistro:         "Ubuntu-20.04",
+				ConfigPath:        "/home/marmutapp/.observer/config.toml",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			res := r.Register("cursor-windows")
+			if res.Error == nil {
+				t.Fatalf("expected a non-observer conflict error for %q, got nil", tc.cmd)
+			}
+			if !strings.Contains(res.Error.Error(), "non-observer") {
+				t.Errorf("error message = %q want it to mention 'non-observer'", res.Error)
+			}
+		})
+	}
+}
+
+// TestRecordAutoRegisterResult pins the F3 persistence contract:
+// last_result/last_error land in hook_checksums.json for BOTH
+// outcomes, an existing entry's sha256/registered/binary_path keys
+// (written by a prior recordChecksum call) survive untouched, and a
+// later success clears a previously-recorded last_error. See
+// docs/audits/cursor-windows-capture-diagnosis-2026-08-07.md §4 F3.
+func TestRecordAutoRegisterResult(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	csPath := filepath.Join(home, ".observer", "hook_checksums.json")
+	r, err := NewRegistry(Options{
+		BinaryPath:    "/opt/observer/bin/observer",
+		HomeDir:       home,
+		ChecksumsPath: csPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const target = "/mnt/c/Users/tester/.cursor/hooks.json"
+
+	// A prior successful write already recorded sha256/registered/
+	// binary_path for this path (simulate recordChecksum's shape
+	// directly rather than depending on it, to keep this test
+	// focused on RecordAutoRegisterResult's own contract).
+	seed := map[string]map[string]any{
+		target: {
+			"sha256":      "deadbeef",
+			"registered":  "2026-08-01T00:00:00Z",
+			"binary_path": "/opt/observer/bin/observer",
+		},
+	}
+	seedBody, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(csPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(csPath, seedBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readEntry := func() map[string]any {
+		t.Helper()
+		body, err := os.ReadFile(csPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]map[string]any
+		if err := json.Unmarshal(body, &m); err != nil {
+			t.Fatalf("not valid JSON: %v\n%s", err, body)
+		}
+		entry, ok := m[target]
+		if !ok {
+			t.Fatalf("no entry for %s in %s", target, body)
+		}
+		return entry
+	}
+
+	// Failure path.
+	regErr := errors.New("event afterAgentResponse already has a non-observer hook; pass --force to overwrite")
+	if err := r.RecordAutoRegisterResult(target, regErr); err != nil {
+		t.Fatalf("RecordAutoRegisterResult (failure): %v", err)
+	}
+	entry := readEntry()
+	if entry["last_result"] != "error" {
+		t.Errorf("last_result = %v want %q", entry["last_result"], "error")
+	}
+	if entry["last_error"] != regErr.Error() {
+		t.Errorf("last_error = %v want %q", entry["last_error"], regErr.Error())
+	}
+	if entry["last_checked_at"] == nil || entry["last_checked_at"] == "" {
+		t.Error("last_checked_at not set")
+	}
+	// Pre-existing keys from the earlier recordChecksum-shaped write
+	// must survive untouched.
+	if entry["sha256"] != "deadbeef" {
+		t.Errorf("sha256 = %v, pre-existing key was clobbered", entry["sha256"])
+	}
+	if entry["registered"] != "2026-08-01T00:00:00Z" {
+		t.Errorf("registered = %v, pre-existing key was clobbered", entry["registered"])
+	}
+
+	// Success path afterwards must clear last_error, not just leave it stale.
+	if err := r.RecordAutoRegisterResult(target, nil); err != nil {
+		t.Fatalf("RecordAutoRegisterResult (success): %v", err)
+	}
+	entry = readEntry()
+	if entry["last_result"] != "ok" {
+		t.Errorf("last_result = %v want %q", entry["last_result"], "ok")
+	}
+	if _, hasErr := entry["last_error"]; hasErr {
+		t.Errorf("last_error still present after a successful re-register: %v", entry["last_error"])
+	}
+	if entry["sha256"] != "deadbeef" {
+		t.Errorf("sha256 = %v, pre-existing key was clobbered on the success path", entry["sha256"])
+	}
+}
+
+// TestRecordAutoRegisterResultEmptyPathNoop guards against writing a
+// bogus "" key into hook_checksums.json when a registration attempt
+// never got far enough to produce a ConfigPath.
+func TestRecordAutoRegisterResultEmptyPathNoop(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	r, err := NewRegistry(Options{
+		BinaryPath:    "/opt/observer/bin/observer",
+		HomeDir:       home,
+		ChecksumsPath: filepath.Join(home, ".observer", "hook_checksums.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordAutoRegisterResult("", errors.New("boom")); err != nil {
+		t.Fatalf("RecordAutoRegisterResult(\"\", ...) = %v want nil", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".observer", "hook_checksums.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no hook_checksums.json to be written, stat err = %v", err)
 	}
 }
 
@@ -1438,28 +2019,43 @@ func TestInstalledDetectsCodex(t *testing.T) {
 	}
 }
 
-// TestObserverEntryHeuristicsAreDisjoint pins the contract that the
-// Linux/default and Windows-bridge heuristics match disjoint command
-// shapes — so if both registrar paths write to the same settings.json
-// (rare but possible after switching observer modes on the same
-// host), `observer start` from one mode does not silently rewrite
-// the other mode's entries. Without the wsl.exe-prefix guard added
-// in v1.6.26, isObserverClaudeEntry / isObserverCursorEntry matched
-// wsl-wrapped commands too, causing the Linux/default refresh path
-// to overwrite WSL-bridge entries into native shape.
-func TestObserverEntryHeuristicsAreDisjoint(t *testing.T) {
+// TestObserverEntryHeuristicsAreOneWay pins the contract between the
+// Linux/default and Windows-bridge ownership heuristics. It is
+// deliberately ASYMMETRIC (it was symmetric — and named
+// TestObserverEntryHeuristicsAreDisjoint — until the class-C2 fix in
+// docs/plans/ide-surface-capture-remediation-plan-2026-09-02.md §1):
+//
+//   - the NATIVE heuristics (isObserverClaudeEntry /
+//     isObserverCursorEntry) still REJECT wsl.exe-wrapped commands.
+//     That is the load-bearing direction, added in v1.6.26: if both
+//     registrar paths write the same settings.json (possible after
+//     switching observer modes on one host), the native refresh path
+//     must not rewrite the bridge's entries into native shape.
+//   - the WINDOWS heuristics now ACCEPT the native shape as ours, so
+//     the bridge can REPLACE a stale native `observer.exe hook <tool>`
+//     entry — written by an earlier Windows-native npm install — without
+//     --force. Before this, that entry read as a foreign third-party
+//     hook, registration errored, and the stale native entry kept
+//     writing the stranded Windows DB (audit IDE-11 / the split-brain
+//     class in CLAUDE.md).
+//
+// Conversion is therefore one-way: native → bridge, never the reverse.
+func TestObserverEntryHeuristicsAreOneWay(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name        string
 		cmd         string
 		wantNative  bool // Linux/default heuristic
-		wantWindows bool // wsl-bridge heuristic
+		wantWindows bool // Windows-target heuristic (bridge OR native)
 	}{
 		{
+			// C2: ours on BOTH targets. The native registrar refreshes
+			// it in place; the Windows registrar replaces it with the
+			// bridge command.
 			name:        "claude native",
 			cmd:         "/usr/local/bin/observer hook claude-code pre-tool",
 			wantNative:  true,
-			wantWindows: false,
+			wantWindows: true,
 		},
 		{
 			name:        "claude wsl bare",
@@ -1499,8 +2095,22 @@ func TestObserverEntryHeuristicsAreDisjoint(t *testing.T) {
 		wantWindows bool
 	}{
 		{
+			// C2: ours on BOTH targets — see the claude row above.
 			name:        "cursor native",
 			cmd:         "/usr/local/bin/observer hook cursor beforeShellExecution",
+			wantNative:  true,
+			wantWindows: true,
+		},
+		{
+			// A third-party binary invoked with our argument shape. The
+			// NATIVE heuristic is a deliberately loose substring test and
+			// accepts it (the documented trade-off in
+			// isObserverClaudeEntry); the widened WINDOWS heuristic is
+			// TOKEN-based and does not — argv[0] must name an observer
+			// binary. So C2 made the Windows side stricter here, not
+			// looser.
+			name:        "cursor third-party binary with our argument shape",
+			cmd:         "/opt/acme/acme hook cursor beforeShellExecution",
 			wantNative:  true,
 			wantWindows: false,
 		},
@@ -1539,12 +2149,12 @@ func TestObserverEntryHeuristicsAreDisjoint(t *testing.T) {
 // /mnt/c presence at test time.
 func TestRegisterClaudeCodeWindowsFreshInstall(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir() // stand-in for /mnt/c/Users/<u>
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	claudeDir := filepath.Join(winHome, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	r, err := NewRegistry(Options{
 		BinaryPath:        "/home/marmutapp/superbased-observer/bin/observer",
 		HomeDir:           wslHome,
@@ -1607,11 +2217,11 @@ func TestRegisterClaudeCodeWindowsFreshInstall(t *testing.T) {
 // error path — without one, the wsl.exe wrapper would be ambiguous on
 // a host with multiple distros and we'd write a broken settings.json.
 func TestRegisterClaudeCodeWindowsRequiresDistro(t *testing.T) {
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	if err := os.MkdirAll(filepath.Join(winHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	t.Setenv("WSL_DISTRO_NAME", "")
 	r, err := NewRegistry(Options{
 		BinaryPath:        "/x",
@@ -1636,11 +2246,11 @@ func TestRegisterClaudeCodeWindowsRequiresDistro(t *testing.T) {
 // settings.json. Counts post-register groups under each event.
 func TestRegisterClaudeCodeWindowsIdempotent(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	if err := os.MkdirAll(filepath.Join(winHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	opts := Options{
 		BinaryPath:        "/bin/observer",
 		HomeDir:           wslHome,
@@ -1680,7 +2290,8 @@ func TestRegisterClaudeCodeWindowsIdempotent(t *testing.T) {
 // Register to fail loudly (no --force). User's hook is left untouched.
 func TestRegisterClaudeCodeWindowsConflictGuard(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	claudeDir := filepath.Join(winHome, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -1690,7 +2301,6 @@ func TestRegisterClaudeCodeWindowsConflictGuard(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte(prior), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	r, _ := NewRegistry(Options{
 		BinaryPath:        "/bin/observer",
 		HomeDir:           wslHome,
@@ -1718,7 +2328,8 @@ func TestRegisterClaudeCodeWindowsConflictGuard(t *testing.T) {
 // matched-checksum case.
 func TestUnregisterClaudeCodeWindowsRoundTrip(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	claudeDir := filepath.Join(winHome, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -1731,7 +2342,6 @@ func TestUnregisterClaudeCodeWindowsRoundTrip(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte(prior), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	wslHome := t.TempDir()
 	opts := Options{
 		BinaryPath:        "/bin/observer",
 		HomeDir:           wslHome,
@@ -1767,13 +2377,14 @@ func TestUnregisterClaudeCodeWindowsRoundTrip(t *testing.T) {
 // option path is exercised so the test doesn't depend on /mnt/c.
 func TestInstalledClaudeCodeWindows(t *testing.T) {
 	t.Parallel()
-	winHome := t.TempDir()
+	wslHome := t.TempDir()
+	winHome := nestedWinHome(t, wslHome) // must live UNDER the pinned HomeDir
 	if err := os.MkdirAll(filepath.Join(winHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	r, _ := NewRegistry(Options{
 		BinaryPath:        "/bin/observer",
-		HomeDir:           t.TempDir(),
+		HomeDir:           wslHome,
 		WindowsClaudeHome: winHome,
 	})
 	got := r.Installed()
@@ -1787,4 +2398,1122 @@ func TestInstalledClaudeCodeWindows(t *testing.T) {
 	if !found {
 		t.Errorf("Installed()=%v does not include claude-code-windows", got)
 	}
+}
+
+// --- Statusline registration tests (docs/plans/observer-statusline-plan-2026-07-30.md §5.1/§7) ---
+
+// readStatuslineEntry reads back the "statusLine" key from path as a
+// claudeStatuslineEntry, failing the test if it's missing or malformed.
+func readStatuslineEntry(t *testing.T, path string) claudeStatuslineEntry {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(body, &settings); err != nil {
+		t.Fatalf("parse %s: %v\n%s", path, err, body)
+	}
+	raw, ok := settings["statusLine"]
+	if !ok {
+		t.Fatalf("%s has no \"statusLine\" key", path)
+	}
+	var entry claudeStatuslineEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("statusLine value not the expected shape: %v\n%s", err, raw)
+	}
+	return entry
+}
+
+func TestRegisterClaudeCodeStatuslineFreshInstall(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline: %v", res.Error)
+	}
+	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "statusLine" {
+		t.Errorf("HooksAdded=%v want [statusLine]", res.HooksAdded)
+	}
+
+	entry := readStatuslineEntry(t, res.ConfigPath)
+	if entry.Type != "command" {
+		t.Errorf("type=%q want command", entry.Type)
+	}
+	if entry.Padding != 0 {
+		t.Errorf("padding=%d want 0", entry.Padding)
+	}
+	if !strings.Contains(entry.Command, r.opts.BinaryPath) || !strings.HasSuffix(entry.Command, " statusline") {
+		t.Errorf("command=%q does not look like <bin> statusline", entry.Command)
+	}
+
+	// The "hooks" key must not exist — this registration path never
+	// touches it.
+	body, _ := os.ReadFile(res.ConfigPath)
+	var settings map[string]json.RawMessage
+	_ = json.Unmarshal(body, &settings)
+	if _, ok := settings["hooks"]; ok {
+		t.Error("statusline registration wrote a \"hooks\" key — it must never touch hooks")
+	}
+
+	// Checksum file should be written (recordChecksum is reused unchanged).
+	csPath := filepath.Join(r.opts.HomeDir, ".observer", "hook_checksums.json")
+	if _, err := os.Stat(csPath); err != nil {
+		t.Errorf("checksum file not created: %v", err)
+	}
+}
+
+// TestRegisterClaudeCodeStatuslineLeavesHooksUntouched registers hooks
+// first, then statusline, and asserts the "hooks" block written by
+// registerClaudeCode is byte-for-byte the same afterwards — the
+// statusline registrar patches a sibling top-level key, never the
+// "hooks" map itself.
+func TestRegisterClaudeCodeStatuslineLeavesHooksUntouched(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	hookRes := r.Register("claude-code")
+	if hookRes.Error != nil {
+		t.Fatalf("Register(claude-code): %v", hookRes.Error)
+	}
+	before, err := os.ReadFile(hookRes.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beforeSettings map[string]json.RawMessage
+	if err := json.Unmarshal(before, &beforeSettings); err != nil {
+		t.Fatal(err)
+	}
+
+	slRes := r.RegisterClaudeCodeStatusline()
+	if slRes.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline: %v", slRes.Error)
+	}
+
+	after, err := os.ReadFile(slRes.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var afterSettings map[string]json.RawMessage
+	if err := json.Unmarshal(after, &afterSettings); err != nil {
+		t.Fatal(err)
+	}
+	if string(beforeSettings["hooks"]) != string(afterSettings["hooks"]) {
+		t.Errorf("\"hooks\" key changed after statusline registration:\nbefore=%s\nafter=%s", beforeSettings["hooks"], afterSettings["hooks"])
+	}
+	if _, ok := afterSettings["statusLine"]; !ok {
+		t.Error("statusLine key missing after registration")
+	}
+}
+
+func TestRegisterClaudeCodeStatuslineConflictBlocksWithoutForce(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	pre := `{"statusLine":{"type":"command","command":"/usr/local/bin/ccstatusline","padding":0}}`
+	if err := os.WriteFile(path, []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error == nil {
+		t.Fatal("expected conflict error for a foreign statusLine entry")
+	}
+	// settings.json is a credential-bearing file (D-268): the conflict
+	// names the key and the escape, never the foreign value.
+	if !strings.Contains(res.Error.Error(), "statusLine") || strings.Contains(res.Error.Error(), "ccstatusline") {
+		t.Errorf("error %q should name statusLine and withhold the foreign command", res.Error)
+	}
+	// The foreign entry must survive untouched.
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), "ccstatusline") {
+		t.Error("foreign statusLine entry was clobbered without --force")
+	}
+
+	// With --force, it overwrites.
+	r.opts.Force = true
+	res = r.RegisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("force register: %v", res.Error)
+	}
+	entry := readStatuslineEntry(t, path)
+	if strings.Contains(entry.Command, "ccstatusline") {
+		t.Error("--force did not overwrite the foreign entry")
+	}
+	if !strings.Contains(entry.Command, "statusline") {
+		t.Errorf("forced entry does not look like ours: %+v", entry)
+	}
+}
+
+// TestRegisterClaudeCodeStatuslineRefreshesStaleBinaryPath pins the
+// refresh-on-drift behaviour: an existing entry recognised as
+// observer-written (by isObserverStatuslineEntry) but pointing at a
+// stale binary path is silently rewritten — no --force needed, unlike
+// a genuinely foreign entry.
+func TestRegisterClaudeCodeStatuslineRefreshesStaleBinaryPath(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	stale := `{"statusLine":{"type":"command","command":"/old/path/observer statusline","padding":0}}`
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline: %v", res.Error)
+	}
+	if len(res.AlreadySet) != 0 {
+		t.Errorf("AlreadySet=%v want none — a stale binary path must refresh, not short-circuit", res.AlreadySet)
+	}
+	entry := readStatuslineEntry(t, path)
+	if strings.Contains(entry.Command, "/old/path/") {
+		t.Errorf("stale observer entry was not refreshed: %+v", entry)
+	}
+	if !strings.Contains(entry.Command, r.opts.BinaryPath) {
+		t.Errorf("refreshed entry does not carry the current binary path: %+v", entry)
+	}
+}
+
+// TestRegisterClaudeCodeStatuslineIdempotent pins BOTH the AlreadySet
+// signal AND the "no needless rewrite" contract: a second identical
+// run must not touch the file on disk (mtime unchanged) and must not
+// re-record the checksum.
+func TestRegisterClaudeCodeStatuslineIdempotent(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	first := r.RegisterClaudeCodeStatusline()
+	if first.Error != nil {
+		t.Fatalf("first: %v", first.Error)
+	}
+
+	fi1, err := os.Stat(first.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csPath := filepath.Join(r.opts.HomeDir, ".observer", "hook_checksums.json")
+	csBefore, err := os.ReadFile(csPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sleep isn't reliable in CI; instead assert via content-equality AND
+	// that no HooksAdded/error occurred, which is the behavioural contract
+	// that implies "we returned before any write call".
+	second := r.RegisterClaudeCodeStatusline()
+	if second.Error != nil {
+		t.Fatalf("second: %v", second.Error)
+	}
+	if len(second.HooksAdded) != 0 {
+		t.Errorf("second run added %v — want no-op", second.HooksAdded)
+	}
+	if len(second.AlreadySet) != 1 || second.AlreadySet[0] != "statusLine" {
+		t.Errorf("AlreadySet=%v want [statusLine]", second.AlreadySet)
+	}
+
+	fi2, err := os.Stat(first.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi1.ModTime().Equal(fi2.ModTime()) {
+		t.Errorf("settings.json mtime changed on idempotent re-run: %v -> %v", fi1.ModTime(), fi2.ModTime())
+	}
+	csAfter, err := os.ReadFile(csPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(csBefore) != string(csAfter) {
+		t.Error("checksum file rewritten on idempotent re-run")
+	}
+}
+
+func TestRegisterClaudeCodeStatuslinePreservesUnknownKeys(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	pre := `{"theme":"dark","permissions":{"allow":["bash"]},"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"/usr/local/bin/other-hook"}]}]}}`
+	if err := os.WriteFile(path, []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline: %v", res.Error)
+	}
+	body, _ := os.ReadFile(path)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["theme"] != "dark" {
+		t.Errorf("theme lost: %v", got["theme"])
+	}
+	if _, ok := got["permissions"]; !ok {
+		t.Error("permissions lost")
+	}
+	hooksBlock, ok := got["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("hooks block lost")
+	}
+	preHook, ok := hooksBlock["PreToolUse"].([]any)
+	if !ok || len(preHook) == 0 {
+		t.Fatal("PreToolUse hook group lost")
+	}
+	if _, ok := got["statusLine"]; !ok {
+		t.Error("statusLine key missing")
+	}
+}
+
+func TestUnregisterClaudeCodeStatuslineRemovesKeyEntirely(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	// Seed an unrelated key first so the file survives the unregister
+	// (isolating "the key is removed entirely" from "the whole file is
+	// removed when it becomes empty", which is covered separately by
+	// TestUnregisterClaudeCodeStatuslineNoopWhenAbsent / the empty-file
+	// removal branch exercised implicitly by the fresh-install-only case
+	// below).
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	regRes := r.RegisterClaudeCodeStatusline()
+	if regRes.Error != nil {
+		t.Fatalf("register: %v", regRes.Error)
+	}
+
+	unregRes := r.UnregisterClaudeCodeStatusline()
+	if unregRes.Error != nil {
+		t.Fatalf("UnregisterClaudeCodeStatusline: %v", unregRes.Error)
+	}
+	if len(unregRes.HooksRemoved) != 1 || unregRes.HooksRemoved[0] != "statusLine" {
+		t.Errorf("HooksRemoved=%v want [statusLine]", unregRes.HooksRemoved)
+	}
+
+	body, err := os.ReadFile(regRes.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(body, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings["theme"] == nil || string(settings["theme"]) != `"dark"` {
+		t.Errorf("unrelated \"theme\" key lost during unregister: %v", settings["theme"])
+	}
+	if _, ok := settings["statusLine"]; ok {
+		t.Error("\"statusLine\" key still present after unregister — must be removed entirely, not blanked")
+	}
+}
+
+// TestUnregisterClaudeCodeStatuslinePreservesHooksAndForeignEntry
+// covers two things in one settings.json: unregistering statusline
+// must (a) leave a co-resident "hooks" block untouched, and (b) never
+// touch a FOREIGN "statusLine" belonging to another tool.
+func TestUnregisterClaudeCodeStatuslinePreservesHooksAndForeignEntry(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	hookRes := r.Register("claude-code")
+	if hookRes.Error != nil {
+		t.Fatalf("Register(claude-code): %v", hookRes.Error)
+	}
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	// Hand-inject a foreign statusLine into the same file after the hook
+	// registration (simulating a user who wrote their own before ever
+	// running `observer init --statusline`).
+	body, _ := os.ReadFile(path)
+	var settings map[string]json.RawMessage
+	_ = json.Unmarshal(body, &settings)
+	settings["statusLine"] = json.RawMessage(`{"type":"command","command":"/usr/local/bin/ccstatusline","padding":0}`)
+	patched, _ := json.Marshal(settings)
+	if err := os.WriteFile(path, patched, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.UnregisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("UnregisterClaudeCodeStatusline: %v", res.Error)
+	}
+	if !res.Skipped {
+		t.Error("expected Skipped=true for a foreign statusLine entry")
+	}
+	if len(res.HooksKept) != 1 || res.HooksKept[0] != "statusLine" {
+		t.Errorf("HooksKept=%v want [statusLine]", res.HooksKept)
+	}
+
+	after, _ := os.ReadFile(path)
+	if !strings.Contains(string(after), "ccstatusline") {
+		t.Error("foreign statusLine entry was removed — must be left untouched")
+	}
+	var afterSettings map[string]json.RawMessage
+	if err := json.Unmarshal(after, &afterSettings); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := afterSettings["hooks"]; !ok {
+		t.Error("hooks block lost during statusline unregister")
+	}
+}
+
+// TestUnregisterClaudeCodeStatuslineRemovesEmptyFile covers the other
+// half of "removed entirely, not blanked": when statusLine was the
+// ONLY top-level key, unregister removes settings.json rather than
+// leaving an empty "{}" file behind.
+func TestUnregisterClaudeCodeStatuslineRemovesEmptyFile(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	regRes := r.RegisterClaudeCodeStatusline()
+	if regRes.Error != nil {
+		t.Fatalf("register: %v", regRes.Error)
+	}
+
+	unregRes := r.UnregisterClaudeCodeStatusline()
+	if unregRes.Error != nil {
+		t.Fatalf("UnregisterClaudeCodeStatusline: %v", unregRes.Error)
+	}
+	if _, err := os.Stat(regRes.ConfigPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("settings.json should be removed once empty, got err=%v", err)
+	}
+}
+
+func TestUnregisterClaudeCodeStatuslineNoopWhenAbsent(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	// No file at all.
+	res := r.UnregisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("unexpected error: %v", res.Error)
+	}
+	if !res.Skipped {
+		t.Error("expected Skipped=true when settings.json doesn't exist")
+	}
+
+	// File exists but has no "statusLine" key.
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res = r.UnregisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("unexpected error: %v", res.Error)
+	}
+	if !res.Skipped {
+		t.Error("expected Skipped=true when \"statusLine\" key is absent")
+	}
+	if len(res.HooksRemoved) != 0 {
+		t.Errorf("HooksRemoved=%v want none", res.HooksRemoved)
+	}
+}
+
+// TestUnregisterClaudeCodeStatuslineChecksumDriftGuard pins the
+// checksum-mismatch guard: once the file has been hand-edited since
+// install (checksum mismatch), unregister refuses without --force and
+// succeeds with it — mirroring unregisterClaudeCode's own guard.
+func TestUnregisterClaudeCodeStatuslineChecksumDriftGuard(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	regRes := r.RegisterClaudeCodeStatusline()
+	if regRes.Error != nil {
+		t.Fatalf("register: %v", regRes.Error)
+	}
+
+	// Hand-edit the hooks subtree, the span the checksum covers in a
+	// credential-bearing settings.json (D-268), without touching
+	// "statusLine" itself.
+	body, _ := os.ReadFile(regRes.ConfigPath)
+	var settings map[string]json.RawMessage
+	_ = json.Unmarshal(body, &settings)
+	settings["hooks"] = json.RawMessage(`{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"/usr/local/bin/mine"}]}]}`)
+	patched, _ := json.Marshal(settings)
+	if err := os.WriteFile(regRes.ConfigPath, patched, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.UnregisterClaudeCodeStatusline()
+	if res.Error == nil {
+		t.Fatal("expected checksum-mismatch error without --force")
+	}
+	if res.ChecksumMatch {
+		t.Error("ChecksumMatch=true but the file was hand-edited")
+	}
+
+	r.opts.Force = true
+	res = r.UnregisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("force unregister: %v", res.Error)
+	}
+	if len(res.HooksRemoved) != 1 {
+		t.Errorf("HooksRemoved=%v want [statusLine]", res.HooksRemoved)
+	}
+}
+
+// TestObserverStatuslineEntryHeuristic pins isObserverStatuslineEntry's
+// recognition contract directly (independent of the full read-modify-
+// write path above).
+func TestObserverStatuslineEntryHeuristic(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	cmd := shellQuoteIfNeeded(forwardSlashPath(r.opts.BinaryPath)) + " statusline"
+	if !isObserverStatuslineEntry(cmd) {
+		t.Errorf("isObserverStatuslineEntry(%q)=false, want true", cmd)
+	}
+	if isObserverStatuslineEntry("/usr/local/bin/ccstatusline") {
+		t.Error("isObserverStatuslineEntry matched a foreign command with no \" statusline\" substring")
+	}
+	if isObserverStatuslineEntry("/usr/bin/faststatusline") {
+		t.Error("isObserverStatuslineEntry matched a substring without the required leading space")
+	}
+}
+
+// TestRegisterUnregisterClaudeCodeStatuslineDryRun pins the --dry-run
+// contract: nothing is written to disk, but the result still reports
+// what WOULD happen.
+func TestRegisterUnregisterClaudeCodeStatuslineDryRun(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	r.opts.DryRun = true
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline dry-run: %v", res.Error)
+	}
+	if len(res.HooksAdded) != 1 {
+		t.Errorf("HooksAdded=%v want [statusLine]", res.HooksAdded)
+	}
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	if _, err := os.ReadFile(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry-run wrote settings.json (err=%v) — must not write", err)
+	}
+
+	// Seed a real file, then dry-run an unregister and confirm the key
+	// survives.
+	r.opts.DryRun = false
+	realRes := r.RegisterClaudeCodeStatusline()
+	if realRes.Error != nil {
+		t.Fatalf("register: %v", realRes.Error)
+	}
+	r.opts.DryRun = true
+	unregRes := r.UnregisterClaudeCodeStatusline()
+	if unregRes.Error != nil {
+		t.Fatalf("UnregisterClaudeCodeStatusline dry-run: %v", unregRes.Error)
+	}
+	if len(unregRes.HooksRemoved) != 1 {
+		t.Errorf("HooksRemoved=%v want [statusLine] reported even in dry-run", unregRes.HooksRemoved)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("dry-run unregister deleted the file: %v", err)
+	}
+	if !strings.Contains(string(body), "statusLine") {
+		t.Error("dry-run unregister actually removed the key from disk — must not write")
+	}
+}
+
+// --- Settings-writer hardening tests (adversarial review F7-F11) ---
+//
+// These pin the read-preserve-write contract of the SHARED
+// settings.json machinery (readSettingsFile / decodeSettingsObject /
+// writeJSONIndented) that the hooks, MCP and statusline registrars all
+// funnel through — the statusline registrar merely made the pre-existing
+// classes visible.
+
+// TestSettingsJSONNullRefused pins F7(a): a settings.json whose whole
+// body is the JSON literal `null` unmarshals a map to NIL, so the next
+// `settings[key] = ...` used to PANIC ("assignment to entry in nil
+// map"). It must instead be refused with an error naming the file — an
+// explicit null is not a settings object, so treating it as {} and
+// overwriting it would be a silent data decision we have no right to
+// make.
+func TestSettingsJSONNullRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		run  func(r *Registry) error
+	}{
+		{"statusline-register", func(r *Registry) error { return r.RegisterClaudeCodeStatusline().Error }},
+		{"statusline-unregister", func(r *Registry) error { return r.UnregisterClaudeCodeStatusline().Error }},
+		{"hooks-register", func(r *Registry) error { return r.Register("claude-code").Error }},
+		{"hooks-unregister", func(r *Registry) error { return r.Unregister("claude-code").Error }},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := setupRegistry(t)
+			path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+			if err := os.WriteFile(path, []byte("null\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := tc.run(r) // must not panic
+			if err == nil {
+				t.Fatal("expected an error for a settings.json containing JSON null")
+			}
+			if !strings.Contains(err.Error(), "JSON null") || !strings.Contains(err.Error(), path) {
+				t.Errorf("error %q does not name the malformed file and the null shape", err)
+			}
+			body, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if strings.TrimSpace(string(body)) != "null" {
+				t.Errorf("refused run mutated the file: %q", body)
+			}
+		})
+	}
+}
+
+// TestSettingsJSONDuplicateTopLevelKeyRefused pins F7(b): duplicate
+// top-level keys are silently collapsed to the LAST one by
+// encoding/json, so a read-modify-write would destroy whichever copy
+// another tool was reading. Detected by token-walking the top level and
+// refused by name.
+func TestSettingsJSONDuplicateTopLevelKeyRefused(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	pre := `{"theme":"dark","permissions":{"allow":["bash"]},"theme":"light"}`
+	if err := os.WriteFile(path, []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error == nil {
+		t.Fatal("expected an error for duplicate top-level keys")
+	}
+	if !strings.Contains(res.Error.Error(), `"theme"`) || !strings.Contains(res.Error.Error(), "duplicate") {
+		t.Errorf("error %q does not name the duplicated key", res.Error)
+	}
+	body, _ := os.ReadFile(path)
+	if string(body) != pre {
+		t.Errorf("refused run mutated the file:\n got %s\nwant %s", body, pre)
+	}
+
+	// The hooks registrar shares the reader, so it refuses identically.
+	hookRes := r.Register("claude-code")
+	if hookRes.Error == nil || !strings.Contains(hookRes.Error.Error(), "duplicate") {
+		t.Errorf("hooks registrar error=%v, want a duplicate-key refusal", hookRes.Error)
+	}
+
+	// A single occurrence of the same key is of course fine.
+	if err := os.WriteFile(path, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("well-formed file refused: %v", res.Error)
+	}
+}
+
+// TestSettingsWriterPreservesUnrelatedValuesLosslessly pins F7(c): the
+// shared writer re-indents unrelated top-level values from their RAW
+// bytes (json.Indent) instead of decoding them through `any`. Decoding
+// mangled every one of these: 2^53+1 through float64, number
+// formatting, and \u-escaping of HTML-ish characters inside strings.
+// Exercised through BOTH the statusline and the hooks registrar,
+// because they share writeJSONIndented.
+func TestSettingsWriterPreservesUnrelatedValuesLosslessly(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		run  func(r *Registry) error
+	}{
+		{"statusline", func(r *Registry) error { return r.RegisterClaudeCodeStatusline().Error }},
+		{"hooks", func(r *Registry) error { return r.Register("claude-code").Error }},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := setupRegistry(t)
+			path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+			pre := `{"bigInt":9007199254740993,"exact":1.500,"exp":1e3,"html":"a<b&c>d","nested":{"id":12345678901234567890}}`
+			if err := os.WriteFile(path, []byte(pre), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.run(r); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(body)
+			for _, want := range []string{
+				"9007199254740993",     // not ...992
+				"1.500",                // not 1.5 / 1
+				"1e3",                  // not 1000
+				"a<b&c>d",              // not a\u003cb\u0026c\u003ed
+				"12345678901234567890", // beyond float64 entirely
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("value %q did not round-trip losslessly:\n%s", want, got)
+				}
+			}
+			// And the result is still valid JSON with our key added.
+			var settings map[string]json.RawMessage
+			if err := json.Unmarshal(body, &settings); err != nil {
+				t.Fatalf("writer produced invalid JSON: %v\n%s", err, got)
+			}
+			if len(settings) != 6 {
+				t.Errorf("top-level key count=%d want 6 (5 preserved + ours): %v", len(settings), got)
+			}
+		})
+	}
+}
+
+// TestObserverStatuslineEntryOwnership pins F8: " statusline" as a bare
+// substring is not an ownership signal. Ours = an observer-basename
+// executable whose FIRST argument is exactly "statusline".
+func TestObserverStatuslineEntryOwnership(t *testing.T) {
+	t.Parallel()
+	ours := []string{
+		"/opt/observer/bin/observer statusline",
+		"observer statusline",
+		"'/home/u/My Stuff/observer' statusline",
+		`D:/programsx/superbased-observer/bin/observer.exe statusline`,
+		`"C:/Program Files/observer/observer.exe" statusline`,
+		"/usr/local/bin/observer-v1.8.3 statusline",
+		"/tmp/observer-A statusline",
+		"/opt/bin/superbased statusline",
+		"/opt/observer/bin/observer statusline --theme compact", // future flag-carrying variant of OUR command
+	}
+	for _, cmd := range ours {
+		if !isObserverStatuslineEntry(cmd) {
+			t.Errorf("isObserverStatuslineEntry(%q)=false, want true (ours)", cmd)
+		}
+	}
+	foreign := []string{
+		"node /opt/acme statusline --theme compact", // the F8 report case
+		"/usr/local/bin/ccstatusline",
+		"/usr/bin/faststatusline",
+		"/usr/local/bin/ccstatusline statusline",
+		"python3 -m ccstatusline statusline",
+		"/opt/acme/observer-ish/bin/acme statusline", // observer only in a DIRECTORY name
+		"/opt/observer/bin/observer hook claude-code session-start",
+		"/opt/observer/bin/observer status --statusline",
+		"bash -c 'observer statusline'", // wrapper shape we never write
+		"",
+		"'/opt/observer/bin/observer statusline", // unbalanced quote ⇒ ambiguous ⇒ foreign
+	}
+	for _, cmd := range foreign {
+		if isObserverStatuslineEntry(cmd) {
+			t.Errorf("isObserverStatuslineEntry(%q)=true, want false (foreign)", cmd)
+		}
+	}
+}
+
+// TestRegisterClaudeCodeStatuslineForeignStatuslineSubcommandBlocks is
+// the F8 end-to-end: a third-party statusline tool invoked as
+// `<exe> statusline ...` is FOREIGN — register blocks without --force
+// and unregister leaves it alone.
+func TestRegisterClaudeCodeStatuslineForeignStatuslineSubcommandBlocks(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	pre := `{"statusLine":{"type":"command","command":"node /opt/acme statusline --theme compact","padding":0}}`
+	if err := os.WriteFile(path, []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error == nil {
+		t.Fatal("expected a conflict error for a foreign `<exe> statusline` command")
+	}
+	if strings.Contains(res.Error.Error(), "/opt/acme") || !strings.Contains(res.Error.Error(), "--force") {
+		t.Errorf("error %q should withhold the foreign command (D-268) and name the --force escape", res.Error)
+	}
+	body, _ := os.ReadFile(path)
+	if string(body) != pre {
+		t.Errorf("foreign statusLine was rewritten:\n%s", body)
+	}
+
+	// Uninstall must not adopt-and-delete it either.
+	unreg := r.UnregisterClaudeCodeStatusline()
+	if unreg.Error != nil {
+		t.Fatalf("unregister: %v", unreg.Error)
+	}
+	if len(unreg.HooksKept) != 1 || unreg.HooksKept[0] != "statusLine" {
+		t.Errorf("HooksKept=%v want [statusLine] — a foreign statusline must be kept", unreg.HooksKept)
+	}
+	body, _ = os.ReadFile(path)
+	if !strings.Contains(string(body), "/opt/acme") {
+		t.Error("uninstall removed a foreign statusline entry")
+	}
+}
+
+// TestRegisterClaudeCodeStatuslineRefreshesOtherObserverPath is F8's
+// other half: OUR entry written by a differently-installed observer
+// binary (different directory, suffixed name) still refreshes silently.
+func TestRegisterClaudeCodeStatuslineRefreshesOtherObserverPath(t *testing.T) {
+	t.Parallel()
+	for _, stale := range []string{
+		"/usr/lib/node_modules/@superbased/observer/bin/observer statusline",
+		"/usr/local/bin/observer-v1.8.3 statusline",
+		`'C:/Program Files/observer/observer.exe' statusline`,
+	} {
+		stale := stale
+		t.Run(stale, func(t *testing.T) {
+			t.Parallel()
+			r := setupRegistry(t)
+			path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+			body, err := json.Marshal(map[string]any{
+				"statusLine": map[string]any{"type": "command", "command": stale, "padding": 0},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			res := r.RegisterClaudeCodeStatusline()
+			if res.Error != nil {
+				t.Fatalf("a differently-installed observer entry should refresh, got: %v", res.Error)
+			}
+			entry := readStatuslineEntry(t, path)
+			if !strings.Contains(entry.Command, r.opts.BinaryPath) {
+				t.Errorf("entry not refreshed to the current binary: %+v", entry)
+			}
+		})
+	}
+}
+
+// TestSettingsWriterUsesUniqueTempAndLeavesNoArtifacts pins F9(a): the
+// writer must not use a FIXED `settings.json.tmp` (two observer
+// processes would splice each other's half-written body), and must
+// leave neither temp nor lock files behind on success.
+func TestSettingsWriterUsesUniqueTempAndLeavesNoArtifacts(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	dir := filepath.Join(r.opts.HomeDir, ".claude")
+	path := filepath.Join(dir, "settings.json")
+
+	if res := r.Register("claude-code"); res.Error != nil {
+		t.Fatalf("Register: %v", res.Error)
+	}
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline: %v", res.Error)
+	}
+
+	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("fixed-name temp file %s exists (err=%v) — temp names must be unique", path+".tmp", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() == "settings.json" {
+			continue
+		}
+		t.Errorf("leftover artifact in %s: %s (temp/lock files must be cleaned up)", dir, e.Name())
+	}
+
+	// Mutation-detecting half: OCCUPY the old fixed temp name with a
+	// DIRECTORY. A writer that still used `<path>.tmp` cannot write
+	// there and would fail; a unique os.CreateTemp name is unaffected.
+	blocker := path + ".tmp"
+	if err := os.Mkdir(blocker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.opts.BinaryPath = "/opt/observer3/bin/observer" // force a real rewrite
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("write failed with %s occupied — the temp name is not unique: %v", blocker, res.Error)
+	}
+	entry := readStatuslineEntry(t, path)
+	if !strings.Contains(entry.Command, "/opt/observer3/") {
+		t.Errorf("refresh did not land: %+v", entry)
+	}
+	if fi, err := os.Stat(blocker); err != nil || !fi.IsDir() {
+		t.Errorf("the occupied fixed temp name was disturbed (err=%v)", err)
+	}
+}
+
+// TestSettingsWriterRereadsBeforeMutating pins F9(c): every
+// registration takes the lock and then reads a FRESH snapshot, so a
+// key another process added between our two write windows is preserved
+// rather than clobbered by a stale in-memory copy.
+func TestSettingsWriterRereadsBeforeMutating(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("first register: %v", res.Error)
+	}
+
+	// Simulate another process editing the file between our locked
+	// windows (the lock is released when the call returns).
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var external map[string]json.RawMessage
+	if err := json.Unmarshal(body, &external); err != nil {
+		t.Fatal(err)
+	}
+	external["externalKey"] = json.RawMessage(`{"added":"by-another-process"}`)
+	patched, err := json.Marshal(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, patched, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second registration that actually rewrites the file (binary path
+	// drifted, so it's a refresh, not a no-op).
+	r.opts.BinaryPath = "/opt/observer2/bin/observer"
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("second register: %v", res.Error)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(after, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["externalKey"]; !ok {
+		t.Errorf("externally-added key lost by the second registration:\n%s", after)
+	}
+	entry := readStatuslineEntry(t, path)
+	if !strings.Contains(entry.Command, "/opt/observer2/") {
+		t.Errorf("second registration did not refresh the command: %+v", entry)
+	}
+}
+
+// TestConcurrentSettingsWritersDoNotCorrupt exercises F9(b) under
+// -race: many observer processes-worth of registrars hammering ONE
+// settings.json must each complete without error and leave a valid,
+// complete file (never a spliced temp body, never a lost unrelated
+// key).
+//
+// Each registry gets its OWN ChecksumsPath: hook_checksums.json is a
+// separate unsynchronized read-modify-write (a pre-existing race
+// outside this file-set's five findings), and sharing it here would
+// test that instead of what this test is about.
+func TestConcurrentSettingsWritersDoNotCorrupt(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r, err := NewRegistry(Options{
+				BinaryPath:    fmt.Sprintf("/opt/observer-%d/bin/observer", i),
+				HomeDir:       home,
+				ChecksumsPath: filepath.Join(home, fmt.Sprintf(".observer-%d", i), "hook_checksums.json"),
+			})
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			errs[i] = r.RegisterClaudeCodeStatusline().Error
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %d: %v", i, err)
+		}
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("settings.json corrupted by concurrent writers: %v\n%s", err, body)
+	}
+	if string(got["theme"]) != `"dark"` {
+		t.Errorf("unrelated key lost: theme=%s", got["theme"])
+	}
+	entry := readStatuslineEntry(t, path)
+	if !isObserverStatuslineEntry(entry.Command) {
+		t.Errorf("final statusLine is not a well-formed observer entry: %+v", entry)
+	}
+}
+
+// TestSettingsWriterFollowsSymlink pins F10: a dotfile-manager setup
+// where ~/.claude/settings.json is a SYMLINK into a tracked repo must
+// keep its link — we rewrite the TARGET, not replace the link with a
+// regular file.
+func TestSettingsWriterFollowsSymlink(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "claude-settings.json")
+	if err := os.WriteFile(target, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home, ".claude", "settings.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable on this platform/privilege level: %v", err)
+	}
+
+	r, err := NewRegistry(Options{
+		BinaryPath:    "/opt/observer/bin/observer",
+		HomeDir:       home,
+		ChecksumsPath: filepath.Join(home, ".observer", "hook_checksums.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("RegisterClaudeCodeStatusline: %v", res.Error)
+	}
+
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("settings.json is no longer a symlink — the link was replaced by a regular file")
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("symlink target is not valid JSON: %v\n%s", err, body)
+	}
+	if _, ok := got["statusLine"]; !ok {
+		t.Errorf("symlink TARGET did not receive the statusLine key:\n%s", body)
+	}
+	if string(got["theme"]) != `"dark"` {
+		t.Errorf("target's existing key lost: theme=%s", got["theme"])
+	}
+	// No temp file stranded in the target's directory.
+	entries, err := os.ReadDir(dotfiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(target) {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("temp artifacts left beside the symlink target: %v", names)
+	}
+}
+
+// TestSettingsFileOverSizeCapRefused pins F11: settings.json is read
+// with a 5 MiB cap checked via Stat BEFORE the read; an over-cap file is
+// refused with no mutation rather than slurped into memory.
+func TestSettingsFileOverSizeCapRefused(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+
+	pad := bytes.Repeat([]byte("a"), int(maxSettingsFileBytes))
+	body := append(append([]byte(`{"pad":"`), pad...), []byte(`"}`)...)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() <= maxSettingsFileBytes {
+		t.Fatalf("test fixture is %d bytes, not over the %d-byte cap", fi.Size(), maxSettingsFileBytes)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error == nil {
+		t.Fatal("expected an error for an over-cap settings.json")
+	}
+	if !strings.Contains(res.Error.Error(), "limit") || !strings.Contains(res.Error.Error(), path) {
+		t.Errorf("error %q should name the file and the size limit", res.Error)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() != fi.Size() {
+		t.Errorf("over-cap file was mutated: %d -> %d bytes", fi.Size(), after.Size())
+	}
+
+	// The hooks registrar shares the reader — same refusal.
+	if hookRes := r.Register("claude-code"); hookRes.Error == nil || !strings.Contains(hookRes.Error.Error(), "limit") {
+		t.Errorf("hooks registrar error=%v, want a size-cap refusal", hookRes.Error)
+	}
+
+	// Just UNDER the cap is read normally.
+	small := append(append([]byte(`{"pad":"`), bytes.Repeat([]byte("a"), 1024)...), []byte(`"}`)...)
+	if err := os.WriteFile(path, small, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("under-cap file refused: %v", res.Error)
+	}
+}
+
+// TestLockSettingsFileBreaksStaleLock pins the stale-lock escape hatch:
+// a lock file left behind by a crashed observer must not wedge
+// registration forever.
+func TestLockSettingsFileBreaksStaleLock(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+	lockPath := path + settingsLockSuffix
+	if err := os.WriteFile(lockPath, []byte("pid=999999 acquired=whenever\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-2 * settingsLockStale)
+	if err := os.Chtimes(lockPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error != nil {
+		t.Fatalf("a stale lock must be broken, got: %v", res.Error)
+	}
+	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock file not released after registration (err=%v)", err)
+	}
+	readStatuslineEntry(t, path) // and the write actually happened
+}
+
+// TestLockSettingsFileHeldBlocksSecondWriter pins that a live lock is
+// respected: while one writer holds it, another times out with an
+// actionable error instead of racing the read-modify-write.
+func TestLockSettingsFileHeldBlocksSecondWriter(t *testing.T) {
+	t.Parallel()
+	r := setupRegistry(t)
+	path := filepath.Join(r.opts.HomeDir, ".claude", "settings.json")
+
+	unlock, err := lockSettingsFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.RegisterClaudeCodeStatusline()
+	if res.Error == nil {
+		t.Fatal("expected a lock-timeout error while the lock is held")
+	}
+	if !strings.Contains(res.Error.Error(), "waiting for") {
+		t.Errorf("error %q does not explain the lock wait", res.Error)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("blocked registration still wrote settings.json (err=%v)", err)
+	}
+
+	unlock()
+	if res := r.RegisterClaudeCodeStatusline(); res.Error != nil {
+		t.Fatalf("registration after release: %v", res.Error)
+	}
+	readStatuslineEntry(t, path)
 }

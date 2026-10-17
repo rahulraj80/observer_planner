@@ -14,17 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xuri/excelize/v2"
-
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
+	"github.com/marmutapp/superbased-observer/internal/tooltax"
 )
 
 func newTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +70,9 @@ func TestIndexHTML_Served(t *testing.T) {
 	if !strings.Contains(string(body), "<title>SuperBased</title>") {
 		t.Errorf("missing title: %s", body)
 	}
-	if !strings.Contains(string(body), `<div id="root"></div>`) {
+	// The root carries the branded boot screen until React mounts over it,
+	// so only the element itself is pinned, not an empty body.
+	if !strings.Contains(string(body), `<div id="root">`) {
 		t.Errorf("missing React root marker: %s", body)
 	}
 }
@@ -296,7 +297,7 @@ func TestAPIStatusCarriesHostOS(t *testing.T) {
 
 func TestAPICodexSupport_ChatGPTJSONLOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +357,7 @@ func TestAPICodexSupport_ChatGPTJSONLOnly(t *testing.T) {
 
 func TestAPICodexSupport_ChatGPTProxyUnlinked(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +420,7 @@ func TestAPICodexSupport_ChatGPTProxyUnlinked(t *testing.T) {
 
 func TestAPICodexSupport_ProxyLinked(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +494,7 @@ func TestAPICost_Shape(t *testing.T) {
 // block and at least one row's compression.original_bytes > 0.
 func TestAPICost_TotalCompression(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +564,7 @@ func TestAPICost_TotalCompression(t *testing.T) {
 // the new "Recent compression events" table on the Compression tab.
 func TestAPICompressionEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,7 +673,7 @@ func TestAPICompressionEvents(t *testing.T) {
 // rollup shape — feeds the "Savings by mechanism" stacked-bar chart.
 func TestAPICompressionTimeseries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -700,9 +701,15 @@ func TestAPICompressionTimeseries(t *testing.T) {
 	}
 	var got map[string]any
 	json.NewDecoder(rr.Body).Decode(&got)
-	series, _ := got["series"].([]any)
+	all, _ := got["series"].([]any)
+	var series []any
+	for _, p := range all {
+		if p.(map[string]any)["total_count"].(float64) > 0 {
+			series = append(series, p)
+		}
+	}
 	if len(series) != 1 {
-		t.Fatalf("series: got %d want 1", len(series))
+		t.Fatalf("non-empty series points: got %d want 1 (of %d zero-filled)", len(series), len(all))
 	}
 	point := series[0].(map[string]any)
 	by, _ := point["by_mechanism"].(map[string]any)
@@ -773,7 +780,7 @@ func approxEqual(a, b, eps float64) bool {
 // Pins the contract behind the action-type-mix chart on Tools tab.
 func TestAPIToolsBreakdown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -846,6 +853,64 @@ func TestAPIToolsBreakdown(t *testing.T) {
 	if int(bt["edit_file"].(float64)) != 1 {
 		t.Errorf("claude-code edit_file: %v want 1", bt["edit_file"])
 	}
+
+	// WP-T5 additive dimensions. by_type above is the pre-WP-T5 contract
+	// and must keep working untouched; these are the like-to-like ones.
+	cats, _ := got["categories"].([]any)
+	if len(cats) != len(tooltax.Categories()) {
+		t.Errorf("categories: got %d entries want %d", len(cats), len(tooltax.Categories()))
+	} else if cats[0] != tooltax.Categories()[0] {
+		t.Errorf("categories order: got %v want tooltax display order", cats)
+	}
+	surfaces, _ := got["surfaces"].([]any)
+	if len(surfaces) != len(tooltax.Surfaces())+1 {
+		t.Errorf("surfaces: got %v want the canonical surfaces + %q", surfaces, SurfaceUnresolved)
+	}
+
+	// jsonInt reads a numeric member without asserting on a possibly
+	// absent key — a wrong taxonomy answer must fail as a diff, not as a
+	// nil-interface panic that hides the rest of the assertions.
+	jsonInt := func(m map[string]any, key string) int {
+		v, ok := m[key].(float64)
+		if !ok {
+			return -1
+		}
+		return int(v)
+	}
+	byCat, _ := first["by_category"].(map[string]any)
+	// 2 read + 1 edit are all category "file".
+	if len(byCat) != 1 || jsonInt(byCat, tooltax.CategoryFile) != 3 {
+		t.Errorf("claude-code by_category: %v want {file: 3}", byCat)
+	}
+	// These fixtures carry no raw_tool_name, so the surface is honestly
+	// unresolved rather than guessed to be a builtin.
+	bySurface, _ := first["by_surface"].(map[string]any)
+	if len(bySurface) != 1 || jsonInt(bySurface, SurfaceUnresolved) != 3 {
+		t.Errorf("claude-code by_surface: %v want {%s: 3}", bySurface, SurfaceUnresolved)
+	}
+	cov, _ := first["coverage"].(map[string]any)
+	if jsonInt(cov, "observed_categories") != 1 {
+		t.Errorf("coverage.observed_categories: %v want 1", cov["observed_categories"])
+	}
+	if jsonInt(cov, "canonical_categories") != len(tooltax.Categories()) {
+		t.Errorf("coverage.canonical_categories: %v want %d",
+			cov["canonical_categories"], len(tooltax.Categories()))
+	}
+	if cov["vocabulary_declared"] != true {
+		t.Errorf("coverage.vocabulary_declared: %v want true", cov["vocabulary_declared"])
+	}
+	if jsonInt(cov, "expressible_categories") != tooltax.CoverageDepth("claude-code") {
+		t.Errorf("coverage.expressible_categories: %v want %d",
+			cov["expressible_categories"], tooltax.CoverageDepth("claude-code"))
+	}
+	// observed(1) is the file category, which claude-code declares, so
+	// nothing here is beyond the vocabulary. The key must still be
+	// present: it is what stops a client formatting observed and
+	// expressible as one ratio (see TestCoverageObservedMayExceedDeclared
+	// for the case where observed legitimately exceeds expressible).
+	if jsonInt(cov, "observed_beyond_declared") != 0 {
+		t.Errorf("coverage.observed_beyond_declared: %v want 0", cov["observed_beyond_declared"])
+	}
 }
 
 // TestAPICost_CompressionSavingsDerived seeds an api_turn with known
@@ -855,7 +920,7 @@ func TestAPIToolsBreakdown(t *testing.T) {
 // Pins the new headline metrics on the redesigned Compression tab.
 func TestAPICost_CompressionSavingsDerived(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -922,7 +987,7 @@ func TestAPICost_CompressionSavingsDerived(t *testing.T) {
 // columns and the cost-summary line.
 func TestAPICost_TokenMathReconciles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,57 +1064,6 @@ func TestAPICost_TokenMathReconciles(t *testing.T) {
 	}
 	if int(row["turn_count"].(float64)) != 2 {
 		t.Errorf("row[0].turn_count: got %v want 2", row["turn_count"])
-	}
-}
-
-// TestAPIExportXLSX_Sheets seeds minimal data and verifies the export
-// endpoint returns a non-empty xlsx with the expected sheet names.
-// Catches regressions where a sheet writer panics or excelize fails to
-// render the workbook.
-func TestAPIExportXLSX_Sheets(t *testing.T) {
-	s, _ := newTestServer(t)
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/export.xlsx?days=30", nil)
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != 200 {
-		t.Fatalf("/api/export.xlsx: %d  body=%s", rr.Code, rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); !strings.Contains(got, "spreadsheetml") {
-		t.Errorf("Content-Type: got %q want xlsx", got)
-	}
-	if cd := rr.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") {
-		t.Errorf("Content-Disposition: got %q", cd)
-	}
-	body := rr.Body.Bytes()
-	if len(body) < 1024 {
-		t.Fatalf("xlsx body suspiciously small: %d bytes", len(body))
-	}
-	// xlsx is a zip — check the magic.
-	if body[0] != 'P' || body[1] != 'K' {
-		t.Errorf("body doesn't start with PK zip magic: %q", body[:8])
-	}
-	// Open the workbook from the response bytes and assert the expected
-	// sheet names exist.
-	f, err := excelize.OpenReader(strings.NewReader(string(body)))
-	if err != nil {
-		t.Fatalf("excelize.OpenReader: %v", err)
-	}
-	defer f.Close()
-	want := map[string]bool{
-		"Overview": false, "Cost": false, "Sessions": false,
-		"Actions": false, "Tools": false, "Compression": false,
-		"Discovery — stale rereads": false, "Discovery — repeated commands": false,
-		"Patterns": false,
-	}
-	for _, name := range f.GetSheetList() {
-		if _, ok := want[name]; ok {
-			want[name] = true
-		}
-	}
-	for k, ok := range want {
-		if !ok {
-			t.Errorf("missing sheet: %q", k)
-		}
 	}
 }
 
@@ -1465,7 +1479,7 @@ func TestAPISessions_ProjectFilter(t *testing.T) {
 // still showed 60+ day old rows.
 func TestAPISessions_DaysFilter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1529,7 +1543,7 @@ func TestAPISessions_DaysFilter(t *testing.T) {
 // honored as an upper bound.
 func TestAPIActions_WindowContract(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1639,7 +1653,7 @@ func TestAPIActions_WindowContract(t *testing.T) {
 // excluded.
 func TestAPISessions_WindowIncludesRecentActivityOnOldSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1719,7 +1733,7 @@ func TestAPISessions_WindowIncludesRecentActivityOnOldSession(t *testing.T) {
 // expensive session even though it started oldest (last by the default order).
 func TestAPISessions_SortByCostIsGlobalAcrossPages(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1943,7 +1957,7 @@ func TestAPISessionDetail(t *testing.T) {
 // note explaining the empty bill — and never fabricates a cost.
 func TestAPISessionDetail_CursorContextBudget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1958,13 +1972,13 @@ func TestAPISessionDetail_CursorContextBudget(t *testing.T) {
 			SourceFile: "f", SourceEventID: "pc1", SessionID: "sCB",
 			ProjectRoot: root, Timestamp: ts, Tool: models.ToolCursor,
 			ActionType: models.ActionPromptContext,
-			Target:     "Rules — 15580 tokens, 61924 chars", Success: true,
+			Target:     "Rules - 15580 tokens, 61924 chars", Success: true,
 		},
 		{
 			SourceFile: "f", SourceEventID: "pc2", SessionID: "sCB",
 			ProjectRoot: root, Timestamp: ts, Tool: models.ToolCursor,
 			ActionType: models.ActionPromptContext,
-			Target:     "Tool definitions — 7339 tokens, 29154 chars", Success: true,
+			Target:     "Tool definitions - 7339 tokens, 29154 chars", Success: true,
 		},
 	}, nil, store.IngestOptions{}); err != nil {
 		t.Fatal(err)
@@ -2007,7 +2021,7 @@ func TestAPISessionDetail_CursorContextBudget(t *testing.T) {
 // and when sessions.model IS set it must win over the fallback.
 func TestAPISessionDetail_ModelFallsBackToTokenUsage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2093,7 +2107,7 @@ func TestAPISessionDetail_ModelFallsBackToTokenUsage(t *testing.T) {
 // detail endpoint. The COALESCE(...,0) fix must let it render 200 with tokens.
 func TestAPISessionDetail_ZeroActionsWithTokens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2127,7 +2141,7 @@ func TestAPISessionDetail_ZeroActionsWithTokens(t *testing.T) {
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session/sZero", nil))
 	if rr.Code != 200 {
-		t.Fatalf("status: %d body=%s (NULL-scan regression — SUM over zero actions)", rr.Code, rr.Body.String())
+		t.Fatalf("status: %d body=%s (NULL-scan regression - SUM over zero actions)", rr.Code, rr.Body.String())
 	}
 	var got struct {
 		TotalActions   int    `json:"total_actions"`
@@ -2162,7 +2176,7 @@ func TestAPISessionDetail_ZeroActionsWithTokens(t *testing.T) {
 // engine.Compute, so it lands non-zero.
 func TestAPISessionDetail_CostSurvivesUnattributedProxy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2246,6 +2260,119 @@ func TestAPISessionDetail_CostSurvivesUnattributedProxy(t *testing.T) {
 	}
 }
 
+// TestAPISessionDetail_TotalsSurviveIDlessLegacyRows pins the 2026-09-22
+// review round 4 finding #1 fix's own edge case, and — since round 5
+// finding #7 — the STRUCTURAL fix for it: handleSessionDetail's totals
+// come from the SAME loaders + sessionmsg.Derive as the Messages tab, and
+// a legacy id-less proxy/token row (no request_id/message_id/
+// source_event_id/turn_id) is no longer dropped by Derive OR
+// endpoint-locally patched by Detail alone — sessionmsg.Derive itself now
+// synthesizes a collision-safe key for it (Row.Keyless=true), so it
+// surfaces identically for every caller. Round 4's fix left a residual
+// divergence: Detail patched proxyRows/tokenRows with a LOCAL id right
+// before calling Derive, so Detail counted the row's tokens while the
+// Messages tab (which called Derive on the UNPATCHED rows) and the org's
+// SessionMessageMetrics (same) still silently dropped it — Detail said
+// 1,000 input tokens, Messages/org showed no row at all. This test now
+// asserts BOTH surfaces agree. Every live capture always stamps an id
+// (internal/proxy's newRequestID: real upstream id, else a generated
+// "sbo-…" fallback; every JSONL adapter sets at least one of message_id/
+// source_event_id/turn_id) so this only guards a legacy pre-fallback row —
+// but a session's total must never silently read $0/0 tokens, and the row
+// must never silently vanish from the Messages timeline, just because one
+// captured row happens to carry none of those ids.
+func TestAPISessionDetail_TotalsSurviveIDlessLegacyRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.db")
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	st := store.New(database)
+	root := t.TempDir()
+	ts := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
+
+	if _, err := st.Ingest(context.Background(), []models.ToolEvent{{
+		SourceFile: "f", SourceEventID: "e1", SessionID: "sA",
+		ProjectRoot: root, Timestamp: ts, Tool: models.ToolClaudeCode,
+		ActionType: models.ActionReadFile, Target: "a.go", Success: true,
+	}}, nil, store.IngestOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A legacy JSONL token_usage row carrying NONE of source_event_id /
+	// message_id / turn_id — sessionmsg.Derive's groupKeyForToken
+	// resolves to "" for this row and, left unguarded, would drop it
+	// entirely from the totals below.
+	if _, err := st.InsertTokenEvents(context.Background(), []models.TokenEvent{{
+		SourceFile: "tu", SourceEventID: "", SessionID: "sA",
+		Timestamp: ts, Tool: string(models.ToolClaudeCode),
+		Model:       "claude-sonnet-4-6",
+		InputTokens: 1000,
+		Source:      "jsonl",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Options{DB: database, DBPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/session/sA", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := got["tokens"].(map[string]any)
+	input, _ := tokens["input"].(float64)
+	if input != 1000 {
+		t.Errorf("tokens.input = %v, want 1000 (the id-less legacy row must still be counted, not silently dropped)", input)
+	}
+	if avail, _ := got["token_usage_available"].(bool); !avail {
+		t.Errorf("token_usage_available = %v, want true", got["token_usage_available"])
+	}
+
+	// Round 5 finding #7: the Messages tab must show the SAME row with
+	// the SAME 1000 input tokens Detail just totaled — not silently drop
+	// it, the exact divergence the reviewer's fixture caught.
+	mrr := httptest.NewRecorder()
+	mreq := httptest.NewRequest(http.MethodGet, "/api/session/sA/messages", nil)
+	srv.Handler().ServeHTTP(mrr, mreq)
+	if mrr.Code != 200 {
+		t.Fatalf("messages status: %d body=%s", mrr.Code, mrr.Body.String())
+	}
+	var mgot struct {
+		Messages []struct {
+			Input int64 `json:"input"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(mrr.Body).Decode(&mgot); err != nil {
+		t.Fatal(err)
+	}
+	// Two rows are expected: the pre-existing synthesized action-only row
+	// for the seeded "a.go" read_file action (no token data, Input=0 —
+	// unrelated to this fix, already present before it) plus the
+	// id-less token row's own row, now surviving via its synthesized
+	// keyless key instead of being silently dropped. Sum rather than
+	// index by position so this doesn't depend on which row lands first.
+	var msgTotalInput int64
+	for _, m := range mgot.Messages {
+		msgTotalInput += m.Input
+	}
+	if len(mgot.Messages) != 2 {
+		t.Fatalf("messages: want 2 rows (1 action-only + 1 surfaced id-less token row), got %d: %+v", len(mgot.Messages), mgot.Messages)
+	}
+	if msgTotalInput != 1000 {
+		t.Errorf("messages: sum(input) = %v, want 1000 (must match Detail's tokens.input exactly - the id-less row must not be dropped)", msgTotalInput)
+	}
+}
+
 // TestAPISessionMessages_GroupsByMessageID pins the v1.4.17 per-message
 // timeline endpoint. Multiple tool calls under the same upstream
 // message.id collapse into a single row whose tool_call_count == N
@@ -2253,7 +2380,7 @@ func TestAPISessionDetail_CostSurvivesUnattributedProxy(t *testing.T) {
 // surface as their own message rows.
 func TestAPISessionMessages_GroupsByMessageID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2393,7 +2520,7 @@ func TestAPISessionMessages_GroupsByMessageID(t *testing.T) {
 // unchanged.
 func TestAPISessionMessages_BrowserChatInlineBody(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2579,7 +2706,7 @@ func TestAPISessionMessages_BrowserChatInlineBody(t *testing.T) {
 // event surfaces as its own row.
 func TestAPISessionMessages_CodexTurnVsInferenceGrouping(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2666,9 +2793,17 @@ func TestAPISessionMessages_CodexTurnVsInferenceGrouping(t *testing.T) {
 	}
 
 	// detail=inference mode: msg_key = COALESCE(message_id, source_event_id).
-	// Each token row is its own msg_key, the assistant action stays
-	// at "turn-2". Three rows total — two per-inference token rows
-	// (no tool calls), one action-only row (no tokens).
+	// Each token row is its own msg_key. The assistant action's own key
+	// ("turn-2") has no matching token row at this grain, so
+	// inferenceBucketIndex (see its doc comment) assigns it to whichever
+	// per-inference bucket actually emitted it by timestamp — here the
+	// action is stamped at the SAME instant as the L7 bucket, so it
+	// attaches to L7 rather than stranding as its own action-only row or
+	// as a synthetic "API call (no recovered text)" placeholder on L7.
+	// Two rows total: L7 carries the real "ls" tool call; L11 has no
+	// tool call and, since the orphan ratio (1 of 2 assistant rows) sits
+	// at exactly 0.5 — not > 0.5 — stays orphaned rather than picking up
+	// an orphan-stub-injection placeholder.
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(
 		http.MethodGet, "/api/session/sCx/messages?detail=inference", nil,
@@ -2680,29 +2815,21 @@ func TestAPISessionMessages_CodexTurnVsInferenceGrouping(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&inferMode); err != nil {
 		t.Fatal(err)
 	}
-	if len(inferMode.Messages) != 3 {
-		t.Fatalf("inference rows: got %d want 3; rows=%+v", len(inferMode.Messages), inferMode.Messages)
+	if len(inferMode.Messages) != 2 {
+		t.Fatalf("inference rows: got %d want 2; rows=%+v", len(inferMode.Messages), inferMode.Messages)
 	}
 	byKey := map[string]rowShape{}
 	for _, m := range inferMode.Messages {
 		byKey[m.MessageID] = m
 	}
-	// The dashboard's orphan-token stub-injection (lines 1933+ of
-	// dashboard.go) adds a synthetic `llm_call` tool_call to any
-	// assistant row that has tokens but no real tool call, when the
-	// session's orphan ratio crosses 0.5. In inference mode the codex
-	// per-event token rows ARE orphans (the real tool calls stay on
-	// the turn-keyed row), so each per-inference row picks up one
-	// synthetic llm_call — that's the right UX, surfacing the
-	// per-inference billing as a clickable timeline row.
+	if _, ok := byKey["turn-2"]; ok {
+		t.Errorf("inference mode: unexpected standalone turn-2 action row; rows=%+v", inferMode.Messages)
+	}
 	if r := byKey["tk:rollout.jsonl:L7"]; r.Input != 100 || r.Output != 50 || r.ToolCallCount != 1 {
-		t.Errorf("inference L7 row: %+v want in=100 out=50 tc=1 (synthetic llm_call stub)", r)
+		t.Errorf("inference L7 row: %+v want in=100 out=50 tc=1 (the real ls tool call, routed here by inferenceBucketIndex)", r)
 	}
-	if r := byKey["tk:rollout.jsonl:L11"]; r.Input != 200 || r.Output != 75 || r.ToolCallCount != 1 {
-		t.Errorf("inference L11 row: %+v want in=200 out=75 tc=1 (synthetic llm_call stub)", r)
-	}
-	if r := byKey["turn-2"]; r.ToolCallCount != 1 || r.Input != 0 {
-		t.Errorf("inference turn-2 action row: %+v want tc=1 in=0", r)
+	if r := byKey["tk:rollout.jsonl:L11"]; r.Input != 200 || r.Output != 75 || r.ToolCallCount != 0 {
+		t.Errorf("inference L11 row: %+v want in=200 out=75 tc=0 (orphan ratio 0.5 does not cross the >0.5 stub-injection threshold)", r)
 	}
 }
 
@@ -2714,7 +2841,7 @@ func TestAPISessionMessages_CodexTurnVsInferenceGrouping(t *testing.T) {
 // threshold even though each underlying turn stayed below it.
 func TestAPISessionMessages_LongContextPerTurn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2794,7 +2921,7 @@ func TestAPISessionMessages_LongContextPerTurn(t *testing.T) {
 // row must render first in the timeline.
 func TestAPISessionMessages_TieBreakUserBeforeAssistant(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2860,13 +2987,111 @@ func TestAPISessionMessages_TieBreakUserBeforeAssistant(t *testing.T) {
 	}
 }
 
+// TestAPISessionMessages_TokensPerSecNeverFromGapToNext pins the S10-SPEED
+// fix end to end through the handler. The live defect (session 9d926c5c,
+// claude-code, NOT proxied): the old "elapsed" tier divided a message's
+// output by the gap to the NEXT timeline row - 18,023 tokens over a 34.2 s
+// gap showed 526 tok/s, and 156 tokens over the 59 ms gap to a synthetic
+// task_complete row showed 2,644 tok/s. A transcript-only row carries no
+// captured duration, so it must serialize NO tps_ms and a visible
+// "not_measured" reason, while elapsed_ms keeps the gap. A proxied row
+// (api_turns.total_response_ms) is the measured case.
+func TestAPISessionMessages_TokensPerSecNeverFromGapToNext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.db")
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	st := store.New(database)
+	root := t.TempDir()
+	t0 := time.Date(2026, 9, 22, 20, 58, 14, 234_000_000, time.UTC)
+	if _, err := st.Ingest(context.Background(), []models.ToolEvent{{
+		SourceFile: "f", SourceEventID: "turn_duration:1", SessionID: "sT",
+		ProjectRoot: root, Timestamp: t0.Add(34234*time.Millisecond + 59*time.Millisecond), Tool: models.ToolClaudeCode,
+		ActionType: models.ActionTaskComplete, Target: "done", Success: true, MessageID: "turn_duration:1",
+	}}, []models.TokenEvent{
+		{
+			SourceFile: "f", SourceEventID: "msg_23", SessionID: "sT", Timestamp: t0, Tool: models.ToolClaudeCode,
+			Model: "claude-opus-4-8", InputTokens: 10, OutputTokens: 18023, MessageID: "msg_23",
+			Source: models.TokenSourceJSONL, Reliability: models.ReliabilityUnreliable,
+		},
+		{
+			SourceFile: "f", SourceEventID: "msg_74", SessionID: "sT", Timestamp: t0.Add(34234 * time.Millisecond), Tool: models.ToolClaudeCode,
+			Model: "claude-opus-4-8", InputTokens: 10, OutputTokens: 156, MessageID: "msg_74",
+			Source: models.TokenSourceJSONL, Reliability: models.ReliabilityUnreliable,
+		},
+	}, store.IngestOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InsertAPITurn(context.Background(), models.APITurn{
+		SessionID: "sT", Timestamp: t0.Add(time.Hour), Provider: "anthropic", Model: "claude-opus-4-8",
+		RequestID: "msg_proxy", InputTokens: 10, OutputTokens: 1200, TotalResponseMS: 20000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{DB: database, DBPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session/sT/messages", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Messages []struct {
+			MessageID     string `json:"message_id"`
+			ElapsedMs     *int64 `json:"elapsed_ms"`
+			ResponseMs    *int64 `json:"response_ms"`
+			TpsTokens     *int64 `json:"tps_tokens"`
+			TpsMs         *int64 `json:"tps_ms"`
+			TpsBasis      string `json:"tps_basis"`
+			TpsSuppressed string `json:"tps_suppressed"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]int{}
+	for i, m := range got.Messages {
+		by[m.MessageID] = i
+	}
+	for _, id := range []string{"msg_23", "msg_74"} {
+		i, ok := by[id]
+		if !ok {
+			t.Fatalf("%s missing: %+v", id, got.Messages)
+		}
+		m := got.Messages[i]
+		if m.TpsMs != nil || m.TpsTokens != nil || m.TpsBasis != "" {
+			t.Errorf("%s: tps_ms=%v tps_tokens=%v basis=%q, want none (a gap to the next row is not a duration)", id, m.TpsMs, m.TpsTokens, m.TpsBasis)
+		}
+		if m.TpsSuppressed != "not_measured" {
+			t.Errorf("%s: tps_suppressed=%q, want not_measured", id, m.TpsSuppressed)
+		}
+		if m.ElapsedMs == nil {
+			t.Errorf("%s: elapsed_ms (gap to next row) must still be served", id)
+		}
+	}
+	if e := got.Messages[by["msg_74"]].ElapsedMs; e == nil || *e != 59 {
+		t.Errorf("msg_74 elapsed_ms = %v, want 59", e)
+	}
+	p := got.Messages[by["msg_proxy"]]
+	if p.TpsMs == nil || *p.TpsMs != 20000 || p.TpsTokens == nil || *p.TpsTokens != 1200 || p.TpsBasis != "measured" || p.TpsSuppressed != "" {
+		t.Errorf("proxied row: tps_tokens=%v tps_ms=%v basis=%q suppressed=%q, want 1200/20000/measured/\"\"", p.TpsTokens, p.TpsMs, p.TpsBasis, p.TpsSuppressed)
+	}
+	if p.ResponseMs == nil || *p.ResponseMs != 20000 {
+		t.Errorf("proxied row response_ms = %v, want 20000", p.ResponseMs)
+	}
+}
+
 // TestAPISessionMessages_ElapsedMs pins v1.4.28's per-message
 // wall-clock duration: each message exposes the gap (ms) to the
 // next message in the timeline. The final message has no successor
 // and reports null.
 func TestAPISessionMessages_ElapsedMs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2951,7 +3176,7 @@ func TestAPISessionMessages_ElapsedMs(t *testing.T) {
 // wall-clock ElapsedMs). Exposes per-tool-call duration_ms too.
 func TestAPISessionMessages_ToolDurationMs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3038,7 +3263,7 @@ func TestAPISessionMessages_ToolDurationMs(t *testing.T) {
 // session.
 func TestAPISessionDetail_PerTurnDedup_GapFillAndPerModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3181,7 +3406,7 @@ func TestAPISessionDetail_PerTurnDedup_GapFillAndPerModel(t *testing.T) {
 // double-counted numbers).
 func TestAPISessionDetail_CodexShapeDedup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3286,6 +3511,107 @@ func TestAPISessionDetail_CodexShapeDedup(t *testing.T) {
 	}
 }
 
+// TestAPISessionMessages_TwinFoldClaimOnceCardinality pins S1 (2026-09-22
+// review round 3): before this round, the node's SQL-side twin-fold used a
+// SET-based NOT EXISTS exclusion, so one proxy row with TWO identical-shape
+// token_usage candidates removed BOTH candidates (the proxy claimed one as
+// its twin, but the NOT EXISTS shape check matched — and dropped — the
+// other too), returning ONE row where the org's claim-once
+// sessionmsg.Derive returned TWO. Now both engines share Derive's
+// assignTwins (one proxy row claims at most ONE unclaimed token row; a
+// token row that merely resembles an unrelated proxy row is never
+// excluded), so the node must show the same TWO rows the org always did:
+// the twin-claimed row (keyed by the twin's message_id) plus the second,
+// genuinely distinct token row surviving as its own row.
+func TestAPISessionMessages_TwinFoldClaimOnceCardinality(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.db")
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	st := store.New(database)
+	root := t.TempDir()
+	ts := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+
+	if _, err := st.Ingest(context.Background(), []models.ToolEvent{{
+		SourceFile: "f", SourceEventID: "e0", SessionID: "sTF",
+		ProjectRoot: root, Timestamp: ts, Tool: models.ToolCodex,
+		ActionType: models.ActionReadFile, Target: "a.go", Success: true,
+	}}, nil, store.IngestOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// One proxy turn (resp1): model/in/out/cache shape (m, 100, 50, 0, 0).
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO api_turns (session_id, timestamp, provider, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, request_id, cost_usd)
+		 VALUES ('sTF', ?, 'openai', 'm', 100, 50, 0, 0, 'resp1', 0.01)`,
+		ts.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	// Two IDENTICAL-shape token_usage rows, genuinely distinct turns
+	// (different message_id/source_event_id), one close in time to the
+	// proxy row (its real twin) and one far away (an unrelated turn that
+	// merely happens to share the same shape).
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO token_usage (session_id, source_file, source_event_id, message_id, timestamp, tool, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, estimated_cost_usd, source, reliability)
+		 VALUES ('sTF', 'f-tu', 'e1', 'm1', ?, 'codex', 'm', 100, 50, 0, 0, 0.01, 'jsonl', 'approximate')`,
+		ts.Add(time.Second).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO token_usage (session_id, source_file, source_event_id, message_id, timestamp, tool, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, estimated_cost_usd, source, reliability)
+		 VALUES ('sTF', 'f-tu', 'e2', 'm2', ?, 'codex', 'm', 100, 50, 0, 0, 0.01, 'jsonl', 'approximate')`,
+		ts.Add(time.Hour).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Options{DB: database, DBPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/session/sTF/messages", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Messages []struct {
+			MessageID string `json:"message_id"`
+			Input     int64  `json:"input"`
+			Output    int64  `json:"output"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	// The regression: pre-fix this returned 2 rows total (the seeded
+	// action's own bare row, e0, plus ONE token row — both m1 and m2
+	// wrongly excluded by the set-based NOT EXISTS check, since it only
+	// matched by SHAPE, not by which one the proxy actually claimed).
+	// Post-fix: 3 rows — e0's own bare row (no token bucket matches its
+	// key), the proxy+twin (m1, closest in time), and the genuinely
+	// distinct m2 — matching the org's claim-once Derive exactly.
+	if len(got.Messages) != 3 {
+		t.Fatalf("messages: got %d, want 3 (claim-once twin fold - the S1 cardinality fix); rows=%+v", len(got.Messages), got.Messages)
+	}
+	byID := map[string]struct{ Input, Output int64 }{}
+	for _, m := range got.Messages {
+		byID[m.MessageID] = struct{ Input, Output int64 }{m.Input, m.Output}
+	}
+	if r, ok := byID["m1"]; !ok || r.Input != 100 || r.Output != 50 {
+		t.Errorf("twin-claimed row m1: got %+v, want the proxy's own 100/50", byID["m1"])
+	}
+	if r, ok := byID["m2"]; !ok || r.Input != 100 || r.Output != 50 {
+		t.Errorf("surviving distinct row m2: got %+v, want its own 100/50 (never excluded)", byID["m2"])
+	}
+}
+
 // TestAPISessionDetail_CacheCreation1hTier is the end-to-end check for
 // audit item C5: a session whose proxy turns split cache_creation into
 // 5m vs 1h tiers must see the 1h portion billed at the 1h rate (2× the
@@ -3293,7 +3619,7 @@ func TestAPISessionDetail_CodexShapeDedup(t *testing.T) {
 // and silently under-counted whenever 1h-tier traffic appeared.
 func TestAPISessionDetail_CacheCreation1hTier(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3400,7 +3726,7 @@ func TestAPISessionDetail_CacheCreation1hTier(t *testing.T) {
 // regressed in, the cost would be 300K × $6 / 1M = $1.80.
 func TestAPISessionDetail_LongContextPerTurn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3508,7 +3834,7 @@ func TestAPISessionDetail_LongContextPerTurn(t *testing.T) {
 // chart reads chronologically left-to-right.
 func TestAPITimeseriesCost_Chronological(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3556,20 +3882,35 @@ func TestAPITimeseriesCost_Chronological(t *testing.T) {
 	var got struct {
 		Series []struct {
 			Bucket  string  `json:"bucket"`
+			T       int64   `json:"t"`
 			CostUSD float64 `json:"cost_usd"`
 		} `json:"series"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Series) != 3 {
-		t.Fatalf("series: got %d points want 3", len(got.Series))
+	// The grid is zero-filled over the whole 365-day window.
+	if n := len(got.Series); n < 365 || n > 366 {
+		t.Fatalf("series: got %d points want the 365-366 day zero-filled grid", n)
+	}
+	for i := 1; i < len(got.Series); i++ {
+		if got.Series[i].T <= got.Series[i-1].T || got.Series[i].Bucket <= got.Series[i-1].Bucket {
+			t.Fatalf("series not chronological at %d: %q after %q", i, got.Series[i].Bucket, got.Series[i-1].Bucket)
+		}
+	}
+	var nonZero []string
+	for _, p := range got.Series {
+		if p.CostUSD > 0 {
+			nonZero = append(nonZero, p.Bucket)
+		}
 	}
 	want := []string{"2026-04-10", "2026-04-15", "2026-04-20"}
+	if len(nonZero) != len(want) {
+		t.Fatalf("non-zero buckets: got %v want %v", nonZero, want)
+	}
 	for i, w := range want {
-		if got.Series[i].Bucket != w {
-			t.Errorf("series[%d].bucket: got %q want %q (chronological order)",
-				i, got.Series[i].Bucket, w)
+		if nonZero[i] != w {
+			t.Errorf("non-zero[%d].bucket: got %q want %q (chronological order)", i, nonZero[i], w)
 		}
 	}
 }
@@ -3580,7 +3921,7 @@ func TestAPITimeseriesCost_Chronological(t *testing.T) {
 // dedup applies (proxy preferred over JSONL for the same session).
 func TestAPITimeseriesTokensByModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3623,7 +3964,7 @@ func TestAPITimeseriesTokensByModel(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/timeseries/tokens-by-model?days=365", nil)
+		"/api/timeseries/tokens-by-model?days=365&gran=1d", nil)
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
@@ -3680,7 +4021,7 @@ func TestAPITimeseriesActions(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got["metric"] != "actions" || got["bucket"] != "day" {
+	if got["metric"] != "actions" || got["bucket"] != "1d" {
 		t.Errorf("metric/bucket: %v / %v", got["metric"], got["bucket"])
 	}
 	series, ok := got["series"].([]any)
@@ -3746,7 +4087,7 @@ func TestAPIDiscover(t *testing.T) {
 // are unchanged.
 func TestAPIActions_MetadataFilters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3864,7 +4205,7 @@ func TestAPIActions_MetadataFilters(t *testing.T) {
 // Copilot's agent_response).
 func TestAPIActions_AssistantTextFilter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3965,7 +4306,7 @@ func TestAPIActions_AssistantTextFilter(t *testing.T) {
 // (no filter, project-only, tool-only, both) matrix.
 func TestAPIPatterns_ToolFilter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4132,7 +4473,7 @@ func TestAPISessions_CostReconcilesWithModels(t *testing.T) {
 	// the stale turn and balloon.
 	staleApprox := 5 * sessionsCostSum
 	if sessionsCostSum >= staleApprox/2 {
-		t.Errorf("sessions cost sum %.6f is suspiciously high — Days param may not be honored",
+		t.Errorf("sessions cost sum %.6f is suspiciously high - Days param may not be honored",
 			sessionsCostSum)
 	}
 }
@@ -4306,7 +4647,7 @@ func TestAPIActionFullText(t *testing.T) {
 // every sub-day cost bucket rendered $0 even when turns had a stored cost.
 func TestAPITimeseriesCost_HourBucketCost(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4342,18 +4683,29 @@ func TestAPITimeseriesCost_HourBucketCost(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Bucket != "hour" {
-		t.Fatalf("bucket echo: got %q want hour", got.Bucket)
+	if got.Bucket != "1h" {
+		t.Fatalf("bucket echo: got %q want 1h (legacy bucket=hour maps to 1h)", got.Bucket)
 	}
-	if len(got.Series) != 1 {
-		t.Fatalf("series: got %d points want 1", len(got.Series))
+	// A 6h window zero-fills 6-7 hour buckets (7 when now is mid-hour).
+	if n := len(got.Series); n < 6 || n > 7 {
+		t.Fatalf("series: got %d points want 6-7 zero-filled hour buckets", n)
 	}
-	if !approxEqual(got.Series[0].CostUSD, 1.23, 1e-9) {
-		t.Errorf("hour-bucket cost_usd: got %v want 1.23 (pre-fix this was 0)", got.Series[0].CostUSD)
+	nonZero := 0
+	for _, p := range got.Series {
+		if p.CostUSD == 0 {
+			continue
+		}
+		nonZero++
+		if !approxEqual(p.CostUSD, 1.23, 1e-9) {
+			t.Errorf("hour-bucket cost_usd: got %v want 1.23 (pre-fix this was 0)", p.CostUSD)
+		}
+		// Bucket string must be hour-grained, not day-truncated.
+		if !strings.Contains(p.Bucket, "T") {
+			t.Errorf("hour bucket string %q is day-grained; expected hour resolution", p.Bucket)
+		}
 	}
-	// Bucket string must be hour-grained, not day-truncated.
-	if !strings.Contains(got.Series[0].Bucket, "T") {
-		t.Errorf("hour bucket string %q is day-grained; expected hour resolution", got.Series[0].Bucket)
+	if nonZero != 1 {
+		t.Errorf("non-zero hour buckets = %d, want 1", nonZero)
 	}
 }
 
@@ -4362,7 +4714,7 @@ func TestAPITimeseriesCost_HourBucketCost(t *testing.T) {
 // unioned count subqueries must each apply the exclusive upper bound.
 func TestAPIStatusScoped_HonorsUntil(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4441,7 +4793,7 @@ func TestAPIStatusScoped_HonorsUntil(t *testing.T) {
 // only received Days — so hours=1 returned 1h counts alongside 30d costs.
 func TestAPISessionsCalendar_CostHonorsWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4533,7 +4885,7 @@ func TestAPISessionsCalendar_CostHonorsWindow(t *testing.T) {
 // actually AFTER `until` must NOT leak into a bounded window.
 func TestAPISessions_UntilBoundsActivityExists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4599,7 +4951,7 @@ func TestAPISessions_UntilBoundsActivityExists(t *testing.T) {
 // resolution.
 func TestAPIActions_MalformedUntilKeepsToDate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4663,7 +5015,7 @@ func TestAPIActions_MalformedUntilKeepsToDate(t *testing.T) {
 // the resolved bucket.
 func TestAPICompressionTimeseries_BucketHour(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4694,21 +5046,103 @@ func TestAPICompressionTimeseries_BucketHour(t *testing.T) {
 	var got struct {
 		Bucket string `json:"bucket"`
 		Series []struct {
-			Bucket string `json:"bucket"`
+			Bucket     string `json:"bucket"`
+			TotalCount int    `json:"total_count"`
 		} `json:"series"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Bucket != "hour" {
-		t.Fatalf("bucket echo: got %q want hour", got.Bucket)
+	if got.Bucket != "1h" {
+		t.Fatalf("bucket echo: got %q want 1h", got.Bucket)
 	}
-	if len(got.Series) != 1 {
-		t.Fatalf("series: got %d want 1", len(got.Series))
+	if n := len(got.Series); n < 6 || n > 7 {
+		t.Fatalf("series: got %d want 6-7 zero-filled hour buckets", n)
 	}
-	// Hour-grained bucket strings carry a 'T' separator; the pre-fix
-	// daily strftime ('%Y-%m-%d') never did.
-	if !strings.Contains(got.Series[0].Bucket, "T") {
-		t.Errorf("bucket string %q is day-grained; bucket=hour must be hour-grained", got.Series[0].Bucket)
+	nonZero := 0
+	for _, p := range got.Series {
+		// Hour-grained bucket strings carry a 'T' separator; the pre-fix
+		// daily strftime ('%Y-%m-%d') never did.
+		if !strings.Contains(p.Bucket, "T") {
+			t.Errorf("bucket string %q is day-grained; bucket=hour must be hour-grained", p.Bucket)
+		}
+		if p.TotalCount > 0 {
+			nonZero++
+		}
+	}
+	if nonZero != 1 {
+		t.Errorf("non-empty buckets = %d, want 1", nonZero)
+	}
+}
+
+// TestAPIStatusScoped_SessionsMatchSessionsList pins T-803: the Overview
+// Sessions tile (/api/status/scoped) counted sessions by started_at alone
+// while the Sessions table (/api/sessions) counts a session active in the
+// window, so the same 30-day window read 1,861 on one and 1,871 on the
+// other. A session that started before the window but has activity in it
+// now counts on both.
+func TestAPIStatusScoped_SessionsMatchSessionsList(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.db")
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	st := store.New(database)
+	root := t.TempDir()
+	now := time.Now().UTC()
+	ev := func(id, sid string, ts time.Time) models.ToolEvent {
+		return models.ToolEvent{
+			SourceFile: "f-" + id, SourceEventID: id, SessionID: sid,
+			ProjectRoot: root, Timestamp: ts, Tool: models.ToolClaudeCode,
+			ActionType: models.ActionReadFile, Target: "a.go", Success: true,
+		}
+	}
+	// sOld started 20 days ago and was used again 2 days ago; sNew started
+	// 2 days ago; sGone was only active 40 days ago.
+	events := []models.ToolEvent{
+		ev("o1", "sOld", now.Add(-20*24*time.Hour)),
+		ev("o2", "sOld", now.Add(-2*24*time.Hour)),
+		ev("n1", "sNew", now.Add(-2*24*time.Hour)),
+		ev("g1", "sGone", now.Add(-40*24*time.Hour)),
+	}
+	if _, err := st.Ingest(context.Background(), events, nil, store.IngestOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{DB: database, DBPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(url string, v any) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, url, nil))
+		if rr.Code != 200 {
+			t.Fatalf("%s: status %d body=%s", url, rr.Code, rr.Body.String())
+		}
+		if err := json.NewDecoder(rr.Body).Decode(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since := now.Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+	var scoped struct {
+		Sessions int64 `json:"sessions"`
+	}
+	get("/api/status/scoped?since="+since, &scoped)
+	var list struct {
+		Total int `json:"total"`
+	}
+	get("/api/sessions?since="+since, &list)
+	if scoped.Sessions != 2 || list.Total != 2 {
+		t.Fatalf("sessions in a 10-day window: tile %d, list %d; want 2 and 2 (sOld + sNew)", scoped.Sessions, list.Total)
+	}
+	// A bounded window that holds only the first day of sOld.
+	until := now.Add(-15 * 24 * time.Hour).Format(time.RFC3339)
+	from := now.Add(-25 * 24 * time.Hour).Format(time.RFC3339)
+	get("/api/status/scoped?since="+from+"&until="+until, &scoped)
+	get("/api/sessions?since="+from+"&until="+until, &list)
+	if scoped.Sessions != int64(list.Total) || list.Total != 1 {
+		t.Fatalf("bounded window: tile %d, list %d; want 1 and 1", scoped.Sessions, list.Total)
 	}
 }

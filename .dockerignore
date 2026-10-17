@@ -1,0 +1,44 @@
+# Applies to every image built with the REPO ROOT as context
+# (deploy/observer-edge, Dockerfile.observer-org, deploy/observer-gateway).
+# Those are all pure-Go builds; every go:embed asset lives under internal/
+# (the dashboards embed internal/*/webapp/dist, not web//web2/ directly), so
+# the web sources, distribution channels, and the private marketing/site
+# trees are dead weight in the build context (~20 GB without this file).
+# harness-gateway builds from its OWN directory context and is unaffected.
+
+.git
+.wrangler
+bin
+tmp
+marketing
+harness-gateway
+model-pricing
+website
+design
+web
+# web/package.json stays: the npm workspace root lists web/ as a member, and
+# `npm ci` in Dockerfile.observer-org's web2 stage needs every member's
+# manifest. The rest of web/ is not in the context.
+!web/package.json
+# web2/ IS in the context: Dockerfile.observer-org builds the org dashboard
+# from source and syncs it into the embed (P3-07), so an image can never ship
+# a stale committed embed. Its build output is not.
+web2/dist
+vscode
+sdk
+npm
+pypi
+docs
+# docs/embed.go embeds the eight deployment runbooks into observer-org
+# (`observer-org deploy export`); the root-level markdown must stay in the
+# context or the go:embed pattern fails the image build. Only docs/*.md is
+# re-included (180 files / 5.6 MB) plus the embed declaration itself;
+# docs/ subdirectories stay excluded.
+!docs/*.md
+!docs/embed.go
+browser-extension
+observer
+observer.exe
+*.log
+node_modules
+**/node_modules

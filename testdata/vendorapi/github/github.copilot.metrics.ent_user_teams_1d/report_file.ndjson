@@ -1,0 +1,3 @@
+{"user_id":1001,"user_login":"octocat","day":"2026-05-14","enterprise_id":"1","team_id":9001,"slug":"eng-platform"}
+{"user_id":1001,"user_login":"octocat","day":"2026-05-14","enterprise_id":"1","team_id":7001,"slug":"business-analytics"}
+{"user_id":1002,"user_login":"hubot","day":"2026-05-14","enterprise_id":"1","team_id":9001,"slug":"eng-platform"}

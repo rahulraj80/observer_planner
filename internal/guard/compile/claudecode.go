@@ -35,7 +35,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-102", Fidelity: FidelityApprox,
-			Note: "same native surface as R-101 — the dialect cannot distinguish in-project VCS-dir deletes from any other recursive delete; the shared entries dedup at compile time",
+			Note: "same native surface as R-101 - the dialect cannot distinguish in-project VCS-dir deletes from any other recursive delete; the shared entries dedup at compile time",
 			Entries: []Entry{
 				{Action: ActionAsk, Value: "Bash(rm -rf:*)"},
 				{Action: ActionAsk, Value: "Bash(rm -fr:*)"},
@@ -113,7 +113,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-151", Fidelity: FidelityNone,
-			Note: "cross-project bleed detection needs the observed-projects root set — daemon knowledge no static config carries",
+			Note: "cross-project bleed detection needs the observed-projects root set - daemon knowledge no static config carries",
 		},
 		{
 			RuleID: "R-152", Fidelity: FidelityApprox,
@@ -138,7 +138,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-153", Fidelity: FidelityApprox,
-			Note: "Read-tool arm only — interpreter/shell reads (python -c open('.env')) stay hook-enforced (the documented F1 caveat applies on both planes)",
+			Note: "Read-tool arm only - interpreter/shell reads (python -c open('.env')) stay hook-enforced (the documented F1 caveat applies on both planes)",
 			Entries: []Entry{
 				{Action: ActionAsk, Value: "Read(**/.env*)"},
 				{Action: ActionAsk, Value: "Read(**/*.pem)"},
@@ -190,7 +190,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-160", Fidelity: FidelityApprox,
-			Note: "observer config dir plus Claude Code's own settings files (user + project — the **/ form covers both); other clients' hook configs are their own dialects' concern; shell-command arms stay hook-enforced",
+			Note: "observer config dir plus Claude Code's own settings files (user + project - the **/ form covers both); other clients' hook configs are their own dialects' concern; shell-command arms stay hook-enforced",
 			Entries: []Entry{
 				{Action: ActionDeny, Value: "Edit(~/.observer/**)"},
 				{Action: ActionDeny, Value: "Write(~/.observer/**)"},
@@ -213,6 +213,10 @@ func claudeCodeRows() []Translation {
 		{
 			RuleID: "R-172", Fidelity: FidelityNone,
 			Note: "content detection (typed secret detectors over arguments/bodies), not command-shape",
+		},
+		{
+			RuleID: "R-190", Fidelity: FidelityNone,
+			Note: "content detection (typed PII detectors over the developer's own prompt text), not command-shape; the reconsider-once mode vocabulary lives in [guard.prompt], not the native dialect",
 		},
 		{
 			RuleID: "R-173", Fidelity: FidelityNone,
@@ -261,6 +265,14 @@ func claudeCodeRows() []Translation {
 			Note: "config-scan finding (pin diff), not a tool-call shape",
 		},
 		{
+			RuleID: "R-306", Fidelity: FidelityNone,
+			Note: "decided against the compiled tools.mcp_access node table at call time (runtime state); the hook seam enforces it, no static native expression",
+		},
+		{
+			RuleID: "R-307", Fidelity: FidelityNone,
+			Note: "org grant deny is runtime state from the signed tools.mcp_access resource; the hook seam enforces it, no static native expression",
+		},
+		{
 			RuleID: "T-501", Fidelity: FidelityNone,
 			Note: "session taint is runtime state; no static native expression",
 		},
@@ -295,6 +307,42 @@ func claudeCodeRows() []Translation {
 		{
 			RuleID: "B-604", Fidelity: FidelityNone,
 			Note: "weekly spend is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+		},
+		{
+			RuleID: "B-621", Fidelity: FidelityNone,
+			Note: "session token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+		},
+		{
+			RuleID: "B-622", Fidelity: FidelityNone,
+			Note: "daily token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+		},
+		{
+			RuleID: "B-623", Fidelity: FidelityNone,
+			Note: "monthly token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+		},
+		{
+			RuleID: "B-624", Fidelity: FidelityNone,
+			Note: "weekly token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+		},
+		{
+			RuleID: "B-625", Fidelity: FidelityNone,
+			Note: "whether the organization's budget ever verified is daemon state; the refusal is the proxy's (org-budget ruling R2)",
+		},
+		{
+			RuleID: "B-626", Fidelity: FidelityNone,
+			Note: "per-tool budget caps are ORGANIZATION policy evaluated against runtime spend; no native dialect can express them and the enforcement is the proxy's and the process controller's (bundle BUD-N)",
+		},
+		{
+			RuleID: "B-627", Fidelity: FidelityNone,
+			Note: "per-tool budget caps are ORGANIZATION policy evaluated against runtime spend; no native dialect can express them and the enforcement is the proxy's and the process controller's (bundle BUD-N)",
+		},
+		{
+			RuleID: "B-628", Fidelity: FidelityNone,
+			Note: "per-model budget caps are ORGANIZATION policy evaluated against runtime spend; no native dialect can express them and the enforcement is the proxy's and the process controller's (bundle BUD-N)",
+		},
+		{
+			RuleID: "B-629", Fidelity: FidelityNone,
+			Note: "per-model budget caps are ORGANIZATION policy evaluated against runtime spend; no native dialect can express them and the enforcement is the proxy's and the process controller's (bundle BUD-N)",
 		},
 		{
 			RuleID: "B-610", Fidelity: FidelityNone,

@@ -1,0 +1,43 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "timePeriod": "VerifiedOfficial",
+    "timePeriod.year": "VerifiedOfficial",
+    "usageItems": "VerifiedOfficial",
+    "usageItems[]": "VerifiedOfficial",
+    "usageItems[].discountAmount": "VerifiedOfficial",
+    "usageItems[].discountQuantity": "VerifiedOfficial",
+    "usageItems[].grossAmount": "VerifiedOfficial",
+    "usageItems[].grossQuantity": "VerifiedOfficial",
+    "usageItems[].model": "VerifiedOfficial",
+    "usageItems[].netAmount": "VerifiedOfficial",
+    "usageItems[].netQuantity": "VerifiedOfficial",
+    "usageItems[].pricePerUnit": "VerifiedOfficial",
+    "usageItems[].product": "VerifiedOfficial",
+    "usageItems[].sku": "VerifiedOfficial",
+    "usageItems[].unitType": "VerifiedOfficial",
+    "user": "VerifiedOfficial"
+  },
+  "fixture_sha256": "34c4dffbd0987662ad0bc9d20b8f2a7e52b25f954fbd8f8620430f7c3384a94c",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/users/{username}/settings/billing/ai_credit/usage",
+    "query": {
+      "month": "9",
+      "year": "2026"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /users/{username}/settings/billing/ai_credit/usage (operationId billing/get-github-billing-ai-credit-usage-report-user).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description api.github.com.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "4d10d960b047176d1be58543dbdfb8ece46d77efcc2e57411770747259b1345f",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.billing.ai_credit_usage_user"
+}

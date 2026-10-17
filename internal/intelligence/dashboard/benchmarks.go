@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package dashboard
 
 import (
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/benchmark"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -42,20 +45,40 @@ type benchmarkRunSummary struct {
 	Models         []string `json:"models"`
 }
 
+// benchmarkScanCap bounds how many recent runs a model-filtered list scans
+// (the list endpoint's own limit ceiling).
+const benchmarkScanCap = 500
+
 // handleBenchmarks — GET /api/benchmarks?limit: sanitized run list, most
 // recent first. Always returns runs:[] (never null) per the empty-array wire
 // contract.
 func (s *Server) handleBenchmarks(w http.ResponseWriter, r *http.Request) {
-	limit := intArg(r, "limit", 50, 1, 500)
+	limit := intArg(r, "limit", 50, 1, benchmarkScanCap)
+	// The global Model filter: a run is "in" a model when its config matrix
+	// ran that model (modelfilter.Matches over the run's model list). It is
+	// applied before the limit, so a narrowed list is still the newest
+	// `limit` matching runs (scanned from the newest benchmarkScanCap).
+	model := modelParam(r)
+	fetch := limit
+	if model != "" {
+		fetch = benchmarkScanCap
+	}
 	st := store.New(s.db())
-	runs, err := st.ListBenchmarkRuns(r.Context(), limit)
+	runs, err := st.ListBenchmarkRuns(r.Context(), fetch)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	out := make([]benchmarkRunSummary, 0, len(runs))
 	for _, run := range runs {
-		out = append(out, summarizeBenchmarkRun(run))
+		sum := summarizeBenchmarkRun(run)
+		if !modelfilter.Matches(model, sum.Models...) {
+			continue
+		}
+		out = append(out, sum)
+		if len(out) >= limit {
+			break
+		}
 	}
 	writeJSON(w, map[string]any{"runs": out, "total": len(out)})
 }

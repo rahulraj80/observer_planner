@@ -39,7 +39,20 @@ const EstimateVersion = "p1-v1"
 // wins, §24.5) and resolve the matched intent against the pipeline's
 // survivors → with no rule, apply privacy enforcement and modifier
 // demotions from the pipeline alone.
+//
+// A switch onto a candidate whose context window the snapshot's resolver
+// does not know carries ReasonContextWindowUnknown (§R11.2): the fit could
+// not be verified, and the decision says so rather than assuming a size.
 func Decide(p Policy, snap *Snapshot, in DecisionInput) Decision {
+	d := decide(p, snap, in)
+	if contextWindowUnverified(snap, in, d) {
+		d.ReasonCodes = append(d.ReasonCodes, ReasonContextWindowUnknown)
+	}
+	return d
+}
+
+// decide is Decide's evaluation, before the context-window annotation.
+func decide(p Policy, snap *Snapshot, in DecisionInput) Decision {
 	d := Decision{
 		OriginalModel:   in.Shape.Model,
 		SelectedModel:   in.Shape.Model,
@@ -86,6 +99,7 @@ func Decide(p Policy, snap *Snapshot, in DecisionInput) Decision {
 	bin := BasisInput{In: in, Kind: cls.Kind, OriginalTier: tier, Policy: &p, Snap: snap}
 	res := RunPipeline(bases, assembleCandidates(snap.Tiers, in, tier), bin)
 	d.AdviseOnly = res.Mod.AdviseOnly
+	d.HardStop = res.Mod.HardStop
 
 	mc := MatchContext{
 		Kind:          cls.Kind,
@@ -103,14 +117,14 @@ func Decide(p Policy, snap *Snapshot, in DecisionInput) Decision {
 		if len(d.FallbackModels) == 0 {
 			d.FallbackModels = resolveFallbacks(p, snap, d.SelectedModel)
 		}
-		return d
+		return stampHardStop(d, res)
 	}
 
 	// No rule matched: privacy enforcement and modifier demotions still
 	// apply from the pipeline alone; otherwise the quiet no-change
 	// default. The fallback chain resolves either way so reliability
 	// (§R12.1) covers unrouted turns too.
-	d = applyPipelineDefaults(snap, in, tier, p, d, res)
+	d = stampHardStop(applyPipelineDefaults(snap, in, tier, p, d, res), res)
 	if len(d.FallbackModels) == 0 {
 		d.FallbackModels = resolveFallbacks(p, snap, d.SelectedModel)
 	}
@@ -588,4 +602,21 @@ func dedupReasons(in []ReasonCode) []ReasonCode {
 		}
 	}
 	return out
+}
+
+// stampHardStop guarantees a hard_stop exhaustion (§R14) is visible on the
+// decision row whatever branch produced it: the flag is already threaded from
+// the modifier, and ReasonBudgetHardStop is appended (deduped) so the row's
+// reason codes name it even when the winning rule/branch replaced the reason
+// list (G1-HARDSTOP). No other reason is touched, so rows for the other two
+// exhaustion behaviors are unchanged.
+func stampHardStop(d Decision, res PipelineResult) Decision {
+	if !res.Mod.HardStop {
+		return d
+	}
+	d.HardStop = true
+	if !hasReason(d.ReasonCodes, ReasonBudgetHardStop) {
+		d.ReasonCodes = append(d.ReasonCodes, ReasonBudgetHardStop)
+	}
+	return d
 }

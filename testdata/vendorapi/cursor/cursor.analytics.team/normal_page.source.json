@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].event_date": "VerifiedOfficial",
+    "data[].total_accepted_diffs": "VerifiedOfficial",
+    "data[].total_green_lines_accepted": "VerifiedOfficial",
+    "data[].total_green_lines_rejected": "VerifiedOfficial",
+    "data[].total_green_lines_suggested": "VerifiedOfficial",
+    "data[].total_lines_accepted": "VerifiedOfficial",
+    "data[].total_lines_suggested": "VerifiedOfficial",
+    "data[].total_red_lines_accepted": "VerifiedOfficial",
+    "data[].total_red_lines_rejected": "VerifiedOfficial",
+    "data[].total_red_lines_suggested": "VerifiedOfficial",
+    "data[].total_rejected_diffs": "VerifiedOfficial",
+    "data[].total_suggested_diffs": "VerifiedOfficial",
+    "params": "VerifiedOfficial",
+    "params.endDate": "VerifiedOfficial",
+    "params.metric": "VerifiedOfficial",
+    "params.startDate": "VerifiedOfficial",
+    "params.teamId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b6acb76e70340e4ff3a8300c84032ff67e87fa8f7b16273062d89f346c7ce298",
+  "http": {
+    "method": "GET",
+    "path": "/analytics/team/agent-edits",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Agent Edits\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Analytics API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "61ff2924a52aea2daef736a9000157af1777a00bd37e0a614d171bb6f1818e69",
+  "source_url": "https://cursor.com/docs/account/teams/analytics-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.analytics.team"
+}

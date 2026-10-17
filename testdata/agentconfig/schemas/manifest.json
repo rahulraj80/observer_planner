@@ -1,0 +1,50 @@
+{
+  "fetched_on": "2026-10-03",
+  "note": "Pinned vendor JSON schemas for the adapter settings catalogue (plan docs/plans/adapter-config-and-common-vocabulary-plan-2026-10-03.md section 2.2, phase P1). The ONE owner of the schema list: scripts/agentconfig-schema-refresh.sh fetches every url over its file, internal/agentconfig/catgen reads the files and emits catalog_<tool>.gen.go per target. Two tools sharing a schema get separate row sets so a per-tool overlay can differ (plan section 9: Open Interpreter vs Codex enums).",
+  "schemas": [
+    {
+      "file": "claude-code-settings.schema.json",
+      "url": "https://json.schemastore.org/claude-code-settings.json",
+      "targets": [
+        {"tool": "claude-code", "shape": "claude-code/settings"}
+      ]
+    },
+    {
+      "file": "codex-config.schema.json",
+      "url": "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/config.schema.json",
+      "targets": [
+        {"tool": "codex", "shape": "codex/config"},
+        {"tool": "open-interpreter", "shape": "open-interpreter/config"}
+      ]
+    },
+    {
+      "file": "gemini-cli-settings.schema.json",
+      "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+      "targets": [
+        {"tool": "gemini-cli", "shape": "gemini-cli/settings"}
+      ]
+    },
+    {
+      "file": "opencode-config.schema.json",
+      "url": "https://opencode.ai/config.json",
+      "targets": [
+        {"tool": "opencode", "shape": "opencode/config"}
+      ]
+    },
+    {
+      "file": "kilo-config.schema.json",
+      "url": "https://app.kilo.ai/config.json",
+      "targets": [
+        {"tool": "kilo-code", "shape": "kilo-code/config"},
+        {"tool": "kilo-code-cli", "shape": "kilo-code-cli/config"}
+      ]
+    },
+    {
+      "file": "crush.schema.json",
+      "url": "https://raw.githubusercontent.com/charmbracelet/crush/main/schema.json",
+      "targets": [
+        {"tool": "crush", "shape": "crush/config-json"}
+      ]
+    }
+  ]
+}

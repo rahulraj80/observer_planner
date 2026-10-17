@@ -1,0 +1,459 @@
+/* SuperBased Observer — Design Tokens
+ *
+ * Ported from design/tokens.css (the Claude-Design mockup).
+ * Tailwind reads these via tailwind.config.ts theme.extend.
+ * Switching `data-theme` on <html> flips the entire palette
+ * without dark: variants.
+ */
+
+:root,
+:root[data-theme="dark"],
+[data-theme-scope="dark"] {
+  /* Surfaces — layered elevation, low to high */
+  --bg-0: #08090d;
+  --bg-1: #0e1018;
+  --bg-2: #14171f;
+  --bg-3: #1a1d27;
+  --bg-4: #21252f;
+  --bg-5: #2a2f3d;
+
+  /* Borders */
+  --line-1: #1c1f29;
+  --line-2: #262a36;
+  --line-3: #353a48;
+
+  /* Foreground. fg-3 (labels, sub-text, table headers) clears WCAG AA 4.5:1
+     on every bg-0..bg-4 surface in both themes; fg-4 (placeholders,
+     decorative) clears 3:1 on the card surface. Raised 2026-09-27 from
+     #6b7388 / #474d5e (3.8:1 / 2.1:1 on bg-2). */
+  --fg-0: #f5f7fb;
+  --fg-1: #e2e6ef;
+  --fg-2: #9aa2b2;
+  --fg-3: #848ca2;
+  --fg-4: #5d6478;
+
+  /* Brand */
+  --brand-from: #6199f0;
+  --brand-to: #8b5cf6;
+  --brand-grad: linear-gradient(135deg, var(--brand-from) 0%, var(--brand-to) 100%);
+  --brand-soft: rgba(139, 92, 246, 0.12);
+  /* The CURRENT mark's Blueprint (favicon.svg / BrandMark). --brand-from /
+     --brand-to / --brand-grad above are the LEGACY "S"-logo gradient, kept
+     for aurora / progress bar / value flash (operator decision D3). The
+     same value in both themes: it is a badge fill, never body text
+     (#2647E8 on --bg-0 is ~3:1). */
+  --brand-blueprint: #2647e8;
+  --brand-blueprint-ink: #ffffff;
+  --brand-blueprint-soft: rgba(38, 71, 232, 0.16);
+
+  /* Accent — primary interactive */
+  --accent: #7c9eff;
+  --on-accent: #0a0d18;
+  --accent-strong: #93b1ff;
+  --accent-soft: rgba(124, 158, 255, 0.1);
+  --accent-ring: rgba(124, 158, 255, 0.35);
+
+  /* Semantic */
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.12);
+  --danger: #f87171;
+  /* Text on a solid danger fill: the dark red is light, so near-black (6.9:1). */
+  --on-danger: #1a0a0c;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.12);
+
+  /* Token bucket colors (4 Anthropic billing buckets) */
+  --tok-net: #60a5fa;
+  --tok-read: #a78bfa;
+  --tok-write: #fbbf24;
+  --tok-out: #f472b6;
+
+  /* Tool brand colors (consistent across every tab) */
+  --tool-claude-code: #f59e0b;
+  --tool-codex: #10b981;
+  --tool-cursor: #a855f7;
+  --tool-cline: #3b82f6;
+  --tool-copilot: #94a3b8;
+  --tool-copilot-cli: #0969da;
+  --tool-cowork: #ec4899;
+  --tool-antigravity: #14b8a6;
+  --tool-opencode: #f97316;
+  --tool-openclaw: #06b6d4;
+  --tool-pi: #84cc16;
+  --tool-gemini: #6366f1;
+  /* 2026-07 additions — CVD-checked against neighbors (dataviz validator);
+     kilo-code shared by kilo-code-cli, antigravity-cli reuses
+     --tool-antigravity (gemini-cli precedent). grok is deliberately
+     neutral (black brand); labels carry identity. */
+  --tool-cline-cli: #0ea5e9;
+  --tool-kilo-code: #fb923c;
+  --tool-hermes: #fde047;
+  --tool-qwen-code: #d946ef;
+  --tool-kiro-cli: #22c55e;
+  --tool-crush: #f43f5e;
+  --tool-kimi-code: #818cf8;
+  --tool-grok: #d6d3d1;
+  /* Wave-3 additions (2026-07-09) — ΔE-checked vs all neighbors (CIE76,
+     floor calibrated to the accepted kimi/gemini pair): devin salmon,
+     aider khaki (terminal heritage), qoder violet (brand). */
+  --tool-devin: #fa8072;
+  --tool-aider: #bdb76b;
+  --tool-qoder: #d8b4fe;
+  /* goose (2026-07-09) — plum; the open ΔE region after wave 3 (minΔE
+     29.6 vs qoder here, 36.6 vs copilot in light — same CIE76 check). */
+  --tool-goose: #cc7aa8;
+  /* 2026-07-29 wave — same CIE76 ΔE check as wave 3, run against all 30
+     existing tool hues in BOTH themes. droid pale-blue (minΔE 19.9 vs
+     cline-cli), open-interpreter pale-yellow (21.0 vs aider),
+     command-code rose (20.5 vs claude-web); pairwise ≥ 57 among the
+     three. Every one clears the shipped palette's own tightest pair
+     (cline/copilot-cli at 9.8), and open-interpreter is deliberately NOT
+     given codex's color — it's a different vendor's rebadge, not a
+     product-family sibling like gemini/gemini-cli. */
+  --tool-droid: #93c5fd;
+  --tool-open-interpreter: #efef8f;
+  --tool-command-code: #fca5a5;
+  /* 2026-08 wave (zcode / mistral-code / freebuff) — RGB-distance
+     screened >= 39 against all 33 prior tool hues in both themes and
+     >= 197 pairwise among the three. */
+  --tool-zcode: #4cd742;
+  /* dark value lifted 2026-09 (#3106e0 almost vanished on the dark
+     surface); #a375fe keeps ΔE ≥ 15 vs gemini / muse. */
+  --tool-mistral-code: #a375fe;
+  --tool-freebuff: #e25acb;
+  /* Browser-chatbot rail (Phase 2, 2026-07-10) — brand-evocative hues,
+     CIE76 ΔE-validated ≥ 21 vs every existing tool + each other (same
+     check as wave 3). chatgpt teal-green, claude terracotta, perplexity
+     cyan, gemini blue, copilot purple. Tokens are estimated-only, always
+     labeled "est." in the UI. */
+  --tool-chatgpt-web: #71efc7;
+  --tool-claude-web: #d5a081;
+  --tool-perplexity-web: #88d7d7;
+  --tool-gemini-web: #8193d5;
+  --tool-copilot-web: #bb62cb;
+  /* 2026-09 wave (dashboard visual upgrade) — eight registry tools that
+     rendered in --tool-other, same CIE76 ΔE check as wave 3, run against
+     every existing tool hue in BOTH themes: every new hue clears ΔE 15.0
+     vs all others (the shipped palette's own tightest pairs are 9.8 dark,
+     cline/copilot-cli, and 14.4 light, cursor/gemini). The kit's first
+     brand-evocative picks collided in the crowded blue/violet band
+     (deepseek vs kimi-code 3.9, muse vs poolside 6.6), so each was nudged
+     ≤ 11° in Lab hue from its brand colour. kiro-crew and grokbot reuse
+     their product-family sibling (the gemini-cli precedent). */
+  --tool-kiro-crew: var(--tool-kiro-cli);
+  --tool-grokbot: var(--tool-grok);
+  --tool-muse: #a779e6;
+  --tool-prime-agent: #e5ddbf;
+  --tool-deepseek: #a8a6fe;
+  --tool-junie: #6eea72;
+  --tool-poolside: #947ed2;
+  --tool-zed: #5a9df5;
+  --tool-other: #64748b;
+
+  /* Action-type category colors. One var per canonical category in
+     internal/tooltax (mirrored into web/src/lib/actiontax.gen.json) —
+     adding a category there needs a var here in BOTH themes, or
+     actions.ts falls the new category back to the meta gray.
+     --act-skill (skill/command invocation) is the taxonomy-plan
+     addition: orange, the one warm hue left between --act-mcp amber
+     and --act-fail red. */
+  --act-file: #60a5fa;
+  --act-cmd: #34d399;
+  --act-search: #a855f7;
+  --act-web: #14b8a6;
+  --act-meta: #94a3b8;
+  --act-fail: #f87171;
+  --act-agent: #ec4899;
+  --act-skill: #fb923c;
+  --act-mcp: #fbbf24;
+  --act-user: #c084fc;
+
+  /* Pattern type colors */
+  --pat-hot: #fbbf24;
+  --pat-cochange: #60a5fa;
+  --pat-edittest: #34d399;
+  --pat-knowledge: #c084fc;
+  --pat-command: #06b6d4;
+
+  /* Reliability */
+  --rel-accurate: var(--success);
+  --rel-approximate: var(--warn);
+  --rel-unreliable: var(--danger);
+
+  /* Radius */
+  /* Type scale (2026-09-28). The apps grew ~25 arbitrary text-[Npx] sizes;
+     these nine steps are the named scale (preset fontSize: text-micro ...
+     text-display). Migrate a page onto them when it is next touched; never
+     a big-bang rewrite. Same in both themes. */
+  --fs-micro: 10px;
+  --fs-caption: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-lead: 15px;
+  --fs-title: 20px;
+  --fs-h1: 22px;
+  --fs-display-sm: 28px;
+  --fs-display: 34px;
+
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-pill: 999px;
+
+  /* Layout */
+  --sidebar-w: 220px;
+  --sidebar-w-collapsed: 56px;
+  --header-h: 52px;
+  --filterbar-h: 56px;
+
+  /* Shadow */
+  --shadow-1:
+    0 1px 0 rgba(255, 255, 255, 0.02) inset,
+    0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.02) inset;
+  --shadow-3:
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --shadow-drawer: -16px 0 48px rgba(0, 0, 0, 0.6);
+
+  /* Motion - the ONE motion vocabulary for every app surface (see
+     shared/styles/motion.css for the keyframes + composite classes and
+     shared/lib/motion.ts for the JS mirror). Durations collapse to 0 under
+     prefers-reduced-motion (motion.css), so anything built on these tokens
+     honours the OS setting without its own media query. */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+  --dur-slower: 560ms;
+  --stagger: 32ms;
+
+  /* Loading placeholders + interaction overlays (theme-aware; the old
+     white-on-white shimmer was invisible in the light theme). */
+  --skel-base: #1b1f29;
+  /* Toggle / slider knob: a near-white disc on any track, both themes. */
+  --knob: #f4f6fa;
+  --skel-hl: rgba(255, 255, 255, 0.06);
+  --overlay-1: rgba(255, 255, 255, 0.08);
+  --overlay-2: rgba(255, 255, 255, 0.16);
+
+  /* Terminal surfaces. The terminal panel sets data-theme-scope so it can
+     follow the app theme or pin its own (Settings > terminal theme). */
+  --term-bg: #0b0b0f;
+  --term-chrome: #14141a;
+  --term-banner: #101017;
+  --term-pop: #1b1b23;
+
+  /* Mascot (Obs, "Prompt in a cape", 2026-10-02; shared/lib/mascot.ts).
+     Dark theme: amber body, periwinkle cape - the website's dark accent is
+     amber, and the cape is a lighter blue than Blueprint so it still clears
+     the dark page. Lost = each colour mixed ~74/26 toward grey: puzzled,
+     not drained. Character-internal colours, never text. */
+  --mascot-body: #ffb000;
+  --mascot-body-shade: #c98700;
+  --mascot-screen: #11163a;
+  --mascot-glyph: #ffc23d;
+  --mascot-badge: #1b2470;
+  --mascot-blush: #ff8fb8;
+  --mascot-cape: #7c98ff;
+  --mascot-cape-lining: #3e5ad0;
+  --mascot-burst: #7c9eff;
+  --mascot-lost-body: #e1a82a;
+  --mascot-lost-body-shade: #b68a31;
+  --mascot-lost-cape: #8096e7;
+  --mascot-lost-cape-lining: #556ac2;
+}
+
+:root[data-theme="light"],
+[data-theme-scope="light"] {
+  --bg-0: #f4f5f9;
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #f6f7fb;
+  --bg-4: #eef0f6;
+  --bg-5: #e2e6ef;
+
+  --line-1: #ebedf2;
+  --line-2: #dde0e8;
+  --line-3: #c1c6d2;
+
+  --fg-0: #0c0f15;
+  --fg-1: #1b1f28;
+  --fg-2: #475067;
+  --fg-3: #646d86;
+  --fg-4: #8d94a8;
+
+  --brand-soft: rgba(139, 92, 246, 0.1);
+  --brand-blueprint: #2647e8;
+  --brand-blueprint-ink: #ffffff;
+  --brand-blueprint-soft: rgba(38, 71, 232, 0.08);
+
+  --accent: #4763ed;
+  --accent-strong: #3850dd;
+  --accent-soft: rgba(71, 99, 237, 0.1);
+  --accent-ring: rgba(71, 99, 237, 0.25);
+  --on-accent: #ffffff;
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.1);
+  --warn: #d97706;
+  --warn-soft: rgba(217, 119, 6, 0.1);
+  --danger: #e53e3e;
+  --on-danger: #ffffff;
+  --danger-soft: rgba(229, 62, 62, 0.1);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, 0.1);
+
+  --tok-net: #2563eb;
+  --tok-read: #7c3aed;
+  --tok-write: #d97706;
+  --tok-out: #db2777;
+
+  --tool-claude-code: #d97706;
+  --tool-codex: #059669;
+  --tool-cursor: #7c3aed;
+  --tool-cline: #2563eb;
+  --tool-copilot: #64748b;
+  --tool-copilot-cli: #0550ae;
+  --tool-cowork: #db2777;
+  --tool-antigravity: #0d9488;
+  --tool-opencode: #ea580c;
+  --tool-openclaw: #0891b2;
+  --tool-pi: #65a30d;
+  --tool-gemini: #4f46e5;
+  --tool-cline-cli: #0284c7;
+  --tool-kilo-code: #c2410c;
+  --tool-hermes: #854d0e;
+  --tool-qwen-code: #c026d3;
+  --tool-kiro-cli: #16a34a;
+  --tool-crush: #e11d48;
+  --tool-kimi-code: #3730a3;
+  --tool-grok: #44403c;
+  --tool-devin: #7f1d1d;
+  --tool-aider: #4d7c0f;
+  --tool-qoder: #86198f;
+  --tool-goose: #a05888;
+  /* 2026-07-29 wave — light-theme variants, same ΔE check (minΔE 17.5 /
+     26.4 / 16.4 respectively). */
+  --tool-droid: #312e81;
+  --tool-open-interpreter: #a1a112;
+  --tool-command-code: #b91c1c;
+  /* 2026-08 wave — light-theme variants (min RGB-distance >= 39). */
+  --tool-zcode: #2db923;
+  --tool-mistral-code: #2202a7;
+  --tool-freebuff: #dd22bd;
+  /* Browser-chatbot rail (Phase 2) — light-theme variants, ΔE-validated. */
+  --tool-chatgpt-web: #19e6ce;
+  --tool-claude-web: #bf5b40;
+  --tool-perplexity-web: #19d1e6;
+  --tool-gemini-web: #2e508a;
+  --tool-copilot-web: #7013ae;
+  --tool-kiro-crew: var(--tool-kiro-cli);
+  --tool-grokbot: var(--tool-grok);
+  --tool-muse: #9648de;
+  --tool-prime-agent: #68655f;
+  --tool-deepseek: #7b65f7;
+  --tool-junie: #31971f;
+  --tool-poolside: #202fe5;
+  --tool-zed: #565dcc;
+  --tool-other: #475569;
+
+  --act-file: #2563eb;
+  --act-cmd: #10b981;
+  --act-search: #7c3aed;
+  --act-web: #0d9488;
+  --act-meta: #64748b;
+  --act-fail: #e53e3e;
+  --act-agent: #db2777;
+  --act-skill: #ea580c;
+  --act-mcp: #d97706;
+  --act-user: #9333ea;
+
+  --pat-hot: #d97706;
+  --pat-cochange: #2563eb;
+  --pat-edittest: #10b981;
+  --pat-knowledge: #9333ea;
+  --pat-command: #0891b2;
+
+  --shadow-1:
+    0 1px 0 rgba(0, 0, 0, 0.02),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-2:
+    0 4px 16px rgba(15, 23, 42, 0.06),
+    0 1px 0 rgba(0, 0, 0, 0.02);
+  --shadow-3:
+    0 16px 48px rgba(15, 23, 42, 0.12),
+    0 1px 0 rgba(0, 0, 0, 0.02);
+  --shadow-drawer: -16px 0 48px rgba(15, 23, 42, 0.12);
+
+  /* Darkened 2026-09-28: #e9ecf3 vanished on the white bg-1 / bg-2 cards. */
+  --skel-base: #dde1ea;
+  --knob: #ffffff;
+  --skel-hl: rgba(255, 255, 255, 0.75);
+  --overlay-1: rgba(15, 23, 42, 0.06);
+  --overlay-2: rgba(15, 23, 42, 0.12);
+
+  --term-bg: #fbfbfd;
+  --term-chrome: #eef0f5;
+  --term-banner: #f4f5f9;
+  --term-pop: #ffffff;
+
+  /* Mascot, light theme: Blueprint body (the website's light accent),
+     amber cape + glyphs. */
+  --mascot-body: #2647e8;
+  --mascot-body-shade: #1631b4;
+  --mascot-screen: #11163a;
+  --mascot-glyph: #ffc23d;
+  --mascot-badge: #ffffff;
+  --mascot-blush: #ff8fb8;
+  --mascot-cape: #ffb000;
+  --mascot-cape-lining: #c98200;
+  --mascot-burst: #ffb000;
+  --mascot-lost-body: #4760db;
+  --mascot-lost-body-shade: #4055b5;
+  --mascot-lost-cape: #e7ae30;
+  --mascot-lost-cape-lining: #be8e37;
+}
+
+/* Density (2026-09-29) - the per-browser "comfortable / compact" preference
+   (shared/lib/density.ts), stamped on <html> as data-density by each app's
+   index.html pre-paint script and shared/lib/useDensity. Theme-independent:
+   both themes share these. The default block equals the pre-density
+   rendering exactly (py-1.5 / py-2 / px-2 / px-1.5 / p-4 / px-4 py-3 /
+   min-h-[104px]), so nothing moves for a viewer who never touches the
+   toggle; compact is the only override. Exposed to Tailwind by the shared
+   preset as py-row, py-head, px-cell, px-cell-num, p-card, px-stat-x,
+   py-stat-y, min-h-stat. Every token must appear in BOTH blocks
+   (web/src/lib/density.test.ts). */
+:root,
+:root[data-density="comfortable"] {
+  --density-row-y: 6px;
+  --density-head-y: 8px;
+  --density-cell-x: 8px;
+  --density-cell-x-num: 6px;
+  --density-card-pad: 16px;
+  --density-stat-x: 16px;
+  --density-stat-y: 12px;
+  --density-stat-min-h: 104px;
+}
+
+:root[data-density="compact"] {
+  --density-row-y: 3px;
+  --density-head-y: 5px;
+  --density-cell-x: 6px;
+  --density-cell-x-num: 4px;
+  --density-card-pad: 12px;
+  --density-stat-x: 12px;
+  --density-stat-y: 8px;
+  --density-stat-min-h: 88px;
+}

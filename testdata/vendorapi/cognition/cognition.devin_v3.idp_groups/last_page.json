@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "idp_group_name": "contractors"
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null,
+  "total": 3
+}

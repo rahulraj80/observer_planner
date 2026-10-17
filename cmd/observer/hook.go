@@ -11,23 +11,22 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	codexadapter "github.com/marmutapp/superbased-observer/internal/adapter/codex"
-	cursoradapter "github.com/marmutapp/superbased-observer/internal/adapter/cursor"
-	"github.com/marmutapp/superbased-observer/internal/adapter/hermes"
-	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
+	"github.com/marmutapp/superbased-observer/internal/budgetwarnfile"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/contentcap"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/guard/notify"
+	"github.com/marmutapp/superbased-observer/internal/guardposture"
 	"github.com/marmutapp/superbased-observer/internal/hook"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/compaction"
+	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/pidbridge"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
@@ -35,8 +34,10 @@ import (
 )
 
 // defaultHookMaxRuntime is the wall-clock budget for a single `observer
-// hook` invocation. Hooks that exceed it exit promptly via os.Exit(0)
-// (fail-open — a timeout must never block the host tool). The
+// hook` invocation. Hooks that exceed it exit promptly: fail-open (exit 0)
+// on every hook except a wired gate hook on a node where guard enforcement
+// is in force, which answers with the dialect's BLOCK instead (hook-parity
+// audit section 5.7; see hookWatchdogFire). The
 // 30 s default is generous vs. the typical hook (sub-second to ~3 s
 // including db.Open + a single write) but tight enough that a hung hook
 // can't pin the host AI tool for minutes. Override with `--max-runtime`
@@ -45,6 +46,45 @@ import (
 // block 20+ minutes waiting on stuck DB / syscall paths because the
 // "MUST NEVER block the host" invariant was documented but unenforced.
 const defaultHookMaxRuntime = 30 * time.Second
+
+// promptSubmitBodyLimit (B2, final-fix review) is the stdin read bound
+// for a hook receiver that can carry a prompt-submit event — larger
+// than defaultHookBodyLimit because a prompt-submit payload's size is
+// the DEVELOPER's own prompt length, not a bounded tool-output excerpt,
+// and a real (if unusually long) prompt must not be truncated into a
+// guard bypass just because the read bound was tuned for smaller
+// events. 8 MiB comfortably covers a large pasted document while still
+// bounding worst-case memory for a single hook invocation.
+const promptSubmitBodyLimit = 8 * 1024 * 1024
+
+// defaultHookBodyLimit is the stdin read bound for every hook event
+// that never carries a prompt-submit payload (PreToolUse/PostToolUse/
+// session lifecycle/etc.) — unchanged from the original bound.
+const defaultHookBodyLimit = 2 * 1024 * 1024
+
+// readHookBodyDetectTruncation reads up to limit+1 bytes from r and
+// reports whether the input was longer than limit — in which case body
+// is exactly limit bytes, NOT the full payload. (B2, final-fix review.)
+//
+// This exists because plain `io.ReadAll(io.LimitReader(r, limit))`
+// (the pre-fix shape used everywhere in this file) is indistinguishable
+// from "the payload happened to be exactly limit bytes or shorter" —
+// there is no way for a caller to tell whether body is complete. For
+// most hook events that ambiguity is harmless (a truncated
+// PostToolUse excerpt just captures less); for a prompt-submit event
+// it is a silent guard bypass: a truncated body almost always fails
+// its dialect's json.Unmarshal, and the pre-fix caller treated that
+// parse failure identically to "no prompt-submit guard installed for
+// this tool" and fell through to a plain, unaudited approve — see
+// hook.HandlePromptSubmitGuarded's bodyTruncated parameter, which
+// this return value feeds.
+func readHookBodyDetectTruncation(r io.Reader, limit int64) (body []byte, truncated bool) {
+	buf, _ := io.ReadAll(io.LimitReader(r, limit+1))
+	if int64(len(buf)) > limit {
+		return buf[:limit], true
+	}
+	return buf, false
+}
 
 // resolveHookMaxRuntime picks the watchdog budget. Precedence: explicit
 // --max-runtime flag (when non-zero) > OBSERVER_HOOK_MAX_RUNTIME env >
@@ -63,30 +103,147 @@ func resolveHookMaxRuntime(flag time.Duration, env string) time.Duration {
 	return defaultHookMaxRuntime
 }
 
-// installHookWatchdog arms a time.AfterFunc that fires exitFn(0) when
-// maxRuntime elapses. Returns a stop func to disarm on a clean exit.
+// installHookWatchdog arms a time.AfterFunc that runs hookWatchdogFire
+// when maxRuntime elapses. Returns a stop func to disarm on a clean exit.
 // exitFn is injected so unit tests can verify firing without actually
 // terminating the test process. In production, callers wire it to
 // os.Exit.
 //
-// **Fail-OPEN on timeout (exit 0, never 2).** A non-zero exit from a
-// PreToolUse hook BLOCKS the host tool — so a watchdog that exits 2 turns
-// a transient capture stall (e.g. the DB momentarily locked by a daemon
-// startup prune/checkpoint on a large DB) into a hard block on the user's
-// work, cascading across the session. A watchdog timeout is NOT a deny
-// decision; the hook simply didn't finish in time, so it must allow the
-// tool through. This upholds the command's "exit 0 on every path"
-// invariant (see newHookCmd). The process still terminates promptly, so
-// the host tool is never pinned waiting.
+// **Fail-open on timeout, except under enforcement (superseded
+// 2026-10-03, hook-parity audit section 5.7).** A non-zero exit from a
+// PreToolUse hook BLOCKS the host tool, so for every hook that is not a
+// wired gate on an enforcing node the watchdog still exits 0: a transient
+// capture stall (e.g. the DB momentarily locked by a daemon startup
+// prune/checkpoint on a large DB) must not turn into a hard block on the
+// developer's work. A wired gate hook (tool_gate / prompt_gate) on a node
+// whose guard-posture.json says enforcement is in force is the one
+// exception: there an unevaluated call must not slip through, so the
+// watchdog writes the dialect's BLOCK with the reason
+// hook.FailClosedTimeoutReason, records the failure for the daemon to
+// persist, and exits with the dialect's block code. Either way the process
+// terminates promptly, so the host tool is never pinned waiting, and the
+// reply goes through the one reply owner (hookReplyMu), so the watchdog
+// and the receiver can never both reply.
 func installHookWatchdog(maxRuntime time.Duration, exitFn func(int), stderr io.Writer) func() {
 	if maxRuntime <= 0 {
 		return func() {}
 	}
 	timer := time.AfterFunc(maxRuntime, func() {
-		fmt.Fprintf(stderr, "observer-hook: max-runtime %v exceeded; allowing the tool (fail-open, exit 0; see V3-1)\n", maxRuntime)
-		exitFn(0)
+		hookWatchdogFire(maxRuntime, exitFn, stderr)
 	})
 	return func() { timer.Stop() }
+}
+
+// hookReplied / hookPendingExitCode / hookExpectsStdoutReply track this
+// invocation's already-decided verdict (P2-1, adversarial review of the
+// P1-4 fix, docs/audits/codebase-audit-2026-09-16.md): several
+// receivers in this file reply (or decide a process-exit-code verdict)
+// FIRST and then do more work that can panic — DB opens, ingests,
+// pidbridge seeds. Before this fix, recoverHookPanic always wrote a
+// SECOND {"decision":"approve"} object and exited 0 no matter what had
+// already happened, which could (a) corrupt the stdout stream with two
+// concatenated JSON objects and (b) silently turn an ALREADY-DECIDED
+// BLOCK (e.g. Claude Code's UserPromptSubmit dialect, which signals a
+// block via process exit code 2 — handleClaudeCodeUserPromptSubmit
+// replies + decides exitCode, THEN runs the capture ingest, THEN calls
+// hookOSExit) into an ALLOW just because the ingest step panicked.
+//
+// hookExpectsStdoutReply additionally distinguishes JSON-reply
+// dialects (the overwhelming majority — the zero value / default) from
+// the two EXIT-CODE-ONLY prompt-submit dialects (Qoder, Cascade — see
+// promptDialectsWithoutStdoutReply) whose vendor contract has NO stdout
+// JSON channel for this event at all, not even on allow; writing one
+// on a pre-reply panic would be unexpected output no such host parses,
+// contradicting the (now corrected) claim that "every dialect treats a
+// bare decision:approve as an allow".
+//
+// All three are reset to their zero/default state at the top of
+// newHookCmd's Run (the single per-invocation entry point) — a
+// production `observer hook` invocation is a fresh, short-lived OS
+// process, but test code may drive Run multiple times in one binary,
+// so state must not leak across invocations.
+var (
+	hookReplied            bool
+	hookPendingExitCode    int
+	hookExpectsStdoutReply = true
+)
+
+// markHookReplied records that this invocation has already written its
+// hook-protocol reply to stdout (whether a JSON object or, for an
+// exit-code-only dialect, deliberately nothing) — see hookReplied.
+func markHookReplied() {
+	hookReplyMu.Lock()
+	hookReplied = true
+	hookReplyMu.Unlock()
+}
+
+// markHookPendingExit records the process exit code a receiver has
+// already decided on (0 for allow, a dialect's blockExitCode for an
+// already-decided block) before doing further work that could panic —
+// see hookPendingExitCode.
+func markHookPendingExit(code int) {
+	hookReplyMu.Lock()
+	hookPendingExitCode = code
+	hookReplyMu.Unlock()
+}
+
+// recoverHookPanic is the top-level panic guard for `observer hook`
+// (P1-4/RES-2, docs/audits/codebase-audit-2026-09-16.md): every hook
+// receiver in hookReceivers, plus HandleApprove's default fallthrough,
+// runs beneath this deferred recover in newHookCmd's Run. Without it a
+// panic anywhere in a receiver (e.g. handleClaudeCodePreTool's
+// hook.RewriteBash over arbitrary developer-typed shell text, or any
+// payload decoder) exits the process with status 2, and this repo's
+// own standing note is that a non-zero exit from a PreToolUse-class
+// hook BLOCKS the host AI tool — inverting the documented fail-open
+// contract that installHookWatchdog already upholds for a timeout.
+//
+// On a recovered panic this: (1) logs the panic value + stack trace to
+// STDERR ONLY — stdout is reserved for the hook protocol reply, and
+// mixing diagnostics into it would corrupt the JSON the host tool
+// parses; (2) writes the SAME {"decision":"approve"} fail-open reply
+// hook.HandleApprove already emits as the default path for a tool with
+// no registered receiver, but ONLY when nothing has been written yet
+// AND the current dialect's wire contract expects stdout JSON at all
+// (hookReplied / hookExpectsStdoutReply — P2-1: never invent a SECOND
+// reply on top of one a receiver already sent, and never emit JSON an
+// exit-code-only dialect doesn't parse); and (3) calls exitFn with
+// hookPendingExitCode — 0 when nothing was ever decided (today's
+// original fail-open default), or the exit code a receiver had already
+// decided on before the panic, so an already-decided BLOCK survives a
+// downstream panic instead of silently becoming an ALLOW.
+//
+// Superseded for one case (2026-10-03, hook-parity audit section 5.7): a
+// panic before any reply on a wired gate hook (tool_gate / prompt_gate)
+// whose node has guard enforcement in force is answered with the
+// dialect's BLOCK (reason hook.FailClosedErrorReason), recorded for the
+// daemon, and exits with the dialect's block code, instead of the approve
+// above. Every other panic keeps the fail-open behaviour described here.
+//
+// exitFn is injected — same pattern as installHookWatchdog — so a unit
+// test can verify the fail-open reply + the intended exit code without
+// actually terminating the test process. Production wires os.Exit.
+func recoverHookPanic(label string, stdout, stderr io.Writer, exitFn func(int)) {
+	if r := recover(); r != nil {
+		fmt.Fprintf(stderr, "observer-hook: PANIC in %s: %v\n%s\n", label, r, debug.Stack())
+		hookReplyMu.Lock()
+		defer hookReplyMu.Unlock()
+		if handled, code := answerFailureLocked(guardposture.KindCrash, "", "", stderr); handled {
+			hookFailureExited = true
+			exitFn(code)
+			return
+		}
+		if !hookReplied && hookExpectsStdoutReply {
+			// stdin may already be partially or fully consumed by the
+			// panicking receiver; HandleApprove tolerates an empty/short
+			// read (it never depends on the body to reply), so we hand it
+			// an empty reader rather than risk re-reading a live os.Stdin.
+			// The plan's dialect picks the host's own allow shape
+			// (HandlePromptAllow; approve for every dialect without one).
+			hook.HandleDialectAllow(currentHookPlan().Dialect, label, strings.NewReader(""), lockedReplyWriter{w: stdout}, stderr)
+		}
+		exitFn(hookPendingExitCode)
+	}
 }
 
 // newHookCmd implements `observer hook <tool> <event>`. The host AI tool
@@ -99,18 +256,104 @@ func installHookWatchdog(maxRuntime time.Duration, exitFn func(int), stderr io.W
 // The command is intentionally flat rather than a subcommand tree so that
 // settings.json / hooks.json can hard-code predictable command strings.
 //
-// Spec P1: this command MUST exit 0 on every path. Errors are written to
-// stderr but never propagate as a non-zero exit. A process-level watchdog
-// (`--max-runtime`, default 30 s) is the defensive belt-and-suspenders:
-// if any code path blocks (stuck DB write, blocked syscall, anything) the
-// AfterFunc calls os.Exit(0) — fail-OPEN, so a transient capture stall
-// (e.g. the DB momentarily locked by a daemon startup prune/checkpoint)
-// can never block the host tool. The process still terminates promptly.
+// Spec P1 (superseded in part 2026-10-03, hook-parity audit section 5.7):
+// errors are written to stderr and a failure ALLOWS the host tool on every
+// hook, with one exception. A wired gate hook (tool_gate / prompt_gate) on
+// a node where guard enforcement is in force (guard-posture.json, written
+// by the daemon) answers a failure (timeout, panic, config error, guard
+// that cannot be built, unparseable payload) with the dialect's BLOCK and a
+// reason, and records it (guard-hookfail.jsonl -> guard_events). A
+// process-level watchdog (`--max-runtime`, default 30 s, capped below the
+// host's own hook timeout for gate events) still guarantees the process
+// terminates promptly whichever way it answers.
 //
 // `--config <path>` propagates the proxy's config to the hook handler so
 // the DB write lands on the same observer.db the proxy is using. Without
 // it, the hook always reads ~/.observer/config.toml regardless of which
 // proxy daemon fired it.
+// hookReceivers is the table-driven dispatch for `observer hook <tool>
+// <event>` (CLAUDE.md rule 5: decision logic is table-driven, never a
+// growing switch/if-else ladder). A tool with NO entry here falls
+// through to the unconditional approve-only default in newHookCmd —
+// correct for a watcher-only-capture tool, but a BUG for any tool
+// whose internal/integration registry row claims a non-zero
+// PromptLane (BLOCK-1, phase-2 review): that claim is a promise that
+// `observer hook <tool> UserPromptSubmit` actually evaluates the
+// guard, and a missing entry here silently breaks that promise no
+// matter what the registry/conformance/docs say.
+// TestPromptLaneHookRowsHaveAReceiver walks the registry and pins
+// every PromptLaneHook row to an entry in this table.
+var hookReceivers = map[string]func(ctx context.Context, event, configPath string){
+	"claude-code": handleClaudeCodeHook,
+	"droid": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolDroid, "droid", hook.PromptDialectTopLevelBlock, "UserPromptSubmit", event, configPath)
+	},
+	// muse (T-479): Muse Code 1.4.3 cancelled the run before any model
+	// request on {"decision":"block"} (live, demo node 1, 2026-10-06).
+	"muse": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolMuse, "muse", hook.PromptDialectTopLevelBlock, "UserPromptSubmit", event, configPath)
+	},
+	// kimi-code (T-378): Kimi Code 2.1.1 blocked a prompt on exit 2 with
+	// zero model requests (live, demo node 1, 2026-10-07). PreToolUse is
+	// served earlier by the binding-driven tool gate (standaloneToolGate).
+	"kimi-code": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolKimiCode, "kimi-code", hook.PromptDialectKimiCode, "UserPromptSubmit", event, configPath)
+	},
+	"qwen-code": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolQwenCode, "qwen-code", hook.PromptDialectTopLevelBlock, "UserPromptSubmit", event, configPath)
+	},
+	"gemini-cli": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolGeminiCLI, "gemini-cli", hook.PromptDialectGemini, "BeforeAgent", event, configPath)
+	},
+	// Part B item 2 (phase-3a, docs/plans/prompt-submit-intervention-
+	// exploration-2026-09-07.md §2.1b): the documented long-tail
+	// vendors. All five, like droid/qwen-code/gemini-cli above, have
+	// no OTHER hook this repo captures — prompt-submit is their entire
+	// hook surface.
+	"qoder": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolQoder, "qoder", hook.PromptDialectQoder, "UserPromptSubmit", event, configPath)
+	},
+	"poolside": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolPoolside, "poolside", hook.PromptDialectPoolside, "UserPromptSubmit", event, configPath)
+	},
+	// zcode's receiver is wired here like every other PromptLaneHook
+	// row, but its REGISTRATION writer deliberately does not exist
+	// (Hook.AutoWired:false, internal/integration) pending a liveness
+	// probe (zai-org/feedback#32) — `observer hook zcode
+	// UserPromptSubmit` works today for anyone who wires the config by
+	// hand or via `observer doctor --probe-hook zcode`.
+	"zcode": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolZcode, "zcode", hook.PromptDialectZcode, "UserPromptSubmit", event, configPath)
+	},
+	// devin's dispatch tool string covers Windsurf/Devin Desktop
+	// Cascade's pre_user_prompt — the CLI's own separate, still-unwired
+	// hooks.v1.json is untouched (see internal/integration's devin row).
+	// antigravity-cli PreInvocation (audit P1; restored by T-476): a
+	// warn-only seam that runs before every model call; the dialect reads
+	// the prompt from the session transcript (agy 1.3.0 writes the
+	// USER_INPUT step before invocationNum 0) and judges each prompt once.
+	// (The PreToolUse tool gate, hook-parity Lane A6, is served by the
+	// binding route ahead of this receiver.)
+	"antigravity-cli": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolAntigravityCLI, "antigravity-cli", hook.PromptDialectAntigravityPreInvocation, "PreInvocation", event, configPath)
+	},
+	"devin": func(_ context.Context, event, configPath string) {
+		handlePromptSubmitOnlyHook(models.ToolDevin, "devin", hook.PromptDialectCascade, "pre_user_prompt", event, configPath)
+	},
+	// command-code's event name matches the Mods SDK hook name
+	// (transformInput) verbatim — the go:embed'd .ts bridge invokes
+	// `observer hook command-code transformInput` exactly like every
+	// other dialect's argv shape, even though the caller is a Node/jiti
+	// process rather than a shell.
+	"command-code": func(ctx context.Context, event, configPath string) {
+		// beforeToolCall (the plugin tool gate) is served by its dialect.
+		if dispatchBindingDialect(ctx, "command-code", event, configPath) {
+			return
+		}
+		handlePromptSubmitOnlyHook(models.ToolCommandCode, "command-code", hook.PromptDialectCommandCode, "transformInput", event, configPath)
+	},
+}
+
 func newHookCmd() *cobra.Command {
 	var (
 		configPath string
@@ -121,41 +364,120 @@ func newHookCmd() *cobra.Command {
 		Short: "Handle an AI-tool hook event on stdin and reply on stdout",
 		Long: "Invoked by the host AI tool via its hook configuration. Reads a\n" +
 			"JSON payload from stdin and replies on stdout. For Cursor, also\n" +
-			"records the event in the observer DB. MUST NEVER block the host\n" +
-			"tool — errors are logged to stderr and swallowed. A process\n" +
-			"watchdog (--max-runtime, default 30s) enforces the invariant.",
+			"records the event in the observer DB. A failure (timeout, crash,\n" +
+			"config or guard error, unparseable payload) ALLOWS the host tool,\n" +
+			"except on a gate hook (tool/prompt gate) while guard enforcement\n" +
+			"is on: then the call is BLOCKED with a reason and the failure is\n" +
+			"recorded as a guard event. A process watchdog (--max-runtime,\n" +
+			"default 30s) bounds every invocation.",
 		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			budget := resolveHookMaxRuntime(maxRuntime, os.Getenv("OBSERVER_HOOK_MAX_RUNTIME"))
-			stopWatchdog := installHookWatchdog(budget, os.Exit, os.Stderr)
-			defer stopWatchdog()
-
-			tool := args[0]
-			event := ""
-			if len(args) >= 2 {
-				event = args[1]
-			}
-			switch tool {
-			case "cursor":
-				handleCursorHook(cmd.Context(), event, configPath)
-			case "claude-code":
-				handleClaudeCodeHook(cmd.Context(), event, configPath)
-			case "codex":
-				handleCodexHook(cmd.Context(), event, configPath)
-			case "hermes":
-				handleHermesHook(cmd.Context(), event, configPath)
-			default:
-				label := tool
-				if event != "" {
-					label = tool + ":" + event
-				}
-				hook.HandleApprove(label, os.Stdin, os.Stdout, os.Stderr)
-			}
+			// P2-1 (adversarial review of the P1-4 fix): reset the
+			// per-invocation verdict-tracking state fresh for THIS
+			// call — see hookReplied's doc comment for why this must
+			// be the single reset point.
+			runHookInvocation(cmd.Context(), args, configPath, maxRuntime, os.Exit)
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "Path to observer config.toml — when set, hook DB writes land on the config's observer.db (matches the proxy / MCP server invocations)")
-	cmd.Flags().DurationVar(&maxRuntime, "max-runtime", 0, "Hard wall-clock cap on a single hook invocation; on exceedance the process exits(2) so the host AI tool isn't pinned. 0 = use OBSERVER_HOOK_MAX_RUNTIME or the 30s default. See docs/observer-platform-issues-v3.md V3-1.")
+	cmd.Flags().StringVar(&configPath, "config", "", "Path to observer config.toml; when set, hook DB writes land on the config's observer.db (matches the proxy / MCP server invocations)")
+	cmd.Flags().DurationVar(&maxRuntime, "max-runtime", 0, "Hard wall-clock cap on a single hook invocation; on exceedance the process exits 0 (fail-open) so the host AI tool is never pinned, except a gate hook (tool/prompt gate) while guard enforcement is on, which BLOCKS the call with a reason (see installHookWatchdog). 0 = use OBSERVER_HOOK_MAX_RUNTIME or the 30s default (gate events are also capped below the host's own hook timeout). See docs/observer-platform-issues-v3.md V3-1.")
 	return cmd
+}
+
+// runHookInvocation is one `observer hook <tool> <event>` invocation.
+// exitFn is the process exit for the watchdog and the panic guard (os.Exit
+// in production; a recorder in tests).
+//
+// Ordering (Sol A2-03): the panic guard is installed before any fallible
+// work; the deadline is ONE absolute instant from the start of the
+// invocation, and the watchdog is armed against it before the posture is
+// resolved, with a provisional plan that already fails closed for a wired
+// gate (finalizeHookFailurePlan can only open it). A slow or panicking
+// posture/config read therefore can neither run on a fail-open zero plan
+// nor push the answer past the host's own deadline. T-381: the provisional
+// plan holds only across the cheap posture and config reads; after them an
+// interim plan from those reads (settleHookFailurePlan) governs until the
+// full derivation finishes, so a node that does not enforce is not closed
+// by a slow derivation.
+func runHookInvocation(ctx context.Context, args []string, configPath string, maxRuntime time.Duration, exitFn func(int)) {
+	start := time.Now()
+	// P2-1 (adversarial review of the P1-4 fix): reset the
+	// per-invocation verdict-tracking state fresh for THIS
+	// call — see hookReplied's doc comment for why this must
+	// be the single reset point.
+	resetHookInvocationState()
+
+	tool := args[0]
+	event := ""
+	if len(args) >= 2 {
+		event = args[1]
+	}
+	label := tool
+	if event != "" {
+		label = tool + ":" + event
+	}
+	// A watchdog that already owns the reply finishes (and exits) before
+	// the invocation may return and exit 0.
+	defer hookReplyBarrier()
+	// P1-4/RES-2 (docs/audits/codebase-audit-2026-09-16.md): a panic
+	// anywhere below this point must never surface as a non-zero exit —
+	// see recoverHookPanic's doc comment.
+	defer recoverHookPanic(label, hookStdout, os.Stderr, exitFn)
+
+	// Hook failure semantics (section 5.7): the provisional plan comes
+	// from the registry alone; the gate budget is capped below the host's
+	// own hook timeout and measured from start.
+	plan := provisionalHookFailurePlan(tool, event, configPath)
+	setHookPlan(plan)
+	budget := hookGateBudget(resolveHookMaxRuntime(maxRuntime, os.Getenv("OBSERVER_HOOK_MAX_RUNTIME")), plan)
+	stopWatchdog := installHookWatchdog(hookRemaining(start, budget), exitFn, os.Stderr)
+	defer stopWatchdog()
+	// The posture settles the plan BEFORE stdin is read. T-381: the cheap
+	// reads (posture, config) publish an interim plan first, so a slow full
+	// derivation on a node that does not enforce fails open, not closed.
+	setHookPlan(settleHookFailurePlan(plan, configPath, setHookPlan))
+	// D-221 / T-327: under the organization's fail_closed choice, an
+	// enforced gate stays closed while the user guard policy does not load
+	// (a no-op on every other plan, and on every individual node).
+	if hookUserPolicyGate(configPath, os.Stdin) {
+		return
+	}
+	// The L2 adapter gate (hook_components.go): a leftover hook of an
+	// inactive adapter allows and records nothing, unless its plan fails
+	// closed (guard enforcement keeps deciding).
+	if hookAdapterGate(ctx, tool, event, label, configPath, currentHookPlan(), os.Stdin, hookStdout, os.Stderr) {
+		return
+	}
+
+	if b, ok := standaloneToolGate(tool, event); ok {
+		// A wired tool gate with no receiver of its own: the one
+		// tool-gate path (hook_toolgate.go), ahead of the tool's
+		// prompt-only receiver.
+		handleToolGateHook(tool, label, b, os.Stdin, configPath)
+	} else if b, ok := lifecycleBinding(tool, event); ok {
+		// The ONE lifecycle handler (hook-parity Lane C1): a wired
+		// session / turn / sub-agent lifecycle binding is served here for
+		// every tool, before the tool's own receiver (hook_lifecycle.go).
+		body, _ := readHookBodyDetectTruncation(os.Stdin, promptSubmitBodyLimit)
+		body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+		handleLifecycleHook(ctx, tool, label, b, body, configPath, hookStdout, os.Stderr, productionLifecycleDeps())
+	} else if fn, ok := hookReceivers[tool]; ok {
+		fn(ctx, event, configPath)
+	} else if dispatchBindingDialect(ctx, tool, event, configPath) {
+		// A binding whose dialect has its own handler (the plugin hosts,
+		// hook_pluginshim.go).
+	} else if b, ok := resolveHookBinding(tool, event); ok {
+		// A tool with bindings but no receiver: the binding's capability
+		// receiver when one exists (dispatchBindingReceiver), else the one
+		// binding-driven allow (hook_binding.go).
+		if !dispatchBindingReceiver(ctx, tool, event, configPath, b) {
+			handleBindingFallback(tool, label, b, os.Stdin, hookStdout, os.Stderr)
+			markHookReplied()
+		}
+	} else {
+		hook.HandleApprove(label, os.Stdin, hookStdout, os.Stderr)
+		markHookReplied()
+	}
 }
 
 // handleClaudeCodeHook dispatches Claude Code hook events. For PreCompact
@@ -163,7 +485,11 @@ func newHookCmd() *cobra.Command {
 // rewrite a Bash command to funnel through `observer run`; other events
 // fall through to HandleApprove (the JSONL watcher captures them
 // out-of-band). Always replies with an approval on stdout — must never
-// block the host.
+// block the host. The one exception is a payload ANOTHER host sent to a
+// Claude Code hook command (cursor-agent runs the user's Claude Code
+// hooks with its own payload): hook.ForeignClaudeHookHost recognises it
+// from a field it carries and the receiver exits 0 without a reply,
+// without ingesting and without evaluating the guard.
 //
 // `configPath`, when non-empty, is forwarded to all `config.Load` calls
 // so the hook handler reads the same config (and therefore writes to
@@ -173,17 +499,37 @@ func handleClaudeCodeHook(ctx context.Context, event, configPath string) {
 	if event != "" {
 		label = "claude-code:" + event
 	}
+	stdin, body, verdict := claudeCodeHookPayload(os.Stdin, event)
+	if verdict.Foreign {
+		answerForeignClaudeCodeHook(ctx, label, verdict, body, configPath, hookStdout, os.Stderr)
+		return
+	}
+	dispatchClaudeCodeHook(ctx, event, configPath, stdin)
+}
+
+// dispatchClaudeCodeHook is handleClaudeCodeHook's per-event dispatch over
+// the already-peeked payload stream (see claudeCodeHookPayload).
+func dispatchClaudeCodeHook(ctx context.Context, event, configPath string, stdin io.Reader) {
+	label := "claude-code"
+	if event != "" {
+		label = "claude-code:" + event
+	}
 	if event == "pre-tool" {
-		handleClaudeCodePreTool(os.Stdin, os.Stdout, os.Stderr, label, configPath)
+		handleClaudeCodePreTool(stdin, hookStdout, os.Stderr, label, configPath)
 		return
 	}
 	if event == "post-tool" {
-		handleClaudeCodePostTool(os.Stdin, os.Stdout, os.Stderr, label, configPath)
+		handleClaudeCodePostTool(stdin, hookStdout, os.Stderr, label, configPath)
 		return
 	}
 	if event == "session-start" {
 		writer := makePidbridgeWriter(configPath)
-		handleClaudeCodeSessionStart(ctx, os.Getppid(), defaultAncestors, os.Stdin, os.Stdout, os.Stderr, label, writer)
+		// The body is teed so the skills-history snapshot (S10-SKILLS,
+		// hook_skillsnap.go) can run AFTER the session-start reply, on the
+		// same payload, without changing the handler's signature.
+		var body bytes.Buffer
+		handleClaudeCodeSessionStart(ctx, os.Getppid(), defaultAncestors, io.TeeReader(stdin, &body), hookStdout, os.Stderr, label, writer)
+		recordClaudeSkillSnapshot(body.Bytes(), "SessionStart", label, configPath, os.Stderr)
 		return
 	}
 	// Tier 1 expansion (2026-05): each of these events maps to one row
@@ -191,55 +537,69 @@ func handleClaudeCodeHook(ctx context.Context, event, configPath string) {
 	// stdin → reply → DB open → insert.
 	switch event {
 	case "session-end":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeSessionEndEvent)
+		// The one lifecycle handler (Lane C1): DB-free spool, because
+		// Claude Code's SessionEnd budget is about 1.5 s shared.
+		if b, ok := lifecycleBinding(models.ToolClaudeCode, "SessionEnd"); ok {
+			body, _ := io.ReadAll(io.LimitReader(stdin, defaultHookBodyLimit))
+			body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+			handleLifecycleHook(ctx, models.ToolClaudeCode, label, b, body, configPath, hookStdout, os.Stderr, productionLifecycleDeps())
+			return
+		}
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeSessionEndEvent)
 		return
 	case "user-prompt-submit":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeUserPromptSubmitEvent)
+		handleClaudeCodeUserPromptSubmitFrom(ctx, stdin, label, configPath)
 		return
 	case "post-tool-failure":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudePostToolFailureEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudePostToolFailureEvent)
 		return
 	case "stop-failure":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeStopFailureEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeStopFailureEvent)
 		return
 	case "subagent-start":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeSubagentStartEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeSubagentStartEvent)
 		return
 	case "subagent-stop":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeSubagentStopEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeSubagentStopEvent)
 		return
 	case "stop":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeStopEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeStopEvent)
 		return
 	case "notification":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeNotificationEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeNotificationEvent)
 		return
 	case "cwd-changed":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeCwdChangedEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeCwdChangedEvent)
 		return
 	case "setup":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeSetupEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeSetupEvent)
 		return
 	case "user-prompt-expansion":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeUserPromptExpansionEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeUserPromptExpansionEvent)
 		return
 	case "post-tool-batch":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudePostToolBatchEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudePostToolBatchEvent)
 		return
 	case "permission-request":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudePermissionRequestEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudePermissionRequestEvent)
 		return
 	case "permission-denied":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudePermissionDeniedEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudePermissionDeniedEvent)
 		return
 	case "instructions-loaded":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeInstructionsLoadedEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeInstructionsLoadedEvent)
 		return
 	case "config-change":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeConfigChangeEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeConfigChangeEvent)
 		return
 	case "worktree-remove":
-		handleClaudeCodeActionEvent(ctx, label, configPath, buildClaudeWorktreeRemoveEvent)
+		handleClaudeCodeActionEvent(ctx, stdin, label, configPath, buildClaudeWorktreeRemoveEvent)
+		return
+	case "task-created", "task-completed":
+		// task_observe (hook-parity Lane E): capture only. The reply is
+		// the plain approve, never a decision: exit 2 here would roll back
+		// the developer's task creation / completion.
+		handleObserveOnlyHook(ctx, models.ToolClaudeCode, label, event, configPath, stdin)
 		return
 	case "worktree-create":
 		// Special path: blocking hook that must write the chosen
@@ -247,61 +607,83 @@ func handleClaudeCodeHook(ctx context.Context, event, configPath string) {
 		// reply matrix) — any non-zero exit or empty stdout fails
 		// the Agent spawn. NOT registered by default; user opts in
 		// per docs/claude-worktree-hook.md.
-		handleClaudeCodeWorktreeCreate(ctx, label, configPath, os.Stdin, os.Stdout, os.Stderr)
+		handleClaudeCodeWorktreeCreate(ctx, label, configPath, stdin, hookStdout, os.Stderr)
 		return
 	}
 	if event != "pre-compact" && event != "post-compact" {
-		hook.HandleApprove(label, os.Stdin, os.Stdout, os.Stderr)
+		hook.HandleApprove(label, stdin, hookStdout, os.Stderr)
+		markHookReplied()
 		return
 	}
-	// Read stdin first — we need it for both the approval reply (which is
-	// stateless) and the compaction handler.
-	body, _ := io.ReadAll(io.LimitReader(os.Stdin, 2*1024*1024))
-	// Reply immediately; the DB write is best-effort.
-	_ = json.NewEncoder(os.Stdout).Encode(hook.Decision{Decision: "approve"})
+	// PreCompact / PostCompact: the ONE compaction recorder every
+	// compact_lifecycle binding reaches (hook_observe.go), after the reply.
+	handleObserveOnlyHook(ctx, models.ToolClaudeCode, label, event, configPath, stdin)
+}
 
-	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s config: %v\n", label, err)
-		return
-	}
-	database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s db: %v\n", label, err)
-		return
-	}
-	defer database.Close()
+// handleObserveOnlyHook answers an observe-family Claude-shaped hook with
+// the plain approve FIRST (the DB write is best-effort and never delays or
+// changes the reply), then records the payload through the binding's
+// capability recorder (recordObserveBinding).
+func handleObserveOnlyHook(ctx context.Context, tool, label, event, configPath string, stdin io.Reader) {
+	body, _ := io.ReadAll(io.LimitReader(stdin, defaultHookBodyLimit))
+	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+	_ = json.NewEncoder(hookStdout).Encode(hook.Decision{Decision: "approve"})
+	markHookReplied()
+	recordObserveBinding(ctx, tool, label, event, body, configPath, os.Stderr)
+}
 
-	var payload struct {
-		SessionID string `json:"session_id"`
-		Cwd       string `json:"cwd"`
-		Trigger   string `json:"trigger"`
+// claudeCodeHookPayload reads the Claude Code hook payload ONCE (up to
+// the largest bound any claude-code handler reads, plus one byte) to ask
+// hook.ClassifyClaudeHookPayload whether another host sent it, and returns a
+// stream that replays those bytes followed by whatever is left, so every
+// handler still reads - and still detects truncation - exactly as before.
+// An over-bound payload is never classified (its tail, where Cursor puts
+// cursor_version, is not in hand) and takes the normal path.
+func claudeCodeHookPayload(r io.Reader, event string) (stdin io.Reader, body []byte, verdict hook.ForeignVerdict) {
+	buf, _ := io.ReadAll(io.LimitReader(r, promptSubmitBodyLimit+1))
+	stdin = io.MultiReader(bytes.NewReader(buf), r)
+	if int64(len(buf)) > promptSubmitBodyLimit {
+		return stdin, nil, hook.ForeignVerdict{}
 	}
-	_ = json.Unmarshal(body, &payload)
-	if payload.SessionID == "" {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s no session_id in payload\n", label)
-		return
-	}
+	body = bytes.TrimPrefix(buf, []byte{0xEF, 0xBB, 0xBF})
+	hook.DumpHookShape(models.ToolClaudeCode, event, body)
+	return stdin, body, hook.ClassifyClaudeHookPayload(body)
+}
 
-	rec := compaction.New(database)
-	switch event {
-	case "pre-compact":
-		if _, err := rec.Capture(ctx, compaction.CaptureOptions{
-			SessionID:   payload.SessionID,
-			ProjectRoot: payload.Cwd,
-			Tool:        models.ToolClaudeCode,
-			Timestamp:   time.Now().UTC(),
-			Trigger:     payload.Trigger,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "observer-hook: %s capture: %v\n", label, err)
+// answerForeignClaudeCodeHook is the claude-code receiver's answer to a
+// payload another host sent (hook.ClassifyClaudeHookPayload). Nothing is
+// ever recorded or evaluated as Claude Code. Per the verdict:
+//
+//   - ForeignDispatch (a host with no Observer hook of its own, e.g. Grok
+//     Build): the host's own lifecycle binding for the event is served by
+//     the one lifecycle handler under the HOST's tool id; any other event is
+//     answered with the host's neutral reply (Lane C3 dispatches lifecycle
+//     only; a gate binding stays unhandled, so unknown is an allow);
+//   - ForeignNeutral (the host's own Observer hook already sees the call,
+//     e.g. cursor-agent): the host's neutral reply for the step (T-034h: an
+//     EMPTY stdout is logged by cursor-agent as a failed hook);
+//   - ForeignNoop (recognisably foreign, unidentified): nothing on stdout.
+func answerForeignClaudeCodeHook(ctx context.Context, label string, v hook.ForeignVerdict, body []byte, configPath string, stdout, stderr io.Writer) {
+	host := v.Host
+	if host == "" {
+		host = "an unidentified host"
+	}
+	hook.RecordForeignReplay(label, v, len(body))
+	if v.Action == hook.ForeignDispatch {
+		if b, ok := lifecycleBinding(v.Tool, v.Step); ok {
+			fmt.Fprintf(stderr, "observer-hook: %s payload from %s; dispatched to %s %s\n", label, host, v.Tool, v.Step)
+			handleLifecycleHook(ctx, v.Tool, label, b, body, configPath, stdout, stderr, productionLifecycleDeps())
+			return
 		}
-	case "post-compact":
-		if err := rec.Reconcile(ctx, compaction.ReconcileOptions{
-			SessionID: payload.SessionID,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "observer-hook: %s reconcile: %v\n", label, err)
-		}
 	}
+	if (v.Action == hook.ForeignNeutral || v.Action == hook.ForeignDispatch) && len(v.Reply) > 0 {
+		_, _ = stdout.Write(v.Reply)
+		markHookReplied()
+		fmt.Fprintf(stderr, "observer-hook: %s payload from %s (runs Claude Code hooks); neutral reply, nothing recorded\n", label, host)
+		return
+	}
+	setHookExpectsStdoutReply(false)
+	fmt.Fprintf(stderr, "observer-hook: %s payload from %s (runs Claude Code hooks); no-op\n", label, host)
 }
 
 // pidbridgeWriter is the injected DB-write side of the SessionStart hook,
@@ -375,7 +757,7 @@ func handleClaudeCodeSessionStart(
 	label string,
 	writer pidbridgeWriter,
 ) {
-	body, _ := io.ReadAll(io.LimitReader(stdin, 2*1024*1024))
+	body, _ := io.ReadAll(io.LimitReader(stdin, defaultHookBodyLimit))
 
 	var payload struct {
 		SessionID     string `json:"session_id"`
@@ -403,6 +785,7 @@ func handleClaudeCodeSessionStart(
 	} else {
 		_ = json.NewEncoder(stdout).Encode(hook.Decision{Decision: "approve"})
 	}
+	markHookReplied()
 
 	registerSessionAncestors(ctx, parentPID, ancestors, payload.SessionID, payload.Cwd,
 		models.ToolClaudeCode, writer, stderr, label)
@@ -672,35 +1055,69 @@ type preToolRewriteOut struct {
 
 // handleClaudeCodePreTool reads a PreToolUse payload and emits an approval
 // reply that optionally rewrites a Bash command to funnel through
-// `observer run`. Any failure falls through to plain approval — this hook
-// MUST NEVER block the host tool.
+// `observer run`. Any failure falls through to plain approval, except under
+// guard enforcement, where a failure (config, unparseable payload, guard
+// that cannot be built) blocks with a reason (hookFailClosed, section 5.7).
 func handleClaudeCodePreTool(stdin io.Reader, stdout, stderr io.Writer, label, configPath string) {
-	body, _ := io.ReadAll(io.LimitReader(stdin, 2*1024*1024))
-	fmt.Fprintf(stderr, "observer-hook: event=%s received bytes=%d at=%s\n",
-		label, len(body), time.Now().UTC().Format(time.RFC3339))
+	// SR27-D2: a PreToolUse body carries the tool's whole input (a Write's
+	// file content, an Edit's new_string), so it can legitimately exceed
+	// the default bound. Read with the larger prompt-submit bound AND
+	// detect truncation: a truncated body fails to parse, and an
+	// unparseable body must never reach the guard's approve-if-unevaluable
+	// path while the guard is enforcing.
+	body, truncated := readHookBodyDetectTruncation(stdin, promptSubmitBodyLimit)
+	fmt.Fprintf(stderr, "observer-hook: event=%s received bytes=%d truncated=%v at=%s\n",
+		label, len(body), truncated, time.Now().UTC().Format(time.RFC3339))
 
 	cfg, cfgErr := config.Load(config.LoadOptions{GlobalPath: configPath})
+	// Section 5.7: under enforcement an unreadable config fails closed.
+	if cfgErr != nil && hookFailClosed(guardposture.KindConfig, body) {
+		return
+	}
+
+	if truncated {
+		enforcing := cfgErr == nil && cfg.Guard.Enabled && cfg.Guard.Mode == "enforce"
+		if hook.HandleTruncatedPreTool(label, enforcing, stdout, stderr) {
+			markHookReplied()
+			return
+		}
+	}
+	if hookPayloadUnparseable(body) && hookFailClosed(guardposture.KindUnparseable, body) {
+		return
+	}
 
 	// Guard seam (guard spec §3.2 seam 1, G4): evaluate BEFORE the
 	// rewrite decision. A deny/ask emission replaces the reply
 	// entirely (HandleGuarded wrote it); an allow/flag emission falls
 	// through to the normal approve/rewrite path with the verdict
 	// record deferred until after that reply (§6.4 reply-first).
-	// Every guard failure path is fail-open: nil guard → unguarded
-	// pre-tool, exactly the pre-G4 behavior.
+	// A nil guard is fail-open (unguarded pre-tool, the pre-G4
+	// behavior) unless this invocation's plan fails closed (guard
+	// enforcement in force, section 5.7): then it blocks with a reason.
 	var recordAfterReply func()
 	if cfgErr == nil && cfg.Guard.Enabled && cfg.Guard.Mode != "off" {
 		if g := buildHookGuard(cfg, stderr); g != nil {
 			var blocked bool
-			blocked, recordAfterReply = hook.HandleGuarded(
-				label, body, g, makeGuardPersist(cfg, g, label, stderr), stdout, stderr,
+			// Review M2-11: a block is marked decided right after its reply
+			// and before persist, so a panic in persist can never add an
+			// allow on top of it.
+			blocked, recordAfterReply = hook.HandleGuardedDecided(
+				label, body, g, makeGuardPersist(cfg, g, label, stderr), markHookDecided, stdout, stderr,
 			)
 			if blocked {
+				// P2-1: HandleGuarded already wrote the block/ask
+				// reply above (its own doc comment: "reply went out
+				// first") — mark it so a panic in the effort capture
+				// below can never make recoverHookPanic write a
+				// second JSON object on top of it.
+				markHookReplied()
 				// Still capture effort — the turn happened even though
 				// the tool call was blocked/deferred.
 				recordClaudecodeEffort(body, "PreToolUse", label, configPath, stderr)
 				return
 			}
+		} else if hookFailClosed(guardposture.KindGuardInit, body) {
+			return
 		}
 	}
 
@@ -719,6 +1136,7 @@ func handleClaudeCodePreTool(stdin io.Reader, stdout, stderr io.Writer, label, c
 		fmt.Fprintf(stderr, "observer-hook: %s bash passthrough (%s)\n", label, reason)
 	}
 	_ = json.NewEncoder(stdout).Encode(reply)
+	markHookReplied()
 	if recordAfterReply != nil {
 		recordAfterReply()
 	}
@@ -746,13 +1164,25 @@ func buildHookGuard(cfg config.Config, stderr io.Writer) *guard.Guard {
 	if err != nil {
 		home = ""
 	}
-	g, err := guard.New(guard.Options{Config: cfg.Guard, Home: home, Notifier: notify.NewDesktop()})
+	// Section 5.7: [guard].strict is implied for a gate hook under
+	// enforcement, so the guard's own internal-error wrapper denies too.
+	if hookPlanFailsClosed() {
+		cfg.Guard.Strict = true
+	}
+	g, err := hookGuardNew(guard.Options{Config: cfg.Guard, Home: home, Notifier: notify.NewDesktop()})
 	if err != nil {
 		fmt.Fprintf(stderr, "observer-hook: guard construction failed (running unguarded): %v\n", err)
 		return nil
 	}
 	for _, issue := range g.LoadIssues() {
 		fmt.Fprintf(stderr, "observer-hook: guard policy issue: %s\n", issue)
+	}
+	// Agent Access P4 hook deny (doc3 §12.6): answer R-306/R-307 from the
+	// compiled node table the daemon cached beside the org-bundle cache —
+	// one file read, no DB, no org fetch; absent/disabled = no lookup
+	// (fail-open, exactly the pre-P4 hook).
+	if fn := hookMCPAccessLookup(cfg); fn != nil {
+		g.SetMCPAccessLookup(fn)
 	}
 	// §6.3 approvals on the hook path: the lookup opens the DB
 	// LAZILY and only runs for verdicts that would block (ask/deny —
@@ -768,6 +1198,83 @@ func buildHookGuard(cfg config.Config, stderr io.Writer) *guard.Guard {
 		lctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
 		defer cancel()
 		return store.New(database).ApprovalActiveFor(lctx, ruleID, sessionID, rootHash, time.Now().UTC())
+	})
+	// Org access grants (request-grants G3): the org's signed, time-bound
+	// exceptions, read from the SAME re-verified cache the daemon reads and
+	// counted through the same conditional UPDATE, so a hook process and
+	// the daemon racing on a grant's last use cannot both win. Lazy DB open
+	// on the blocking path only; any failure is "no grant".
+	g.SetOrgGrantClaim(newOrgGrantClaim(hookOrgGrantOpener(cfg.Observer.DBPath), cfg.Observer.Hooks.HookTimeout()))
+	// Request-grants G4: the org-locked deny line links the node request
+	// form under the dashboard origin (the daemon's guard stamps the same).
+	g.SetRequestAccessBase(requestAccessBase(cfg))
+	// T-519: an exhausted managed budget stops this hook's prompt or tool
+	// call, from the decision the daemon publishes beside the DB (one file
+	// read; no DB, no spend measured here). Fail open on the transport only.
+	// A node whose [org_client] is off has no publisher (start.go builds the
+	// budget service only with an org client), so a file beside its DB is a
+	// leftover and is not read at all (D-359, review P3-05).
+	if cfg.OrgClient.Enabled {
+		g.SetHookBudgetLookup(hookBudgetAdmissionLookup(cfg.Observer.DBPath, stderr))
+	}
+	// Prompt-submit reconsider-once persistence (Part B item 1 — wires
+	// guard.PromptReconsiderFuncs, whose zero value fails EVERY
+	// ask-once/redact finding closed to block per promptguard.go's own
+	// contract; unwired was never a valid production state, only a
+	// phase-1-with-no-caller placeholder). Same lazy-per-call DB open
+	// as SetApprovalLookup above — the hook process is short-lived and
+	// this only runs when EvaluatePrompt actually reaches the
+	// ask-once/redact branch (a finding exists), never on the common
+	// clean-prompt path.
+	g.SetPromptReconsiderStore(guard.PromptReconsiderFuncs{
+		Lookup: func(fp string, now time.Time) (time.Time, bool, error) {
+			database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+			if err != nil {
+				return time.Time{}, false, err
+			}
+			defer database.Close()
+			lctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
+			defer cancel()
+			row, ok, err := store.New(database).LookupPromptReconsider(lctx, fp, now)
+			return row.WarnedAt, ok, err
+		},
+		Record: func(fp, sessionID, tool, detectors string, warnedAt, expiresAt time.Time) error {
+			database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+			if err != nil {
+				return err
+			}
+			defer database.Close()
+			rctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
+			defer cancel()
+			return store.New(database).RecordPromptWarned(rctx, store.PromptReconsiderRow{
+				Fingerprint: fp, SessionID: sessionID, Tool: tool, Detectors: detectors,
+				WarnedAt: warnedAt, ExpiresAt: expiresAt,
+			})
+		},
+		Confirm: func(fp string, now time.Time) (bool, error) {
+			database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+			if err != nil {
+				return false, err
+			}
+			defer database.Close()
+			cctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
+			defer cancel()
+			return store.New(database).ConfirmPromptReconsider(cctx, fp, now)
+		},
+	})
+	// Pre-send marks (guard.PromptAlreadyJudged): a repeating prompt seam
+	// (agy PreInvocation, before every model call) judges each prompt
+	// once. Same lazy DB open; it only runs when the prompt has a finding.
+	g.SetPromptPreSendLookup(func(sessionID, digest string, at time.Time) bool {
+		database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+		if err != nil {
+			return false
+		}
+		defer database.Close()
+		lctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
+		defer cancel()
+		judged, err := store.New(database).PreSendPromptJudged(lctx, sessionID, digest, at)
+		return err == nil && judged
 	})
 	return g
 }
@@ -797,29 +1304,352 @@ func makeGuardPersist(cfg config.Config, g *guard.Guard, label string, stderr io
 	}
 }
 
-// handleClaudeCodePostTool captures effort.level + tool_use_id from a
-// PostToolUse payload into the claudecode_effort sidecar table. Replies
+// makePromptGuardPersist returns the lazy persist callback
+// hook.HandlePromptSubmitGuarded invokes AFTER the reply is on stdout
+// (Part B item 4/5: the guard_events writer + the MaybeAlert bridge
+// for prompt-submit verdicts). Mirrors makeGuardPersist's shape
+// exactly (lazy DB open, one store.PersistGuardVerdicts call, then
+// MaybeAlert, all best-effort) but bridges through
+// guard.ActionVerdictFromPrompt first — the ONE place a PromptVerdict
+// becomes the general-purpose ActionVerdict the existing store seam
+// already knows how to persist. No new table, no new writer.
+func makePromptGuardPersist(cfg config.Config, g *guard.Guard, tool, label string, stderr io.Writer) func(pv guard.PromptVerdict, em guard.Emission, sessionID string) {
+	return func(pv guard.PromptVerdict, em guard.Emission, sessionID string) {
+		av := g.ActionVerdictFromPrompt(pv, em, guard.ActionInput{
+			SessionID:  sessionID,
+			Tool:       tool,
+			ActionType: models.ActionUserPrompt,
+			Timestamp:  time.Now().UTC(),
+		})
+		database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+		if err != nil {
+			fmt.Fprintf(stderr, "observer-hook: %s prompt guard persist db: %v\n", label, err)
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
+			if _, perr := store.New(database).PersistGuardVerdicts(ctx, []guard.ActionVerdict{av}); perr != nil {
+				fmt.Fprintf(stderr, "observer-hook: %s prompt guard persist: %v\n", label, perr)
+			}
+			cancel()
+			database.Close()
+		}
+		g.MaybeAlert(av)
+	}
+}
+
+// promptGuardEnabled reports whether the prompt-submit hook lane
+// should evaluate at all: the general [guard] gate (enabled + not
+// off, same gate every other guarded hook channel already checks) AND
+// the feature's own [guard.prompt] enabled + hook_lane knobs (CLAUDE.md
+// Default-On section: the prompt-submit hook is registered like every
+// other observer hook, but only EVALUATES when both gates are set).
+func promptGuardEnabled(cfg config.Config) bool {
+	return cfg.Guard.Enabled && cfg.Guard.Mode != "off" && cfg.Guard.Prompt.Enabled && cfg.Guard.Prompt.HookLane
+}
+
+// promptDialectsWithoutStdoutReply mirrors internal/hook/promptsubmit.go's
+// promptDialect.reply==nil rows (Qoder, Cascade — see that file's
+// promptDialects table doc comment): those two dialects signal a
+// prompt-submit block PURELY via the process exit code and have NO
+// stdout JSON channel for this event at all, not even on allow.
+// recoverHookPanic (P2-1) consults this so a panic before any reply is
+// written on one of these dialects leaves stdout empty instead of
+// emitting a bare {"decision":"approve"} no such host parses — which
+// is also why CLAUDE.md's "every dialect treats a bare decision:approve
+// as an allow" over-claimed before this fix. Table-driven (CLAUDE.md
+// rule 5) rather than a growing if/else so a future nil-reply dialect
+// is a one-line addition.
+var promptDialectsWithoutStdoutReply = map[string]bool{
+	hook.PromptDialectQoder:   true,
+	hook.PromptDialectCascade: true,
+	// Kimi Code: exit-code block, EMPTY stdout on allow (any stdout is
+	// appended to the model context).
+	hook.PromptDialectKimiCode: true,
+}
+
+// handlePromptSubmitOnlyHook is the shared receiver for tools whose
+// ONLY guarded hook event is prompt-submit (BLOCK-1, phase-2 review):
+// Factory Droid, Qwen Code, and Gemini CLI all have a registry
+// PromptLane=PromptLaneHook row and a CanBlock:true conformance row
+// (internal/guard/conformance.go) plus a verified wire dialect
+// (internal/hook/promptsubmit.go), but before this fix `observer hook
+// <tool> <event>` for these three tools had NO case in newHookCmd's
+// switch at all — every invocation fell to the unconditional
+// approve-only default, which can structurally never block. That made
+// the registry/conformance/docs claim of "this harness blocks" false
+// for any install that actually registered the hook.
+//
+// These tools have no other hook-driven capture (their conversation
+// capture is watcher/transcript-based — see internal/adapter/droid,
+// qwencode, gemini) — so every event OTHER than the one prompt-submit
+// event name is byte-identical to the old default-case behavior
+// (hook.HandleApprove, which also appends the forensics log row these
+// tools always got via the default case).
+func handlePromptSubmitOnlyHook(tool, label, dialect, promptEvent, event, configPath string) {
+	fullLabel := label
+	if event != "" {
+		fullLabel = label + ":" + event
+	}
+	// A second prompt event on the same tool (Devin: Desktop Cascade's
+	// pre_user_prompt AND the Devin CLI's UserPromptSubmit) is evaluated in
+	// ITS binding's dialect, resolved from the registry (capability shape,
+	// never the tool name).
+	if event != promptEvent {
+		if b, ok := resolveHookBinding(tool, event); ok && b.Cap == integration.HookCapPromptGate && hook.KnownPromptDialect(b.Dialect) {
+			dialect, promptEvent = b.Dialect, event
+		}
+	}
+	body, truncated := readHookBodyDetectTruncation(os.Stdin, promptSubmitBodyLimit)
+	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+	hook.DumpHookShape(tool, event, body)
+
+	if event != promptEvent {
+		hook.HandlePromptAllow(dialect, fullLabel, bytes.NewReader(body), hookStdout, os.Stderr)
+		markHookReplied()
+		// Observe-family events (compaction, task) on this mechanism are
+		// recorded after the allow reply (hook_observe.go).
+		recordObserveBinding(context.Background(), tool, fullLabel, event, body, configPath, os.Stderr)
+		return
+	}
+
+	// P2-1: from here on this invocation is evaluating dialect's own
+	// prompt-submit contract — flip hookExpectsStdoutReply for the two
+	// exit-code-only dialects so a pre-reply panic's recover doesn't
+	// emit JSON such a host never parses (see
+	// promptDialectsWithoutStdoutReply's doc comment).
+	setHookExpectsStdoutReply(!promptDialectsWithoutStdoutReply[dialect])
+
+	cfg, cfgErr := config.Load(config.LoadOptions{GlobalPath: configPath})
+	if cfgErr != nil && hookFailClosed(guardposture.KindConfig, body) {
+		return
+	}
+	if !truncated && hookPayloadUnparseable(body) && hookFailClosed(guardposture.KindUnparseable, body) {
+		return
+	}
+	// The next-prompt org budget notice rides this dialect's user-visible
+	// reply field when it has one (hook_budgetnotice.go).
+	var stdout io.Writer = hookStdout
+	if cfgErr == nil {
+		stdout = wrapBudgetNotice(hookStdout, dialect, cfg.Observer.DBPath, time.Now())
+		// A prompt is node activity: the daemon's policy-freshness
+		// checker watches this stamp (P2, nodeactivity.go).
+		_ = budgetwarnfile.TouchActivity(cfg.Observer.DBPath)
+	}
+	handled := false
+	var recordAfterReply func()
+	exitCode := 0
+	if cfgErr == nil && promptGuardEnabled(cfg) {
+		if g := buildHookGuard(cfg, os.Stderr); g != nil {
+			handled, recordAfterReply, exitCode = hook.HandlePromptSubmitGuarded(
+				tool, dialect, promptEvent, body, truncated, g,
+				makePromptGuardPersist(cfg, g, tool, fullLabel, os.Stderr), stdout, os.Stderr,
+			)
+			if handled {
+				// P2-1: whatever this dialect's wire contract required
+				// (a JSON reply, or deliberately nothing) has ALREADY
+				// happened synchronously inside the call above, and
+				// exitCode is now the fully-decided verdict — record
+				// both BEFORE recordAfterReply/hookOSExit so a panic
+				// in either can never overwrite a decided block with
+				// an allow, nor double-write a reply on top of one
+				// already sent.
+				markHookDecided(exitCode)
+			}
+		} else if hookFailClosed(guardposture.KindGuardInit, body) {
+			return
+		}
+	}
+	if !handled {
+		// Guard off/disabled/misconstructed, or no prompt found: the
+		// dialect's own allow reply (with forensics). For most dialects
+		// that is the approve-only reply this event always got; a host
+		// with a strict output schema gets its own shape.
+		hook.HandlePromptAllow(dialect, fullLabel, bytes.NewReader(body), stdout, os.Stderr)
+		markHookReplied()
+	}
+	if recordAfterReply != nil {
+		recordAfterReply()
+	}
+	// Part B item 2 (Qoder/Poolside/Cascade): some dialects signal a
+	// block via the PROCESS exit code rather than (or in addition to)
+	// a JSON stdout reply — see promptDialect.blockExitCode. Exit only
+	// AFTER recordAfterReply has run, and only when the guard actually
+	// produced a handled, blocking verdict (exitCode is always 0 on
+	// the unguarded/fallback path above).
+	if handled && exitCode != 0 {
+		hookExit(exitCode)
+	}
+}
+
+// hookOSExit is the process-exit seam for the exit-code-signalled
+// prompt-submit blocks (Qoder / Poolside / Cascade — and, since the
+// 2026-09-07 live correction, Claude Code). Production is os.Exit;
+// in-process tests substitute a recorder so a block does not end the
+// test binary.
+var hookOSExit = os.Exit
+
+// handleClaudeCodeUserPromptSubmit is the guarded counterpart of the
+// plain "user-prompt-submit" capture-only path (Part B item 1/2):
+// evaluate the prompt via hook.HandlePromptSubmitGuarded BEFORE
+// replying when the prompt-submit hook lane is enabled, then run the
+// EXISTING capture (buildClaudeUserPromptSubmitEvent → Ingest)
+// regardless of the verdict — a denied attempt is still an attempt
+// worth recording, the same posture HandleCursorEventGuarded already
+// established. When the guard isn't enabled/wired (handled=false),
+// this falls through to writing the plain approve reply itself,
+// so the observable behavior for a guard-off install is byte-identical
+// to before this seam existed.
+// NIT (phase-2 review): this handler loads config and builds the whole
+// guard engine (buildHookGuard) BEFORE writing anything to stdout —
+// unlike every other guard-evaluated receiver in this file (codex,
+// cursor), which reply first and do heavier work after. That's not an
+// oversight to fix; it's structural. Every OTHER guarded channel's
+// reply is a fixed "approve" the capture/ingest work never changes —
+// there's something to send immediately regardless of what happens
+// next. A prompt-submit reply's CONTENT *is* the verdict: whether to
+// allow, ask, or deny the prompt cannot be known until the guard has
+// actually evaluated it, so there is no earlier point at which a
+// correct reply could be sent. Replying "allow" first and blocking
+// after would be a real vulnerability (the host has already let the
+// prompt through by the time a late "actually, deny" arrived) — the
+// ordering here is required by the security property, not an
+// oversight.
+func handleClaudeCodeUserPromptSubmit(ctx context.Context, label, configPath string) {
+	handleClaudeCodeUserPromptSubmitFrom(ctx, os.Stdin, label, configPath)
+}
+
+// handleClaudeCodeUserPromptSubmitFrom is handleClaudeCodeUserPromptSubmit
+// over an explicit payload stream (the dispatcher's peeked stdin).
+func handleClaudeCodeUserPromptSubmitFrom(ctx context.Context, stdin io.Reader, label, configPath string) {
+	body, truncated := readHookBodyDetectTruncation(stdin, promptSubmitBodyLimit)
+	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+
+	cfg, cfgErr := config.Load(config.LoadOptions{GlobalPath: configPath})
+	if cfgErr != nil && hookFailClosed(guardposture.KindConfig, body) {
+		return
+	}
+	if !truncated && hookPayloadUnparseable(body) && hookFailClosed(guardposture.KindUnparseable, body) {
+		return
+	}
+	// The next-prompt org budget notice (hook_budgetnotice.go): Claude Code
+	// renders the reply's top-level systemMessage to the user.
+	var stdout io.Writer = hookStdout
+	if cfgErr == nil {
+		stdout = wrapBudgetNotice(hookStdout, hook.PromptDialectClaudeCode, cfg.Observer.DBPath, time.Now())
+		// A prompt is node activity (policy-freshness trigger, P2).
+		_ = budgetwarnfile.TouchActivity(cfg.Observer.DBPath)
+	}
+
+	handled := false
+	var recordAfterReply func()
+	exitCode := 0
+	if cfgErr == nil && promptGuardEnabled(cfg) {
+		if g := buildHookGuard(cfg, os.Stderr); g != nil {
+			// LIVE CORRECTION (2026-09-07 operator step-in): Claude
+			// Code blocks THIS event only via process exit code 2
+			// (its stderr is the user-visible reason); the JSON
+			// `permissionDecision:"deny"` this handler used to rely
+			// on is PreToolUse-only and was silently ignored — three
+			// live secret submissions were logged as blocked by the
+			// receiver and still reached the model. The exit happens
+			// at the END of this handler, after the capture below has
+			// run and closed its DB handle.
+			handled, recordAfterReply, exitCode = hook.HandlePromptSubmitGuarded(
+				models.ToolClaudeCode, hook.PromptDialectClaudeCode, "UserPromptSubmit",
+				body, truncated, g, makePromptGuardPersist(cfg, g, models.ToolClaudeCode, label, os.Stderr), stdout, os.Stderr,
+			)
+			if handled {
+				// P2-1 (docs/audits/codebase-audit-2026-09-16.md
+				// adversarial review): record the reply + the decided
+				// exit code BEFORE recordAfterReply and the capture
+				// closure below, both of which can panic. Without
+				// this, a panic in the capture closure hit
+				// recoverHookPanic's OLD unconditional exitFn(0) and
+				// silently turned an already-decided BLOCK
+				// (exitCode==2, its JSON reply already on stdout)
+				// into an ALLOW.
+				markHookDecided(exitCode)
+			}
+		} else if hookFailClosed(guardposture.KindGuardInit, body) {
+			return
+		}
+	}
+	if !handled {
+		// FIX cluster, item 7a: this used to emit the legacy bare
+		// {"decision":"approve"} shape — the wrong contract for
+		// UserPromptSubmit specifically (Claude Code's modern reply
+		// for this event is the hookSpecificOutput envelope
+		// HandlePromptSubmitGuarded already builds on a real ALLOW;
+		// see hook.ClaudeCodePromptApproveReply's doc comment). Scoped
+		// to this ONE prompt-submit fallback only — every other
+		// hook.Decision{Decision: "approve"} fallback in this file is
+		// a different event with its own established contract and is
+		// deliberately left untouched.
+		_ = json.NewEncoder(stdout).Encode(hook.ClaudeCodePromptApproveReply())
+		markHookReplied()
+	}
+	if recordAfterReply != nil {
+		recordAfterReply()
+	}
+
+	// Capture proceeds regardless of the guard verdict (mirrors
+	// handleClaudeCodeActionEvent's own shape, minus the reply this
+	// function already sent above). Wrapped in a closure so its
+	// deferred DB close runs BEFORE the exit-code block below —
+	// os.Exit would otherwise skip the defers.
+	func() {
+		ev, ok := buildClaudeUserPromptSubmitEvent(body)
+		if !ok || ev.SessionID == "" {
+			return
+		}
+		if cfgErr != nil {
+			return
+		}
+		database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "observer-hook: %s db: %v\n", label, err)
+			return
+		}
+		defer database.Close()
+		insertCtx, cancel := context.WithTimeout(ctx, cfg.Observer.Hooks.HookTimeout())
+		defer cancel()
+		if _, err := store.New(database).Ingest(insertCtx, []models.ToolEvent{ev}, nil, store.IngestOptions{}); err != nil {
+			fmt.Fprintf(os.Stderr, "observer-hook: %s insert: %v\n", label, err)
+		}
+	}()
+	// A blocking verdict on Claude Code's dialect is signalled by the
+	// process exit code (blockExitCode:2) — only after the capture
+	// above, and only when the guard actually handled + blocked.
+	if handled && exitCode != 0 {
+		hookExit(exitCode)
+	}
+}
+
+// handleClaudeCodePostTool captures effort and local login evidence from a
+// PostToolUse payload into their node-local sidecar tables. Replies
 // approve fast and never blocks the host (spec P1).
 //
 // Unlike PreToolUse this handler has no rewrite responsibility; its
-// sole job is the effort capture. PostToolUse fires after the tool
+// job is context capture. PostToolUse fires after the tool
 // finishes; on rare hook-before-JSONL orderings this gives us a second
 // chance to capture effort even if the PreToolUse fire was lost.
 func handleClaudeCodePostTool(stdin io.Reader, stdout, stderr io.Writer, label, configPath string) {
-	body, _ := io.ReadAll(io.LimitReader(stdin, 2*1024*1024))
+	body, _ := io.ReadAll(io.LimitReader(stdin, defaultHookBodyLimit))
 	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
 	_ = json.NewEncoder(stdout).Encode(hook.Decision{Decision: "approve"})
+	markHookReplied()
 
 	recordClaudecodeEffort(body, "PostToolUse", label, configPath, stderr)
+	// S10-SKILLS: a Skill-tool invocation snapshots the invoked SKILL.md
+	// (a no-op for every other tool; see hook_skillsnap.go).
+	recordClaudeSkillSnapshot(body, "PostToolUse", label, configPath, stderr)
 }
 
 // recordClaudecodeEffort parses (session_id, tool_use_id, effort.level)
 // from a tool-context Claude Code hook payload and upserts it into the
 // claudecode_effort sidecar. Two no-op cases:
 //
-//   - effort.level is empty (the current model doesn't support effort,
-//     per the docs: "Present ... when the current model supports the
-//     effort parameter"). Nothing to persist.
+//   - effort.level is empty and no exact local login evidence is available.
+//     Account capture is independent of model support for effort.
 //   - tool_use_id is empty (malformed payload, or a future event class
 //     that lost the field). Nothing to key on.
 //
@@ -829,7 +1659,8 @@ func recordClaudecodeEffort(body []byte, eventName, label, configPath string, st
 	if err := json.Unmarshal(body, &p); err != nil {
 		return
 	}
-	if p.Effort.Level == "" || p.SessionID == "" || p.ToolUseID == "" {
+	accounts := hook.LocalAccountObservations(context.Background(), models.ToolClaudeCode, eventName, body)
+	if (p.Effort.Level == "" && len(accounts) == 0) || p.SessionID == "" || p.ToolUseID == "" {
 		return
 	}
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
@@ -855,6 +1686,12 @@ func recordClaudecodeEffort(body []byte, eventName, label, configPath string, st
 	defer database.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
 	defer cancel()
+	if err := store.New(database).RecordToolAccounts(ctx, accounts); err != nil {
+		fmt.Fprintf(stderr, "observer-hook: %s account capture: %v\n", label, err)
+	}
+	if p.Effort.Level == "" {
+		return
+	}
 	if err := store.New(database).UpsertClaudecodeEffort(ctx, p.SessionID, p.ToolUseID, p.Effort.Level, eventName); err != nil {
 		fmt.Fprintf(stderr, "observer-hook: %s effort upsert: %v\n", label, err)
 	}
@@ -915,328 +1752,6 @@ func looksWindowsPath(p string) bool {
 	return strings.Contains(p, `\`)
 }
 
-// handleCursorHook opens the observer DB and dispatches the cursor hook.
-// Replies on stdout immediately (handled inside HandleCursorEvent) so the
-// host doesn't wait on the DB insert.
-func handleCursorHook(ctx context.Context, event, configPath string) {
-	if event == "" {
-		event = "unknown"
-	}
-	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
-	if err != nil {
-		// Fall back to approve-only — never block the host.
-		fmt.Fprintf(os.Stderr, "observer-hook: cursor config: %v\n", err)
-		hook.HandleApprove("cursor:"+event, os.Stdin, os.Stdout, os.Stderr)
-		return
-	}
-	database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: cursor db: %v\n", err)
-		hook.HandleApprove("cursor:"+event, os.Stdin, os.Stdout, os.Stderr)
-		return
-	}
-	defer database.Close()
-
-	sc := scrub.New()
-	// v1.6.23 audit F3/F4: wire the FTS5 indexer so postToolUse
-	// tool_output bodies and beforeReadFile file content land in
-	// action_excerpts the same way the daemon's watcher-attached
-	// indexer would. Use the configured cap (or DefaultMaxExcerptBytes
-	// when zero) — matches main.go's daemon Indexer setup.
-	idx := indexing.New(database, cfg.Compression.Indexing.MaxExcerptBytes)
-
-	// Guard seam (G6): cursor's before-events carry documented
-	// permission JSON, so the guarded receiver can deny/ask. Nil
-	// guard (disabled, mode off, construction failure) degrades to
-	// the unguarded receiver — exactly the pre-G6 behavior. The
-	// persist callback reuses THIS process's already-open DB handle
-	// (unlike claude-code's lazy open, the cursor hook holds one for
-	// capture anyway).
-	// Read the body once: the event receiver needs it for the ingest,
-	// and the sessionStart pidbridge seed below needs the
-	// conversation_id + workspace root. The receiver still replies on
-	// stdout first, so the host is never blocked by the seed.
-	body, _ := io.ReadAll(io.LimitReader(os.Stdin, 2*1024*1024))
-	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
-
-	var g *guard.Guard
-	if cfg.Guard.Enabled && cfg.Guard.Mode != "off" {
-		g = buildHookGuard(cfg, os.Stderr)
-	}
-	if g != nil {
-		st := store.New(database).WithIndexer(idx)
-		persist := func(v guard.ActionVerdict) {
-			pctx, cancel := context.WithTimeout(context.Background(), cfg.Observer.Hooks.HookTimeout())
-			defer cancel()
-			if _, err := st.PersistGuardVerdicts(pctx, []guard.ActionVerdict{v}); err != nil {
-				fmt.Fprintf(os.Stderr, "observer-hook: cursor guard persist: %v\n", err)
-			}
-			g.MaybeAlert(v)
-		}
-		hook.HandleCursorEventGuarded(event, g, persist, st, sc, bytes.NewReader(body), os.Stdout, os.Stderr, cfg.Observer.Hooks.HookTimeout())
-	} else {
-		hook.HandleCursorEvent(event, store.New(database).WithIndexer(idx), sc, bytes.NewReader(body), os.Stdout, os.Stderr, cfg.Observer.Hooks.HookTimeout())
-	}
-
-	// A cursor sessionStart hook runs as a descendant of the cursor
-	// process, so the claude-code ancestor-walk resolves cursor's pid
-	// verbatim (no pid rides in the payload). Best-effort + fail-open —
-	// the reply already went out above.
-	seedCursorSessionPidbridge(ctx, event, body, os.Getppid(), defaultAncestors,
-		makePidbridgeWriter(configPath), sc, os.Stderr)
-}
-
-// seedCursorSessionPidbridge writes pidbridge rows for a cursor
-// sessionStart hook, ancestor-walking the hook process to reach the
-// long-lived cursor pid. It no-ops for every other cursor event and for
-// cloud/background-agent sessions (no local process worth seeding).
-// Split out so it's unit-testable with an injected ancestors func +
-// writer.
-//
-// conversation_id (== the session id) is decoded via cursor.BuildEvent
-// so workspace_roots resolves through the same list/object tolerance the
-// ingest path uses. NOTE: this repo has never captured a live
-// sessionStart payload, so the conversation_id-present assumption rests
-// on the official cursor.com/docs/hooks common-payload contract that the
-// seven captured events do follow.
-func seedCursorSessionPidbridge(
-	ctx context.Context,
-	event string,
-	body []byte,
-	parentPID int,
-	ancestors ancestorsFunc,
-	writer pidbridgeWriter,
-	sc *scrub.Scrubber,
-	stderr io.Writer,
-) {
-	// Cheap background-agent skip without teaching the cursor adapter a
-	// new field: a cloud/background agent has no local process to seed
-	// (and upsert-idempotent writes make an accidental over-seed
-	// harmless anyway).
-	var flags struct {
-		Event             string `json:"hook_event_name"`
-		IsBackgroundAgent bool   `json:"is_background_agent"`
-	}
-	_ = json.Unmarshal(body, &flags)
-	name := event
-	if name == "" {
-		name = flags.Event
-	}
-	if name != cursoradapter.EventSessionStart || flags.IsBackgroundAgent {
-		return
-	}
-	ev, ok, err := cursoradapter.BuildEvent(cursoradapter.EventSessionStart, body, sc)
-	if err != nil || !ok {
-		return
-	}
-	registerSessionAncestors(ctx, parentPID, ancestors, ev.SessionID, ev.ProjectRoot,
-		models.ToolCursor, writer, stderr, "cursor:session-start")
-}
-
-// handleCodexHook opens the observer DB and dispatches a Codex hook.
-// Replies on stdout immediately (inside HandleCodexEvent) so the host
-// doesn't wait on the DB insert. Codex's hook event names are
-// CamelCase identical to Claude Code's; we forward them as-is to the
-// adapter (no kebab-case translation as observer's CLI does for
-// claude-code).
-func handleCodexHook(ctx context.Context, event, configPath string) {
-	if event == "" {
-		event = "unknown"
-	}
-	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: codex config: %v\n", err)
-		// Bare ack via empty JSON object — codex hooks accept this as
-		// "no action" across all event classes.
-		_ = json.NewEncoder(os.Stdout).Encode(struct{}{})
-		return
-	}
-	database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: codex db: %v\n", err)
-		_ = json.NewEncoder(os.Stdout).Encode(struct{}{})
-		return
-	}
-	defer database.Close()
-
-	// Read the body once: HandleCodexEvent needs it for the ingest, and
-	// the SessionStart pidbridge seed below needs the session_id + cwd.
-	body, _ := io.ReadAll(io.LimitReader(os.Stdin, 2*1024*1024))
-	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
-
-	sc := scrub.New()
-	// HandleCodexEvent replies on stdout FIRST, so the host is unblocked
-	// before either the ingest or the seed runs.
-	hook.HandleCodexEvent(event, store.New(database), sc, bytes.NewReader(body),
-		os.Stdout, os.Stderr, cfg.Observer.Hooks.HookTimeout())
-
-	// A codex SessionStart hook runs as a descendant of the codex
-	// process, so the claude-code ancestor-walk resolves the codex pid
-	// verbatim — reuse the shared writer. Best-effort + fail-open: the
-	// reply already went out above.
-	seedCodexSessionPidbridge(ctx, event, body, os.Getppid(), defaultAncestors,
-		makePidbridgeWriter(configPath), os.Stderr)
-}
-
-// seedCodexSessionPidbridge writes pidbridge rows for a codex
-// SessionStart hook, ancestor-walking the hook process to reach the
-// long-lived codex pid (same shape as claude-code). It no-ops for every
-// other codex event. Split out from handleCodexHook so it's unit-testable
-// with an injected ancestors func + writer.
-func seedCodexSessionPidbridge(
-	ctx context.Context,
-	event string,
-	body []byte,
-	parentPID int,
-	ancestors ancestorsFunc,
-	writer pidbridgeWriter,
-	stderr io.Writer,
-) {
-	var meta struct {
-		SessionID     string `json:"session_id"`
-		Cwd           string `json:"cwd"`
-		HookEventName string `json:"hook_event_name"`
-	}
-	_ = json.Unmarshal(body, &meta)
-	name := event
-	if name == "" {
-		name = meta.HookEventName
-	}
-	if name != codexadapter.HookEventSessionStart {
-		return
-	}
-	registerSessionAncestors(ctx, parentPID, ancestors, meta.SessionID, meta.Cwd,
-		models.ToolCodex, writer, stderr, "codex:session-start")
-}
-
-// handleHermesHook dispatches a Hermes Agent hook event delivered by
-// the Python plugin bridge at ~/.hermes/plugins/superbased-observer/.
-//
-// Wire shape per docs/hermes-adapter-plan.md §11.1 + §17.1.F:
-// structured JSON on stdin carrying event=tool_call|session_start|
-// session_end|api_request|subagent_stop plus tool-specific fields
-// (tool_name, args, result, cwd, model, usage, …). Per
-// hermes_cli/plugins.py the bridge's subprocess.run wrapper has a
-// 0.5 s timeout and swallows exceptions — observer being down or
-// slow MUST never propagate into the host. We reply approve on
-// stdout immediately and do all DB work after.
-//
-// Both tool-event (ActionFoo rows) and token-event (post_api_request
-// usage) paths flow through here; the per-event dispatch lives in
-// internal/adapter/hermes/hook.go::BuildToolEvent / BuildTokenEvent
-// so the parser is shared with the SQLite backfill path.
-func handleHermesHook(ctx context.Context, event, configPath string) {
-	label := "hermes"
-	if event != "" {
-		label = "hermes:" + event
-	}
-
-	body, _ := io.ReadAll(io.LimitReader(os.Stdin, 2*1024*1024))
-	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
-	// Reply approve immediately — host must never wait on the DB
-	// path. Bridge accepts "approve" identically to the Claude Code
-	// shape; on parse failure it falls back to no-op.
-	_ = json.NewEncoder(os.Stdout).Encode(hook.Decision{Decision: "approve"})
-
-	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s config: %v\n", label, err)
-		return
-	}
-	database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s db: %v\n", label, err)
-		return
-	}
-	defer database.Close()
-
-	// A hermes session_start seeds the pid bridge. The reply already
-	// went out above; do this before the (possibly early-returning)
-	// ingest so a session_start always seeds. Writer reuses this
-	// process's open DB handle.
-	seedHermesSessionPidbridge(ctx, event, body, os.Getppid(), defaultAncestors,
-		func(wctx context.Context, e pidbridge.Entry) error { return pidbridge.New(database).Write(wctx, e) },
-		os.Stderr)
-
-	sc := scrub.New()
-
-	var toolEvents []models.ToolEvent
-	var tokenEvents []models.TokenEvent
-
-	if ev, ok, buildErr := hermes.BuildToolEvent(event, body, sc); buildErr != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s build tool event: %v\n", label, buildErr)
-	} else if ok {
-		toolEvents = append(toolEvents, ev)
-	}
-
-	if tok, ok, buildErr := hermes.BuildTokenEvent(event, body); buildErr != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s build token event: %v\n", label, buildErr)
-	} else if ok {
-		tokenEvents = append(tokenEvents, tok)
-	}
-
-	if len(toolEvents) == 0 && len(tokenEvents) == 0 {
-		return
-	}
-
-	insertCtx, cancel := context.WithTimeout(ctx, cfg.Observer.Hooks.HookTimeout())
-	defer cancel()
-	if _, err := store.New(database).Ingest(insertCtx, toolEvents, tokenEvents, store.IngestOptions{}); err != nil {
-		fmt.Fprintf(os.Stderr, "observer-hook: %s insert: %v\n", label, err)
-	}
-}
-
-// seedHermesSessionPidbridge writes a pidbridge row for a hermes
-// session_start hook. Unlike claude-code/codex/cursor, the Hermes plugin
-// runs IN-PROCESS in the long-lived python agent and can hand us its own
-// pid directly (os.getpid(), additive wire field since v1.20), so we
-// register that single pid — it is the process that opens provider API
-// sockets. The os.getppid() the plugin also sends is the agent's PARENT
-// (usually the user's shell) and is deliberately NOT seeded: registering
-// a shell would poison the bridge for later unrelated connections (D17).
-//
-// Compat both ways: an OLDER plugin sends no pid — we fall back to the
-// ancestor-walk, which still works because `observer hook hermes` is an
-// exec'd subprocess CHILD of that same python process (subprocess.run,
-// no shell), so os.Getppid() reaches it. A NEWER plugin talking to an
-// OLDER observer is fine too: Go's json.Unmarshal ignores the unknown
-// pid/ppid fields. Split out for unit-testability (injected ancestors +
-// writer). Best-effort + fail-open throughout.
-func seedHermesSessionPidbridge(
-	ctx context.Context,
-	event string,
-	body []byte,
-	hookParentPID int,
-	ancestors ancestorsFunc,
-	writer pidbridgeWriter,
-	stderr io.Writer,
-) {
-	var meta struct {
-		Event     string `json:"event"`
-		SessionID string `json:"session_id"`
-		Cwd       string `json:"cwd"`
-		PID       int    `json:"pid"`
-	}
-	_ = json.Unmarshal(body, &meta)
-	name := event
-	if name == "" {
-		name = meta.Event
-	}
-	if name != hermes.EventSessionStart {
-		return
-	}
-	if meta.PID > 1 {
-		// Plugin-supplied pid: register it directly (the plugin runs in
-		// this process, so no walk is required).
-		registerSessionAncestors(ctx, meta.PID, func(p int) []int { return []int{p} },
-			meta.SessionID, meta.Cwd, models.ToolHermes, writer, stderr, "hermes:session-start")
-		return
-	}
-	// Older plugin without a pid: ancestor-walk the exec'd hook child.
-	registerSessionAncestors(ctx, hookParentPID, ancestors, meta.SessionID, meta.Cwd,
-		models.ToolHermes, writer, stderr, "hermes:session-start")
-}
-
 // claudeActionBuilder takes a raw Claude Code hook payload and returns a
 // ToolEvent ready for insertion. ok=false means "skip this fire" (e.g.
 // missing required field). Builders never block — they parse, validate,
@@ -1247,10 +1762,11 @@ type claudeActionBuilder func(body []byte) (models.ToolEvent, bool)
 // events that ingest one row each. Reads stdin, replies approve, opens
 // the configured DB, calls build(body), and inserts the resulting
 // ToolEvent. All errors log to stderr and never block the host (spec P1).
-func handleClaudeCodeActionEvent(ctx context.Context, label, configPath string, build claudeActionBuilder) {
-	body, _ := io.ReadAll(io.LimitReader(os.Stdin, 2*1024*1024))
+func handleClaudeCodeActionEvent(ctx context.Context, stdin io.Reader, label, configPath string, build claudeActionBuilder) {
+	body, _ := io.ReadAll(io.LimitReader(stdin, defaultHookBodyLimit))
 	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
-	_ = json.NewEncoder(os.Stdout).Encode(hook.Decision{Decision: "approve"})
+	_ = json.NewEncoder(hookStdout).Encode(hook.Decision{Decision: "approve"})
+	markHookReplied()
 
 	ev, ok := build(body)
 	if !ok {
@@ -1275,7 +1791,15 @@ func handleClaudeCodeActionEvent(ctx context.Context, label, configPath string, 
 
 	insertCtx, cancel := context.WithTimeout(ctx, cfg.Observer.Hooks.HookTimeout())
 	defer cancel()
-	if _, err := store.New(database).Ingest(insertCtx, []models.ToolEvent{ev}, nil, store.IngestOptions{}); err != nil {
+	hookStore := store.New(database)
+	// [tasks].enabled gate: this generic handler also serves the
+	// PostToolBatch hook builder — the capture path for the
+	// post_tool_batch envelope rows carrying claude-code Task payloads
+	// (docs/task-tracking.md; without this, that slice would only ever
+	// get decoded by a later `observer backfill --tasks` pass).
+	hookStore.SetTasksEnabled(cfg.Tasks.Enabled)
+	hookStore.SetTasksOptions(cfg.Tasks.MatchMode, cfg.Tasks.ConcurrentAttribution, cfg.Tasks.IncludeSidechains)
+	if _, err := hookStore.Ingest(insertCtx, []models.ToolEvent{ev}, nil, store.IngestOptions{}); err != nil {
 		fmt.Fprintf(os.Stderr, "observer-hook: %s insert: %v\n", label, err)
 	}
 }
@@ -1352,6 +1876,23 @@ func buildClaudeUserPromptSubmitEvent(body []byte) (models.ToolEvent, bool) {
 		return models.ToolEvent{}, false
 	}
 	ev := baseToolEvent(p.claudeBaseEnvelope, models.ActionUserPrompt, "user_prompt_submit")
+	// Per-prompt discriminator. baseToolEvent's default id is
+	// "<session>:user_prompt_submit" — CONSTANT for the whole session — so
+	// with actions' UNIQUE(source_file, source_event_id) every prompt after
+	// the FIRST collided and was swallowed by the upsert. Measured on the
+	// live DB before this fix: all 515 hook-captured claude-code sessions
+	// had exactly 1 user_prompt row, while watcher-captured sessions reached
+	// 406. The loss also starved the predictor's turns-per-message ladder,
+	// which counts user_prompt boundaries (LoadSessionShape) and so could
+	// never leave the 1-message "young session" case.
+	//
+	// Content hash, NOT a timestamp/nonce: TestClaudeCodeHookDoubleFireIsIdempotent
+	// requires the id stay deterministic so double-wired hooks (plugin +
+	// settings.json) still collapse to one row. Same convention as :stop:,
+	// :post_tool_batch: and :user_prompt_expansion:. Residual, shared with
+	// those: the exact same prompt text repeated inside one session collapses
+	// to a single row.
+	ev.SourceEventID = p.SessionID + ":user_prompt_submit:" + claudeContentHash(body)
 	text := scrub.New().String(p.Prompt)
 	ev.RawToolInput = text
 	ev.Target = previewLine(text, 120)
@@ -1379,7 +1920,12 @@ func buildClaudePostToolFailureEvent(body []byte) (models.ToolEvent, bool) {
 	ev.Target = p.ToolName
 	ev.RawToolName = p.ToolName
 	if len(p.ToolInput) > 0 {
-		ev.RawToolInput = scrub.New().String(string(p.ToolInput))
+		// MHC-4: tool_input is a JSON object — RawJSON scrubs each
+		// string value in isolation and re-marshals, so redaction can
+		// never corrupt the stored JSON the way String's line-oriented
+		// regexes can on compact JSON (see scrub.ScrubForward's doc
+		// comment for the failure mode this avoids).
+		ev.RawToolInput = scrub.New().RawJSON(p.ToolInput)
 	}
 	ev.ErrorMessage = p.Error
 	ev.DurationMs = p.DurationMs
@@ -1423,6 +1969,11 @@ func buildClaudeStopFailureEvent(body []byte) (models.ToolEvent, bool) {
 		msg = p.LastAssistantMessage
 	}
 	ev := baseToolEvent(p.claudeBaseEnvelope, models.ActionAPIError, "stop_failure")
+	// Per-occurrence discriminator — same collapse bug as
+	// user_prompt_submit. A session that hits several API errors kept only
+	// the first, understating the error rate. Deterministic hash, per the
+	// double-fire contract.
+	ev.SourceEventID = p.SessionID + ":stop_failure:" + claudeContentHash(body)
 	ev.Target = cls
 	ev.RawToolName = cls
 	ev.ErrorMessage = msg
@@ -1446,6 +1997,10 @@ func buildClaudeSubagentStartEvent(body []byte) (models.ToolEvent, bool) {
 	ev := baseToolEvent(p.claudeBaseEnvelope, models.ActionSubagentStart, "subagent_start")
 	if p.AgentID != "" {
 		ev.SourceEventID = p.AgentID + ":subagent_start"
+		// Structured sub-agent identity (alongside the legacy RawToolName
+		// carry): feeds /api/session/<id>/subagents grouping without
+		// raw-field scraping.
+		ev.Metadata = &models.ActionMetadata{AgentID: p.AgentID}
 	}
 	ev.Target = p.AgentType
 	ev.RawToolName = p.AgentID
@@ -1500,6 +2055,12 @@ func buildClaudeSubagentStopEvent(body []byte) (models.ToolEvent, bool) {
 		ev.Target = filepath.Base(p.AgentTranscriptPath)
 	}
 	ev.RawToolName = p.AgentID
+	if p.AgentID != "" {
+		// Structured sub-agent identity (alongside the legacy RawToolName
+		// carry): feeds /api/session/<id>/subagents grouping without
+		// raw-field scraping.
+		ev.Metadata = &models.ActionMetadata{AgentID: p.AgentID}
+	}
 	if p.LastAssistantMessage != "" {
 		// Land the assistant's final message in BOTH
 		// raw_tool_input (the dashboard-rendered body) AND
@@ -1575,6 +2136,11 @@ func buildClaudeNotificationEvent(body []byte) (models.ToolEvent, bool) {
 		return models.ToolEvent{}, false
 	}
 	ev := baseToolEvent(p.claudeBaseEnvelope, models.ActionNotification, "notification")
+	// Per-occurrence discriminator — same collapse bug as
+	// user_prompt_submit (a session emits many notifications; the constant
+	// id kept only the first). Deterministic hash, per the double-fire
+	// contract.
+	ev.SourceEventID = p.SessionID + ":notification:" + claudeContentHash(body)
 	ev.Target = p.NotificationType
 	ev.ErrorMessage = p.Message
 	return ev, true
@@ -1601,6 +2167,12 @@ func buildClaudeCwdChangedEvent(body []byte) (models.ToolEvent, bool) {
 		previous = p.PreviousCwd
 	}
 	ev := baseToolEvent(p.claudeBaseEnvelope, models.ActionCwdChange, "cwd_changed")
+	// Per-occurrence discriminator — same collapse bug as
+	// user_prompt_submit. A session can cd many times; the constant id
+	// recorded only the first move, so the cwd trail was truncated to one
+	// hop. Deterministic hash, per the double-fire contract (an A→B→A
+	// round trip re-collapses, matching the convention's accepted residual).
+	ev.SourceEventID = p.SessionID + ":cwd_changed:" + claudeContentHash(body)
 	ev.Target = p.NewCwd
 	if ev.Target == "" {
 		ev.Target = p.Cwd
@@ -1730,9 +2302,10 @@ func buildClaudePostToolBatchEvent(body []byte) (models.ToolEvent, bool) {
 	// Full tool_calls array lands in RawToolInput as a scrubbed JSON
 	// blob. Dashboards render it as the row's "what was in the batch"
 	// detail; analysts can json_extract individual entries for
-	// per-tool drilldown.
+	// per-tool drilldown. RawJSON (not String) so redaction can't
+	// corrupt this structurally-nested JSON (MHC-4).
 	if raw, err := json.Marshal(p.ToolCalls); err == nil {
-		ev.RawToolInput = scrub.New().String(string(raw))
+		ev.RawToolInput = scrub.New().RawJSON(raw)
 	}
 	return ev, true
 }
@@ -1762,7 +2335,8 @@ func buildClaudePermissionRequestEvent(body []byte) (models.ToolEvent, bool) {
 	ev.Target = p.ToolName
 	ev.RawToolName = p.ToolName
 	if len(p.ToolInput) > 0 {
-		ev.RawToolInput = scrub.New().String(string(p.ToolInput))
+		// RawJSON, not String — tool_input is JSON (MHC-4).
+		ev.RawToolInput = scrub.New().RawJSON(p.ToolInput)
 	}
 	// permission_suggestions (addRules / setMode / etc.) lands on
 	// PrecedingReasoning so analysts can see WHAT the host proposed
@@ -1800,7 +2374,8 @@ func buildClaudePermissionDeniedEvent(body []byte) (models.ToolEvent, bool) {
 	ev.Target = p.ToolName
 	ev.RawToolName = p.ToolName
 	if len(p.ToolInput) > 0 {
-		ev.RawToolInput = scrub.New().String(string(p.ToolInput))
+		// RawJSON, not String — tool_input is JSON (MHC-4).
+		ev.RawToolInput = scrub.New().RawJSON(p.ToolInput)
 	}
 	ev.ErrorMessage = p.Reason
 	ev.Success = false
@@ -1941,7 +2516,7 @@ func buildClaudeWorktreeRemoveEvent(body []byte) (models.ToolEvent, bool) {
 // are injected for testability — production callers pass os.Stdin /
 // os.Stdout / os.Stderr.
 func handleClaudeCodeWorktreeCreate(ctx context.Context, label, configPath string, stdin io.Reader, stdout, stderr io.Writer) {
-	body, _ := io.ReadAll(io.LimitReader(stdin, 2*1024*1024))
+	body, _ := io.ReadAll(io.LimitReader(stdin, defaultHookBodyLimit))
 	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
 
 	worktreePath, ev, hasSession := buildClaudeWorktreeCreateReply(body)
@@ -1955,6 +2530,7 @@ func handleClaudeCodeWorktreeCreate(ctx context.Context, label, configPath strin
 		},
 	}
 	_ = json.NewEncoder(stdout).Encode(reply)
+	markHookReplied()
 
 	if !hasSession {
 		return
@@ -1973,7 +2549,10 @@ func handleClaudeCodeWorktreeCreate(ctx context.Context, label, configPath strin
 	defer database.Close()
 	insertCtx, cancel := context.WithTimeout(ctx, cfg.Observer.Hooks.HookTimeout())
 	defer cancel()
-	if _, err := store.New(database).Ingest(insertCtx, []models.ToolEvent{ev}, nil, store.IngestOptions{}); err != nil {
+	hookStore := store.New(database)
+	hookStore.SetTasksEnabled(cfg.Tasks.Enabled)
+	hookStore.SetTasksOptions(cfg.Tasks.MatchMode, cfg.Tasks.ConcurrentAttribution, cfg.Tasks.IncludeSidechains)
+	if _, err := hookStore.Ingest(insertCtx, []models.ToolEvent{ev}, nil, store.IngestOptions{}); err != nil {
 		fmt.Fprintf(stderr, "observer-hook: %s insert: %v\n", label, err)
 	}
 }

@@ -11,46 +11,62 @@ import (
 // high-effort counts, cachetrack verdicts, MCP audit counts, and the
 // failure_context rollup. All best-effort by shape but loud on real query
 // errors (P6 applies at the surface layer, not here).
-func loadPhase2(ctx context.Context, db *sql.DB, since string, f *Facts) error {
+func loadPhase2(ctx context.Context, db *sql.DB, since, until string, f *Facts) error {
 	idx := map[string]*SessionFacts{}
 	for i := range f.Sessions {
 		idx[f.Sessions[i].ID] = &f.Sessions[i]
 	}
 
-	// Action mix + effort. json_extract on the nullable metadata blob —
-	// NULL-safe (returns NULL → not counted).
+	// Action mix + effort. actions has no index covering
+	// (session_id, timestamp), so a SQL-side `GROUP BY session_id` over
+	// the timestamp-filtered window would force the same kind of temp
+	// B-tree spill as an ORDER BY on this table (P1-C). Instead: fetch
+	// the per-row flags (still computed in SQL — json_extract on the
+	// nullable metadata blob is NULL-safe, returns NULL → not counted)
+	// unaggregated, and sum them per session in Go.
 	mixQ := `SELECT session_id,
-	       COUNT(*),
-	       SUM(CASE WHEN action_type IN ('read_file','search_text','search_files') THEN 1 ELSE 0 END),
-	       SUM(CASE WHEN action_type IN ('edit_file','write_file') THEN 1 ELSE 0 END),
-	       SUM(CASE WHEN json_extract(metadata,'$.effort_level') IN ('xhigh','max') THEN 1 ELSE 0 END)
-	FROM actions WHERE timestamp >= ? GROUP BY session_id`
-	rows, err := db.QueryContext(ctx, mixQ, since)
+	       CASE WHEN action_type IN ('read_file','search_text','search_files') THEN 1 ELSE 0 END,
+	       CASE WHEN action_type IN ('edit_file','write_file') THEN 1 ELSE 0 END,
+	       CASE WHEN json_extract(metadata,'$.effort_level') IN ('xhigh','max') THEN 1 ELSE 0 END
+	FROM actions WHERE timestamp >= ? AND timestamp < ?`
+	rows, err := db.QueryContext(ctx, mixQ, since, until)
 	if err != nil {
 		return fmt.Errorf("advisor.loadPhase2: action mix: %w", err)
 	}
+	mix := map[string]*ActionMix{}
 	for rows.Next() {
 		var sid string
-		var total, reads, edits, eff int
-		if err := rows.Scan(&sid, &total, &reads, &edits, &eff); err != nil {
+		var isRead, isEdit, isEff int
+		if err := rows.Scan(&sid, &isRead, &isEdit, &isEff); err != nil {
 			rows.Close()
 			return fmt.Errorf("advisor.loadPhase2: mix scan: %w", err)
 		}
-		if s := idx[sid]; s != nil {
-			s.Mix = ActionMix{Total: total, Reads: reads, Edits: edits, EffortHigh: eff}
+		m, ok := mix[sid]
+		if !ok {
+			m = &ActionMix{}
+			mix[sid] = m
 		}
+		m.Total++
+		m.Reads += isRead
+		m.Edits += isEdit
+		m.EffortHigh += isEff
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	for sid, m := range mix {
+		if s := idx[sid]; s != nil {
+			s.Mix = *m
+		}
 	}
 
 	// Cachetrack verdicts (may be empty until Anthropic traffic proxies).
 	f.CacheEvents = map[string][]CacheEventFact{}
 	ceQ := `SELECT session_id, kind, COALESCE(cause,''), COALESCE(tokens_read,0),
 	       COALESCE(tokens_written,0), COALESCE(cost_delta_usd,0)
-	FROM cache_events WHERE timestamp >= ?`
-	rows, err = db.QueryContext(ctx, ceQ, since)
+	FROM cache_events WHERE timestamp >= ? AND timestamp < ?`
+	rows, err = db.QueryContext(ctx, ceQ, since, until)
 	if err != nil {
 		return fmt.Errorf("advisor.loadPhase2: cache_events: %w", err)
 	}
@@ -75,8 +91,8 @@ func loadPhase2(ctx context.Context, db *sql.DB, since string, f *Facts) error {
 
 	// MCP audit counts.
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN response_ok = 0 THEN 1 ELSE 0 END), 0) FROM mcp_audit WHERE ts >= ?`,
-		since).Scan(&f.MCPCalls, &f.MCPDenied); err != nil {
+		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN response_ok = 0 THEN 1 ELSE 0 END), 0) FROM mcp_audit WHERE ts >= ? AND ts < ?`,
+		since, until).Scan(&f.MCPCalls, &f.MCPDenied); err != nil {
 		return fmt.Errorf("advisor.loadPhase2: mcp_audit: %w", err)
 	}
 	// "MCP configured" has no single config flag (registration is
@@ -94,8 +110,8 @@ func loadPhase2(ctx context.Context, db *sql.DB, since string, f *Facts) error {
 	// the window plus the operator's engagement proxy (active scoped
 	// approvals). Cheap COUNTs; the mode itself is injected by callers.
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM guard_events WHERE ts >= ? AND severity IN ('high', 'critical')`,
-		since).Scan(&f.GuardHighSevEvents); err != nil {
+		`SELECT COUNT(*) FROM guard_events WHERE ts >= ? AND ts < ? AND severity IN ('high', 'critical')`,
+		since, until).Scan(&f.GuardHighSevEvents); err != nil {
 		return fmt.Errorf("advisor.loadPhase2: guard_events: %w", err)
 	}
 	if err := db.QueryRowContext(ctx,
@@ -108,8 +124,8 @@ func loadPhase2(ctx context.Context, db *sql.DB, since string, f *Facts) error {
 	fQ := `SELECT COALESCE(p.root_path,''), fc.command_summary, COUNT(*),
 	       SUM(COALESCE(fc.retry_count,0)), MAX(fc.eventually_succeeded)
 	FROM failure_context fc LEFT JOIN projects p ON p.id = fc.project_id
-	WHERE fc.timestamp >= ? GROUP BY p.root_path, fc.command_summary`
-	rows, err = db.QueryContext(ctx, fQ, since)
+	WHERE fc.timestamp >= ? AND fc.timestamp < ? GROUP BY p.root_path, fc.command_summary`
+	rows, err = db.QueryContext(ctx, fQ, since, until)
 	if err != nil {
 		return fmt.Errorf("advisor.loadPhase2: failures: %w", err)
 	}
@@ -132,8 +148,8 @@ func loadPhase2(ctx context.Context, db *sql.DB, since string, f *Facts) error {
 	       s.quality_score, s.stale_reads_wasteful,
 	       COALESCE((SELECT SUM(COALESCE(tu.web_search_requests,0)) FROM token_usage tu WHERE tu.session_id = s.id), 0)
 	FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
-	WHERE s.started_at >= ? ORDER BY s.started_at`
-	rows, err = db.QueryContext(ctx, sQ, since)
+	WHERE s.started_at >= ? AND s.started_at < ? ORDER BY s.started_at`
+	rows, err = db.QueryContext(ctx, sQ, since, until)
 	if err != nil {
 		return fmt.Errorf("advisor.loadPhase2: scores: %w", err)
 	}

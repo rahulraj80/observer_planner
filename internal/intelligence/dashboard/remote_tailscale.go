@@ -1,7 +1,8 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
-	"errors"
 	"net/http"
 	"runtime"
 	"strings"
@@ -9,18 +10,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/remotecfg"
 	"github.com/marmutapp/superbased-observer/internal/tailnet"
 )
-
-// writeSetupSpawnErr maps a CreateSetup failure to an honest status: the setup
-// single-flight refusal is 409 (a privileged PTY of this kind is already
-// starting — POST-spam is bounded to one live setup op per kind); anything else
-// degrades to 500.
-func writeSetupSpawnErr(w http.ResponseWriter, err error) {
-	if errors.Is(err, ErrLaunchSetupInFlight) {
-		writeErrStatus(w, err, http.StatusConflict)
-		return
-	}
-	writeErr(w, err)
-}
 
 // remote_tailscale.go is the read-only tailnet detection + guidance surface
 // (dashboard-management-surface plan §D). It runs `tailscale status --json` via
@@ -101,7 +90,7 @@ func (s *Server) handleRemoteTailscaleServe(w http.ResponseWriter, r *http.Reque
 	}
 	backendAddr := cfg.Remote.TailscaleBackendAddr
 	if backendAddr == "" {
-		http.Error(w, `{"error":"arm remote access first — the tailscale serve target is the backend port minted at arm time"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"arm remote access first - the tailscale serve target is the backend port minted at arm time"}`, http.StatusBadRequest)
 		return
 	}
 	res := tailscaleServeRunner(r.Context(), remotecfg.BackendPortOnly(backendAddr))
@@ -133,7 +122,10 @@ func (s *Server) handleRemoteTailscaleOperatorGrant(w http.ResponseWriter, r *ht
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, `{"error":"the in-dashboard terminal is not available on this platform — run the observer daemon under WSL/Linux, or run `+"`sudo tailscale set --operator=<you>`"+` manually"}`, http.StatusServiceUnavailable)
+		// Q16: the setup PTY here is exactly as ConPTY-capable as the New
+		// Terminal launch path since 2026-07-04 — reuse errTerminalUnavailable
+		// (audit DI-16) instead of the stale "run under WSL/Linux" claim.
+		http.Error(w, `{"error":"`+errTerminalUnavailable+`, or run `+"`sudo tailscale set --operator=<you>`"+` manually"}`, http.StatusServiceUnavailable)
 		return
 	}
 	user, isRoot, err := tailnet.CurrentDaemonUser()
@@ -142,7 +134,7 @@ func (s *Server) handleRemoteTailscaleOperatorGrant(w http.ResponseWriter, r *ht
 		return
 	}
 	if isRoot {
-		http.Error(w, `{"error":"the daemon already runs as root — tailscale serve needs no grant; click \"Set up serve for me\""}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"the daemon already runs as root - tailscale serve needs no grant; click \"Set up serve for me\""}`, http.StatusBadRequest)
 		return
 	}
 	argv := tailnet.OperatorGrantArgv(user)
@@ -181,7 +173,8 @@ func (s *Server) handleRemoteTailscaleLogin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, `{"error":"the in-dashboard terminal is not available on this platform — run the observer daemon under WSL/Linux, or run `+"`tailscale up`"+` manually"}`, http.StatusServiceUnavailable)
+		// Q16: same reasoning as handleRemoteTailscaleOperatorGrant above.
+		http.Error(w, `{"error":"`+errTerminalUnavailable+`, or run `+"`tailscale up`"+` manually"}`, http.StatusServiceUnavailable)
 		return
 	}
 	_, isRoot, err := tailnet.CurrentDaemonUser()
@@ -224,15 +217,16 @@ func (s *Server) handleRemoteTailscaleInstall(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if runtime.GOOS != "linux" {
-		http.Error(w, `{"error":"the guided install runs the Linux install script — install Tailscale on the machine that owns your tailnet, or use the download link"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"the guided install runs the Linux install script - install Tailscale on the machine that owns your tailnet, or use the download link"}`, http.StatusBadRequest)
 		return
 	}
 	if tailnet.Detect(r.Context()).Present {
-		http.Error(w, `{"error":"tailscale is already installed — no install needed"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"tailscale is already installed - no install needed"}`, http.StatusBadRequest)
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, `{"error":"the in-dashboard terminal is not available on this platform — run the observer daemon under WSL/Linux, or install Tailscale manually"}`, http.StatusServiceUnavailable)
+		// Q16: same reasoning as handleRemoteTailscaleOperatorGrant above.
+		http.Error(w, `{"error":"`+errTerminalUnavailable+`, or install Tailscale manually"}`, http.StatusServiceUnavailable)
 		return
 	}
 	// Re-check presence at the FINAL spawn boundary (not just the early advisory
@@ -242,7 +236,7 @@ func (s *Server) handleRemoteTailscaleInstall(w http.ResponseWriter, r *http.Req
 	// binary. The setup single-flight (Label below) closes the concurrent-POST
 	// race; this closes the slower "installed out-of-band" race.
 	if tailnet.Detect(r.Context()).Present {
-		http.Error(w, `{"error":"tailscale is already installed — no install needed"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"tailscale is already installed - no install needed"}`, http.StatusBadRequest)
 		return
 	}
 	argv := tailnet.InstallArgv()

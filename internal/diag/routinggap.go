@@ -51,7 +51,7 @@ func checkProxyRoutingGap(ctx context.Context, database *sql.DB, homeDir string)
 		routed = append(routed, routedIntegration{tool: "codex", provider: "openai"})
 	}
 	if len(routed) == 0 {
-		return Check{Name: name, Status: StatusOK, Message: "no tools durably routed — nothing to compare"}
+		return Check{Name: name, Status: StatusOK, Message: "no tools durably routed - nothing to compare"}
 	}
 
 	cutoff := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
@@ -72,8 +72,8 @@ func checkProxyRoutingGap(ctx context.Context, database *sql.DB, homeDir string)
 		case actions > 0 && turns == 0:
 			gaps++
 			detail = append(detail,
-				fmt.Sprintf("%s: %d captured actions but 0 %s proxy turns in 24h — the proxy was unreachable while the tool ran", ri.tool, actions, ri.provider),
-				"a routed tool with the daemon down HANGS (no bypass, no fast fail — live-verified); keep the daemon running or remove the route",
+				fmt.Sprintf("%s: %d captured actions but 0 %s proxy turns in 24h - the proxy was unreachable while the tool ran", ri.tool, actions, ri.provider),
+				"a routed tool with the daemon down HANGS (no bypass, no fast fail - live-verified); keep the daemon running or remove the route",
 				"fix: `observer start`, or undo routing via `observer uninstall --"+ri.tool+"` / the Compression page")
 		case actions == 0:
 			detail = append(detail, fmt.Sprintf("%s: idle in the last 24h (nothing to compare)", ri.tool))

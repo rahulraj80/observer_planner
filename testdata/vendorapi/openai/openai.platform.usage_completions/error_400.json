@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": null,
+    "message": "limit must be at most 31 when bucket_width is 1d",
+    "param": null,
+    "type": "invalid_request_error"
+  }
+}

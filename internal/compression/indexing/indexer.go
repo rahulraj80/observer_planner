@@ -29,32 +29,78 @@ func New(db *sql.DB, maxExcerptBytes int) *Indexer {
 	return &Indexer{db: db, maxExcerptBytes: maxExcerptBytes}
 }
 
+// deletePriorSQL removes every excerpt row of one action.
+//
+// action_id is UNINDEXED in the FTS5 table (001_initial.sql), so the
+// obvious `DELETE FROM action_excerpts WHERE action_id = ?` is planned as
+// `SCAN action_excerpts VIRTUAL TABLE INDEX 0:`: a read of EVERY stored
+// excerpt, under the write lock, once per indexed tool result. On a node
+// with ~500k excerpts that was 0.4 s in sqlite3 and about 1 s in modernc
+// per call, which stalled watcher ingestion for days (T-412).
+//
+// FTS5 keeps its stored columns in the ordinary shadow table
+// action_excerpts_content (c0 is action_id), and migration 147 indexes c0.
+// Resolving the action id to FTS rowids through that index and deleting by
+// rowid equality is two B-tree seeks. It finds every row whatever rowid it
+// was given, so legacy rows (auto-assigned rowids) and new rows behave the
+// same and no re-key or rebuild is needed. The equality comparison is the
+// one the old statement made (both columns carry no affinity), so the set of
+// rows deleted is unchanged. Pinned by TestDeletePriorUsesRowidSeek.
+const deletePriorSQL = `DELETE FROM action_excerpts
+ WHERE rowid IN (SELECT id FROM action_excerpts_content WHERE c0 = ?)`
+
+const insertExcerptSQL = `INSERT INTO action_excerpts (action_id, tool_name, target, excerpt, error_message)
+ VALUES (?, ?, ?, ?, ?)`
+
 // Index records an excerpt for an action. The stored excerpt is the first
 // half of maxExcerptBytes plus the last half when raw exceeds the cap, joined
 // by a "…" marker — mirroring the spec's "first 1KB + last 1KB" rule.
 //
 // Idempotent: re-indexing the same action_id overwrites the prior excerpt.
+// The delete and the insert run in one transaction, so a reader never sees
+// the action with no excerpt or with two.
 func (i *Indexer) Index(ctx context.Context, actionID int64, toolName, target, raw, errorMessage string) error {
+	return i.index(ctx, actionID, toolName, target, raw, errorMessage, true)
+}
+
+// IndexNew records the excerpt of an action row that was INSERTED (not
+// upserted) by the caller's current batch, skipping the prior-row delete.
+// actions.id is AUTOINCREMENT, so an id allocated by this insert has never
+// been used before and no excerpt can carry it yet. Callers that cannot
+// prove a fresh insert (cross-tick outcome updates, hooks, backfills,
+// imports) must use Index.
+func (i *Indexer) IndexNew(ctx context.Context, actionID int64, toolName, target, raw, errorMessage string) error {
+	return i.index(ctx, actionID, toolName, target, raw, errorMessage, false)
+}
+
+func (i *Indexer) index(ctx context.Context, actionID int64, toolName, target, raw, errorMessage string, replace bool) error {
 	if actionID == 0 {
 		return errors.New("indexing.Index: actionID required")
 	}
 	excerpt := TrimExcerpt(raw, i.maxExcerptBytes)
-	// FTS5 with content='actions' is a contentless view; we insert into
-	// its rowid-keyed virtual table directly. Replace any prior row with
-	// the same action_id so re-parsing doesn't multiply entries.
-	_, err := i.db.ExecContext(ctx,
-		`DELETE FROM action_excerpts WHERE action_id = ?`, actionID)
+	if !replace {
+		if _, err := i.db.ExecContext(ctx, insertExcerptSQL,
+			actionID, toolName, target, excerpt, errorMessage); err != nil {
+			return fmt.Errorf("indexing.Index: insert: %w", err)
+		}
+		return nil
+	}
+	tx, err := i.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("indexing.Index: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Replace any prior row with the same action_id so re-parsing doesn't
+	// multiply entries.
+	if _, err := tx.ExecContext(ctx, deletePriorSQL, actionID); err != nil {
 		return fmt.Errorf("indexing.Index: delete prior: %w", err)
 	}
-	_, err = i.db.ExecContext(
-		ctx,
-		`INSERT INTO action_excerpts (action_id, tool_name, target, excerpt, error_message)
-		 VALUES (?, ?, ?, ?, ?)`,
-		actionID, toolName, target, excerpt, errorMessage,
-	)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, insertExcerptSQL,
+		actionID, toolName, target, excerpt, errorMessage); err != nil {
 		return fmt.Errorf("indexing.Index: insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("indexing.Index: commit: %w", err)
 	}
 	return nil
 }

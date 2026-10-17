@@ -1,5 +1,3 @@
-//go:build no_obs
-
 package main
 
 import (
@@ -10,21 +8,94 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	otlpingest "github.com/marmutapp/superbased-observer/internal/ingest/otlp"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
-	"github.com/marmutapp/superbased-observer/internal/proxy"
+	"github.com/marmutapp/superbased-observer/internal/selfobs/emit"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
+// obsAdmissionHandle is the no_obs-build stub of the shared admission carrier
+// (gap P0-7). It has no fields — admission (and all of internal/obs) is
+// compiled out — but the type must exist so buildProxy's return signature and
+// proxy.go/start.go compile identically in both builds.
+type obsAdmissionHandle struct{}
+
+// obsPolicyStateFacts mirrors the !no_obs definition so policystate_wire.go
+// (non-build-tagged) compiles in the no_obs build (R3-S5). Admission (and all
+// of internal/obs) is compiled out here, so PolicyStateFacts always reports
+// Live=false with empty hashes → both local points resolve to none/no_policy.
+type obsPolicyStateFacts struct {
+	Live         bool
+	AdmitterHash string
+	AdmitterMode string
+	EgressHash   string
+	EgressMode   string
+	LastSeen     time.Time
+
+	AdmitterHasOrgRail  bool
+	AdmitterOrgKey      string
+	AdmitterGeneration  int64
+	AdmitterOrgVersion  int64
+	AdmitterBodyHash    string
+	AdmitterInertReason string
+
+	EgressHasOrgRail  bool
+	EgressOrgKey      string
+	EgressGeneration  int64
+	EgressOrgVersion  int64
+	EgressBodyHash    string
+	EgressInertReason string
+}
+
+// PolicyStateFacts is the no_obs stub of the P0-6 local-point state reader: no
+// admission service exists, so it returns the zero value (Live=false). ctx is
+// accepted for signature parity with the !no_obs build and ignored.
+func (h *obsAdmissionHandle) PolicyStateFacts(_ context.Context) obsPolicyStateFacts {
+	return obsPolicyStateFacts{}
+}
+
+// PublishOrgAdmission / ClearOrgAdmission / PublishOrgEgress / ClearOrgEgress
+// are no-ops in the no_obs build (Phase W poller/LKG signature parity) —
+// admission (and all of internal/obs) is compiled out here, so there is no
+// Org layer to publish into or clear.
+func (h *obsAdmissionHandle) PublishOrgAdmission(_ string, _, _ int64, _, _ string, _, _ bool, _ any) {
+}
+
+func (h *obsAdmissionHandle) ClearOrgAdmission() {}
+
+func (h *obsAdmissionHandle) PublishOrgEgress(_ string, _, _ int64, _, _ string, _, _ bool, _ any) {}
+
+func (h *obsAdmissionHandle) ClearOrgEgress() {}
+
+// LiveCapabilities advertises nothing in the no_obs build: there is no
+// admission runtime here, so every judge-requiring org policy correctly stays
+// capability_mismatch (fail-closed).
+func (h *obsAdmissionHandle) LiveCapabilities() []string { return nil }
+
 // wireAdmission is a no-op in the no_obs build — admission lives inside the
-// observability subsystem, which is compiled out here.
-func wireAdmission(_ context.Context, _ config.Config, _ *sql.DB, _ *proxy.Options, _ *slog.Logger) {
+// observability subsystem, which is compiled out here. It returns a nil handle
+// to match the !no_obs signature. The relay parameter (C1 judge relay,
+// docs/plans/c1-judge-relay-spec-2026-08-15.md §3) is accepted for signature
+// parity with the !no_obs build and ignored — there is no judge to relay to.
+//
+// The stub binds nothing onto the proxy: obs_wire_proxy.go (the proxy half
+// of the real wiring) is not linked, so proxy.go reads obsProxyBinder as nil
+// and this file stays free of internal/proxy. That is what lets the public
+// tree, where this file is the only obs variant, build without capture.proxy
+// too (lane MP-L1L, T-715, ruling D-518).
+func wireAdmission(_ context.Context, cfg config.Config, _ *sql.DB, _ orgJudgeRelayFunc, logger *slog.Logger, _ emit.Sink) *obsAdmissionHandle {
+	// D-514 / D-516: an [observability.admission] block this build cannot
+	// honour starts off with the feasibility seam's one line.
+	if line, off := settingOffLine("observability.admission.enabled", cfg.Observability.Admission.Enabled, nil); off && logger != nil {
+		logger.Warn("admission: " + line)
+	}
+	return nil
 }
 
 // errObsCompiledOut is returned by the eval CLI wrappers in the no_obs build:
 // the whole observability subsystem (incl. the eval plane) is compiled out.
-var errObsCompiledOut = errors.New("this binary was built without observability (no_obs) — the eval plane is unavailable")
+var errObsCompiledOut = errors.New("this binary was built without observability (Plane A obs compiled out) - the eval plane is unavailable")
 
 // Plain eval shapes the (non-build-tagged) eval command references. Mirror the
 // !no_obs definitions so the command file compiles in both builds.
@@ -68,8 +139,10 @@ func newObsTraceHandler(_ context.Context, _ config.Config, _ *sql.DB, _ *slog.L
 	return nil
 }
 
-// obsDashboardRoutes is the no_obs stub: no obs trajectory endpoints exist.
-func obsDashboardRoutes(_ context.Context, _ config.Config, _ *sql.DB, _ *slog.Logger) []dashboard.ExtraRoute {
+// obsDashboardRoutes is the no_obs stub: no obs trajectory endpoints exist. The
+// shared-admission-handle parameter (gap P0-7) is accepted for signature parity
+// and ignored.
+func obsDashboardRoutes(_ context.Context, _ config.Config, _ string, _ *sql.DB, _ *obsAdmissionHandle, _ *slog.Logger) []dashapi.ExtraRoute {
 	return nil
 }
 

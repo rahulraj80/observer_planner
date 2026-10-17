@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -39,6 +41,10 @@ func (s *recordingSpawner) lastSpec() termsession.Spec {
 // (the seam ptyLauncher owns); the EXACT argv each ArgvMode yields is pinned in
 // internal/termsession TestSpecArgvModes.
 func TestPtyLauncherArgvModePerKind(t *testing.T) {
+	// The daemon --config setting is process-wide (newStartCmd records it in
+	// the policystate tests); pin an empty one so this table sees no `--config`
+	// prefix regardless of test order.
+	withDaemonConfigPath(t, "")
 	cases := []struct {
 		name         string
 		req          termsvc.LaunchRequest
@@ -102,5 +108,68 @@ func TestPtyLauncherArgvModePerKind(t *testing.T) {
 				t.Fatalf("continue-from argv = %v, want %v", gotContinue, tc.wantContinue)
 			}
 		})
+	}
+}
+
+// TestResolveShellArgvPrefersSHELL pins the server-derived-argv discipline: a
+// non-empty $SHELL in the daemon's OWN process env wins outright, never a
+// client-supplied value (there is no client input to this function at all). It
+// uses the injected form so it is green on every host — a POSIX $SHELL is
+// honoured verbatim on unix, and on Windows only when it names a real program
+// (see TestResolveShellArgvFor for the full ladders).
+func TestResolveShellArgvPrefersSHELL(t *testing.T) {
+	env := map[string]string{"SHELL": "/usr/bin/zsh"}
+	got := resolveShellArgvFor("linux", failLookPath, mapGetenv(env), missingStat)
+	want := []string{"/usr/bin/zsh"}
+	if !equalArgs(got, want) {
+		t.Fatalf("resolveShellArgvFor(linux) = %v, want %v", got, want)
+	}
+}
+
+// TestResolveShellArgvFallsBackToBash pins the fallback ladder when $SHELL is
+// unset: /bin/bash, then /bin/sh.
+func TestResolveShellArgvFallsBackToBash(t *testing.T) {
+	got := resolveShellArgvFor("linux", failLookPath, mapGetenv(nil), statOnly("/bin/bash"))
+	want := []string{"/bin/bash"}
+	if !equalArgs(got, want) {
+		t.Fatalf("resolveShellArgvFor(linux) = %v, want %v", got, want)
+	}
+}
+
+// TestPtyLauncherSpawnShellRequest pins the ptyLauncher.Spawn IsShell branch:
+// a shell request builds a SpecShell whose ShellArgv is exactly what the
+// server-side resolver returns for THIS host, ignoring
+// BinPath/Subcommand/ArgvMode/SessionID entirely — the fixed, server-derived
+// argv a plain-shell launch requires (mirrors SpecSetup's shape, see
+// internal/termsession.Spec.argv()). The assertion is against
+// resolveShellArgv() rather than a hard-coded POSIX path so it pins the WIRING
+// on every host; the per-OS ladders themselves are pinned by
+// TestResolveShellArgvFor.
+func TestPtyLauncherSpawnShellRequest(t *testing.T) {
+	wantShell := resolveShellArgv()
+	sp := &recordingSpawner{}
+	mgr := termsession.NewManager(termsession.Options{
+		Spawner: sp, ReapInterval: time.Hour, Now: time.Now,
+	})
+	t.Cleanup(mgr.Shutdown)
+	launcher := &ptyLauncher{mgr: mgr, binPath: "/observer"}
+	req := termsvc.LaunchRequest{
+		Kind:       termrun.KindFresh,
+		Subcommand: "should-be-ignored",
+		SessionID:  "should-be-ignored",
+		IsShell:    true,
+	}
+	if _, err := launcher.Spawn(req); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	spec := sp.lastSpec()
+	if spec.Kind != termsession.SpecShell {
+		t.Fatalf("Kind = %v, want SpecShell", spec.Kind)
+	}
+	if !equalArgs(spec.ShellArgv, wantShell) {
+		t.Fatalf("ShellArgv = %v, want %v (the server-derived shell argv)", spec.ShellArgv, wantShell)
+	}
+	if len(spec.ShellArgv) == 0 {
+		t.Fatal("ShellArgv is empty - a plain-shell launch must always carry a program")
 	}
 }

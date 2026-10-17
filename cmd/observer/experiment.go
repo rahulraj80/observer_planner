@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -10,8 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 )
 
 // newExperimentCmd is the `observer experiment` group (usability arc
@@ -28,7 +28,7 @@ func newExperimentCmd() *cobra.Command {
 		Long: "Split one traffic class between two profiles by a deterministic\n" +
 			"session hash, then report per-arm evidence ($/session, CV, turns,\n" +
 			"cache causes, compression savings). ADVISORY measurement tooling:\n" +
-			"experiments select profiles exactly like assignments do — the master\n" +
+			"experiments select profiles exactly like assignments do - the master\n" +
 			"compression switch and every safety invariant stay untouched.\n\n" +
 			"Methodology (docs/plans/profile-content-refresh-ab-plan-2026-06-10.md):\n" +
 			"single-variable candidates, n>=8 sessions per arm before believing a\n" +
@@ -81,7 +81,7 @@ func newExperimentStartCmd() *cobra.Command {
 					return fmt.Errorf("experiment %q already exists (records persist; pick a new name)", exp.Name)
 				}
 				if e.Running() && e.Class == exp.Class {
-					return fmt.Errorf("experiment %q is already running on class %q — stop it first", e.Name, e.Class)
+					return fmt.Errorf("experiment %q is already running on class %q - stop it first", e.Name, e.Class)
 				}
 			}
 			cfg.Experiments = append(cfg.Experiments, exp)
@@ -91,9 +91,9 @@ func newExperimentStartCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "experiment %s started: class=%s control=%s candidate=%s\n",
 				exp.Name, exp.Class, exp.Control, exp.Candidate)
 			if pokeReload() {
-				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded — new sessions split between the arms now")
+				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded - new sessions split between the arms now")
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected on the dashboard port — splits on next start")
+				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected on the dashboard port - splits on next start")
 			}
 			return nil
 		},
@@ -143,7 +143,7 @@ func newExperimentStopCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "experiment %s stopped\n", args[0])
 			if pokeReload() {
-				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded — new sessions resolve per the assignment table again")
+				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded - new sessions resolve per the assignment table again")
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "report: observer experiment report %s\n", args[0])
 			return nil
@@ -169,7 +169,7 @@ func newExperimentListCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 			if len(cfg.Experiments) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no experiments recorded — start one with: observer experiment start <name> --class <class> --control <p> --candidate <p>")
+				fmt.Fprintln(cmd.OutOrStdout(), "no experiments recorded - start one with: observer experiment start <name> --class <class> --control <p> --candidate <p>")
 				return nil
 			}
 			exps := append([]config.ExperimentConfig{}, cfg.Experiments...)
@@ -217,7 +217,7 @@ func newExperimentReportCmd() *cobra.Command {
 			if exp == nil {
 				return fmt.Errorf("unknown experiment %q", args[0])
 			}
-			rep, err := dashboard.ComputeExperimentReport(cmd.Context(), database, cost.NewEngine(cfg.Intelligence), *exp)
+			rep, err := dashapi.ComputeExperimentReport(cmd.Context(), database, acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default()), *exp)
 			if err != nil {
 				return err
 			}
@@ -238,7 +238,7 @@ func newExperimentReportCmd() *cobra.Command {
 // printExperimentReport renders the evidence table plus the §2.4
 // decision-rule guidance — numbers first, verdicts left to the
 // operator.
-func printExperimentReport(cmd *cobra.Command, rep *dashboard.ExperimentReport) {
+func printExperimentReport(cmd *cobra.Command, rep *dashapi.ExperimentReport) {
 	out := cmd.OutOrStdout()
 	status := "stopped"
 	if rep.Running {
@@ -251,7 +251,7 @@ func printExperimentReport(cmd *cobra.Command, rep *dashboard.ExperimentReport) 
 	}
 	fmt.Fprintf(out, "\n%-11s %-20s %8s %10s %8s %7s %10s %12s\n",
 		"arm", "profile", "sessions", "mean $", "CV", "turns", "cache r:w", "comp saved")
-	for _, ar := range []dashboard.ExperimentArmReport{rep.Control, rep.Candidate} {
+	for _, ar := range []dashapi.ExperimentArmReport{rep.Control, rep.Candidate} {
 		rw := "—"
 		if ar.CacheWriteTokens > 0 {
 			rw = fmt.Sprintf("%.1fx", float64(ar.CacheReadTokens)/float64(ar.CacheWriteTokens))

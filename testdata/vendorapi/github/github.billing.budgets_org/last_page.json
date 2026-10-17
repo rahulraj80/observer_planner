@@ -1,0 +1,53 @@
+{
+  "budgets": [
+    {
+      "id": "2066deda-923f-43f9-88d2-62395a28c0cdd",
+      "budget_type": "ProductPricing",
+      "budget_product_skus": [
+        "actions"
+      ],
+      "budget_scope": "enterprise",
+      "budget_amount": 1000.0,
+      "prevent_further_usage": true,
+      "budget_alerting": {
+        "will_alert": true,
+        "alert_recipients": [
+          "enterprise-admin",
+          "billing-manager"
+        ]
+      }
+    },
+    {
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "budget_type": "SkuPricing",
+      "budget_product_skus": [
+        "actions_linux"
+      ],
+      "budget_scope": "organization",
+      "budget_amount": 500.0,
+      "prevent_further_usage": false,
+      "budget_alerting": {
+        "will_alert": true,
+        "alert_recipients": [
+          "org-owner"
+        ]
+      }
+    },
+    {
+      "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "budget_type": "ProductPricing",
+      "budget_product_skus": [
+        "packages"
+      ],
+      "budget_scope": "cost_center",
+      "budget_amount": 250.0,
+      "prevent_further_usage": true,
+      "budget_alerting": {
+        "will_alert": false,
+        "alert_recipients": []
+      }
+    }
+  ],
+  "has_next_page": false,
+  "total_count": 3
+}

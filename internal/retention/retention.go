@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
 // Result summarizes one Run.
@@ -21,15 +23,20 @@ type Result struct {
 	DBSizeBytesBefore       int64
 	DBSizeBytesAfter        int64
 	DurationMs              int64
-	// SizeCapUnmet is set when the size-cap shrink stopped while the DB
-	// was still over MaxDBSizeMB — because shedding aged `actions` (the
-	// only table the size loop prunes) couldn't bring it under cap. That
-	// means the bulk is in OTHER tables (token_usage / cache_*), and the
-	// operator should raise max_db_size_mb or add token retention rather
-	// than have the size loop destroy the actions table. The caller logs
-	// a WARN. Pre-fix the loop kept deleting actions to (near) zero
-	// chasing an unreachable cap; now it respects an action-keep floor
-	// and stops here instead.
+	// SizeCapUnmet is set when the single bounded size-cap shed pass
+	// (shrinkToCap) left the DB still over MaxDBSizeMB — because shedding
+	// aged `actions` (the only table this pass prunes) couldn't bring it
+	// under cap, either because the keep-floor stopped it or because a
+	// DELETE alone (no automatic full VACUUM — see shrinkToCap) doesn't
+	// shrink the file. That means the bulk is in OTHER tables
+	// (token_usage / cache_*), or the file needs the operator-triggered
+	// `observer prune --vacuum` compaction. The operator should raise
+	// max_db_size_mb, add token retention, or run `observer prune
+	// --vacuum` in a restart window rather than have this pass destroy
+	// the actions table chasing an unreachable cap. The caller logs a
+	// WARN. Historically (pre-2026-08-fix) this path looped a bare
+	// `VACUUM` up to 12x per pass, which is exactly the incident this
+	// field's guard now prevents.
 	SizeCapUnmet bool
 	// CacheRowsDeleted is the count of cache_* table rows removed
 	// by the cachetrack sweep (spec §9). The retention package
@@ -52,6 +59,16 @@ type Result struct {
 	// chain checkpoint keeps the audit chain verifiable across the
 	// prune). Zero when [guard].retention_days is ≤ 0.
 	GuardRowsDeleted int
+	// PromptReconsiderRowsDeleted is the count of guard_prompt_reconsider
+	// rows removed by the prompt-submit "reconsider-once" sweep (migration
+	// 097, docs/plans/prompt-submit-intervention-exploration-2026-09-07.md
+	// §5.4). Unlike CacheRowsDeleted/GuardRowsDeleted this sweep has no
+	// config-gated retention-days knob: the table's own expires_at column
+	// IS its prune horizon (a short-lived reconsider-once grant, default
+	// 30 minutes), so runRetention calls store.PrunePromptReconsider
+	// unconditionally on every pass — an expired-only age sweep with
+	// nothing left to configure.
+	PromptReconsiderRowsDeleted int
 	// ProcessRowsDeleted is the count of process_runs + process_events rows
 	// removed by the process-observability sweep
 	// ([observer.process].retention_days, docs/process-observability.md §11).
@@ -81,6 +98,38 @@ type Result struct {
 	// runRetention calls store.CodeIntelPruneStaleProjects and sets this
 	// field. Zero when [codeintel].retention_days is ≤ 0.
 	CodeIntelProjectsDeleted int
+	// CodeIntelProjectsArchived is the count of code-intelligence projects
+	// MOVED to cold storage (~/.observer/archive.db) this pass by the
+	// [archive] sweep, rather than deleted
+	// (docs/plans/observer-corpus-archival-lazyload-design-2026-08-26.md).
+	// Same orchestration pattern as CacheRowsDeleted: the retention package
+	// never touches the tables; runRetention drives internal/archivesvc and
+	// sets this field.
+	//
+	// This is a SIBLING of CodeIntelProjectsDeleted, deliberately not a reuse
+	// of it: "deleted" and "archived" are different fates for the operator —
+	// one is gone, one is one rehydrate away — and a report that conflates
+	// them would make the whole arc invisible in the numbers it should be
+	// most visible in. Exactly one of the two is non-zero on any given pass,
+	// because [archive].enabled selects which sweep runs.
+	CodeIntelProjectsArchived int
+	// CodeIntelRowsArchived is the total verified row count moved to cold
+	// storage this pass — the useful magnitude behind
+	// CodeIntelProjectsArchived, since projects vary by orders of magnitude.
+	CodeIntelRowsArchived int64
+	// ProcessWindowsArchived is the count of process-capture day-windows
+	// moved to cold storage this pass (corpus archival Bucket B). Like
+	// CodeIntelProjectsArchived it is a SIBLING of ProcessRowsDeleted, never
+	// a repurposing of it: "moved, still readable" and "deleted, gone" are
+	// different operator-visible outcomes and a report that conflated them
+	// would be lying about the only-copy bucket.
+	ProcessWindowsArchived int
+	// ProcessRowsArchived is the total verified row count moved to cold
+	// storage this pass.
+	ProcessRowsArchived int64
+	// ProcessWindowsExpired is the count of day-windows deleted from the
+	// ARCHIVE FILE by its own (later) retention horizon.
+	ProcessWindowsExpired int
 	// IncrementalVacuumRun is set when Run issued a bounded PRAGMA
 	// incremental_vacuum(N) at the end of the pass — possible only once
 	// the DB has been converted to auto_vacuum=INCREMENTAL (the
@@ -88,6 +137,21 @@ type Result struct {
 	// DB (auto_vacuum=NONE) freed pages stay on the freelist until a full
 	// VACUUM; this flag reports which regime applied.
 	IncrementalVacuumRun bool
+	// OrgIntelCacheDeleted is the count of node-local org_intel_cache rows
+	// (org-served-cloud-intelligence, migration 112/114) removed this pass:
+	// orphans whose session is gone, plus rows older than max_age_days. Same
+	// orchestration pattern as CacheRowsDeleted — the retention package never
+	// touches the table; runRetention calls store.PruneOrgIntelCache and sets
+	// this field (finding 7).
+	OrgIntelCacheDeleted int
+	// EventRowsDeleted is the per-table row count removed by the bounded,
+	// table-driven event sweep (events.go): compaction_events and
+	// compression_events, the two node-local append-only event tables that
+	// had NO retention horizon at all until 2026-09-16 and between them held
+	// ~2.3 GiB on the operator's 33 GiB live DB. Keyed by table name so a
+	// third horizon is a data row, not a third Result field. A table whose
+	// horizon is 0 (keep forever) is absent from the map.
+	EventRowsDeleted EventSweepCounts
 }
 
 // Options parameterize Run.
@@ -116,13 +180,34 @@ type Options struct {
 	// (defaultIncrementalVacuumPages ≈ 200MB at 4KiB pages); negative
 	// disables the step.
 	IncrementalVacuumPages int
+	// EventSweep carries the per-table horizons for the bounded event sweep
+	// (events.go). Zero on a field means keep forever, so the zero Options
+	// value is byte-identical to pre-2026-09-16 behaviour.
+	EventSweep EventSweepDays
 }
 
 // Pruner runs retention on a database.
-type Pruner struct{ db *sql.DB }
+type Pruner struct {
+	db *sql.DB
+	// sessionsDeleted runs inside the orphaned-session sweep's transaction,
+	// after it deleted at least one session (WithSessionsDeletedHook).
+	sessionsDeleted func(ctx context.Context, tx *sql.Tx) error
+}
 
 // New wraps an open database.
 func New(db *sql.DB) *Pruner { return &Pruner{db: db} }
+
+// WithSessionsDeletedHook installs a step the orphaned-session sweep runs
+// inside its own transaction after deleting sessions. The composition root
+// passes store.ClampSessionPushCursor (T-373): sessions has an implicit
+// rowid, so deleting the newest sessions lets SQLite hand the next one a
+// rowid at or below the org push cursor, and the cursor must come down in
+// the same transaction, before any new session exists. The hook is injected
+// because this package must not import the store. Chainable; nil clears it.
+func (p *Pruner) WithSessionsDeletedHook(fn func(ctx context.Context, tx *sql.Tx) error) *Pruner {
+	p.sessionsDeleted = fn
+	return p
+}
 
 // Run executes retention with opts and returns a summary. The pruner is
 // safe to call on an empty database; missing data is silently ignored.
@@ -164,6 +249,18 @@ func (p *Pruner) Run(ctx context.Context, opts Options) (Result, error) {
 		return res, err
 	}
 	res.FileStateDeleted = n
+
+	// Bounded, table-driven event sweep (events.go). Placed after the
+	// actions/session passes and before the WAL checkpoint so the pages it
+	// frees are part of the same reclamation step; a compaction_events row
+	// deleted here also unblocks its session from the NEXT pass's
+	// deleteOrphanedSessions (which treats a surviving compaction row as a
+	// reason to keep the session).
+	swept, serr := p.sweepEventTables(ctx, opts.EventSweep)
+	res.EventRowsDeleted = swept
+	if serr != nil {
+		return res, serr
+	}
 
 	// Reclaim WAL space — auto_vacuum isn't enabled, so PRAGMA
 	// wal_checkpoint(TRUNCATE) is the cheapest way to shrink storage.
@@ -262,6 +359,27 @@ func ConvertToIncrementalVacuum(ctx context.Context, db *sql.DB) (int, error) {
 	return mode, nil
 }
 
+// deleteAgedExcerptsSQL removes the FTS5 excerpts of every action older
+// than the cutoff.
+//
+// action_id is UNINDEXED in action_excerpts (001_initial.sql), so the old
+// `DELETE FROM action_excerpts WHERE action_id IN (SELECT id FROM actions
+// WHERE timestamp < ?)` planned as a full scan of every stored excerpt
+// under the write lock on EVERY retention pass, even one that deletes
+// nothing (T-415, the FTSSTALL class: 0.4-0.5 s in sqlite3 over 529k
+// excerpts, slower in modernc). Here the aged actions are walked by their
+// timestamp index, each is resolved to its FTS rowids through the shadow
+// table's c0 index (migration 147), and the virtual table is reached by
+// rowid equality, so the cost follows the number of aged actions, not the
+// size of the excerpt table. `+a.id` drops actions.id's INTEGER affinity so
+// the c0 index stays usable (c0 has no affinity; every writer binds int64),
+// which also makes the planner drive the join from the timestamp range.
+// Pinned by TestDeleteAgedExcerptsSeeksByRowid.
+const deleteAgedExcerptsSQL = `DELETE FROM action_excerpts
+ WHERE rowid IN (SELECT e.id FROM actions a
+                   JOIN action_excerpts_content e ON e.c0 = +a.id
+                  WHERE a.timestamp < ?)`
+
 // deleteActionsOlder deletes actions with timestamp < cutoff, plus the
 // dependent FTS5 excerpts and failure_context rows (which carry FK to
 // actions but no ON DELETE CASCADE).
@@ -272,9 +390,7 @@ func (p *Pruner) deleteActionsOlder(ctx context.Context, cutoff string, res *Res
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	exc, err := tx.ExecContext(ctx,
-		`DELETE FROM action_excerpts
-		 WHERE action_id IN (SELECT id FROM actions WHERE timestamp < ?)`, cutoff)
+	exc, err := tx.ExecContext(ctx, deleteAgedExcerptsSQL, cutoff)
 	if err != nil {
 		return fmt.Errorf("retention: delete excerpts: %w", err)
 	}
@@ -322,12 +438,26 @@ func (p *Pruner) deleteActionsOlder(ctx context.Context, cutoff string, res *Res
 		}
 	}
 
-	a, err := tx.ExecContext(ctx, `DELETE FROM actions WHERE timestamp < ?`, cutoff)
-	if err != nil {
-		return fmt.Errorf("retention: delete actions: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tool_account_observations WHERE observed_at < ?`, cutoff); err != nil {
+		return fmt.Errorf("retention: delete account observations: %w", err)
 	}
-	if n, err := a.RowsAffected(); err == nil {
-		res.ActionsDeleted += int(n)
+	// Ageing, not a correction (agent migration 141): the marker keeps these
+	// deletes out of the org tombstone queue, so the org keeps the rows under
+	// its own retention policy.
+	if err := db.WithRetentionDeletes(ctx, tx, func() error {
+		if err := db.RecordAgeingCutoff(ctx, tx, cutoff); err != nil {
+			return fmt.Errorf("retention: %w", err)
+		}
+		a, err := tx.ExecContext(ctx, `DELETE FROM actions WHERE timestamp < ?`, cutoff)
+		if err != nil {
+			return fmt.Errorf("retention: delete actions: %w", err)
+		}
+		if n, err := a.RowsAffected(); err == nil {
+			res.ActionsDeleted += int(n)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -348,18 +478,41 @@ func (p *Pruner) deleteActionsOlder(ctx context.Context, cutoff string, res *Res
 // tool_use block (see decision log 2026-04-16). Those sessions look
 // orphaned by the actions table alone, but their token_usage data is
 // still load-bearing for cost rollups.
+//
+// Ageing, not a correction (agent migration 141): runs under the retention
+// marker, so a session this sweep removes is never tombstoned on the org.
 func (p *Pruner) deleteOrphanedSessions(ctx context.Context, res *Result) error {
-	r, err := p.db.ExecContext(ctx,
-		`DELETE FROM sessions
-		 WHERE id NOT IN (SELECT DISTINCT session_id FROM actions)
-		   AND id NOT IN (SELECT DISTINCT session_id FROM token_usage)
-		   AND id NOT IN (SELECT DISTINCT session_id FROM failure_context)
-		   AND id NOT IN (SELECT DISTINCT session_id FROM compaction_events)`)
+	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("retention: orphaned sessions: %w", err)
+		return fmt.Errorf("retention: orphaned sessions: begin: %w", err)
 	}
-	if n, err := r.RowsAffected(); err == nil {
-		res.OrphanedSessionsDeleted = int(n)
+	defer func() { _ = tx.Rollback() }()
+	deleted := int64(0)
+	if err := db.WithRetentionDeletes(ctx, tx, func() error {
+		r, err := tx.ExecContext(ctx,
+			`DELETE FROM sessions
+			 WHERE id NOT IN (SELECT DISTINCT session_id FROM actions)
+			   AND id NOT IN (SELECT DISTINCT session_id FROM token_usage)
+			   AND id NOT IN (SELECT DISTINCT session_id FROM failure_context)
+			   AND id NOT IN (SELECT DISTINCT session_id FROM compaction_events)`)
+		if err != nil {
+			return fmt.Errorf("retention: orphaned sessions: %w", err)
+		}
+		if n, err := r.RowsAffected(); err == nil {
+			res.OrphanedSessionsDeleted = int(n)
+			deleted = n
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if deleted > 0 && p.sessionsDeleted != nil {
+		if err := p.sessionsDeleted(ctx, tx); err != nil {
+			return fmt.Errorf("retention: orphaned sessions: after delete: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("retention: orphaned sessions: commit: %w", err)
 	}
 	return nil
 }
@@ -377,68 +530,89 @@ func (p *Pruner) deleteOrphanedSessions(ctx context.Context, res *Result) error 
 // the non-actions bulk.
 const sizeCapActionFloorDays = 30
 
-// shrinkToCap iteratively drops the oldest 30-day window of actions until
-// the DB file is under the size cap OR the action-keep floor is reached.
-// Capped at 12 iterations as a safety rail against an unexpectedly small
-// max_db_size_mb (e.g. 1MB while individual sessions stay open).
+// shrinkToCap performs AT MOST ONE bounded reclamation pass when the DB
+// file exceeds the size cap: it sheds a single 30-day window of the
+// oldest `actions` (never crossing the sizeCapActionFloorDays keep-floor),
+// checkpoints the WAL, and runs the existing bounded incrementalVacuum
+// (a no-op unless the DB has already been converted to
+// auto_vacuum=INCREMENTAL via the daemon-down `observer prune --vacuum`
+// step — that's fine and correct; it's live-safe either way).
+//
+// It NEVER issues a bare `VACUUM` and NEVER loops. A full VACUUM rewrites
+// the entire file under an exclusive lock and needs ~2x disk headroom —
+// on a many-GB DB that is a minutes-long stall and can itself exhaust
+// disk. That reclamation class is operator-triggered only
+// (ConvertToIncrementalVacuum / `observer prune --vacuum` in a restart
+// window), never automatic (2026-08-26 incident: this loop ran a bare
+// VACUUM up to 12x per pass, rewriting a ~40GB file to a /var/tmp temp
+// copy on every startup and every retention tick).
+//
+// If, after the single pass, the DB is still over cap — because the
+// oldest action is already within the keep-floor (actions can't be shed
+// further so the bulk lives in other tables), because there are no
+// actions left to shave, or because the pass didn't bring the file under
+// cap (expected on an unconverted auto_vacuum=NONE DB, since a DELETE
+// alone only frees pages to the internal freelist without a VACUUM) —
+// shrinkToCap sets res.SizeCapUnmet and returns. The caller WARNs once,
+// naming the real bulk and pointing at raising max_db_size_mb or running
+// the daemon-down `observer prune --vacuum` compaction.
 func (p *Pruner) shrinkToCap(ctx context.Context, opts Options, res *Result) error {
 	cap := int64(opts.MaxDBSizeMB) * 1024 * 1024
-	floor := nowUTC().AddDate(0, 0, -sizeCapActionFloorDays)
-	for i := 0; i < 12; i++ {
-		size := sizeOf(opts.DBPath)
-		if size <= cap {
-			return nil
-		}
-		var minTS sql.NullString
-		if err := p.db.QueryRowContext(ctx,
-			`SELECT MIN(timestamp) FROM actions`).Scan(&minTS); err != nil {
-			return fmt.Errorf("retention: min timestamp: %w", err)
-		}
-		if !minTS.Valid {
-			// No actions left to shave, yet still over cap → the bulk is
-			// in other tables. Stop and flag rather than no-op silently.
-			res.SizeCapUnmet = true
-			return nil
-		}
-		min, err := time.Parse(time.RFC3339Nano, minTS.String)
-		if err != nil {
-			return fmt.Errorf("retention: parse min timestamp %q: %w", minTS.String, err)
-		}
-		// Floor guard: if the oldest action is already within the keep-
-		// floor, we must not delete it — actions can't be shed further, so
-		// the over-cap condition is owned by other tables.
-		if !min.Before(floor) {
-			res.SizeCapUnmet = true
-			return nil
-		}
-		cutoff := min.Add(30 * 24 * time.Hour)
-		if cutoff.After(floor) {
-			cutoff = floor // clamp: never cross the keep-floor in one pass
-		}
-		actionsBefore := res.ActionsDeleted
-		if err := p.deleteActionsOlder(ctx, cutoff.Format(time.RFC3339Nano), res); err != nil {
-			return err
-		}
-		if err := p.deleteOrphanedSessions(ctx, res); err != nil {
-			return err
-		}
-		_, _ = p.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
-		// VACUUM compacts the main file to reflect deletes; this is the
-		// only way to shrink the .db file without auto_vacuum enabled.
-		if _, err := p.db.ExecContext(ctx, `VACUUM`); err != nil {
-			// VACUUM can fail under heavy concurrent load; non-fatal.
-			break
-		}
-		res.SizePassesRun++
-		// If a pass deleted no actions OR the file didn't shrink, actions
-		// aren't the bulk — stop churning and flag rather than loop to the
-		// floor pointlessly.
-		if res.ActionsDeleted == actionsBefore || sizeOf(opts.DBPath) >= size {
-			res.SizeCapUnmet = true
-			return nil
-		}
+	size := sizeOf(opts.DBPath)
+	if size <= cap {
+		return nil
 	}
-	if sizeOf(opts.DBPath) > cap {
+
+	var minTS sql.NullString
+	if err := p.db.QueryRowContext(ctx,
+		`SELECT MIN(timestamp) FROM actions`).Scan(&minTS); err != nil {
+		return fmt.Errorf("retention: min timestamp: %w", err)
+	}
+	if !minTS.Valid {
+		// No actions left to shave, yet still over cap → the bulk is in
+		// other tables. Stop and flag rather than no-op silently.
+		res.SizeCapUnmet = true
+		return nil
+	}
+	min, err := time.Parse(time.RFC3339Nano, minTS.String)
+	if err != nil {
+		return fmt.Errorf("retention: parse min timestamp %q: %w", minTS.String, err)
+	}
+
+	// Floor guard: if the oldest action is already within the keep-floor,
+	// we must not delete it — actions can't be shed further, so the
+	// over-cap condition is owned by other tables. Gate here, before any
+	// work, so an unreachable cap costs nothing beyond the MIN() lookup
+	// above.
+	floor := nowUTC().AddDate(0, 0, -sizeCapActionFloorDays)
+	if !min.Before(floor) {
+		res.SizeCapUnmet = true
+		return nil
+	}
+
+	cutoff := min.Add(30 * 24 * time.Hour)
+	if cutoff.After(floor) {
+		cutoff = floor // clamp: never cross the keep-floor in one pass
+	}
+	actionsBefore := res.ActionsDeleted
+	if err := p.deleteActionsOlder(ctx, cutoff.Format(time.RFC3339Nano), res); err != nil {
+		return err
+	}
+	if err := p.deleteOrphanedSessions(ctx, res); err != nil {
+		return err
+	}
+	_, _ = p.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+	// Bounded, live-safe reclamation — a no-op unless the DB is already
+	// auto_vacuum=INCREMENTAL. Never a bare VACUUM.
+	p.incrementalVacuum(ctx, opts.IncrementalVacuumPages)
+	res.SizePassesRun++
+
+	// Report whether the single pass actually shed the bulk. A DELETE
+	// with no incremental/full vacuum doesn't shrink the file at all
+	// (freed pages just join the freelist), so on an unconverted DB this
+	// will almost always still be over cap — that's expected; the fix is
+	// `observer prune --vacuum`, not another automatic pass here.
+	if res.ActionsDeleted == actionsBefore || sizeOf(opts.DBPath) > cap {
 		res.SizeCapUnmet = true
 	}
 	return nil
@@ -470,3 +644,28 @@ func sizeOf(path string) int64 {
 
 // nowUTC is a var so tests can inject a fixed clock.
 var nowUTC = func() time.Time { return time.Now().UTC() }
+
+// AgeingHorizon is the oldest instant no retention pass under opts can have
+// deleted a pushed row (actions or sessions) from, as of now: rows at or after
+// it are still on the node unless a CORRECTION removed them. It is what lets
+// `observer org resync --deletions` tell a correction from ageing when it
+// compares the node with the org (store.PushManifestOptions.NotBefore).
+//
+// The age pass deletes actions older than MaxAgeDays; the size-cap pass never
+// crosses sizeCapActionFloorDays; the orphaned-session sweep only removes a
+// session with no actions left, so it follows the actions horizon. One day of
+// margin absorbs a pass that ran just before now. The zero time means no
+// ageing is configured at all.
+func AgeingHorizon(opts Options, now time.Time) time.Time {
+	days := 0
+	if opts.MaxAgeDays > 0 {
+		days = opts.MaxAgeDays
+	}
+	if opts.MaxDBSizeMB > 0 && (days == 0 || days > sizeCapActionFloorDays) {
+		days = sizeCapActionFloorDays
+	}
+	if days == 0 {
+		return time.Time{}
+	}
+	return now.UTC().AddDate(0, 0, -(days - 1))
+}

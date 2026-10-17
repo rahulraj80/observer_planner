@@ -1,0 +1,22 @@
+{
+  "total_count": 3,
+  "offset": 0,
+  "limit": 100,
+  "data": [
+    {
+      "userId": "usr_synth01",
+      "userName": "Ada Example",
+      "userEmail": "ada@example.com",
+      "role": "ADMIN",
+      "joinedAt": "2026-03-01T09:00:00Z"
+    },
+    {
+      "userId": "usr_synth02",
+      "userName": null,
+      "userEmail": null,
+      "role": "MEMBER",
+      "joinedAt": "2026-04-12T15:30:00Z"
+    }
+  ],
+  "status": null
+}

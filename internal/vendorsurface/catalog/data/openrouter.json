@@ -1,0 +1,4206 @@
+{
+ "group": "openrouter",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/openrouter-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "openrouter.broadcast.traces",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.broadcast",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "destination credential configured by admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "async seconds",
+   "lookback_doc": "receiver-owned",
+   "per_user_doc": "per call",
+   "mechanism_doc": "push to destination: OTel Collector (OTLP), webhook, S3 / S3-compatible, BigQuery, Snowflake, ClickHouse, Datadog, Grafana, Langfuse, LangSmith, New Relic, PostHog, Sentry, Arize, Braintrust, Opik, Elastic, Raindrop, Ramp, Weave",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry, Usage, Cost, Content, Sessions",
+   "grain_doc": "PerCall trace (prompt + completion unless privacy_mode, token breakdown, costs, timings, user, session_id, trace ids, apiKeyName)",
+   "build": "buildable",
+   "build_doc": "Driverable (OTLP / webhook receiver)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/broadcast.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.data.public_datasets",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.data",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "any key"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "limit/offset"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "30 rpm per key, 500/day per account"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "from 2025-01-01, max 366 day window",
+   "per_user_doc": "aggregate public",
+   "mechanism_doc": "REST GET /api/v1/datasets/rankings-daily, /datasets/app-rankings, /benchmarks, /classifications/task (session-cost dataset referenced, no path)",
+   "read_write_doc": "R",
+   "class_doc": "Adoption (market, NOT org data)",
+   "grain_doc": "Day / 7-day share",
+   "build": "buildable",
+   "build_doc": "Driverable but out of scope (no org data)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/data-api.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.batches",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "regular key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "async",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per batch",
+   "mechanism_doc": "REST GET/POST /api/v1/batches, GET/DELETE /{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions (async jobs)",
+   "grain_doc": "per batch",
+   "build": "buildable",
+   "build_doc": "Driverable (not admin)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/batch/list-batches.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.catalog",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "regular key or none"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST GET /api/v1/models, /api/v1/models/{author}/{slug}/endpoints, /api/v1/providers, /api/v1/models/count, ZDR preview endpoint",
+   "read_write_doc": "R",
+   "class_doc": "Policy (reference: models, prices, endpoints, providers, ZDR impact)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/endpoints/preview-the-impact-of-zdr-on-the-available-endpoints.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.generation",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "regular key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a (by id)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "seconds after completion",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per call",
+   "mechanism_doc": "REST GET /api/v1/generation?id=",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Sessions",
+   "grain_doc": "PerCall (gen-...; session_id, external_user, workspace_id, app_id, data_region, is_byok, latency)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.generation_content",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "key (doc ambiguous: 403 example cites management key)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any; requires I/O logging enabled before the call"
+   },
+   "freshness_doc": "after completion",
+   "lookback_doc": "stored at least 3 months, longer at vendor discretion; deletion via support",
+   "per_user_doc": "per call",
+   "mechanism_doc": "REST GET /api/v1/generation/content?id=",
+   "read_write_doc": "R",
+   "class_doc": "Content",
+   "grain_doc": "PerCall (input prompt/messages, output completion/reasoning, error chain)",
+   "build": "buildable",
+   "build_doc": "Driverable (content gate)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/generations/get-stored-prompt-completion-and-error-content-for-a-generation.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/guides/features/input-output-logging.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.inline_usage",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "regular key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "response body / final SSE chunk (node proxy capture)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall (`usage` incl. cached, cache_write, reasoning tokens, `cost`, `cost_details.upstream_inference_cost`)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/usage-accounting.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.key_self",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "the key itself"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "rolling counters",
+   "per_user_doc": "per key",
+   "mechanism_doc": "REST GET /api/v1/key",
+   "read_write_doc": "R",
+   "class_doc": "Limits, RateLimits, Usage",
+   "grain_doc": "Snapshot of calling key (limit, limit_remaining, limit_reset, usage daily/weekly/monthly, byok usage, is_free_tier, free_model_daily_requests, expires_at, workspace_id, allowed_data_regions)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/api_reference/limits.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.models_user",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "regular key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key",
+   "mechanism_doc": "REST GET /api/v1/models/user",
+   "read_write_doc": "R",
+   "class_doc": "Policy (effective model access)",
+   "grain_doc": "Snapshot (models a key may use after guardrails, privacy, provider prefs)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/models/list-models-filtered-by-user-provider-preferences-privacy-settings-and-guardrails.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.presets",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "versions kept",
+   "per_user_doc": "per workspace",
+   "mechanism_doc": "REST GET /api/v1/presets, GET preset, GET versions, POST create from chat-completions / messages / responses body",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (server-side request config)",
+   "grain_doc": "Snapshot (versioned)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/presets/list-presets.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.inference.ratelimit_headers",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.inference",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "free models 20 rpm, 50 or 1000 rpd; paid no platform cap"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "response headers (node proxy capture)",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits",
+   "grain_doc": "PerCall (on 429 only: X-RateLimit-Limit/Remaining/Reset; Retry-After; 402 limit_source)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api_reference/limits.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.interns",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.interns",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "key (workspace scoped)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor starting_after, limit 1..500"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Intern programme only (others 404)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per intern",
+   "mechanism_doc": "REST GET/POST /api/v1/interns, GET/PATCH/DELETE /{id}, provision, suspend, run async, chat stream, daemon access",
+   "read_write_doc": "R/W",
+   "class_doc": "ServiceAccounts-like (hosted agents), Sessions",
+   "grain_doc": "Snapshot (id, model, instructions, status, hostname, workspace_id, vault_id; no usage/cost fields)",
+   "build": "buildable",
+   "build_doc": "Driverable (programme gated)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/interns/list-interns.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.activity",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "management key as Authorization: Bearer (OpenAPI security scheme apiKey: http bearer); a regular inference key is refused (403)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none (one day or window)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any (org for user_id)"
+   },
+   "freshness_doc": "completed UTC days",
+   "lookback_doc": "last 30 completed UTC days",
+   "per_user_doc": "aggregate, per-user by filter",
+   "mechanism_doc": "REST GET /api/v1/activity?date&api_key_hash&user_id&group_by&workspace_id",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "OrgDay x model x endpoint (filter by key hash, member user_id; group_by=workspace)",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "openrouter.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity-grouped-by-endpoint.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710) for Usage and Cost: driver internal/vendorapi/openrouter Activity (GET /api/v1/activity with no filter: the last 30 completed UTC days, one row per date, model and endpoint, aggregated across workspaces; unpaged; every run restates the 30 days). Tool attribution RULING: OpenRouter is a gateway route with no registry adapter, so every row lands as an UNATTRIBUTED org-level gateway fact under the reserved value gateway:openrouter (vendorapi.GatewayTool), never a registry tool: no tool figure arbitrates onto it, no identity is held under it, nothing on a spend, budget, alert or enforcement path reads it. Facts per (UTC day, model slug, endpoint id): cost and byok_cost (usd), requests, input, output, reasoning and cache_read tokens; cached_tokens may exceed prompt_tokens (documented) and is never subtracted. Adoption stays buildable (the per-user filter is not used). Closed DTO (secret class may_return_secret kept). Synthetic only, no vendor response observed. assumption_tested: the first row is the reference example, the second is synthesized.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/openrouter Activity, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: OpenRouter OpenAPI securitySchemes apiKey (type http, scheme bearer): management key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.analytics_meta",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "REST GET /api/v1/analytics/meta",
+   "read_write_doc": "R",
+   "class_doc": "Usage (schema)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/analytics/get-available-analytics-metrics-and-dimensions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.analytics_query",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "limit default 1000, group_limit; truncated flag"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented; 408 on timeout"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "near real time (cachedAt)",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per-user via `user` dimension",
+   "mechanism_doc": "REST POST /api/v1/analytics/query",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Adoption",
+   "grain_doc": "Day (granularity `day`) x up to 2 dimensions (model, api_key_id, user, workspace, app, provider, origin, country, classifier dims)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/analytics/query-analytics-data.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.byok",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per credential",
+   "mechanism_doc": "REST GET/POST /api/v1/byok ; GET/PATCH/DELETE /api/v1/byok/{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials, Policy",
+   "grain_doc": "Snapshot (id, provider, workspace_id, masked label, disabled, is_fallback, is_required, is_byok_only, declared_zdr, declared_region, allowed_models, allowed_user_ids, allowed_api_key_hashes, sort_order)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/byok/create-a-byok-provider-credential.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.credits",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "management key as Authorization: Bearer (OpenAPI security scheme apiKey: http bearer); a regular inference key is refused (403)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "lifetime",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST GET /api/v1/credits",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "Snapshot (total_credits, total_usage USD)",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "openrouter.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/openrouter Credits (GET /api/v1/credits), landed as one snapshot of class openrouter.credits (subject account): lifetime total_credits and total_usage in micro-dollars. A balance, never a spend series: nothing sums it. Synthetic only, no vendor response observed. assumption_tested: the fixture is the reference example. Secret class reviewed: two numbers.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/openrouter Credits, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: OpenRouter OpenAPI securitySchemes apiKey (type http, scheme bearer): management key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.end_users",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per end user",
+   "mechanism_doc": "REST GET/POST /api/v1/end-users ; GET/PATCH/DELETE /api/v1/end-users/{user}",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity (app end users, not seats)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/user-tracking.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.generation_feedback",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "REST POST /api/v1/generation/feedback",
+   "read_write_doc": "W",
+   "class_doc": "Content (feedback)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (not needed)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/generations/submit-feedback-for-a-generation.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.guardrail_assignments",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per member / per key",
+   "mechanism_doc": "REST GET/POST /api/v1/guardrails/{id}/assignments/keys and /members, POST .../keys/remove and .../members/remove, GET /api/v1/guardrails/assignments/keys and /members (global)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, Identity (who is governed)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/management-api-keys.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/guardrails/list-all-member-assignments.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.guardrails",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key; org admins"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any; data regions need Business+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per guardrail",
+   "mechanism_doc": "REST GET/POST /api/v1/guardrails ; GET/PATCH/DELETE /api/v1/guardrails/{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, Limits",
+   "grain_doc": "Snapshot (allowed_models, ignored_models, allowed_providers, ignored_providers, limit_usd + reset_interval, include_byok_in_budgets, enforce_zdr_{anthropic,openai,google,xai,other}, enable_free_model_publication/training, enable_paid_model_training, allowed_data_regions, content_filter_builtins PII/secrets/prompt-injection redact/block/flag, content_filters regex, workspace_id)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/guardrails/create-a-guardrail.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/guides/features/guardrails.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.keys",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "100 most recent, `offset`"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429 documented on create"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key (and per creator)",
+   "mechanism_doc": "REST GET/POST /api/v1/keys ; GET/PATCH/DELETE /api/v1/keys/{hash}",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials, Limits, Usage",
+   "grain_doc": "Snapshot per key (hash, name, disabled, limit, limit_reset, include_byok_in_limit, usage/_daily/_weekly/_monthly, byok_usage*, creator_user_id, workspace_id, expires_at, external_user)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/api-keys/list-api-keys.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/api-keys/create-a-new-api-key.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.observability_destinations",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key; org admins"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any; max 5 per type"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST GET/POST /api/v1/observability/destinations ; GET/PATCH/DELETE /api/v1/observability/destinations/{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Telemetry (config), Policy",
+   "grain_doc": "Snapshot (type, name, config, sampling_rate, privacy_mode, api_key_hashes, workspace_id, enabled, regions, filter_rules, broadcast_generation_cost/identity/request_context)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/observability/create-an-observability-destination.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.org_members",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "management key as Authorization: Bearer (OpenAPI security scheme apiKey: http bearer); a regular inference key is refused (403)"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset (default 0) + limit (max 100) with total_count; vendormock offset family, loop rule vendorapi.OffsetLoop"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "org account"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "REST GET /api/v1/organization/members",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "Snapshot (id, email, role org:admin / org:member, first_name, last_name, total_count)",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "openrouter.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/organization/list-organization-members.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/openrouter OrgMembers (GET /api/v1/organization/members, offset + limit=100, total_count), conformance against the vendormock mock (new offset paging family; the loop rule: the runner cursor carries the next offset and a digest of the page's last member, and a page repeating it is schema drift), landed as User/openrouter.org_member/v1 resources keyed openrouter.user = user id: email, role (the documented org:admin / org:member enum; another value is schema drift), first and last name as the display name. A complete page set is authoritative. Synthetic only, no vendor response observed. assumption_tested: the first member is the reference example; the rest is synthesized. Secret class reviewed: identity and role fields only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/openrouter OrgMembers, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: OpenRouter OpenAPI securitySchemes apiKey (type http, scheme bearer): management key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.org_settings",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key (org; personal = 404)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "org"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST GET/PATCH /api/v1/organization/settings",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot (is_filtered_model_catalog_enabled; the only org setting in the spec)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/organization/update-organization-settings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.private_endpoints",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Enterprise-style (not stated)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST GET/POST /api/v1/private-endpoints ; GET/PATCH/DELETE /{id} ; POST /{id}/activate, /disable, /enable, /validate ; PUT /{id}/pricing",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (routing infra)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/management-api-keys.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.scim_group_mappings",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Enterprise + SSO"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per group",
+   "mechanism_doc": "REST GET/POST /api/v1/scim/group-mappings ; GET/PATCH/DELETE /api/v1/scim/group-mappings/{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, Roles",
+   "grain_doc": "Snapshot (IdP group -> workspace, role Member/Admin)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/scim/list-scim-group-mappings.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/guides/features/scim-mappings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.scim_groups",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "as last sync",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per group",
+   "mechanism_doc": "REST GET /api/v1/scim/groups",
+   "read_write_doc": "R",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot (IdP groups pushed via SCIM)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/scim/list-scim-groups.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.scim_sync_jobs",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST POST /api/v1/scim/sync-jobs ; GET /api/v1/scim/sync-jobs/{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups (sync state)",
+   "grain_doc": "Event / Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/scim/start-a-scim-directory-sync.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.workspace_budgets",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per workspace",
+   "mechanism_doc": "REST GET /api/v1/workspaces/{ref}/budgets ; GET/PUT/DELETE /api/v1/workspaces/{ref}/budgets/{interval}",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot (interval daily/weekly/monthly/lifetime, limit_usd; strictly decreasing lifetime > monthly > weekly > daily; 403 on exceed, checked pre-routing)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/workspaces/workspace-budgets.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.workspace_members",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any; role assignment Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "REST GET /api/v1/workspaces/{id}/members (added 2026-07-03) ; POST /api/v1/workspaces/{id}/members/add ; POST /api/v1/workspaces/{id}/members/remove",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Groups, Roles",
+   "grain_doc": "Snapshot (members per workspace; Admin / Member)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/workspaces/list-workspace-members.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/changelog.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.mgmt.workspaces",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.mgmt",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key; org admins create/delete"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "REST GET/POST /api/v1/workspaces ; GET/PATCH/DELETE /api/v1/workspaces/{id or slug} (delete Default needs confirm_default_workspace_deletion=true)",
+   "read_write_doc": "R/W",
+   "class_doc": "Projects, Policy, Retention",
+   "grain_doc": "Snapshot (id, name, slug, description, created_by, default_guardrail_id, default_text_model, default_image_model, default_provider_sort, disabled_server_tools, include_byok_in_budgets, io_logging_api_key_ids, io_logging_sampling_rate, is_data_discount_logging_enabled, is_observability_broadcast_enabled, is_observability_io_logging_enabled)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/workspaces/get-a-workspace.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/workspaces/update-a-workspace.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.oauth.pkce",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.oauth",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "REST POST /api/v1/auth/keys (code exchange), create authorization code",
+   "read_write_doc": "n/a",
+   "class_doc": "Credentials",
+   "grain_doc": "Event (user-consented key creation for apps)",
+   "build": "buildable",
+   "build_doc": "Driverable (not admin)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/oauth.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.oauth.wif_exchange",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.oauth",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "workload JWT + federation_policy_id"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business, Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per workload",
+   "mechanism_doc": "REST POST /api/v1/oauth/token (RFC 8693) ; GET /api/v1/oauth/jwks",
+   "read_write_doc": "n/a",
+   "class_doc": "Credentials",
+   "grain_doc": "Event (token exchange, 15 min ES256 JWT, scope inference)",
+   "build": "buildable",
+   "build_doc": "Driverable (not an admin read)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/workload-identity-federation.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.scim.inbound",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.scim",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "IdP only"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "IdP push",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "SCIM 2.0 server at a URL shown once in UI, bearer token",
+   "read_write_doc": "W by IdP",
+   "class_doc": "Identity, Groups",
+   "grain_doc": "Event (IdP pushes users/groups)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (Observer is not the IdP)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/scim-mappings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.terraform.provider",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.terraform",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "management key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Terraform provider OpenRouterTeam/openrouter (resources: api_key, byok_key, guardrail, observability_destination, private_endpoint, scim_group_mapping, workspace; data sources incl. credits, presets, models)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, Credentials, Projects (IaC over the same API)",
+   "grain_doc": "Snapshot + drift",
+   "build": "buildable",
+   "build_doc": "Driverable (alternate client)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/terraform.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.activity_explore",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admins all, members own"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "any date range (UI)",
+   "per_user_doc": "per member filter",
+   "mechanism_doc": "dashboard Activity (Overview, Trends, Explore, Guardrails tabs); CSV / PDF download",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Adoption",
+   "grain_doc": "Day / hour / minute rollups; saved charts",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (API twin = analytics_query)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/activity.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/activity-export.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.billing",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "invoiced billing by sales"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "dashboard Settings > Credits / Billing",
+   "read_write_doc": "UI",
+   "class_doc": "BillingExport, Cost",
+   "grain_doc": "invoices, payment methods, tax id, credit transfers personal -> org",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/tax-id.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/organization-management.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.logs",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "org admin all; members own"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per call / session",
+   "mechanism_doc": "dashboard only (per-call API = /generation)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Usage, Cost, Content",
+   "grain_doc": "PerCall + PerSession (Generations, Upstream Requests, Sessions, Videos, Batches tabs; Org Member column)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (Sessions tab has no API)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/logs.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.mgmt_keys",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key",
+   "mechanism_doc": "dashboard only; no list endpoint documented",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials",
+   "grain_doc": "management keys (create, expiry, delete)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/management-api-keys.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.notifications",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "push_webhook_header_auth",
+   "transport": "webhook",
+   "auth": {
+    "kind": "header_key",
+    "doc": "org admin, workspace admin, key owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "basic all plans; budget/key alerts + Slack/webhook Business, Enterprise"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per workspace / key",
+   "mechanism_doc": "dashboard config; delivery email, Slack webhook, custom https webhook (payload schema undocumented)",
+   "read_write_doc": "UI config, push delivery",
+   "class_doc": "Limits (alerts)",
+   "grain_doc": "Event (low balance, workspace budget percent, key spend limit, model deprecation / price drop / new model)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/notifications.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "webhook",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.org_membership",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "org"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "dashboard only (no invite API)",
+   "read_write_doc": "UI",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "invite, remove, change org role",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/cookbook/administration/organization-management.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.privacy",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "dashboard Settings > Privacy (account level)",
+   "read_write_doc": "UI",
+   "class_doc": "Retention, Policy (account data-policy ceiling: training opt-ins, 1 percent data discount, ZDR per model group, provider restrictions)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/privacy/data-collection.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openrouter.ai/docs/guides/features/zdr.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.scim_audit_log",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per event",
+   "mechanism_doc": "dashboard UI only",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "Event (SCIM activation, token rotation, mapping changes, membership changes)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/scim-mappings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.security",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "personal owner or org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "IP allowlist Enterprise; lifetime any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "dashboard Settings > Security and privacy settings",
+   "read_write_doc": "UI",
+   "class_doc": "Policy (IP allowlist; max key lifetime; key risk flags; CSV of key owners)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialCreationPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/security-settings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.sso_saml",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "dashboard UI",
+   "read_write_doc": "UI",
+   "class_doc": "Identity, Policy",
+   "grain_doc": "Snapshot (SAML IdP, verified domain, one-way enable)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/features/sso.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.ui.wif_config",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business, Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "dashboard Settings > Workload identity (no management API documented)",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials, Policy",
+   "grain_doc": "Snapshot (issuers: iss URL, JWKS URL; policies: audience, subject, CEL condition, target workspace key, paused)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/guides/overview/auth/workload-identity-federation.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openrouter.vault",
+   "vendor_group": "openrouter",
+   "vendor": "openrouter",
+   "plane": "openrouter.vault",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "non-provisioning key"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "limit 1..100, offset"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429 documented"
+   },
+   "tier": {
+    "doc": "Intern programme only"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per workspace / intern",
+   "mechanism_doc": "REST GET /api/v1/vault/secrets (+ store, delete, copy, intern-scoped routes)",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot (secret name, bound hosts, fingerprint; values never returned)",
+   "build": "buildable",
+   "build_doc": "Driverable (programme gated)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://openrouter.ai/docs/api/api-reference/vault/list-workspace-secrets.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

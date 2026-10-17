@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/contentcap"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/platform/pathnorm"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 )
@@ -45,58 +43,54 @@ const cwdScanBytes = 64 * 1024
 // format — essentially the Anthropic Messages content-block schema — so the
 // same parser handles both.
 //
-// The owning tool (claude-code sense) is inferred from the path segment of
-// the enclosing extension: saoudrizwan.claude-dev → cline,
-// rooveterinaryinc.roo-cline → roo-code.
+// The owning tool (claude-code sense) is inferred from the path segment
+// of the enclosing extension via the clineExtensions table in roots.go
+// (saoudrizwan.claude-dev → cline; the five Roo publisher/name/channel
+// ids → roo-code). Roots for every VS Code-family host come from
+// internal/platform/vscodehost; see roots.go.
 type Adapter struct {
 	scrubber   *scrub.Scrubber
 	watchRoots []string
+	// customRootTools maps a lower-cased relocated task-store root (from a
+	// `<tool>.customStoragePath` setting) to the tool that owns it. It is
+	// how a relocated store recovers its identity: the operator-chosen
+	// path carries no extension id, so toolForPath consults this map
+	// before the id-in-path scan. Only populated when the root set was
+	// composed from platform defaults (nil when watchRoots are injected).
+	customRootTools map[string]string
 }
 
 // New returns an adapter with default scrubber and platform-specific watch
-// paths.
+// paths. The root set is composed ONCE here — see NewWithOptions.
 func New() *Adapter {
-	return &Adapter{scrubber: scrub.New()}
+	return NewWithOptions(nil, nil)
 }
 
 // NewWithOptions customizes the scrubber and/or watch roots. Non-empty
 // watchRoots override platform defaults (useful for tests).
+//
+// The default root set is composed HERE, not lazily in WatchPaths:
+// defaultWatchRoots walks every vscodehost product x every extension id
+// x every cross-mount home AND opens+parses each product's settings.json
+// looking for a relocated Roo store. WatchPaths and IsSessionFile are
+// hot-path calls (the watcher's dispatch runs IsSessionFile per event),
+// so recomputing that per call cost ~450 µs and ~330 allocations each
+// time. Same discipline as kilocode.NewLegacy.
 func NewWithOptions(s *scrub.Scrubber, watchRoots []string) *Adapter {
 	if s == nil {
 		s = scrub.New()
 	}
-	return &Adapter{scrubber: s, watchRoots: watchRoots}
+	var customRootTools map[string]string
+	if len(watchRoots) == 0 {
+		watchRoots, customRootTools = composeDefaults()
+	}
+	return &Adapter{scrubber: s, watchRoots: watchRoots, customRootTools: customRootTools}
 }
 
 // Name implements adapter.Adapter. Note: Cline and Roo Code share this
 // adapter but the emitted Tool field on each ToolEvent is set per-file
 // based on the enclosing extension directory.
 func (*Adapter) Name() string { return models.ToolCline }
-
-// WatchPaths returns the canonical Cline + Roo tasks directories under
-// every cross-mount-resolved $HOME's VS Code globalStorage. The
-// globalStorage subpath is per-OS (Windows uses %APPDATA%, etc.) and
-// branches on h.OS so a WSL2 observer reaches Cline data living at
-// /mnt/c/Users/<u>/AppData/Roaming/Code/User/globalStorage. Tests
-// can override via NewWithOptions.
-func (a *Adapter) WatchPaths() []string {
-	if len(a.watchRoots) > 0 {
-		return a.watchRoots
-	}
-	var roots []string
-	for _, h := range crossmount.AllHomes() {
-		base := vsCodeGlobalStorage(h)
-		if base == "" {
-			continue
-		}
-		roots = append(
-			roots,
-			filepath.Join(base, "saoudrizwan.claude-dev", "tasks"),
-			filepath.Join(base, "rooveterinaryinc.roo-cline", "tasks"),
-		)
-	}
-	return roots
-}
 
 // IsSessionFile matches api_conversation_history.json inside one of
 // this adapter's WatchPaths. The under-WatchPaths constraint enforces
@@ -111,23 +105,30 @@ func (a *Adapter) IsSessionFile(path string) bool {
 
 // actionMap translates Cline/Roo tool names to the normalized taxonomy.
 var actionMap = map[string]string{
-	"execute_command":       models.ActionRunCommand,
-	"powershell":            models.ActionRunCommand,
-	"pwsh":                  models.ActionRunCommand,
-	"cmd":                   models.ActionRunCommand,
-	"cmd.exe":               models.ActionRunCommand,
-	"bash":                  models.ActionRunCommand,
-	"sh":                    models.ActionRunCommand,
-	"read_file":             models.ActionReadFile,
-	"write_to_file":         models.ActionWriteFile,
-	"replace_in_file":       models.ActionEditFile,
-	"search_files":          models.ActionSearchText,
-	"list_files":            models.ActionSearchFiles,
-	"browser_action":        models.ActionBrowserAction,
-	"attempt_completion":    models.ActionTaskComplete,
-	"use_mcp_tool":          models.ActionMCPCall,
-	"access_mcp_resource":   models.ActionMCPCall,
-	"ask_followup_question": models.ActionAskUser,
+	"execute_command": models.ActionRunCommand,
+	"powershell":      models.ActionRunCommand,
+	"pwsh":            models.ActionRunCommand,
+	"cmd":             models.ActionRunCommand,
+	"cmd.exe":         models.ActionRunCommand,
+	"bash":            models.ActionRunCommand,
+	"sh":              models.ActionRunCommand,
+	"read_file":       models.ActionReadFile,
+	"write_to_file":   models.ActionWriteFile,
+	"replace_in_file": models.ActionEditFile,
+	"search_files":    models.ActionSearchText,
+	"list_files":      models.ActionSearchFiles,
+	// list_code_definition_names (ClineDefaultTool.LIST_CODE_DEF,
+	// cline/cline apps/vscode/src/shared/tools.ts) lists the top-level
+	// definitions of the source files in a directory — a structural
+	// directory scan. Cline's own SDK alias table routes it to
+	// `search_codebase`, which the cline-cli adapter maps to
+	// ActionSearchFiles; same bucket here as `list_files`.
+	"list_code_definition_names": models.ActionSearchFiles,
+	"browser_action":             models.ActionBrowserAction,
+	"attempt_completion":         models.ActionTaskComplete,
+	"use_mcp_tool":               models.ActionMCPCall,
+	"access_mcp_resource":        models.ActionMCPCall,
+	"ask_followup_question":      models.ActionAskUser,
 }
 
 type rawMessage struct {
@@ -202,13 +203,14 @@ func (m *rawMessage) resolvedModel() string {
 // Anthropic providers) OR Cline 3.89.2's `metrics` (non-Anthropic
 // providers). Returns ok=false when neither is present (a turn that emitted
 // no token accounting). model is the already-resolved model string.
-func tokenEventFor(msg *rawMessage, path, sessionID, projectRoot, gitBranch, toolID, model string, ts time.Time, idx int) (models.TokenEvent, bool) {
+func tokenEventFor(msg *rawMessage, path, sessionID, projectRoot, gitBranch, gitRemote, toolID, model string, ts time.Time, idx int) (models.TokenEvent, bool) {
 	ev := models.TokenEvent{
 		SourceFile:    path,
 		SourceEventID: fmt.Sprintf("tk:%s:%d", filepath.Base(filepath.Dir(path)), idx),
 		SessionID:     sessionID,
 		ProjectRoot:   projectRoot,
 		GitBranch:     gitBranch,
+		GitRemote:     gitRemote,
 		Timestamp:     ts,
 		Tool:          toolID,
 		Model:         model,
@@ -244,6 +246,26 @@ type rawContentBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
+	// Source is the image envelope ({type:"base64", media_type, data}).
+	// Only media_type is read (Issue 1 user-attachment capture); the
+	// base64 `data` is never decoded or stored.
+	Source json.RawMessage `json:"source"`
+}
+
+// imageMediaType reads the media_type off an image block's source
+// envelope ("image/png"), or "" when absent. Reads ONLY the media type,
+// never the base64 data.
+func (b rawContentBlock) imageMediaType() string {
+	if len(b.Source) == 0 {
+		return ""
+	}
+	var src struct {
+		MediaType string `json:"media_type"`
+	}
+	if err := json.Unmarshal(b.Source, &src); err == nil {
+		return src.MediaType
+	}
+	return ""
 }
 
 // ParseSessionFile implements adapter.Adapter.
@@ -275,19 +297,33 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		return res, nil
 	}
 
-	toolID, sessionID := toolFromPath(path), sessionIDFromPath(path)
-	projectRoot, gitBranch := a.inferProjectContext(path)
+	toolID, sessionID := a.toolForPath(path), sessionIDFromPath(path)
+	projectRoot, gitBranch, gitRemote, projectIdentity := a.inferProjectContext(path)
 	pending := map[string]int{}
+
+	// Sibling task_metadata.json (taskmeta.go): the surface host the
+	// task ran inside + the task-level model. Absent on pre-metadata
+	// Cline builds — the surface then falls back to the path-sniffed
+	// product and no model is filled.
+	meta, haveMeta := readTaskMetadata(path)
+	res.SessionSurfaces = append(res.SessionSurfaces, sessionSurfaceFor(sessionID, path, meta, haveMeta))
+	taskModel := ""
+	if haveMeta {
+		taskModel = latestModelID(meta)
+		// Issue 2: captured Cline agent version (earliest, then latest).
+		res.SessionToolVersions = append(res.SessionToolVersions, clineToolVersionStamps(sessionID, meta)...)
+	}
 
 	for i := range msgs {
 		if ctx.Err() != nil {
+			adapter.ApplyProjectIdentity(&res, projectIdentity)
 			return res, ctx.Err()
 		}
 		msg := &msgs[i]
 		ts := parseMilliTimestamp(msg.Ts)
 		model := msg.resolvedModel()
 
-		if ev, ok := tokenEventFor(msg, path, sessionID, projectRoot, gitBranch, toolID, model, ts, i); ok {
+		if ev, ok := tokenEventFor(msg, path, sessionID, projectRoot, gitBranch, gitRemote, toolID, model, ts, i); ok {
 			res.TokenEvents = append(res.TokenEvents, ev)
 		}
 
@@ -299,7 +335,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		// skipped by extractUserPrompt so they don't masquerade as prompts.
 		if msg.Role == "user" {
 			if prompt := extractUserPrompt(blocks); prompt != "" {
-				res.ToolEvents = append(res.ToolEvents, a.userPromptEvent(path, toolID, sessionID, projectRoot, gitBranch, model, ts, i, prompt))
+				res.ToolEvents = append(res.ToolEvents, a.userPromptEvent(path, toolID, sessionID, projectRoot, gitBranch, gitRemote, model, ts, i, prompt))
 			}
 		}
 
@@ -307,6 +343,11 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		// message so the tool call / text that follows inherits it as
 		// PrecedingReasoning (blocks are ordered: thinking precedes tool_use).
 		var reasoning string
+		// xmlSeq counts pseudo-tool occurrences WITHIN this message,
+		// across its text blocks, so the `<msgIdx>:xml:<n>` dedup key
+		// is unique even when one message carries several text blocks
+		// that each embed a call.
+		xmlSeq := 0
 		for blockIdx, block := range blocks {
 			switch block.Type {
 			case "thinking", "redacted_thinking":
@@ -320,13 +361,23 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				if txt == "" {
 					continue
 				}
+				// REASONING SEMANTICS (B3 convergence, 2026-07-31): the
+				// thinking block is accumulated into the per-message
+				// `reasoning` buffer and reaches the timeline ONLY as
+				// PrecedingReasoning on the tool_use rows that follow it
+				// within this message (FAN-OUT: blocks are ordered
+				// thinking-then-tool_use, and one thinking block can
+				// precede several tool calls — each carries it). It is
+				// deliberately NOT emitted as a standalone task_complete
+				// row: a reasoning block is not an action, and the phantom
+				// rows polluted every action aggregate (see
+				// docs/plans/b3-reasoning-convergence-plan-2026-07-31.md §1).
+				// This holds for every retag of this parser (cline /
+				// roo-code / kilo-code legacy) — the raw name was
+				// toolID-derived, so all three minted the class.
 				reasoning = appendReasoning(reasoning, txt)
-				// Emit the reasoning as a first-class, visible timeline row
-				// (matches kilocode/opencode/codex), not only as downstream
-				// PrecedingReasoning.
-				res.ToolEvents = append(res.ToolEvents, a.reasoningEvent(path, toolID, sessionID, projectRoot, gitBranch, model, ts, i, blockIdx, txt))
 			case "tool_use":
-				evt := a.toolUseEvent(path, toolID, sessionID, projectRoot, gitBranch, model, ts, block)
+				evt := a.toolUseEvent(path, toolID, sessionID, projectRoot, gitBranch, gitRemote, model, ts, block)
 				if reasoning != "" {
 					evt.PrecedingReasoning = truncate(a.scrubber.String(reasoning), 2048)
 				}
@@ -349,11 +400,9 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				if msg.Role != "assistant" {
 					continue
 				}
-				body := strings.TrimSpace(block.Text)
-				if body == "" {
-					continue
-				}
-				res.ToolEvents = append(res.ToolEvents, a.assistantTextEvent(path, toolID, sessionID, projectRoot, gitBranch, model, ts, i, blockIdx, body))
+				res.ToolEvents = append(res.ToolEvents,
+					a.assistantTextBlockEvents(path, toolID, sessionID, projectRoot, gitBranch, gitRemote, model,
+						ts, i, blockIdx, block.Text, reasoning, &xmlSeq)...)
 			case "image":
 				// Multimodal attachment (Anthropic image content block:
 				// {type:"image", source:{type:"base64", media_type, data}}).
@@ -362,10 +411,26 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				// user turns carry no <task> text, so extractUserPrompt
 				// skips them) — observability-only, no image bytes stored.
 				// The image's token cost lands on the per-message TokenEvent.
-				res.ToolEvents = append(res.ToolEvents, a.imageEvent(path, toolID, sessionID, projectRoot, gitBranch, model, ts, i, blockIdx))
+				res.ToolEvents = append(res.ToolEvents, a.imageEvent(path, toolID, sessionID, projectRoot, gitBranch, gitRemote, model, ts, i, blockIdx, block.imageMediaType()))
 			}
 		}
 	}
+	// Task-level model backfill. Cline 3.88.0+ records the model the
+	// task ran under in task_metadata.json's model_usage[], while the
+	// per-message `model` / `modelInfo.modelId` keys are absent on
+	// several message shapes (every user-role row, and every assistant
+	// row on builds that carry neither key). Per-message values stay
+	// authoritative; this only fills the rows that would otherwise
+	// carry no model at all.
+	if taskModel != "" {
+		for i := range res.ToolEvents {
+			if res.ToolEvents[i].Model == "" {
+				res.ToolEvents[i].Model = taskModel
+			}
+		}
+	}
+	res.CacheObservations = buildCacheObservations(msgs, path, sessionID)
+	adapter.ApplyProjectIdentity(&res, projectIdentity)
 	return res, nil
 }
 
@@ -378,14 +443,25 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 // pricing is attributed via the existing per-message TokenEvent path.
 // RawToolName uses the resolved toolID (cline / roo-code), matching the
 // `<source>.assistant_text` convention.
+//
+// IDENTITY vs BODY (a re-parse trap, not a style choice). `body` is
+// the prose AFTER the XML pseudo-tool spans have been excised
+// (xmltools.go); `idBody` is the ORIGINAL trimmed block text. The
+// SourceEventID and MessageID hash `idBody` because this adapter
+// re-parses the whole conversation array on every poll: hashing the
+// stripped prose changed the id of every historical assistant message
+// the moment the scanner landed, so an `observer scan --force` wrote a
+// SECOND row for each of them beside the pre-scanner row instead of
+// hitting the store's (source_file, source_event_id) dedup. The hash
+// input is therefore pinned to the source bytes, which never change.
 func (a *Adapter) assistantTextEvent(
-	sourceFile, toolID, sessionID, projectRoot, gitBranch, model string,
+	sourceFile, toolID, sessionID, projectRoot, gitBranch, gitRemote, model string,
 	ts time.Time,
 	msgIdx, blockIdx int,
-	body string,
+	body, idBody string,
 ) models.ToolEvent {
 	preview := truncate(a.scrubber.String(body), 200)
-	hash := shortHash(body)
+	hash := shortHash(idBody)
 	return models.ToolEvent{
 		SourceFile:         sourceFile,
 		SourceEventID:      fmt.Sprintf("%s:asst:%s:%d:%d:%s", toolID, sessionID, msgIdx, blockIdx, hash),
@@ -393,6 +469,7 @@ func (a *Adapter) assistantTextEvent(
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          gitBranch,
+		GitRemote:          gitRemote,
 		Model:              model,
 		Tool:               toolID,
 		ActionType:         models.ActionAssistantMessage,
@@ -453,9 +530,10 @@ func appendReasoning(acc, next string) string {
 // the timeline. SourceEventID is derived from the message + block index
 // so the (source_file, source_event_id) upsert dedupes across re-parses.
 func (a *Adapter) imageEvent(
-	sourceFile, toolID, sessionID, projectRoot, gitBranch, model string,
+	sourceFile, toolID, sessionID, projectRoot, gitBranch, gitRemote, model string,
 	ts time.Time,
 	msgIdx, blockIdx int,
+	mediaType string,
 ) models.ToolEvent {
 	const marker = "[image attachment]"
 	return models.ToolEvent{
@@ -465,45 +543,18 @@ func (a *Adapter) imageEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     gitBranch,
+		GitRemote:     gitRemote,
 		Model:         model,
 		Tool:          toolID,
 		ActionType:    models.ActionUserPrompt,
 		Target:        marker,
-		Success:       true,
-		RawToolName:   toolID + ".image",
-		MessageID:     fmt.Sprintf("%s:image:%s:%d:%d", toolID, sessionID, msgIdx, blockIdx),
-	}
-}
-
-// reasoningEvent emits a standalone reasoning row for a thinking /
-// redacted_thinking block on an assistant message, making the model's
-// chain-of-thought visible in the action timeline (matches kilocode /
-// opencode / codex). Content-derivable SourceEventID dedupes re-parses.
-func (a *Adapter) reasoningEvent(
-	sourceFile, toolID, sessionID, projectRoot, gitBranch, model string,
-	ts time.Time,
-	msgIdx, blockIdx int,
-	thinking string,
-) models.ToolEvent {
-	scrubbed := a.scrubber.String(thinking)
-	preview := truncate(scrubbed, 200)
-	hash := shortHash(thinking)
-	return models.ToolEvent{
-		SourceFile:         sourceFile,
-		SourceEventID:      fmt.Sprintf("%s:reasoning:%s:%d:%d:%s", toolID, sessionID, msgIdx, blockIdx, hash),
-		SessionID:          sessionID,
-		ProjectRoot:        projectRoot,
-		Timestamp:          ts,
-		GitBranch:          gitBranch,
-		Model:              model,
-		Tool:               toolID,
-		ActionType:         models.ActionTaskComplete,
-		Target:             preview,
-		Success:            true,
-		PrecedingReasoning: preview,
-		RawToolName:        toolID + ".reasoning",
-		ToolOutput:         a.scrubber.String(contentcap.Cap(thinking, contentcap.DefaultMaxBytes)),
-		MessageID:          toolID + ":reasoning:" + hash,
+		// Structured user-attachment metadata (Issue 1) alongside the
+		// back-compat text marker. Metadata only — kind + optional
+		// media_type, never a filename or bytes.
+		UserAttachments: []models.UserAttachment{{Kind: "image", MediaType: mediaType}},
+		Success:         true,
+		RawToolName:     toolID + ".image",
+		MessageID:       fmt.Sprintf("%s:image:%s:%d:%d", toolID, sessionID, msgIdx, blockIdx),
 	}
 }
 
@@ -512,7 +563,7 @@ func (a *Adapter) reasoningEvent(
 // store-layer (source_file, source_event_id) upsert dedupes across the
 // adapter's full-file re-parses.
 func (a *Adapter) userPromptEvent(
-	sourceFile, toolID, sessionID, projectRoot, gitBranch, model string,
+	sourceFile, toolID, sessionID, projectRoot, gitBranch, gitRemote, model string,
 	ts time.Time,
 	msgIdx int,
 	prompt string,
@@ -526,6 +577,7 @@ func (a *Adapter) userPromptEvent(
 		ProjectRoot:        projectRoot,
 		Timestamp:          ts,
 		GitBranch:          gitBranch,
+		GitRemote:          gitRemote,
 		Model:              model,
 		Tool:               toolID,
 		ActionType:         models.ActionUserPrompt,
@@ -539,7 +591,7 @@ func (a *Adapter) userPromptEvent(
 }
 
 func (a *Adapter) toolUseEvent(
-	sourceFile, toolID, sessionID, projectRoot, gitBranch, model string,
+	sourceFile, toolID, sessionID, projectRoot, gitBranch, gitRemote, model string,
 	ts time.Time,
 	block rawContentBlock,
 ) models.ToolEvent {
@@ -556,6 +608,7 @@ func (a *Adapter) toolUseEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     gitBranch,
+		GitRemote:     gitRemote,
 		Model:         model,
 		Tool:          toolID,
 		ActionType:    actionType,
@@ -628,7 +681,7 @@ func (a *Adapter) extractTarget(toolName string, rawInput json.RawMessage, proje
 // first (the format every current install produces) and fall back
 // to ui_messages.json for sessions captured by older Cline versions.
 //
-// Returns ("", "") when neither file yields a cwd — the watcher still
+// Returns ("", "", "") when neither file yields a cwd — the watcher still
 // stores the action but the store layer's "drop empty ProjectRoot"
 // guard then silently discards every event for the session. This was
 // the V1 bug surfaced by the 2026-06-06 Windows validation.
@@ -642,14 +695,14 @@ func (a *Adapter) extractTarget(toolName string, rawInput json.RawMessage, proje
 // as relative, prepends observer's own CWD, and walks UP — landing
 // on observer's own .git in the worst case
 // (memory [[feedback_foreign_path_git_resolve]]).
-func (a *Adapter) inferProjectContext(path string) (projectRoot, branch string) {
+func (a *Adapter) inferProjectContext(path string) (projectRoot, branch, remote string, id git.Identity) {
 	if cwd := scanAPIHistoryCwd(path); cwd != "" {
 		return resolveProjectFromCwd(cwd)
 	}
 	if cwd := scanUIMessagesCwd(filepath.Join(filepath.Dir(path), "ui_messages.json")); cwd != "" {
 		return resolveProjectFromCwd(cwd)
 	}
-	return "", ""
+	return "", "", "", git.Identity{}
 }
 
 // scanAPIHistoryCwd reads the first cwdScanBytes of
@@ -699,16 +752,18 @@ func scanUIMessagesCwd(uiPath string) string {
 
 // resolveProjectFromCwd normalises a raw cwd hint and runs git.Resolve
 // over it. When git.Resolve finds a repo root the returned root +
-// branch are used; otherwise the normalised cwd itself becomes the
-// project root with an empty branch (still satisfies the store
-// layer's non-empty ProjectRoot requirement).
-func resolveProjectFromCwd(cwd string) (string, string) {
+// branch + normalized remote are used; otherwise the normalised cwd
+// itself becomes the project root with an empty branch and remote
+// (still satisfies the store layer's non-empty ProjectRoot
+// requirement).
+func resolveProjectFromCwd(cwd string) (string, string, string, git.Identity) {
 	cwd = pathnorm.Normalize(cwd)
-	info, err := git.Resolve(cwd)
+	id, err := git.ResolveIdentity(cwd, git.IdentityOptions{})
 	if err == nil {
-		return info.Root, info.Branch
+		// id.Remote is already NormalizeRemote'd by ResolveIdentity.
+		return id.Root, id.Branch, id.Remote, id
 	}
-	return cwd, ""
+	return cwd, "", "", git.Identity{}
 }
 
 // decodeContent handles the array-of-blocks form. Some Cline messages store
@@ -793,21 +848,6 @@ func bytesTrimSpace(b []byte) []byte {
 	return b[start:end]
 }
 
-// toolFromPath infers whether a task path belongs to Cline or Roo Code based
-// on the enclosing extension directory.
-func toolFromPath(path string) string {
-	lower := strings.ToLower(path)
-	switch {
-	case strings.Contains(lower, "rooveterinaryinc.roo-cline"):
-		return models.ToolRooCode
-	case strings.Contains(lower, "saoudrizwan.claude-dev"):
-		return models.ToolCline
-	}
-	// Unrecognized extension — default to cline, which is the more common
-	// of the two.
-	return models.ToolCline
-}
-
 // sessionIDFromPath uses the task-directory name (a ULID-like string created
 // by the extension) as the session ID.
 func sessionIDFromPath(path string) string {
@@ -819,34 +859,6 @@ func parseMilliTimestamp(ms int64) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(ms).UTC()
-}
-
-// vsCodeGlobalStorage returns the VS Code globalStorage subpath under
-// the given cross-mount-resolved $HOME, branching on the home's
-// LOGICAL OS (not runtime.GOOS — those can differ when observer in
-// WSL2 reaches a Windows /mnt/c/Users/<u> home).
-//
-// On windows the canonical location is %APPDATA%\Code\User\
-// globalStorage. When h is the native windows home we honor APPDATA
-// (handles roaming-profile redirection); for cross-mount Windows
-// homes APPDATA is irrelevant — we use the conventional
-// $HOME\AppData\Roaming layout, which is correct for the standard
-// install. Returns "" for unrecognized OS tags.
-func vsCodeGlobalStorage(h crossmount.HomeRoot) string {
-	switch h.OS {
-	case crossmount.OSWindows:
-		if h.Origin == "native" && runtime.GOOS == "windows" {
-			if appData := os.Getenv("APPDATA"); appData != "" {
-				return filepath.Join(appData, "Code", "User", "globalStorage")
-			}
-		}
-		return filepath.Join(h.Path, "AppData", "Roaming", "Code", "User", "globalStorage")
-	case crossmount.OSDarwin:
-		return filepath.Join(h.Path, "Library", "Application Support", "Code", "User", "globalStorage")
-	case crossmount.OSLinux:
-		return filepath.Join(h.Path, ".config", "Code", "User", "globalStorage")
-	}
-	return ""
 }
 
 func firstNonEmpty(ss ...string) string {

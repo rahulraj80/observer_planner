@@ -1,9 +1,9 @@
-# SuperBased Observer — Browser Capture Extension
+# SuperBased Observer: Browser Capture Extension
 
 An opt-in MV3 Chrome/Edge extension that passively observes **your own** AI
 chatbot web usage and relays a per-turn summary to your local `observer`
-daemon. It **never re-originates a request** — the real browser makes the real
-request; the extension only observes the streamed response — so it cannot
+daemon. It **never re-originates a request**: the real browser makes the real
+request and the extension only observes the streamed response, so it cannot
 break the site it watches. Tokens are **always estimated** (no target UI
 returns authoritative counts).
 
@@ -30,18 +30,18 @@ Phase-0 findings: `docs/plans/browser-extension-phase-0-spike-findings-2026-07-1
 
 ```
 <site> tab
-  content-main.js      (MAIN world)  — monkeypatches fetch (SSE sites) OR
+  content-main.js      (MAIN world)  : monkeypatches fetch (SSE sites) OR
         │                              WebSocket (Copilot); SITE = a DATA row
         │ window.postMessage           (chatgpt/claude/perplexity/gemini/copilot)
         ▼
-  content-isolated.js  (ISOLATED)    — nonce+origin guard, per-site toggle,
+  content-isolated.js  (ISOLATED)    : nonce+origin guard, per-site toggle,
         │                              granularity rule, client token estimate
         │ chrome.runtime.sendMessage   + relays per-site health pings
         ▼
-  service-worker.js                  — sendNativeMessage (turns) +
+  service-worker.js                  : sendNativeMessage (turns) +
         │                              chrome.storage.local health (sbo_health)
         ▼
-  native-messaging-host/host.js      — spawns `observer browser hook capture`
+  native-messaging-host/host.js      : spawns `observer browser hook capture`
         │ payload on STDIN             (works even when the daemon is down)
         ▼
   observer browser hook  →  internal/adapter/browserchat  →  store.Ingest
@@ -56,7 +56,7 @@ extension's own bundled code (no `eval`, no remote `<script src>`).
 **SITE = DATA.** In `content-main.js`, every per-site difference (host,
 capture endpoints, request/response parsing) is a row in the `SITES` table.
 SSE and WebSocket are genuinely different transports, so they get two
-interceptors that both feed the same `emitTurn()` — a capability shape, not a
+interceptors that both feed the same `emitTurn()`: a capability shape, not a
 name branch.
 
 ## The wire contract (single-sourced)
@@ -65,7 +65,7 @@ The extension → native host → `observer browser hook` all agree on ONE JSON
 schema, **defined authoritatively in
 `internal/adapter/browserchat/doc.go`** (the `CapturedTurn` type). It is
 versioned via `schema_version`. Fields: `schema_version`, `site`,
-`conversation_id` (→ SessionID when present; **optional** — an id-less turn
+`conversation_id` (→ SessionID when present; **optional**; an id-less turn
 is not dropped, it ingests under a fallback key: `message_id`, then the
 opaque `capture_id`, then `captured_at`), `message_id`, `model`,
 `request_url`, `prompt_text`/`response_text` (**only at redacted/full
@@ -75,21 +75,21 @@ random per-turn id; the content-free id-less-turn fallback session key).
 
 **Granularity is daemon-driven**: the extension fetches the daemon's
 `[browser].granularity_ceiling` over the native-messaging `config` event and
-sends at exactly that level (shipped daemon default: `full` — local-first,
+sends at exactly that level (shipped daemon default: `full`: local-first,
 same posture as coding-agent capture). The extension's own inlined default is
-`usage_only` — the FAIL-CLOSED value used only when the daemon is
+`usage_only`, the FAIL-CLOSED value used only when the daemon is
 unreachable; an explicit `chrome.storage.sync` granularity still wins
 downward (`min(user choice, daemon ceiling)`). Any content that crosses the
 wire (at redacted/full granularity) still hits the server-side ingest scrub
 seam AND the **daemon granularity ceiling** (`[browser].granularity_ceiling`): the
 daemon downgrades anything above its configured ceiling before storing, so
-the daemon — not the extension — is the final authority on what is stored.
+the daemon, not the extension, is the final authority on what is stored.
 
-## Outbound-PII screening (client-side, best-effort — Phase 3)
+## Outbound-PII screening (client-side, best-effort, Phase 3)
 
 > **Assistive, not compliance-grade DLP.** This screens *your own* outbound
 > data before it leaves the browser. It is best-effort and **will miss
-> things** — the on-device NER is probabilistic and the pre-send intercept is
+> things**: the on-device NER is probabilistic and the pre-send intercept is
 > only as strong as the transports it can patch. It is **not** airtight DLP,
 > and it does **not** touch any AI vendor's safety, moderation, or usage
 > features. Market and read it as *"AI-usage observability + local
@@ -99,7 +99,7 @@ For a browser rail, client-side minimization remains available for operators
 who want it: setting the daemon ceiling to `usage_only` means the extension
 never even constructs a content field, and `redacted` runs the two-tier
 client-side redaction before content leaves the browser. The shipped default
-is `full` — Observer is local-first and the daemon config is the explicit,
+is `full`: Observer is local-first and the daemon config is the explicit,
 dashboard-editable consent lever (content stays on the node; the server-side
 scrub seam still strips secrets). Intervention applies only when turned on.
 
@@ -107,25 +107,25 @@ scrub seam still strips secrets). Intervention applies only when turned on.
 
 | Tier | Detects | Tech | Where it runs |
 |---|---|---|---|
-| **Tier 1** | email, phone, SSN, credit-card (Luhn), IBAN, IPv4/IPv6, GitHub/OpenAI/AWS/Bearer keys | regex + checksum, <1 ms, confidence 1.0 | `src/redact/tier1.js` — pure JS, loaded into every realm |
+| **Tier 1** | email, phone, SSN, credit-card (Luhn), IBAN, IPv4/IPv6, GitHub/OpenAI/AWS/Bearer keys | regex + checksum, <1 ms, confidence 1.0 | `src/redact/tier1.js`: pure JS, loaded into every realm |
 | **Tier 2** | names, orgs, locations | on-device transformer NER (Transformers.js + ONNX Runtime Web, WebGPU→WASM CPU) | `chrome.offscreen` document (`offscreen.html` + `src/redact/offscreen.js`) |
 
-**Tier-1 rule table** (`src/redact/tier1.js`, `RULES` — one row per class,
+**Tier-1 rule table** (`src/redact/tier1.js`, `RULES`, one row per class,
 `{name, re, validator?}`; adding a class is one row, never a code branch):
 
 | Type | Shape | Checksum / range validator |
 |---|---|---|
-| `email` | `local@domain.tld` | — |
-| `credit_card` | 13–19 digits, space/dash grouped | **Luhn** (mod-10) |
-| `ssn` | `NNN-NN-NNNN` | area ≠ 000/666/900–999, group ≠ 00, serial ≠ 0000 |
-| `iban` | `CC NN …` 15–34 chars | **mod-97 == 1** (ISO 7064) |
-| `ipv4` | dotted quad | every octet 0–255, no leading zeros |
-| `ipv6` | hex groups | — |
-| `phone` | `+? digits/sep` | 7–15 digits (E.164 bound) |
-| `github_token` | `gh[pousr]_…` | — |
-| `openai_key` | `sk-…` | — |
-| `aws_access_key` | `AKIA…` | — |
-| `bearer_token` | `Bearer …` | — |
+| `email` | `local@domain.tld` | none |
+| `credit_card` | 13 to 19 digits, space/dash grouped | **Luhn** (mod-10) |
+| `ssn` | `NNN-NN-NNNN` | area ≠ 000/666/900 to 999, group ≠ 00, serial ≠ 0000 |
+| `iban` | `CC NN …` 15 to 34 chars | **mod-97 == 1** (ISO 7064) |
+| `ipv4` | dotted quad | every octet 0 to 255, no leading zeros |
+| `ipv6` | hex groups | none |
+| `phone` | `+? digits/sep` | 7 to 15 digits (E.164 bound) |
+| `github_token` | `gh[pousr]_…` | none |
+| `openai_key` | `sk-…` | none |
+| `aws_access_key` | `AKIA…` | none |
+| `bearer_token` | `Bearer …` | none |
 
 Spans are checksum-gated (a bare 16-digit run is *not* redacted unless it
 passes Luhn), then resolved into a sorted, non-overlapping set and replaced
@@ -150,26 +150,26 @@ repo ships the *scaffolding*: the offscreen doc, the message protocol, and the
 loader that dynamic-`import()`s an **operator-vendored** Transformers.js build
 from `browser-extension/vendor/transformers/` + model under `vendor/models/`.
 Until those are vendored, `loadModel()` fails soft and **Tier-2 degrades to
-Tier-1-only** — redaction still runs, it just loses names/orgs/locations. No
+Tier-1-only**: redaction still runs, it just loses names/orgs/locations. No
 network fetch for weights is ever made (`env.allowRemoteModels = false`).
 
-### Pre-send intervention (warn / redact / block) — best-effort
+### Pre-send intervention (warn / redact / block), best-effort
 
 The **same MAIN-world interception point** that reads outgoing bodies can also
-act on them *before* the real network call — a JS-call-layer intercept
+act on them *before* the real network call: a JS-call-layer intercept
 (`src/content-main.js`), so the MV3 no-blocking-`webRequest` rule (a
 network-layer rule) does not apply. Config is read in the isolated world
 (`chrome.storage`) and relayed to the MAIN world as a nonce-guarded
 `SBO_CONFIG` message.
 
-- **`off`** (default) — the least-surprising posture: does nothing to your
+- **`off`** (default): the least-surprising posture: does nothing to your
   sends. An observability tool should not silently rewrite/stop your messages.
-- **`warn`** — advisory in-page overlay listing detected span types, then
-  proceeds. (It does **not** hold the request pending a decision — a
+- **`warn`**: advisory in-page overlay listing detected span types, then
+  proceeds. (It does **not** hold the request pending a decision; that is a
   documented MV3 limit; treat it as a heads-up, not a gate.)
-- **`redact`** — rewrites the outbound body, stripping detected PII, then
+- **`redact`**: rewrites the outbound body, stripping detected PII, then
   sends the redacted body (so even the model receives less).
-- **`block`** — drops the call (rejects `fetch`, aborts `XHR`, suppresses the
+- **`block`**: drops the call (rejects `fetch`, aborts `XHR`, suppresses the
   WS frame). A hard stop that can disrupt the site's UX by design.
 
 **Transports patched:** `fetch`, `XMLHttpRequest.send`, `WebSocket.send`, and
@@ -185,11 +185,11 @@ Types (`require-trusted-types-for 'script'`); the overlay uses
 - Only **string** request bodies are rewritable; a `Request`-object body is
   observed but not rewritten.
 - `declarativeNetRequest` could add a coarse URL/host backstop but **cannot
-  inspect a body** — not built here (noted as a possible future backstop).
+  inspect a body**, not built here (noted as a possible future backstop).
 - The composer DOM `submit`/`keydown` is a **secondary** signal only, never a
   sufficient hard block on its own.
 
-This is a **separate, in-browser, best-effort surface** — distinct from the
+This is a **separate, in-browser, best-effort surface**, distinct from the
 Plane-B `internal/guard` egress policy (which governs the developer's own
 coding-agent tool calls at a transport we control). Do not conflate them.
 
@@ -198,7 +198,7 @@ coding-agent tool calls at a transport we control). Do not conflate them.
 Anything that *does* cross the wire (at `redacted` or `full` granularity)
 still hits the **ingest-time `scrub.Scrubber`** at the adapter/hook boundary
 (`internal/adapter/browserchat` via `cmd/observer/browser.go::ingestBrowserTurn`).
-It uses `Scrubber.String` — **not** `ScrubForward` (that's the proxy-outbound
+It uses `Scrubber.String`, **not** `ScrubForward` (that's the proxy-outbound
 path with the 214 KB-JSON footgun documented in CLAUDE.md). The DB never
 stores unscrubbed content; the *primary* guarantee is still that at
 `usage_only` there is nothing to scrub. Pinned by
@@ -208,7 +208,7 @@ stores unscrubbed content; the *primary* guarantee is still that at
 
 - **Per-site toggle** (`chrome.storage.sync` `sites.<tool> = false`) drops a
   site in-browser (the primary "send less" control).
-- **Granularity** (`usage_only` | `redacted` | `full`) — daemon-driven: the
+- **Granularity** (`usage_only` | `redacted` | `full`): daemon-driven: the
   extension follows `[browser].granularity_ceiling` (shipped default `full`;
   dashboard-editable). An explicit `chrome.storage.sync` value wins downward
   (`min(user choice, daemon ceiling)`); with no reachable daemon the
@@ -216,15 +216,15 @@ stores unscrubbed content; the *primary* guarantee is still that at
   client-side pipeline runs before content leaves the browser.
 - **Intervention** (`chrome.storage.sync` `intervention.mode` =
   `off`|`warn`|`redact`|`block`, default `off`; `intervention.types` filters
-  which PII classes trigger it, empty = all) — the pre-send guardrail. Read in
+  which PII classes trigger it, empty = all): the pre-send guardrail. Read in
   the isolated world, relayed to the MAIN world.
 - **Daemon ceiling** (`~/.observer/config.toml` `[browser]`): `enabled`,
   `granularity_ceiling` (clamps what is stored), per-site `[browser.sites]`
   backstop, optional `[browser.listener]` loopback HTTP receiver
   (`listen_addr` default `127.0.0.1:8821`), `retention_days`,
-  `ingest_timeout_ms` (captured-turn DB-write deadline, default 35000 —
+  `ingest_timeout_ms` (captured-turn DB-write deadline, default 35000,
   decoupled from the blocking-hook timeout, past the 30s SQLite
-  busy_timeout). LOCAL-ONLY —
+  busy_timeout). LOCAL-ONLY,
   never distributed to an org.
 
 ## Per-site health
@@ -236,7 +236,7 @@ surfaces from telemetry rather than user reports (proposal §3.7).
 
 ## Permissions & host_permissions decision
 
-`host_permissions` lists the **five exact chat origins** (no wildcards) — the
+`host_permissions` lists the **five exact chat origins** (no wildcards): the
 extension's declared single purpose, scoped to stay in the Chrome Web Store
 standard review lane. **Sites beyond this initial set** should use
 `optional_host_permissions` + `chrome.permissions.request()` (runtime "add
@@ -249,12 +249,12 @@ trust warning; reserved for an opt-in diagnostics mode).
 
 ### CWS listing-hygiene note (Limited Use, from 2026-08-01)
 
-This extension screens *your own* outbound data — it is substantively the
+This extension screens *your own* outbound data; it is substantively the
 **opposite** of AI-guardrail circumvention (it never modifies, suppresses, or
 bypasses any vendor's safety features, content moderation, or usage limits).
 Frame the **public listing / single-purpose statement** as *"AI-usage
 observability + local outbound-PII (DLP) screening."* Keep internally-accurate
-words — "guardrail," "intervention," "bypass," "jailbreak," "intercept" — **out
+words ("guardrail," "intervention," "bypass," "jailbreak," "intercept") **out
 of the public listing/screenshots** (they are fine in code/comments). Under the
 Chrome Web Store **Limited Use** rule (enforced 2026-08-01), collected data
 must be strictly necessary to the disclosed single purpose; the data-use
@@ -262,7 +262,7 @@ declaration must plainly disclose that the extension "reads your AI chat
 conversations," and the manifest → Dashboard data-use declarations → privacy
 policy must agree exactly. One reviewer note: *"Passive observability +
 outbound-PII-redaction tool; it does not modify, suppress, or bypass any AI
-vendor's safety features, content moderation, or usage limits — it only
+vendor's safety features, content moderation, or usage limits; it only
 inspects/redacts data the user is about to send, before it leaves the
 browser."*
 
@@ -296,7 +296,7 @@ Manual (developer / load-unpacked):
   dependency is `gpt-tokenizer` for OpenAI; the server labels them
   `estimated`/unreliable regardless).
 - Every endpoint is a **private, undocumented** web-app API that changes
-  without notice — the parsers fail soft and a per-site health canary flags
+  without notice; the parsers fail soft and a per-site health canary flags
   churn.
 - **Gemini** (BatchExecute RPC) is best-effort/incomplete; **Copilot**
   (WebSocket) is cf_clearance-gated and needs live verification.
@@ -313,6 +313,6 @@ Manual (developer / load-unpacked):
   composer + real ONNX model loading have **not** been exercised here.
 - Completions routed through a page **service worker** would bypass the
   MAIN-world `fetch`/`WebSocket` patch (none observed for these sites today).
-- **Live multi-site capture is operator-attended** — authenticated in-browser
+- **Live multi-site capture is operator-attended**: authenticated in-browser
   stream capture could not be exercised in an automated test; the server +
   wiring path is verified, the parsers are best-effort pending live checks.

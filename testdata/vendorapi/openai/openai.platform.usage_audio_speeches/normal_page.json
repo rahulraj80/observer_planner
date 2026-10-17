@@ -1,0 +1,23 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1730419200,
+      "end_time": 1730505600,
+      "results": [
+        {
+          "object": "organization.usage.audio_speeches.result",
+          "characters": 45,
+          "num_model_requests": 1,
+          "project_id": null,
+          "user_id": null,
+          "api_key_id": null,
+          "model": null
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "page_synthetic_next"
+}

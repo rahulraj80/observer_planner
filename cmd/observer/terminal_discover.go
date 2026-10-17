@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 // terminal_discover.go — the daemon's generic, tool-agnostic terminal-run
 // discovery sweep (Session Cockpit correlation, part C / the core).
 //
@@ -63,16 +65,28 @@ type terminalDiscoverConfig struct {
 	// ambiguous and abstains anyway, so the cap only bounds work.
 	candLimit int
 	// window is the FORWARD ceiling on the candidate time window: a session is a
-	// candidate only if it started at or before launched_at + window. A generous
-	// ceiling covering tool startup + watcher ingest lag, it prevents an
-	// hours-later bare-launch session from being claimed by a long-idle
-	// uncorrelated run (production: 30m).
+	// candidate only if it started at or before launched_at + window. It exists to
+	// stop a stale, long-idle uncorrelated run from being claimed by an unrelated
+	// bare-launch session hours later — but that is a SECONDARY guard, not the
+	// primary one: the primary correctness guarantees are the mandatory
+	// tool+project-root match, the unique-or-abstain pairing (step 3), and the
+	// dwellTicks persistence requirement, all of which hold regardless of how wide
+	// this ceiling is. Widened from 30m to 2h (2026-09-02): a lazily-session-
+	// creating CLI/TUI tool (declares adapter.CursorWatermark/CursorEncrypted, so
+	// it is excluded from the fast post-launch discovery path in
+	// terminal_discover_generic.go and depends on THIS sweep exclusively) may not
+	// write its first session row until the operator's first real message — e.g.
+	// opencode, whose Session Cockpit was observed live waiting 48+ minutes past
+	// launch before the tool wrote anything, well past the old 30m ceiling, with
+	// no way to ever recover once past it (production: 2h).
 	window time.Duration
 }
 
 // defaultTerminalDiscoverConfig is the production timing: sweep every 10s, open
 // the candidate window 5s before launch, require the same unique pair on 2
-// consecutive ticks, and bound the per-tick fan-out to 64 runs × 8 candidates.
+// consecutive ticks, bound the per-tick fan-out to 64 runs × 8 candidates, and
+// give a launch up to 2h to produce its first session record before the
+// forward ceiling permanently closes the run's correlation opportunity.
 func defaultTerminalDiscoverConfig() terminalDiscoverConfig {
 	return terminalDiscoverConfig{
 		interval:   10 * time.Second,
@@ -80,7 +94,7 @@ func defaultTerminalDiscoverConfig() terminalDiscoverConfig {
 		dwellTicks: 2,
 		runLimit:   64,
 		candLimit:  8,
-		window:     30 * time.Minute,
+		window:     2 * time.Hour,
 	}
 }
 
@@ -88,6 +102,8 @@ func defaultTerminalDiscoverConfig() terminalDiscoverConfig {
 // tests). It is exactly the two discovery queries — nothing else of *store.Store
 // leaks in — so the sweep's dependency on storage is one injected interface.
 type terminalDiscoverStore interface {
+	CapturedSessionForTool(ctx context.Context, sessionID, tool string) (bool, error)
+	LiveRunForSession(ctx context.Context, sessionID string, minConfidence float64) (bool, error)
 	// ListLiveUncorrelatedRuns returns the live terminal runs that carry NO
 	// correlation at or above minConfidence yet (the sweep's candidates for
 	// linking).
@@ -128,7 +144,10 @@ type pendingDiscovery struct {
 // (the store seam plus function seams over termsvc.Service), so the loop is
 // unit-testable with fakes and never imports the concrete service.
 type terminalDiscoverer struct {
-	st terminalDiscoverStore
+	// nativeSession resolves a primary rollout writer under the live terminal's
+	// process tree. Nil means this discovery mechanism is not wired.
+	nativeSession func(context.Context, string) (terminalNativeIdentity, error)
+	st            terminalDiscoverStore
 	// handleForRun resolves a run id to its LIVE PTY handle (prod:
 	// svc.HandleForRun). It is the in-memory liveness truth: a stale crash-orphan
 	// row from a previous daemon boot has no live handle, misses here, and is
@@ -141,10 +160,21 @@ type terminalDiscoverer struct {
 	// rollout discovery) correlated mid-dwell is never given a second, possibly
 	// different, pair (pre-correlate revalidation, tick step 4).
 	sessionLinkForRun func(runID string) (sessionID string, confidence float64, ok bool)
-	// projectRoot resolves a live handle to its validated launch directory (prod:
-	// svc.ProjectRoot). ok=false for a default-cwd launch (no browsable root) —
-	// out of v1 scope, skipped.
-	projectRoot func(handle string) (string, bool)
+	// runDir resolves a live handle to the directory its child process actually
+	// runs in (prod: svc.SpawnDir): the validated launch root when the launch
+	// carried one, otherwise the daemon's own cwd, which the child inherits.
+	//
+	// It is deliberately NOT svc.ProjectRoot. ProjectRoot answers an
+	// AUTHORIZATION question ("what may the Files/Git panel browse?") and is
+	// empty for a launch with no requested project root — which every dashboard
+	// "New Terminal" is on a node with no [terminal.launch].allowed_project_roots
+	// configured. Keying correlation off that answer made this sweep skip such
+	// runs forever, so their Session Cockpit sat at "linking…" for the whole
+	// window even though the child's cwd and the session's project root were
+	// both known and equal. Correlation asks a FACT question, so it reads the
+	// factual seam; ok=false now means only an unknown handle or an unreadable
+	// daemon cwd.
+	runDir func(handle string) (string, bool)
 	// correlate records the scored run→session link (prod: svc.Correlate). The
 	// sweep always calls it with termrun.SourceDiscovered.
 	correlate func(ctx context.Context, runID, sessionID string, source termrun.Source, at time.Time) error
@@ -177,8 +207,9 @@ type terminalDiscoverer struct {
 func newTerminalDiscoverer(
 	st terminalDiscoverStore,
 	handleForRun func(runID string) (string, bool),
+	nativeSession func(context.Context, string) (terminalNativeIdentity, error),
 	sessionLinkForRun func(runID string) (sessionID string, confidence float64, ok bool),
-	projectRoot func(handle string) (string, bool),
+	runDir func(handle string) (string, bool),
 	correlate func(ctx context.Context, runID, sessionID string, source termrun.Source, at time.Time) error,
 	resolveGitRoot func(dir string) string,
 	now func() time.Time,
@@ -193,9 +224,10 @@ func newTerminalDiscoverer(
 	}
 	return &terminalDiscoverer{
 		st:                st,
+		nativeSession:     nativeSession,
 		handleForRun:      handleForRun,
 		sessionLinkForRun: sessionLinkForRun,
-		projectRoot:       projectRoot,
+		runDir:            runDir,
 		correlate:         correlate,
 		resolveGitRoot:    resolveGitRoot,
 		now:               now,
@@ -235,7 +267,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	// sessions query.
 	runs, err := d.st.ListLiveUncorrelatedRuns(ctx, termrun.MinLinkConfidence, d.cfg.runLimit)
 	if err != nil {
-		d.logger.Debug("terminal discovery: list live uncorrelated runs failed — abstaining this tick and clearing dwell", "err", err)
+		d.logger.Debug("terminal discovery: list live uncorrelated runs failed - abstaining this tick and clearing dwell", "err", err)
 		if len(d.pending) > 0 {
 			d.pending = make(map[string]pendingDiscovery)
 		}
@@ -257,7 +289,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	// the honest cost. The caps are therefore pure WORK bounds, never a
 	// correctness shortcut.
 	if len(runs) >= d.cfg.runLimit {
-		d.logger.Debug("terminal discovery: live uncorrelated run list at cap — abstaining this tick (possible truncation would invalidate the uniqueness proof)",
+		d.logger.Debug("terminal discovery: live uncorrelated run list at cap - abstaining this tick (possible truncation would invalidate the uniqueness proof)",
 			"runs", len(runs), "runLimit", d.cfg.runLimit)
 		if len(d.pending) > 0 {
 			d.pending = make(map[string]pendingDiscovery)
@@ -265,14 +297,20 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 		return 0
 	}
 
+	// Native adapter identity survives delayed first records and simultaneous
+	// same-project terminals. Withhold supported runs from timing inference.
+	nativeLinks, runs := d.discoverNativeSessions(ctx, runs)
+
 	// 2. For each run, resolve its live handle → launch dir → git root, then ask
 	// the store for candidate sessions. Two failure classes are treated
 	// DIFFERENTLY:
 	//   • STRUCTURAL skips (permanent states) drop only the affected run and are
 	//     treated as ABSENT for dwell (pending dropped in step 4 like any run not
 	//     producing a pair): a handleForRun miss (run ended — it also leaves the
-	//     store list next tick), a projectRoot miss on a NON-handoff run
-	//     (default-cwd launch, no browsable root), and a handoff source root that
+	//     store list next tick), a runDir miss on a NON-handoff run (an unknown
+	//     handle, or a daemon whose own cwd is unreadable — a launch with no
+	//     requested project root is NOT such a miss: its child inherits the
+	//     daemon cwd, which svc.SpawnDir reports), and a handoff source root that
 	//     resolves to EMPTY with a nil error (source session unknown to the
 	//     corpus). RESIDUAL, accepted honestly: a structurally dir-less LIVE run is
 	//     invisible to the cross-run uniqueness check in step 3, so its child
@@ -284,7 +322,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	//     lookup error above) make the WHOLE tick unsound — an unresolved run is
 	//     hidden from the uniqueness check, so a competitor it would contest goes
 	//     unseen and another run can look falsely exclusive. These abstain
-	//     TICK-WIDE (clear ALL pending, return 0), the same shape as the cap
+	//     TICK-WIDE (clear ALL pending, return nativeLinks), the same shape as the cap
 	//     abstains.
 	cands := make(map[string][]string, len(runs))
 	for _, run := range runs {
@@ -297,7 +335,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 		//   • launch dir MISSING but this is a handoff → recover the root from the
 		//     SOURCE session (below).
 		var gitRoot, rawDir string
-		if dir, dok := d.projectRoot(handle); dok {
+		if dir, dok := d.runDir(handle); dok {
 			gitRoot = d.resolveRoot(dir)
 			rawDir = dir
 		} else if run.Kind == string(termrun.KindHandoff) && run.SourceSessionID != "" {
@@ -320,12 +358,12 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 				// in step 3, so a competitor it would have contested stays hidden and
 				// another run could look falsely exclusive. Abstain tick-wide: clear
 				// ALL pending and make no links (same shape as the cap abstains).
-				d.logger.Debug("terminal discovery: source-session project root lookup failed — abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
+				d.logger.Debug("terminal discovery: source-session project root lookup failed - abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
 					"run", run.RunID, "source", run.SourceSessionID, "err", rerr)
 				if len(d.pending) > 0 {
 					d.pending = make(map[string]pendingDiscovery)
 				}
-				return 0
+				return nativeLinks
 			}
 			if root == "" {
 				// STRUCTURAL skip (permanent state, nil error): the source session is
@@ -334,14 +372,17 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 				// run (a tick-wide abstain on it would disable the sweep for as long as
 				// such a run lives). Its child session is left claimable by other runs,
 				// the same accepted residual as a structurally dir-less launch.
-				d.logger.Debug("terminal discovery: source session has no stored project root — skipping handoff run",
+				d.logger.Debug("terminal discovery: source session has no stored project root - skipping handoff run",
 					"run", run.RunID, "source", run.SourceSessionID)
 				continue
 			}
 			gitRoot = root
 			rawDir = root
 		} else {
-			continue // default-cwd launch with no handoff fallback: out of v1 scope
+			// No working directory for this run at all (unknown handle, or an
+			// unreadable daemon cwd) and no handoff source to recover one from.
+			// Nothing to filter candidates on, so abstain for this run.
+			continue
 		}
 		tool := canonicalToolForRun(run.Tool)
 		after := run.LaunchedAt.Add(-d.cfg.skew)
@@ -367,12 +408,12 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 			// would contest goes unseen and another run could look falsely exclusive.
 			// Abstain tick-wide (clear ALL pending, no links), the same shape as the
 			// cap abstains.
-			d.logger.Debug("terminal discovery: candidate sessions query failed — abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
+			d.logger.Debug("terminal discovery: candidate sessions query failed - abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
 				"run", run.RunID, "err", cerr)
 			if len(d.pending) > 0 {
 				d.pending = make(map[string]pendingDiscovery)
 			}
-			return 0
+			return nativeLinks
 		}
 		ids := make([]string, 0, len(sessions))
 		for _, s := range sessions {
@@ -390,12 +431,12 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	// where linking would be guesswork anyway.
 	for runID, ids := range cands {
 		if len(ids) >= d.cfg.candLimit {
-			d.logger.Debug("terminal discovery: a run's candidate list is at cap — abstaining this tick (hidden candidates can invalidate cross-run exclusivity)",
+			d.logger.Debug("terminal discovery: a run's candidate list is at cap - abstaining this tick (hidden candidates can invalidate cross-run exclusivity)",
 				"run", runID, "candidates", len(ids), "candLimit", d.cfg.candLimit)
 			if len(d.pending) > 0 {
 				d.pending = make(map[string]pendingDiscovery)
 			}
-			return 0
+			return nativeLinks
 		}
 	}
 
@@ -410,7 +451,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 			delete(d.pending, runID)
 		}
 	}
-	links := 0
+	links := nativeLinks
 	for runID, sessionID := range pairs {
 		p, ok := d.pending[runID]
 		if ok && p.sessionID == sessionID {
@@ -432,7 +473,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 		if cerr := d.correlate(ctx, runID, sessionID, termrun.SourceDiscovered, d.now().UTC()); cerr != nil {
 			// Keep the pending entry and retry next tick (the pair is still unique
 			// and will re-dwell; a transient correlate failure never abandons it).
-			d.logger.Debug("terminal discovery: correlate failed — will retry next tick",
+			d.logger.Debug("terminal discovery: correlate failed - will retry next tick",
 				"run", runID, "session", sessionID, "err", cerr)
 			continue
 		}
@@ -473,25 +514,25 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 func (d *terminalDiscoverer) linkBlockedByRevalidation(ctx context.Context, runID, sessionID string) bool {
 	if _, live := d.handleForRun(runID); !live {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: run ended between tick start and link — skipping", "run", runID)
+		d.logger.Debug("terminal discovery: run ended between tick start and link - skipping", "run", runID)
 		return true
 	}
 	if _, _, linked := d.sessionLinkForRun(runID); linked {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: run already linked by a stronger source mid-dwell — skipping",
+		d.logger.Debug("terminal discovery: run already linked by a stronger source mid-dwell - skipping",
 			"run", runID, "session", sessionID)
 		return true
 	}
 	claimed, serr := d.st.SessionLinkedToAnyRun(ctx, sessionID, termrun.MinLinkConfidence)
 	if serr != nil {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: session-link recheck failed — dropping pending, not linking",
+		d.logger.Debug("terminal discovery: session-link recheck failed - dropping pending, not linking",
 			"run", runID, "session", sessionID, "err", serr)
 		return true
 	}
 	if claimed {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: session already linked to another run mid-dwell — skipping",
+		d.logger.Debug("terminal discovery: session already linked to another run mid-dwell - skipping",
 			"run", runID, "session", sessionID)
 		return true
 	}

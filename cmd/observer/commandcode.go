@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // newCommandCodeCmd implements `observer command-code` (alias `commandcode`)
@@ -40,7 +42,7 @@ func newCommandCodeCmd() *cobra.Command {
 		Aliases: []string{"commandcode"},
 		Short:   "Launch Command Code; with --continue-from, seed a handover as its initial message",
 		Long: "Wraps Command Code (`commandcode`, npm package `command-code`).\n" +
-			"This launcher is NON-PROXIED — Command Code's API-URL knob points at\n" +
+			"This launcher is NON-PROXIED - Command Code's API-URL knob points at\n" +
 			"its own closed gateway, so there is no Anthropic/OpenAI-shaped lane\n" +
 			"to redirect. Token capture happens via observer's local command-code\n" +
 			"adapter (per-message usage envelope in the session JSONL).\n\n" +
@@ -51,8 +53,13 @@ func newCommandCodeCmd() *cobra.Command {
 			"All arguments after the subcommand are forwarded to commandcode.\n" +
 			"Use `--` to separate observer flags from commandcode flags. NEVER\n" +
 			"touches API keys or stored auth.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach gate (attach-all-launchers): default-on attach hands the PTY
 			// to the daemon. Seed-only spec (launched non-proxied — no proxy env,
 			// no escape-hatch flag); incompatible when a handoff fork is engaged,
@@ -104,7 +111,7 @@ func newCommandCodeCmd() *cobra.Command {
 				// the continued work. Fail fast, before the handoff render
 				// (the goose --no-session precedent).
 				if forwardedFlagConflict(args, "--no-session") {
-					err := fmt.Errorf("--continue-from opens a session-persisted seeded run, but you forwarded --no-session — drop it (observer's command-code adapter captures from the on-disk session JSONL)")
+					err := fmt.Errorf("--continue-from opens a session-persisted seeded run, but you forwarded --no-session - drop it (observer's command-code adapter captures from the on-disk session JSONL)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer command-code: %v\n", err)
 					return err
 				}
@@ -114,7 +121,7 @@ func newCommandCodeCmd() *cobra.Command {
 				// positional injection kinds, so this flag case is the
 				// launcher's own guard (the goose --no-session shape).
 				if argsContainHeadlessFlag(args, "-p", "--print") {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the headless -p/--print one-shot — drop it (or run the handover through `commandcode -p` yourself)")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the headless -p/--print one-shot - drop it (or run the handover through `commandcode -p` yourself)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer command-code: %v\n", err)
 					return err
 				}
@@ -130,7 +137,7 @@ func newCommandCodeCmd() *cobra.Command {
 				// that owns the case — the droid `exec` precedent. Fail fast,
 				// before the (comparatively expensive) handoff render.
 				if verb, bad := commandCodeHeadlessScan.leadingVerb(args); bad {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the management subcommand %q, which prints and exits — drop it, or run `commandcode %s` yourself", verb, verb)
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the management subcommand %q, which prints and exits - drop it, or run `commandcode %s` yourself", verb, verb)
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer command-code: %v\n", err)
 					return err
 				}
@@ -164,7 +171,13 @@ func newCommandCodeCmd() *cobra.Command {
 				continueDir = cwd
 			}
 
-			return runSeedOnlyLaunch("command-code", bin, args, continueDir)
+			// Best-effort attribution config: a load failure just disables
+			// the launch seed (recordLaunchSeed treats "" as off).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+			}
+			return runSeedOnlyLaunchSeeded(configPath, dbPath, "command-code", "command-code", bin, args, continueDir)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
@@ -175,7 +188,6 @@ func newCommandCodeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "command-code")
 	resume = registerResumeFlag(cmd, "command-code")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 

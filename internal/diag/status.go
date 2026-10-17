@@ -3,6 +3,7 @@ package diag
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
 // StatusSnapshot is a point-in-time view of the observer's state. Exposed so
@@ -52,6 +55,92 @@ type StatusSnapshot struct {
 	// on every OS. Not omitempty: an absent field is the wire signal
 	// for "daemon too old to know", which the client handles.
 	HostOS string `json:"host_os"`
+
+	// HostName is the machine's own hostname (os.Hostname), so a dashboard
+	// opened on a REMOTE machine through the instance switcher can always
+	// name the machine it shows (T-425). Empty when the OS will not say;
+	// omitted then, which is also what an older daemon sends.
+	HostName string `json:"host_name,omitempty"`
+
+	// QueryErrors counts the individual lookups in Snapshot that FAILED and
+	// were swallowed into a zero value. Snapshot is deliberately tolerant —
+	// a partial schema, a table that pre-dates its migration, or a scan cut
+	// short must still yield whatever else is readable rather than an
+	// all-or-nothing error — but that tolerance is indistinguishable, at the
+	// wire, from a genuinely empty database. This field is the distinction:
+	// 0 means every lookup answered, N>0 means N of the numbers in this
+	// snapshot are fabricated zeros rather than measurements.
+	//
+	// It exists so a CONSUMER can refuse to treat a degraded snapshot as
+	// fact — the dashboard's /api/status cache declines to memoize any
+	// snapshot with QueryErrors > 0, since a cached partial would keep
+	// serving fabricated zeros for the whole TTL, long after the transient
+	// condition that caused them had cleared.
+	//
+	// omitempty: the wire shape only grows when something actually went
+	// wrong, so a healthy daemon's response is byte-identical to before this
+	// field existed and no client is required to know about it.
+	QueryErrors int `json:"query_errors,omitempty"`
+
+	// Integrity is the persisted verdict of the daemon's background
+	// `PRAGMA quick_check` (RES-3, codebase audit 2026-09-16). nil means the
+	// probe has NOT run on this database yet — a fresh install, or one where
+	// [observer.db].integrity_check_max_gb size-gated it off. nil is NOT a
+	// failure and must never be rendered as one.
+	//
+	// It is here rather than in a new table or a new endpoint because this is
+	// already the struct `observer status` prints and the dashboard's
+	// /api/status serves: before this, a corrupt database produced exactly one
+	// ERROR log line and nothing else, so it degraded capture silently until
+	// somebody thought to run `observer doctor`.
+	//
+	// omitempty + pointer: a daemon that has never probed emits the same bytes
+	// as before this field existed.
+	Integrity *IntegrityStatus `json:"integrity,omitempty"`
+}
+
+// IntegrityStatus is the status-surface projection of db.IntegrityVerdict.
+// Duplicated as its own type rather than embedding the db one so the wire shape
+// this package owns cannot drift when the db type grows a field.
+type IntegrityStatus struct {
+	// CheckedAt is when the probe finished (UTC).
+	CheckedAt time.Time `json:"checked_at"`
+	// Status is db.IntegrityOK / db.IntegrityCorrupt / db.IntegrityError —
+	// a closed vocabulary. "error" means the probe could not COMPLETE
+	// (timeout, locked file); it says nothing about the data.
+	Status string `json:"status"`
+	// Message is the pragma's own text, or the error's. Empty when ok.
+	Message string `json:"message,omitempty"`
+}
+
+// OK reports whether the last probe completed cleanly.
+func (s IntegrityStatus) OK() bool { return s.Status == db.IntegrityOK }
+
+// MarshalJSON preserves StatusSnapshot's public wire shape while actually
+// honoring the optional contract for time.Time fields. encoding/json's
+// `omitempty` does not consider a zero struct empty, so without this projection
+// a fresh database emits `0001-01-01T00:00:00Z` as last_action_at. Dashboard
+// relative-time formatters then honestly-but-uselessly render roughly 17.7
+// million hours of "activity". Internal callers keep ordinary time.Time values
+// and their IsZero checks; only the JSON boundary uses nullable timestamps.
+func (s StatusSnapshot) MarshalJSON() ([]byte, error) {
+	type snapshotAlias StatusSnapshot
+	type snapshotWire struct {
+		snapshotAlias
+		LastActionAt *time.Time `json:"last_action_at,omitempty"`
+		StartedAt    *time.Time `json:"started_at,omitempty"`
+	}
+
+	w := snapshotWire{snapshotAlias: snapshotAlias(s)}
+	if !s.LastActionAt.IsZero() {
+		last := s.LastActionAt
+		w.LastActionAt = &last
+	}
+	if !s.StartedAt.IsZero() {
+		started := s.StartedAt
+		w.StartedAt = &started
+	}
+	return json.Marshal(w)
 }
 
 // SnapshotCounts holds the row counts for each table the user cares about.
@@ -100,6 +189,16 @@ type ToolActivity struct {
 	ActionCount int       `json:"action_count"`
 }
 
+// excerptCountTable is the table the excerpt count reads. It is the FTS5
+// shadow table, not the action_excerpts virtual table (T-415): FTS5 answers
+// `COUNT(*)` on the virtual table by a full scan that reads every stored
+// excerpt (0.6-6 s over 529k rows on the operator node, on every
+// `observer status`, every /metrics scrape and every dashboard status
+// refresh), while the shadow table holds exactly one row per FTS row and its
+// count is served from the migration-147 c0 index in milliseconds. Pinned by
+// TestSnapshotExcerptCountAvoidsFTSScan.
+const excerptCountTable = "action_excerpts_content"
+
 // Snapshot returns a status snapshot of the observer DB. Errors loading
 // individual fields surface as zero values; the caller can render whatever's
 // available.
@@ -108,16 +207,46 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 		return StatusSnapshot{}, errors.New("diag.Snapshot: nil DB")
 	}
 	snap := StatusSnapshot{DBPath: dbPath, HostOS: runtime.GOOS}
+	if h, err := os.Hostname(); err == nil {
+		snap.HostName = h
+	}
 	if fi, err := os.Stat(expandTilde(dbPath)); err == nil {
 		snap.DBSizeBytes = fi.Size()
 	}
 
+	// note records a lookup that failed and was swallowed into a zero value,
+	// so the caller can tell a partial snapshot from an empty database (see
+	// StatusSnapshot.QueryErrors).
+	//
+	// sql.ErrNoRows is deliberately NOT counted: "no row" is a legitimate
+	// ANSWER — an empty actions table, a fresh install with no advisor
+	// digest — not a failure to read. Counting it would mark every new
+	// install permanently degraded, which is the precise opposite of what
+	// this signal is for.
+	note := func(err error) {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			snap.QueryErrors++
+		}
+	}
+
 	// Schema version — tolerated on error (schema may be partial); the
-	// destination stays zero-valued, so the result is discarded explicitly.
-	_ = database.QueryRowContext(
+	// destination stays zero-valued, so only the failure is recorded.
+	note(database.QueryRowContext(
 		ctx,
 		`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='version'`,
-	).Scan(&snap.SchemaVersion)
+	).Scan(&snap.SchemaVersion))
+
+	// Last integrity verdict (RES-3). Absent is the common, healthy case on a
+	// fresh install and is NOT counted as a query error — same rule as
+	// sql.ErrNoRows above. A malformed/unreadable record IS counted, because
+	// then the snapshot genuinely could not answer.
+	if v, ok, err := db.LastIntegrityVerdict(ctx, database); err != nil {
+		note(err)
+	} else if ok {
+		snap.Integrity = &IntegrityStatus{
+			CheckedAt: v.CheckedAt, Status: v.Status, Message: v.Message,
+		}
+	}
 
 	tableCounts := []struct {
 		table string
@@ -129,21 +258,21 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 		{"api_turns", &snap.Counts.APITurns},
 		{"file_state", &snap.Counts.FileState},
 		{"failure_context", &snap.Counts.FailureContext},
-		{"action_excerpts", &snap.Counts.ActionExcerpts},
+		{excerptCountTable, &snap.Counts.ActionExcerpts},
 		{"token_usage", &snap.Counts.TokenUsageRows},
 		{"cache_events", &snap.Counts.CacheEvents},
 		{"guard_events", &snap.Counts.GuardEvents},
 		{"router_decisions", &snap.Counts.RouterDecisions},
 	}
 	for _, tc := range tableCounts {
-		_ = database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tc.table).Scan(tc.dest)
+		note(database.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tc.table).Scan(tc.dest))
 	}
 
 	// Live sessions: distinct sessions with activity in the last 15
 	// minutes across the three activity tables — the /api/live
 	// definition (its default window), as a count instead of a feed.
 	liveSince := time.Now().UTC().Add(-15 * time.Minute).Format(time.RFC3339Nano)
-	_ = database.QueryRowContext(
+	note(database.QueryRowContext(
 		ctx, `
 		SELECT COUNT(DISTINCT session_id) FROM (
 			SELECT session_id FROM actions WHERE timestamp >= ?
@@ -153,22 +282,22 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 			SELECT session_id FROM token_usage WHERE timestamp >= ?
 		) WHERE session_id IS NOT NULL AND session_id <> ''`,
 		liveSince, liveSince, liveSince,
-	).Scan(&snap.Counts.LiveSessions)
+	).Scan(&snap.Counts.LiveSessions))
 
 	// Advisor active-suggestion count from the digest snapshot (tolerant:
 	// table may not exist pre-migration-039, payload may lack the field).
-	_ = database.QueryRowContext(
+	note(database.QueryRowContext(
 		ctx,
 		`SELECT CAST(COALESCE(json_extract(payload, '$.total_count'), 0) AS INTEGER)
 		 FROM advisor_digest WHERE id = 1`,
-	).Scan(&snap.Counts.Suggestions)
+	).Scan(&snap.Counts.Suggestions))
 
 	// Last action overall.
 	var lastTS, lastTool sql.NullString
-	_ = database.QueryRowContext(
+	note(database.QueryRowContext(
 		ctx,
 		`SELECT timestamp, tool FROM actions ORDER BY timestamp DESC LIMIT 1`,
-	).Scan(&lastTS, &lastTool)
+	).Scan(&lastTS, &lastTool))
 	if lastTS.Valid {
 		if t, err := time.Parse(time.RFC3339Nano, lastTS.String); err == nil {
 			snap.LastActionAt = t
@@ -181,12 +310,14 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 	// Per-tool last seen.
 	rows, err := database.QueryContext(ctx,
 		`SELECT tool, MAX(timestamp), COUNT(*) FROM actions GROUP BY tool ORDER BY tool`)
+	note(err)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var ta ToolActivity
 			var ts string
 			if err := rows.Scan(&ta.Tool, &ts, &ta.ActionCount); err != nil {
+				note(err)
 				continue
 			}
 			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
@@ -194,14 +325,18 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 			}
 			snap.PerToolLastSeen = append(snap.PerToolLastSeen, ta)
 		}
+		// A cursor that dies mid-walk (a cancelled scan, a closing DB) leaves
+		// a SHORT list that looks exactly like a small install. Only rows.Err
+		// tells the two apart.
+		note(rows.Err())
 	}
 
 	// Failures in the last 24 hours.
 	cutoff := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
-	_ = database.QueryRowContext(
+	note(database.QueryRowContext(
 		ctx,
 		`SELECT COUNT(*) FROM failure_context WHERE timestamp >= ?`, cutoff,
-	).Scan(&snap.RecentFailures24)
+	).Scan(&snap.RecentFailures24))
 
 	return snap, nil
 }
@@ -238,6 +373,20 @@ func FormatStatus(s StatusSnapshot) string {
 	fmt.Fprintf(&b, "Guard events:     %d\n", s.Counts.GuardEvents)
 	fmt.Fprintf(&b, "Router decisions: %d\n", s.Counts.RouterDecisions)
 	fmt.Fprintf(&b, "Live sessions:    %d\n", s.Counts.LiveSessions)
+	// Integrity (RES-3): silent when the probe has not run (a fresh install
+	// must not read as damaged) and when it last came back clean — a healthy
+	// status stays noise-free. Loud, with the remedy, otherwise.
+	if s.Integrity != nil && !s.Integrity.OK() {
+		label := "DB INTEGRITY:     CORRUPT"
+		if s.Integrity.Status == db.IntegrityError {
+			label = "DB INTEGRITY:     UNVERIFIED"
+		}
+		fmt.Fprintf(&b, "%s (checked %s)\n", label, s.Integrity.CheckedAt.Format(time.RFC3339))
+		if s.Integrity.Message != "" {
+			fmt.Fprintf(&b, "                  %s\n", s.Integrity.Message)
+		}
+		fmt.Fprintf(&b, "                  run `observer doctor db` - capture may be degraded\n")
+	}
 	if !s.LastActionAt.IsZero() {
 		fmt.Fprintf(&b, "Last action:      %s by %s\n",
 			s.LastActionAt.Format(time.RFC3339), s.LastActionTool)
@@ -248,6 +397,17 @@ func FormatStatus(s StatusSnapshot) string {
 			fmt.Fprintf(&b, "  %-12s %d actions, last %s\n",
 				ta.Tool, ta.ActionCount, ta.LastSeenAt.Format(time.RFC3339))
 		}
+	}
+	// QueryErrors is the completeness signal (see its doc comment): silent
+	// when 0 so a healthy status stays noise-free, loud when non-zero so
+	// the reader can't mistake a degraded read for a genuinely empty DB.
+	if s.QueryErrors > 0 {
+		word := "query"
+		if s.QueryErrors != 1 {
+			word = "queries"
+		}
+		fmt.Fprintf(&b, "WARNING:          %d %s failed - the counts above are INCOMPLETE, do not trust them as exact\n",
+			s.QueryErrors, word)
 	}
 	return b.String()
 }

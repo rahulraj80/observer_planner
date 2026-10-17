@@ -14,12 +14,20 @@ import (
 
 // OWASP-recommended argon2id cost parameters (operator Q1 default; see doc.go).
 const (
-	argonMemoryKiB = 19 * 1024 // 19 MiB
-	argonTime      = 2         // iterations
-	argonThreads   = 1         // parallelism
-	argonKeyLen    = 32        // derived-key bytes
-	argonSaltLen   = 16        // salt bytes
-	argonVersion   = argon2.Version
+	prodArgonMemoryKiB = 19 * 1024 // 19 MiB
+	prodArgonTime      = 2         // iterations
+	argonThreads       = 1         // parallelism
+	argonKeyLen        = 32        // derived-key bytes
+	argonSaltLen       = 16        // salt bytes
+	argonVersion       = argon2.Version
+)
+
+// The cost actually used. Production never changes these; this package's
+// own tests lower them in an init (argon2_testcost_test.go, D-609). A stored
+// hash carries its own parameters, so verification is unaffected.
+var (
+	argonMemoryKiB uint32 = prodArgonMemoryKiB
+	argonTime      uint32 = prodArgonTime
 )
 
 // ErrBadHash is returned by VerifySecret when the encoded hash is malformed.
@@ -35,6 +43,7 @@ func HashSecret(secret []byte) (string, error) {
 		return "", fmt.Errorf("remoteauth.HashSecret: rng failure: %w", err)
 	}
 	key := argon2.IDKey(secret, salt, argonTime, argonMemoryKiB, argonThreads, argonKeyLen)
+	// no-bare-usd:allow (not money: the PHC string format)
 	return fmt.Sprintf(
 		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argonVersion, argonMemoryKiB, argonTime, argonThreads,

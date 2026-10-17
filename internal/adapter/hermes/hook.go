@@ -27,11 +27,12 @@ const SourceFileHook = "hermes:hook"
 // usage{input_tokens, output_tokens} plus provider / base_url /
 // api_mode / api_duration. See docs/hermes-adapter-plan.md §17.1.F.
 const (
-	EventToolCall     = "tool_call"     // mapped from post_tool_call
-	EventSessionStart = "session_start" // mapped from on_session_start
-	EventSessionEnd   = "session_end"   // mapped from on_session_end
-	EventAPIRequest   = "api_request"   // mapped from post_api_request
-	EventSubagentStop = "subagent_stop" // mapped from subagent_stop
+	EventToolCall      = "tool_call"      // mapped from post_tool_call
+	EventSessionStart  = "session_start"  // mapped from on_session_start
+	EventSessionEnd    = "session_end"    // mapped from on_session_end
+	EventAPIRequest    = "api_request"    // mapped from post_api_request
+	EventSubagentStart = "subagent_start" // mapped from subagent_start
+	EventSubagentStop  = "subagent_stop"  // mapped from subagent_stop
 )
 
 // hookPayload is the union of fields the Python bridge sends. Unknown
@@ -81,8 +82,13 @@ type hookPayload struct {
 	MessageCount int64          `json:"message_count"`
 	Usage        hookUsageBlock `json:"usage"`
 
-	// subagent_stop fields.
+	// subagent_start / subagent_stop fields. ChildRole rides on both
+	// events per testdata/hermes/plugin-api-source.txt's
+	// _DEFAULT_PAYLOADS["subagent_stop"] sample (child_role: None) —
+	// captured here so a future bridge revision that populates it on
+	// either event needs no struct change.
 	ParentSessionID string `json:"parent_session_id"`
+	ChildRole       string `json:"child_role"`
 	ChildSummary    string `json:"child_summary"`
 	ChildStatus     string `json:"child_status"`
 }
@@ -111,10 +117,20 @@ type hookUsageBlock struct {
 //
 // SourceEventID composition mirrors the SQLite path's deterministic
 // dedup scheme:
-//   - tool_call:     <session_id>:<tool_call_id>
-//   - session_start: <session_id>:session_start
-//   - session_end:   <session_id>:session_end
-//   - subagent_stop: <session_id>:subagent_stop:<child_summary_hash>
+//   - tool_call:      <session_id>:<tool_call_id>
+//   - session_start:  <session_id>:session_start
+//   - session_end:    <session_id>:session_end
+//   - subagent_start: <session_id>:subagent_start:<timestamp_ms>
+//   - subagent_stop:  <session_id>:subagent_stop:<child_summary_hash>
+//
+// EventSubagentStart is a real entry in hermes_cli/plugins.py's
+// VALID_HOOKS (testdata/hermes/plugin-api-source.txt line 147,
+// alongside subagent_stop) but the bundled plugin bridge shipped at
+// internal/hook/hermesplugin/__init__.py currently registers only
+// subagent_stop — so no live Hermes install fires this event today.
+// The case below is forward-compatible groundwork: once the bridge
+// registers subagent_start (out of this package's scope), rows land
+// correctly with no adapter change. See docs/hermes-adapter.md.
 //
 // Combined with SourceFile="hermes:hook" these are unique across
 // re-fires and across the SQLite path (which uses the absolute DB
@@ -147,6 +163,8 @@ func BuildToolEvent(eventName string, body []byte, sc *scrub.Scrubber) (models.T
 		return buildHookSessionStart(raw), true, nil
 	case EventSessionEnd:
 		return buildHookSessionEnd(raw), true, nil
+	case EventSubagentStart:
+		return buildHookSubagentStart(raw), true, nil
 	case EventSubagentStop:
 		return buildHookSubagentStop(raw, sc), true, nil
 	case EventAPIRequest:
@@ -221,6 +239,23 @@ func BuildTokenEvent(eventName string, body []byte) (models.TokenEvent, bool, er
 	if raw.APICallCount == 0 {
 		ev.SourceEventID = fmt.Sprintf("%s:api:t%d", raw.SessionID, int64(raw.Timestamp*1000))
 	}
+	// api_duration is FLOAT SECONDS (testdata/hermes/plugin-api-source.txt
+	// ~L373 "api_duration": 1.234) covering exactly the single API call
+	// this post_api_request event reports on — its usage block ({input,
+	// output}_tokens) is that same one call's tokens, not a session
+	// cumulative. api_call_count is an ORDINAL (the running "this is call
+	// #N in the session" counter also seen on pre_api_request BEFORE the
+	// call fires; docs/hermes-adapter-plan.md §3.1 describes the SQLite
+	// sessions.api_call_count column with the same name as a session
+	// total) — it is not a batch size the duration spans, so it doesn't
+	// gate the stamp. post_api_request fires once per completed LLM API
+	// call by construction (hermes_cli/hooks.py), so api_duration always
+	// covers one call's generation.
+	if raw.APIDuration > 0 {
+		ev.GenMs = int64(raw.APIDuration*1000 + 0.5)
+		ev.GenBasis = models.GenBasisNative
+		ev.GenTimingV = 1
+	}
 	return ev, true, nil
 }
 
@@ -275,7 +310,14 @@ func buildHookToolCall(raw hookPayload, sc *scrub.Scrubber) models.ToolEvent {
 		evt.Success = success
 		evt.ErrorMessage = errMsg
 		if sc != nil {
-			output = sc.String(output)
+			// parseToolResult's fallback path (no output/content key
+			// found) hands back the WHOLE raw JSON result body, so
+			// scrub with RawJSON — not String's line-oriented regexes,
+			// which can corrupt JSON structure (MHC-4). RawJSON falls
+			// back to the same behavior String had when output is
+			// plain text (the extracted-field case), so this is safe
+			// either way.
+			output = sc.RawJSON([]byte(output))
 		}
 		evt.ToolOutput = contentcap.Cap(output, contentcap.DefaultMaxBytes)
 	}
@@ -319,6 +361,38 @@ func buildHookSessionEnd(raw hookPayload) models.ToolEvent {
 		Target:        raw.EndReason,
 		Success:       true,
 		RawToolName:   "on_session_end",
+	}
+}
+
+// buildHookSubagentStart maps a subagent_start hook payload to a
+// normalized ToolEvent, mirroring buildHookSubagentStop. IsSidechain
+// is set true — this row marks the child sub-agent's OWN runtime
+// bracket starting, distinct from the parent's tool_use that spawned
+// it (ActionSpawnSubagent, which stays IsSidechain=false since it
+// happens on the parent thread). See models.ActionSubagentStart doc
+// comment and the cursor adapter's EventSubagentStart handling for
+// the same start/stop bracket convention.
+//
+// No live payload sample exists for this event yet (absent from
+// testdata/hermes/plugin-api-source.txt's _DEFAULT_PAYLOADS, unlike
+// subagent_stop) since the bundled bridge doesn't fire it — see the
+// BuildToolEvent doc comment. SourceEventID falls back to a
+// timestamp-derived key (no child_summary equivalent exists at start
+// time to hash).
+func buildHookSubagentStart(raw hookPayload) models.ToolEvent {
+	return models.ToolEvent{
+		SourceFile:    SourceFileHook,
+		SourceEventID: fmt.Sprintf("%s:subagent_start:%d", raw.SessionID, int64(raw.Timestamp*1000)),
+		SessionID:     raw.SessionID,
+		ProjectRoot:   raw.CWD,
+		Timestamp:     unixFloatToTime(raw.Timestamp),
+		Tool:          models.ToolHermes,
+		Model:         stripProviderPrefix(raw.Model),
+		ActionType:    models.ActionSubagentStart,
+		Target:        raw.ChildRole,
+		Success:       true,
+		RawToolName:   "subagent_start",
+		IsSidechain:   true,
 	}
 }
 

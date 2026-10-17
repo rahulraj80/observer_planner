@@ -1,0 +1,37 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "groups": "VerifiedOfficial",
+    "groups[]": "VerifiedOfficial",
+    "groups[].createdAt": "VerifiedOfficial",
+    "groups[].displayName": "VerifiedOfficial",
+    "groups[].externalId": "VerifiedOfficial",
+    "groups[].id": "VerifiedOfficial",
+    "groups[].isManaged": "VerifiedOfficial",
+    "groups[].memberCount": "VerifiedOfficial",
+    "groups[].organizationId": "VerifiedOfficial",
+    "groups[].source": "VerifiedOfficial",
+    "groups[].syncType": "VerifiedOfficial",
+    "groups[].updatedAt": "VerifiedOfficial",
+    "maxResults": "VerifiedOfficial"
+  },
+  "fixture_sha256": "76d2d94d2d09541b58ae26b641c03d83de813cd5edbe32615c03caaaecb62cb6",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/{organization_id}/groups",
+    "query": {
+      "maxResults": "100",
+      "nextToken": "cursor_from_response"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: nextToken omitted (documented: omitted on the last page); a SCIM group (source scim, externalId, syncType, isManaged true) and a group with the optional fields omitted.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Qoder Teams OpenAPI Group APIs (groups.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "46514112b32fba48cbc5c94733ae3833e5cfc6f99c297469a875b86fe2d94cb3",
+  "source_url": "https://docs.qoder.com/account/teams/openapi/groups.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "qoder.oapi.groups"
+}

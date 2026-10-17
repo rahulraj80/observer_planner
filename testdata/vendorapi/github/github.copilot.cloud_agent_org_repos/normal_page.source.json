@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "enabled_repositories": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7a614302989f7904bf6f41521db441e719e560526f33b4f0f3a149f41c923f4e",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/orgs/{org}/copilot/coding-agent/permissions",
+    "status": 200
+  },
+  "notes": "Verbatim example all_enabled of GET /orgs/{org}/copilot/coding-agent/permissions (operationId copilot/get-copilot-coding-agent-permissions-organization).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.cloud_agent_org_repos"
+}

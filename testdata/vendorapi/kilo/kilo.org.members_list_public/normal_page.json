@@ -1,0 +1,29 @@
+{
+  "result": {
+    "data": [
+      {
+        "id": "kilo_user_synth01",
+        "name": "Ada Example",
+        "email": "ada@example.com",
+        "role": "owner",
+        "status": "active",
+        "inviteDate": null
+      },
+      {
+        "id": "kilo_user_synth02",
+        "name": "Bo Example",
+        "email": "bo@example.com",
+        "role": "member",
+        "status": "active",
+        "inviteDate": "2026-09-01T10:00:00Z"
+      },
+      {
+        "email": "cy@example.com",
+        "role": "member",
+        "inviteDate": "2026-10-01T10:00:00Z",
+        "status": "invited",
+        "emailStatus": "delivered"
+      }
+    ]
+  }
+}

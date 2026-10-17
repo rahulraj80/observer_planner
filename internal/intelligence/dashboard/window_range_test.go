@@ -27,7 +27,7 @@ func TestWindowRange(t *testing.T) {
 		}
 	}
 
-	t.Run("days only (default) — unchanged behavior", func(t *testing.T) {
+	t.Run("days only (default) - unchanged behavior", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/x?days=7", nil)
 		since, until := windowRange(r, 30, 1, 36500)
 		approxSince(t, since, 7*24*time.Hour)
@@ -36,7 +36,7 @@ func TestWindowRange(t *testing.T) {
 		}
 	})
 
-	t.Run("no params — falls back to defDays", func(t *testing.T) {
+	t.Run("no params - falls back to defDays", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/x", nil)
 		since, until := windowRange(r, 30, 1, 36500)
 		approxSince(t, since, 30*24*time.Hour)
@@ -45,7 +45,7 @@ func TestWindowRange(t *testing.T) {
 		}
 	})
 
-	t.Run("no params + minDays 0 — no lower bound", func(t *testing.T) {
+	t.Run("no params + minDays 0 - no lower bound", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/x", nil)
 		since, until := windowRange(r, 0, 0, 36500)
 		if !since.IsZero() {

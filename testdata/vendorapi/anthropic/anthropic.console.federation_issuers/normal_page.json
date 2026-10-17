@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": "fdis_01SDCCSbTxrXDpWc1phhtcfK",
+      "archived_at": "2019-12-27T18:11:19.117Z",
+      "archived_by_actor_id": "archived_by_actor_id",
+      "check_jti": true,
+      "created_at": "2024-10-30T23:58:27.427722Z",
+      "created_by_actor_id": "created_by_actor_id",
+      "issuer_url": "https://token.actions.githubusercontent.com",
+      "jwks": {
+        "type": "discovery",
+        "ca_cert_pem": "ca_cert_pem",
+        "discovery_base": "discovery_base"
+      },
+      "jwks_polling_disabled_at": "2019-12-27T18:11:19.117Z",
+      "max_jwt_lifetime_seconds": 0,
+      "name": "github-actions",
+      "poll_status": {
+        "consecutive_failures": 0,
+        "last_fetched_at": "2019-12-27T18:11:19.117Z",
+        "next_poll_at": "2019-12-27T18:11:19.117Z"
+      },
+      "type": "federation_issuer",
+      "updated_at": "2024-10-30T23:58:27.427722Z",
+      "updated_by_actor_id": "updated_by_actor_id"
+    }
+  ],
+  "next_page": "next_page"
+}

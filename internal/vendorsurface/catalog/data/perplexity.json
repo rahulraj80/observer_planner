@@ -1,0 +1,2831 @@
+{
+ "group": "perplexity",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/perplexity-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "perplexity.api.agent_responses",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "tier QPS"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "async",
+   "lookback_doc": "not documented",
+   "per_user_doc": "per response",
+   "mechanism_doc": "REST GET /v1/agent/{id}, files, POST cancel",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerCall (retrieve agent response, files, cancel)",
+   "build": "buildable",
+   "build_doc": "Driverable (not admin)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/agent-get.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.aws_marketplace",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "AWS account"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "AWS cycle",
+   "lookback_doc": "AWS",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "AWS Marketplace",
+   "read_write_doc": "R",
+   "class_doc": "BillingExport",
+   "grain_doc": "consolidated AWS billing for API credits",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/resources/aws-marketplace.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.console_billing",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project Admin"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "Previous / Next"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "invoice history",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI Billing",
+   "read_write_doc": "UI",
+   "class_doc": "BillingExport, Limits",
+   "grain_doc": "invoices per cycle; prepaid balance; auto reload threshold; keys blocked at zero",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/getting-started/projects.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.console_keys",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key",
+   "mechanism_doc": "UI console API Keys page (no list API)",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot (key list, names)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/getting-started/projects.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.console_members",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "project Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI console Settings / Members",
+   "read_write_doc": "UI",
+   "class_doc": "Identity, Roles, Projects",
+   "grain_doc": "Snapshot (Project, Admin / Member, invites)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/getting-started/projects.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.console_usage",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "project Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "custom range",
+   "per_user_doc": "aggregate (no per-key view)",
+   "mechanism_doc": "UI Billing page, 7d / 30d / custom",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "OrgDay (requests, input / output / citation / reasoning tokens, Deep Research, Search, Pro Search; per-model quantity, rate, cost)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no export, no API)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/getting-started/projects.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.generate_auth_token",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer existing API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "no expiry",
+   "per_user_doc": "per key",
+   "mechanism_doc": "REST POST https://api.perplexity.ai/generate_auth_token",
+   "read_write_doc": "W",
+   "class_doc": "Credentials",
+   "grain_doc": "Event (new key: auth_token, created_at_epoch_seconds, token_name)",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/generate-auth-token-post.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.perplexity.ai/docs/admin/api-key-management.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.inline_usage",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "response body (node proxy capture)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall (`usage` on Sonar / Agent responses)",
+   "build": "buildable",
+   "build_doc": "Driverable (node side; not perplexity-web)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/agent-post.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.retention_default",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "docs",
+   "read_write_doc": "n/a",
+   "class_doc": "Retention",
+   "grain_doc": "fact: zero-day retention of API prompt data, no training",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/resources/faq.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.revoke_auth_token",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer valid API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "permanent",
+   "per_user_doc": "per key",
+   "mechanism_doc": "REST POST https://api.perplexity.ai/revoke_auth_token (body auth_token)",
+   "read_write_doc": "W",
+   "class_doc": "Credentials",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/revoke-auth-token-post.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.skills",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "API key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "revisions kept",
+   "per_user_doc": "per project",
+   "mechanism_doc": "REST create / list / get / revise / revisions / download / delete skills",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (agent skill catalog)",
+   "grain_doc": "Snapshot + revisions",
+   "build": "buildable",
+   "build_doc": "Driverable (not admin)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/skills-list-get.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.api.usage_tiers",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.api",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429 with Retry-After on Router"
+   },
+   "tier": {
+    "doc": "API platform"
+   },
+   "freshness_doc": "immediate on upgrade",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "docs + console Usage tiers tab (no API)",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits",
+   "grain_doc": "Snapshot (tier 0..5 by lifetime purchases; Agent API 1/3/8/17/33/33 QPS org-wide; Search 50 units/s; Embeddings 85/170/335 QPS)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/admin/rate-limits-usage-tiers.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.comet.assistant_permissions",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.comet",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Comet Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org-wide",
+   "mechanism_doc": "UI admin dashboard",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot (Assistant on/off org-wide, per-domain Browser control / Read only / No access, action approvals, task limits)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/13531023-managing-comet-assistant-permissions",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.perplexity.ai/enterprise/comet",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.comet.mdm_policies",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.comet",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "device admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Comet Enterprise (with Enterprise subscription)"
+   },
+   "freshness_doc": "on policy refresh",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per device",
+   "mechanism_doc": "MDM profiles / registry with bundle id `ai.perplexity.comet` (Chrome policy names reused: extensions, URL block / allow, bookmarks, privacy, homepage); silent / offline installers",
+   "read_write_doc": "W via MDM file",
+   "class_doc": "Policy (managed settings)",
+   "grain_doc": "Snapshot on device",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly for reading; file-rail generatable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/13529668-comet-policies-and-controls",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.comet.telemetry",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.comet",
+   "reach": "push_webhook_header_auth",
+   "transport": "webhook",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Comet Enterprise"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "unknown",
+   "per_user_doc": "unknown",
+   "mechanism_doc": "product claim, no documented contract; Comet agent actions arrive via audit_webhook",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry",
+   "grain_doc": "unspecified (\"native telemetry, audit logs, and analytics\")",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/enterprise/comet",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "webhook",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ent.analytics_v1",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ent",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "org analytics key (one active per org, admin-generated, analytics-only, free)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "opaque `page` cursor, limit 31 (1d) / 168 (1h)"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per org, number unpublished; 429 request_rate_limit_exceeded"
+   },
+   "tier": {
+    "doc": "Enterprise (seat threshold not stated)"
+   },
+   "freshness_doc": "periodic sync, complete UTC buckets only",
+   "lookback_doc": "window max 90 days per request; history depth not stated",
+   "per_user_doc": "aggregate; `user_email` filter on most datasets",
+   "mechanism_doc": "REST GET https://api.perplexity.ai/v1/analytics/computer/usage",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost (credits), Adoption, Sessions (thread counts)",
+   "grain_doc": "OrgDay or OrgHour (1d / 1h) x axis; datasets credit_usage, query_volume, daily_active_users, connectors, artifacts, skills, spaces, workflows, task_durations",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/admin/computer-analytics-api.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-get.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ent.analytics_v2_member",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ent",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "organization analytics API key (one active per org, admin-generated, analytics-only) as Authorization: Bearer (OpenAPI HTTPBearer)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "has_more + next_page sent back as page, limit max 100 member rows"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per org"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "periodic sync",
+   "lookback_doc": "90-day window",
+   "per_user_doc": "per user",
+   "mechanism_doc": "REST GET https://api.perplexity.ai/v2/analytics/computer/usage",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost (credits), Adoption",
+   "grain_doc": "UserDay (group_by=user_email) for credit_usage, query_volume",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.perplexity.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-v2-get.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708) for the credit_usage dataset: driver internal/vendorapi/perplexity MemberUsage (GET /v2/analytics/computer/usage, dataset=credit_usage, group_by=user_email, start_time the UTC day before the window, end_time the window end, limit=100, page = next_page; at most 31 days per run, 90 days of lookback), conformance against the vendormock mock (next_page paging family), landed as per-member facts for perplexity-web per UTC day under the member's email: the credits total and one credits fact per model (ModelRaw; the model rows sum to the total and are never added to it), unit credits, never money. The Credit Source breakdown is not landed; the query_volume dataset (Feature, Project, Comet) is not built, so the Adoption and Identity supplies stay buildable. Synthetic only, no vendor response observed. assumption_tested: the first page is the reference's example; the terminal page is synthesized. Secret class reviewed: emails, model names and counts.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/perplexity MemberUsage (credit_usage), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Perplexity Computer Analytics OpenAPI security HTTPBearer: organization analytics key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ent.analytics_v2_member_query_volume",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ent",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "organization analytics API key (one active per org, admin-generated, analytics-only) as Authorization: Bearer (OpenAPI HTTPBearer)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "has_more + next_page sent back as page, limit max 100 member rows"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per org"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "periodic sync",
+   "lookback_doc": "90-day window",
+   "per_user_doc": "per user",
+   "mechanism_doc": "GET /v2/analytics/computer/usage?dataset=query_volume&group_by=user_email&start_time&end_time&limit&page; daily buckets of member rows {user_email, count, by_categories: {Feature, Project, Comet}}",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Adoption (queries per member per day, per feature)",
+   "grain_doc": "UserDay (group_by=user_email) for query_volume",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.perplexity.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-v2-get.md",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16D, T-713): its own row and driver, split off perplexity.ent.analytics_v2_member, which keeps the credit_usage dataset (one row, one driver, never a dataset switch inside one driver). Driver internal/vendorapi/perplexity MemberQueryVolume (dataset=query_volume, group_by=user_email, the next_page family). Lands per-member facts for perplexity-web per UTC day under the member's e-mail: queries (unit count) and one per Feature category, which never adds to the total (the reference: the total may exceed a breakdown). Project (admin-named Spaces, free text) and Comet are not landed; the dataset has no Model breakdown at this grain. Synthetic only, no vendor response observed. assumption_tested: the reference's example is credit_usage only, so the query_volume category values are Inferred.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16D: driver internal/vendorapi/perplexity MemberQueryVolume, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Perplexity Computer Analytics OpenAPI security HTTPBearer: organization analytics key as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ent.audit_webhook",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ent",
+   "reach": "push_splunk_hec",
+   "transport": "webhook",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "admin configures (Organization Settings > Data and privacy > Audit Log Settings)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "50+ seats or one Enterprise Max seat"
+   },
+   "freshness_doc": "real time; ack within 1 s",
+   "lookback_doc": "no vendor-side replay or backfill; retries undocumented",
+   "per_user_doc": "per user (user_email, ip_address, user_agent)",
+   "mechanism_doc": "push HTTP POST JSON to customer HTTPS URL; optional Authorization header (Bearer default, verbatim if prefixed, e.g. Splunk HEC wrap); Slack Block Kit variant",
+   "read_write_doc": "push",
+   "class_doc": "Audit, Content, Sessions, Identity events, Groups events, Roles events, Policy events",
+   "grain_doc": "Event (31 event types: login, query, answer_generated, file_*, thread_*, member_*, role_*, group_*, comet_agent_action, connector_*, computer_task_*, computer_agent_action; settings changes with key / old_value / new_value)",
+   "build": "buildable",
+   "build_doc": "Driverable (header-auth receiver; content gate)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/11652747-audit-logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "splunk_hec",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ent.scim",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ent",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "IdP"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM standard (paths unpublished)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "50+ seats or Max; group sync annual contract"
+   },
+   "freshness_doc": "IdP push",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "SCIM 2.0 server, base URL + token issued in admin console",
+   "read_write_doc": "W by IdP",
+   "class_doc": "Identity, Groups",
+   "grain_doc": "Event (IdP pushes users, groups; deprovision = active false)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (Observer is not the IdP; read path unverified)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/11652604-scim-based-user-account-management",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ent.sso",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ent",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "paid org subscription, no seat minimum"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI Settings > Identity",
+   "read_write_doc": "UI",
+   "class_doc": "Identity, Policy",
+   "grain_doc": "Snapshot (SAML / OIDC connection, verified domains, SSO required)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/admin/signing-in.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.analytics_key",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "UI Settings > Organization > Computer > Analytics",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot (one org analytics key; generate, regenerate, toggle off revokes)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.perplexity.ai/docs/admin/computer-analytics-api.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.billing",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI Billing",
+   "read_write_doc": "UI",
+   "class_doc": "BillingExport, Cost",
+   "grain_doc": "invoices, seat billing",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/11187557-how-to-manage-enterprise-billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.computer_config",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI Settings > Computer Configuration",
+   "read_write_doc": "UI",
+   "class_doc": "Policy, Credentials",
+   "grain_doc": "Snapshot (sandbox internet access; org API credential vault for Computer)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/13901210-computer-for-enterprise",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.credits",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise; group limits annual contract"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user / group",
+   "mechanism_doc": "UI (admin guide)",
+   "read_write_doc": "UI",
+   "class_doc": "Limits, Cost",
+   "grain_doc": "Snapshot (org credit pool, auto-refill, named usage limits for groups and members, per-member custom limits; highest limit wins)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitGroup",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/13901296-how-credits-work-for-enterprise-organizations-admin-guide",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.data_privacy",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "retention: 50+ seats or Max"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "UI Organization Settings > Data and privacy",
+   "read_write_doc": "UI",
+   "class_doc": "Retention, Policy",
+   "grain_doc": "Snapshot (session retention period from last activity, Enforce Incognito, file 7-day deletion, AI model and provider enablement)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/11187708-data-retention-and-privacy-for-enterprise-organizations-and-users",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.insights",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "50+ seats or Max"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "not stated",
+   "per_user_doc": "per user in UI",
+   "mechanism_doc": "UI Settings > Insights, filter and export",
+   "read_write_doc": "R",
+   "class_doc": "Adoption, Usage",
+   "grain_doc": "OrgDay / month (Total Users, MAU, Monthly Queries, feature use, per-user activity)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (manual export; API twin = analytics)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/11844346-enterprise-usage-analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.members",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI Members dashboard",
+   "read_write_doc": "UI",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot (members, pending invites, invite links)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/12067853-introduction-to-organization-admins",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.permissions",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per member for connectors",
+   "mechanism_doc": "UI admin control panel",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot (file uploads, sharing of threads / pages / spaces, connector access per member, custom MCP connector sharing and member self-add)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/12053065-enterprise-organization-permissions",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/13901210-computer-for-enterprise",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.roles_groups",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin or role with org management"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "annual sales contract"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user / group",
+   "mechanism_doc": "UI Organization Settings > Roles and Permissions",
+   "read_write_doc": "UI",
+   "class_doc": "Roles, Groups",
+   "grain_doc": "Snapshot (built-in + custom roles, permissions, managed and SCIM groups, assignments)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (changes visible as audit events)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/11187754-enterprise-roles-and-permissions",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.perplexity.ai/changelog/role-based-access-controls-api-credentials-and-brain-for-max",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "perplexity.ui.seats",
+   "vendor_group": "perplexity",
+   "vendor": "perplexity",
+   "plane": "perplexity.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per member assignment",
+   "mechanism_doc": "UI Organization settings > Billing > Seats",
+   "read_write_doc": "UI",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot per tier (Available, Assigned, Invited)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.perplexity.ai/help-center/en/articles/20260916-how-enterprise-seats-work",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

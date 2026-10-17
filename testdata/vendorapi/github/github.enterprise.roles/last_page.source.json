@@ -1,0 +1,48 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "roles": "VerifiedOfficial",
+    "roles[]": "VerifiedOfficial",
+    "roles[].created_at": "VerifiedOfficial",
+    "roles[].description": "VerifiedOfficial",
+    "roles[].enterprise": "VerifiedOfficial",
+    "roles[].enterprise.avatar_url": "VerifiedOfficial",
+    "roles[].enterprise.created_at": "VerifiedOfficial",
+    "roles[].enterprise.description": "VerifiedOfficial",
+    "roles[].enterprise.html_url": "VerifiedOfficial",
+    "roles[].enterprise.id": "VerifiedOfficial",
+    "roles[].enterprise.name": "VerifiedOfficial",
+    "roles[].enterprise.node_id": "VerifiedOfficial",
+    "roles[].enterprise.slug": "VerifiedOfficial",
+    "roles[].enterprise.updated_at": "VerifiedOfficial",
+    "roles[].enterprise.website_url": "VerifiedOfficial",
+    "roles[].id": "VerifiedOfficial",
+    "roles[].name": "VerifiedOfficial",
+    "roles[].permissions": "VerifiedOfficial",
+    "roles[].permissions[]": "VerifiedOfficial",
+    "roles[].source": "VerifiedOfficial",
+    "roles[].updated_at": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "42a5b53110090bbd179cfbfe4a4ad6fadbfa01eee0286f465cad28e03b4a2965",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/enterprise-roles",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/enterprise-roles (operationId enterprise-admin/list-enterprise-roles). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.enterprise.roles"
+}

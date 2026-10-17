@@ -1,0 +1,23 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ab9eced9ab1f79559674e9f877d74520ac96f430df20e2fa317f59b3f6552eeb",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/credits",
+    "status": 401
+  },
+  "notes": "The documented 401 response example, verbatim.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "OpenRouter API 1.0.0 (openapi.yaml as rendered on the reference page), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "63b46be08e14f7e2bb7adcba529c702a3aa031e59b00c90055562834d5dc685f",
+  "source_url": "https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openrouter.mgmt.credits"
+}

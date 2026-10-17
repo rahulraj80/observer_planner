@@ -68,6 +68,18 @@ type modelChangeData struct {
 	ReasoningEffort         string `json:"reasoningEffort"`
 }
 
+// autoModeResolvedData is `session.auto_mode_resolved`: the event Copilot CLI
+// writes when the user's model choice is the "auto" router and the router has
+// picked the concrete model for the turn (live shape, ~/.copilot/session-state
+// 2026-08: {"chosenModel":"gpt-5-mini","candidateModels":["gpt-5-mini",
+// "claude-haiku-4.5"]}). chosenModel is the ROUTED id - the one the request is
+// billed at - so it replaces the "auto" sentinel as the session-level model.
+// candidateModels is the router's shortlist, never a billed identity, and is
+// not read.
+type autoModeResolvedData struct {
+	ChosenModel string `json:"chosenModel"`
+}
+
 // sessionResumeData covers `session.resume.data`. Empirically every
 // resume event in the operator specimen (2026-05-19, 9 of them)
 // carries `selectedModel`, `reasoningEffort`, and `context.{cwd,
@@ -359,8 +371,23 @@ type parserState struct {
 	cwd            string
 	gitRoot        string
 	branch         string
+	remote         string
 	repository     string
 	projectRoot    string
+	// identity is the Project Identity Resolver v2 bundle (upstream
+	// remote/owner hashes, workspace, worktree flag, content
+	// fingerprint) resolved alongside projectRoot/remote by
+	// resolveProjectRoot. Zero value when resolveProjectRoot never ran
+	// or found no git repo (honest gap, not fabricated).
+	identity git.Identity
+	// effortLevel is the current session's reasoning-effort SETTING
+	// ("low"/"medium"/"high", etc). Copilot CLI surfaces it as a
+	// session-scoped knob (like st.model), never per-message: it rides
+	// `session.model_change.data.reasoningEffort` and
+	// `session.resume.data.reasoningEffort`, not any per-assistant-
+	// message field. Threaded into ActionMetadata.EffortLevel on every
+	// emitted ToolEvent, mirroring st.model's session-wide fallback.
+	effortLevel string
 	// toolCalls maps toolCallId → cached tool-execution-start payload
 	// so we can pair it with tool.execution_complete and emit one
 	// ToolEvent per call.
@@ -392,6 +419,17 @@ type parserState struct {
 	// content without tool_use blocks). Same deferral logic; same
 	// post-loop patch.
 	pendingSubagentToolEmits []pendingSubagentEmit
+	// spanOutputTokens sums assistant.message.outputTokens (Tier 3) since
+	// the most recent session.resume / session.shutdown, the same span a
+	// shutdown's modelMetrics block covers. Advanced by dispatchState on
+	// EVERY line (even before fromOffset) so it is complete at emit time.
+	spanOutputTokens int64
+	// shutdownSpanOutput is spanOutputTokens frozen at the current
+	// session.shutdown line (dispatchState runs before emitEvent for the
+	// same line and resets the running sum). Zero means no Tier 3 row in
+	// the span reported output, so the Tier 0 row carries modelMetrics'
+	// outputTokens instead of leaving output unmeasured (T-353).
+	shutdownSpanOutput int64
 }
 
 // pendingSubagentEmit pairs the index of an emitted event in
@@ -506,22 +544,50 @@ func (a *Adapter) parseEventsJSONL(_ context.Context, path string, fromOffset in
 	// the in-stream context. Mirrors what parseProcessLog already does
 	// for the log-file path.
 	yamlPath := filepath.Join(filepath.Dir(path), "workspace.yaml")
-	if yamlRoot, yamlBranch := resolveProjectFromWorkspaceYAML(yamlPath); yamlRoot != "" {
-		st.projectRoot = yamlRoot
-		if yamlBranch != "" {
-			st.branch = yamlBranch
+	ws := resolveProjectFromWorkspaceYAML(yamlPath)
+	if ws.ProjectRoot != "" {
+		st.projectRoot = ws.ProjectRoot
+		if ws.Branch != "" {
+			st.branch = ws.Branch
 		}
+		if ws.Remote != "" {
+			st.remote = ws.Remote
+		}
+		st.identity = ws.Identity
 	} else {
-		st.projectRoot = resolveProjectRoot(st)
+		st.projectRoot, st.remote, st.identity = resolveProjectRoot(st)
+	}
+	// Capture surface — the same workspace.yaml read carries the
+	// `client_name` of the client that drove the session (see
+	// surface.go). Emitted on every parse call, including a resumed
+	// one: SetSessionSurface is first-wins-unless-empty, so a repeat
+	// stamp is a no-op, and a session whose events.jsonl grew after the
+	// first poll still gets attributed.
+	if surf, ok := surfaceForClientName(st.sessionID, ws.ClientName); ok {
+		out.SessionSurfaces = append(out.SessionSurfaces, surf)
+	}
+	// Issue 2: captured Copilot CLI version from session.start
+	// (dispatchState set st.copilotVersion above). first-wins-unless-
+	// empty + bounded-token validation make a re-stamp / bad value
+	// harmless.
+	if st.sessionID != "" && st.copilotVersion != "" {
+		out.SessionToolVersions = append(out.SessionToolVersions, models.SessionToolVersion{
+			SessionID: st.sessionID,
+			Version:   st.copilotVersion,
+		})
 	}
 	// Backfill ProjectRoot on emitted events (we built them before
 	// finalizing state).
+	adapter.ApplyProjectIdentity(&out, st.identity)
 	for i := range out.ToolEvents {
 		if out.ToolEvents[i].ProjectRoot == "" {
 			out.ToolEvents[i].ProjectRoot = st.projectRoot
 		}
 		if out.ToolEvents[i].GitBranch == "" {
 			out.ToolEvents[i].GitBranch = st.branch
+		}
+		if out.ToolEvents[i].GitRemote == "" {
+			out.ToolEvents[i].GitRemote = st.remote
 		}
 		if out.ToolEvents[i].SessionID == "" {
 			out.ToolEvents[i].SessionID = st.sessionID
@@ -533,6 +599,9 @@ func (a *Adapter) parseEventsJSONL(_ context.Context, path string, fromOffset in
 		}
 		if out.TokenEvents[i].GitBranch == "" {
 			out.TokenEvents[i].GitBranch = st.branch
+		}
+		if out.TokenEvents[i].GitRemote == "" {
+			out.TokenEvents[i].GitRemote = st.remote
 		}
 		if out.TokenEvents[i].SessionID == "" {
 			out.TokenEvents[i].SessionID = st.sessionID
@@ -591,6 +660,22 @@ func dispatchState(st *parserState, env eventEnvelope, sc *scrub.Scrubber) {
 			if d.NewModel != "" {
 				st.model = d.NewModel
 			}
+			if d.ReasoningEffort != "" {
+				st.effortLevel = d.ReasoningEffort
+			}
+		}
+	case "session.auto_mode_resolved":
+		// Auto routing: `session.model_change` set st.model to the literal
+		// "auto" (the user's choice, kept as-is on action rows until now),
+		// which prices as a MISS. The router's resolution names the model
+		// actually served, so from here on the session-level fallback - used
+		// by an assistant.message that carries no data.model, and by the
+		// process-log lane's sibling-events recovery - is the routed id, not
+		// the sentinel. A per-message data.model still wins over this (see
+		// the assistant.message case). Empty chosenModel leaves st.model be.
+		var d autoModeResolvedData
+		if err := json.Unmarshal(env.Data, &d); err == nil && d.ChosenModel != "" {
+			st.model = d.ChosenModel
 		}
 	case "session.resume":
 		// Refresh parser state from the resume payload. Without this,
@@ -600,10 +685,14 @@ func dispatchState(st *parserState, env eventEnvelope, sc *scrub.Scrubber) {
 		// session.start's field-by-field updates — non-empty wins,
 		// empty leaves the prior value in place (resumes often omit
 		// gitRoot/branch/repository, which we want to preserve).
+		st.spanOutputTokens = 0
 		var d sessionResumeData
 		if err := json.Unmarshal(env.Data, &d); err == nil {
 			if d.SelectedModel != "" {
 				st.model = d.SelectedModel
+			}
+			if d.ReasoningEffort != "" {
+				st.effortLevel = d.ReasoningEffort
 			}
 			if d.Context.CWD != "" {
 				st.cwd = d.Context.CWD
@@ -670,6 +759,15 @@ func dispatchState(st *parserState, env eventEnvelope, sc *scrub.Scrubber) {
 		if err := json.Unmarshal(env.Data, &d); err == nil && d.Model != "" {
 			st.subagentModels[env.AgentID] = d.Model
 		}
+	case "assistant.message":
+		// T-353: running Tier 3 output sum for the current shutdown span.
+		var d assistantMessageData
+		if err := json.Unmarshal(env.Data, &d); err == nil && d.OutputTokens > 0 {
+			st.spanOutputTokens += d.OutputTokens
+		}
+	case "session.shutdown":
+		st.shutdownSpanOutput = st.spanOutputTokens
+		st.spanOutputTokens = 0
 	}
 	_ = sc
 }
@@ -677,6 +775,14 @@ func dispatchState(st *parserState, env eventEnvelope, sc *scrub.Scrubber) {
 // emitEvent appends ToolEvents / TokenEvents for events past the cursor.
 func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.ParseResult, sc *scrub.Scrubber) {
 	ts := parseTimestamp(env.Timestamp)
+	// sidechain is true for every event carrying a non-empty AgentID —
+	// i.e. anything emitted inside a subagent's execution context (see
+	// eventEnvelope.AgentID doc comment). The spawning `task` tool call
+	// itself is invoked in the PARENT session's context (AgentID==""),
+	// so it never gets stamped — only the subagent's own work (its
+	// assistant messages, and the tool calls it makes) does. Mirrors
+	// claude-code's line.IsSidechain pass-through convention.
+	sidechain := env.AgentID != ""
 	switch env.Type {
 
 	case "user.message":
@@ -701,6 +807,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			RawToolName:   "user",
 			RawToolInput:  scrub.Truncate(sc.String(content)),
 			MessageID:     env.ID,
+			IsSidechain:   sidechain,
+			Metadata:      effortMetadata(nil, st.effortLevel),
 		})
 
 	case "system.message":
@@ -728,6 +836,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			RawToolName:   "system",
 			RawToolInput:  scrub.Truncate(sc.String(d.Content)),
 			MessageID:     env.ID,
+			IsSidechain:   sidechain,
+			Metadata:      effortMetadata(nil, st.effortLevel),
 		})
 
 	case "assistant.message":
@@ -775,6 +885,7 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 				Source:        models.TokenSourceJSONL,
 				Reliability:   models.ReliabilityUnreliable,
 				MessageID:     d.RequestID,
+				IsSidechain:   sidechain,
 			})
 			// Buffer for post-loop patch when data.model is missing
 			// AND we're under a subagent context but haven't yet seen
@@ -795,26 +906,21 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			// back — the ToolEvent's Model column is informational and
 			// has historically been left empty for unattributed actions.
 			// We only fill it with d.Model or subagent-resolved model.)
-			reasoning := reasoningProxy(d.ReasoningText, d.ReasoningOpaque)
-			// Emit the reasoning as a standalone, visible row (was only
-			// threaded into PrecedingReasoning) so the chain-of-thought is
-			// in the timeline (matches cline/gemini/cowork/openclaw/…).
-			if reasoning != "" {
-				out.ToolEvents = append(out.ToolEvents, models.ToolEvent{
-					SourceFile:         path,
-					SourceEventID:      env.ID + ":reasoning",
-					SessionID:          st.sessionID,
-					Timestamp:          ts,
-					Model:              toolModel,
-					Tool:               models.ToolCopilotCLI,
-					ActionType:         models.ActionTaskComplete,
-					Target:             truncate(reasoning, 256),
-					Success:            true,
-					RawToolName:        models.ToolCopilotCLI + ".reasoning",
-					PrecedingReasoning: truncate(reasoning, 256),
-					MessageID:          d.MessageID,
-				})
-			}
+			// B3 (2026-07-31): reasoning mints NO row of its own — it
+			// briefly emitted a standalone `cline-cli`-style
+			// `<tool>.reasoning` task_complete row, a phantom action for
+			// something the model never did. The reasoning is a SIBLING
+			// FIELD of the assistant message it belongs to
+			// (data.reasoningText / .reasoningOpaque), so threading is
+			// direct and unconditional — no pending state, no
+			// consumption ordering: the assistant_text row below carries
+			// it in PrecedingReasoning. A reasoning-only message (no
+			// content, or one that carries tool requests instead)
+			// therefore produces nothing here — there is no successor
+			// row in this branch to carry it. An OPAQUE-ONLY reasoning
+			// field carries nothing either (see threadableReasoning):
+			// an encrypted blob is not content, uniformly with codex.
+			reasoning := threadableReasoning(d.ReasoningText)
 			idx := len(out.ToolEvents)
 			out.ToolEvents = append(out.ToolEvents, models.ToolEvent{
 				SourceFile:    path,
@@ -832,6 +938,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 				RawToolInput:       scrub.Truncate(sc.String(d.Content)),
 				PrecedingReasoning: reasoning,
 				MessageID:          d.MessageID,
+				IsSidechain:        sidechain,
+				Metadata:           effortMetadata(nil, st.effortLevel),
 			})
 			if d.Model == "" && env.AgentID != "" {
 				st.pendingSubagentToolEmits = append(st.pendingSubagentToolEmits, pendingSubagentEmit{idx: idx, agentID: env.AgentID})
@@ -891,6 +999,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			RawToolInput:  scrub.Truncate(sc.RawJSON([]byte(raw))),
 			ToolOutput:    scrub.Truncate(sc.String(toolOutput)),
 			MessageID:     d.InteractionID,
+			IsSidechain:   sidechain,
+			Metadata:      effortMetadata(nil, st.effortLevel),
 		})
 		// Clear the cache entry — call complete.
 		delete(st.toolCalls, d.ToolCallID)
@@ -947,7 +1057,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			Success:       success,
 			RawToolName:   pr.Kind,
 			RawToolInput:  scrub.Truncate(sc.String(rawInput)),
-			Metadata:      meta,
+			Metadata:      effortMetadata(meta, st.effortLevel),
+			IsSidechain:   sidechain,
 		})
 		delete(st.permRequests, d.RequestID)
 
@@ -963,6 +1074,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			Target:        "resume",
 			Success:       true,
 			RawToolName:   "session.resume",
+			IsSidechain:   sidechain,
+			Metadata:      effortMetadata(nil, st.effortLevel),
 		})
 
 	case "session.shutdown":
@@ -977,6 +1090,8 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 			Target:        "shutdown",
 			Success:       true,
 			RawToolName:   "session.shutdown",
+			IsSidechain:   sidechain,
+			Metadata:      effortMetadata(nil, st.effortLevel),
 		})
 		// Tier 0 capture — `session.shutdown.data.modelMetrics` carries
 		// the per-model cumulative usage delta for the work span between
@@ -1003,11 +1118,25 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 		// constraint. When Tier 1 (otel) rows exist for the same
 		// session the store-layer dedup drops these (Tier 1 wins —
 		// it has per-request granularity instead of per-shutdown).
+		//
+		// T-353 (copilot-cli 1.0.91): a live session recorded input from
+		// this block but output 0, i.e. no Tier 3 row in the span carried
+		// outputTokens. When the span's Tier 3 output sum is zero the
+		// shutdown row carries modelMetrics' own outputTokens, so output is
+		// never silently dropped; when any Tier 3 row reported output the
+		// old rule stands (output 0 here, no double count). The decision is
+		// per span, all models together: Tier 3 rows resolve their model
+		// late (subagent patch), so a per-model sum would be unreliable.
+		carryOutput := st.shutdownSpanOutput == 0
 		var sd sessionShutdownData
 		if jsonErr := json.Unmarshal(env.Data, &sd); jsonErr == nil {
 			for model, entry := range sd.ModelMetrics {
 				u := entry.Usage
-				if u.InputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.ReasoningTokens == 0 {
+				outT := int64(0)
+				if carryOutput {
+					outT = u.OutputTokens
+				}
+				if u.InputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.ReasoningTokens == 0 && outT == 0 {
 					// Empty delta — shutdown fired without API activity
 					// since the previous resume (compaction-only, idle
 					// sleep, etc.). Skip emitting a zero row.
@@ -1033,7 +1162,7 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 					Tool:                models.ToolCopilotCLI,
 					Model:               model,
 					InputTokens:         netInput,
-					OutputTokens:        0, // Tier 3 captures output per-message
+					OutputTokens:        outT, // 0 unless the span had no Tier 3 output (T-353)
 					CacheReadTokens:     u.CacheReadTokens,
 					CacheCreationTokens: u.CacheWriteTokens,
 					ReasoningTokens:     u.ReasoningTokens,
@@ -1120,24 +1249,42 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 // Prefers gitRoot from session.start.context; falls back to cwd. Both
 // are translated through crossmount.TranslateForeignPath so a Windows-
 // formatted path captured on WSL2 lands on the real /mnt/c/... mount
-// instead of being CWD-prefixed by filepath.Abs.
-func resolveProjectRoot(st *parserState) string {
+// instead of being CWD-prefixed by filepath.Abs. remote is the
+// normalized "origin" remote when git.ResolveIdentity found a repo; ""
+// when it didn't (honest gap, not fabricated). id carries the Project
+// Identity Resolver v2 bundle (upstream remote/owner hashes,
+// workspace, worktree flag, content fingerprint); the root-commit exec
+// is intentionally left nil here (adapters never shell out to git for
+// the lazy root-commit resolution — that runs once, store-side, behind
+// Store.RootCommitNeedsCheck).
+func resolveProjectRoot(st *parserState) (root, remote string, id git.Identity) {
 	candidate := st.gitRoot
 	if candidate == "" {
 		candidate = st.cwd
 	}
 	if candidate == "" {
-		return ""
+		return "", "", git.Identity{}
 	}
 	translated := crossmount.TranslateForeignPath(candidate)
 	if translated == "" {
 		translated = candidate
 	}
-	info, err := git.Resolve(translated)
-	if err == nil && info.Root != "" {
-		return info.Root
+	// STAT-GATE before git.ResolveIdentity (the goose / crush / freebuff
+	// precedent): a (possibly cross-OS-translated) path that isn't locally
+	// reachable falls through to the STATED path verbatim, not the /mnt
+	// form. git.ResolveIdentity returns a non-existent path as its own
+	// "root" with no error, so without this gate a Windows-side cwd
+	// captured on a WSL host would persist as its /mnt/c translation.
+	if _, err := os.Stat(translated); err != nil {
+		return candidate, "", git.Identity{}
 	}
-	return translated
+	info, err := git.ResolveIdentity(translated, git.IdentityOptions{})
+	if err == nil && info.Root != "" {
+		// info.Remote/info.UpstreamRemote are already NormalizeRemote'd
+		// by ResolveIdentity.
+		return info.Root, info.Remote, info
+	}
+	return candidate, "", git.Identity{}
 }
 
 // classifyToolName picks an action_type using the bare toolName first,
@@ -1227,17 +1374,49 @@ func deriveTarget(name string, args json.RawMessage) string {
 	return truncate(string(args), 64)
 }
 
-// reasoningProxy returns the plain reasoning text when present;
-// otherwise records a byte-count proxy for the encrypted opaque blob
-// (mirroring the codex encrypted-reasoning pattern).
-func reasoningProxy(text, opaque string) string {
-	if strings.TrimSpace(text) != "" {
-		return scrub.Truncate(text)
+// threadableReasoning returns the reasoning text that may ride the
+// successor event's PrecedingReasoning: `data.reasoningText` when the
+// model surfaced readable thinking, and NOTHING otherwise.
+//
+// B3 uniform placeholder rule (2026-07-31): an opaque/encrypted
+// reasoning blob is NOT content and is threaded nowhere. This helper
+// used to render `data.reasoningOpaque` as a byte-count proxy
+// ("[encrypted reasoning, N bytes]") mirroring codex's placeholder row;
+// codex's placeholders were retired along with its phantom reasoning
+// row, so copilot-cli's are too. An opaque-only assistant message
+// therefore contributes nothing anywhere — no action row, and no
+// `preceding_reasoning` on the assistant_text row that follows it. The
+// blob's LENGTH is deliberately not surfaced: it told the operator
+// nothing they could act on and read as if reasoning content had been
+// captured.
+// effortMetadata folds a session's reasoning-effort SETTING into an
+// ActionMetadata, allocating one when meta is nil and preserving any
+// fields already set on it (e.g. PermissionApprovalKind). Returns meta
+// unchanged (possibly nil) when effort is empty, so rows from sessions
+// that never surfaced session.model_change/session.resume with a
+// reasoningEffort value keep a NULL metadata column rather than an
+// empty-but-allocated one. Mirrors zcode's effortMetadata /
+// codex's withEffort convention.
+func effortMetadata(meta *models.ActionMetadata, effort string) *models.ActionMetadata {
+	e := strings.TrimSpace(effort)
+	if e == "" {
+		return meta
 	}
-	if opaque != "" {
-		return fmt.Sprintf("[encrypted reasoning, %d bytes]", len(opaque))
+	if meta == nil {
+		meta = &models.ActionMetadata{}
+	} else {
+		cp := *meta
+		meta = &cp
 	}
-	return ""
+	meta.EffortLevel = e
+	return meta
+}
+
+func threadableReasoning(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return scrub.Truncate(text)
 }
 
 func parseTimestamp(s string) time.Time {

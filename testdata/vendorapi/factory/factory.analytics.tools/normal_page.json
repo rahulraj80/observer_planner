@@ -1,0 +1,81 @@
+{
+  "data": [
+    {
+      "date": "2026-01-15",
+      "tool_calls": 45000,
+      "by_tool": [
+        {
+          "tool": "Read",
+          "invocations": 12500
+        },
+        {
+          "tool": "Edit",
+          "invocations": 8200
+        },
+        {
+          "tool": "Execute",
+          "invocations": 6100
+        }
+      ],
+      "mcp_users_with_mcp": 42,
+      "mcp_by_server": [
+        {
+          "server": "github",
+          "invocations": 1200
+        },
+        {
+          "server": "notion",
+          "invocations": 850
+        }
+      ],
+      "skills_invocations": 320,
+      "skills_by_name": [
+        {
+          "name": "browser",
+          "count": 180
+        },
+        {
+          "name": "frontend-ui",
+          "count": 95
+        }
+      ],
+      "slash_commands_invocations": 1500,
+      "slash_commands_by_name": [
+        {
+          "name": "review",
+          "count": 420
+        },
+        {
+          "name": "test",
+          "count": 380
+        }
+      ],
+      "hooks_invocations": 2800,
+      "hooks_by_event": [
+        {
+          "event": "PostToolUse",
+          "matcher": "*.ts",
+          "command": "eslint --fix",
+          "count": 1200
+        }
+      ],
+      "web_users": 42,
+      "autonomy_ratio_avg": 8.5,
+      "autonomy_ratio_p50": 6.2,
+      "autonomy_ratio_p90": 18.4,
+      "tool_calls_per_session_avg": 45.2,
+      "user_turns_per_session_avg": 5.3,
+      "tool_autonomy_level_ratio": {
+        "auto_high": 0.35,
+        "auto_medium": 0.42,
+        "auto_low": 0.18,
+        "manual": 0.05
+      }
+    }
+  ],
+  "meta": {
+    "org_id": "org_01HPMQ6ABCDE",
+    "start_date": "2026-01-15",
+    "end_date": "2026-01-15"
+  }
+}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -91,24 +93,22 @@ type bridgeStream struct {
 	stats  []bridge.CapturerStats
 }
 
-// runBridgeCapturer runs one capturer to completion against a short deadline
-// and decodes its whole stream. The poll interval is deliberately longer than
-// the deadline so exactly the initial snapshot is emitted — enough to assert
-// the event contract without a multi-second test.
+// runBridgeCapturer runs one capturer until its initial snapshot has produced
+// its first event frame (captureUntilFirstEvent waits on that CONDITION with a
+// generous ceiling, never on a fixed short context — T-310), then decodes the
+// whole stream. The poll interval is deliberately long so only the initial
+// snapshot is emitted — enough to assert the event contract without a
+// multi-second test on an idle host.
 func runBridgeCapturer(t *testing.T, opts processBridgeOptions) bridgeStream {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-	defer cancel()
-
 	if opts.Interval == 0 {
 		opts.Interval = 5 * time.Second
 	}
-	var buf bytes.Buffer
-	if err := streamProcessBridgeWith(ctx, &buf, opts); err != nil {
-		t.Fatalf("streamProcessBridgeWith: %v", err)
-	}
+	raw := captureUntilFirstEvent(t, func(ctx context.Context, w io.Writer) error {
+		return streamProcessBridgeWith(ctx, w, opts)
+	})
 
-	dec := bridge.NewDecoder(&buf)
+	dec := bridge.NewDecoder(bytes.NewReader(raw))
 	first, err := dec.Next()
 	if err != nil {
 		t.Fatalf("decode hello: %v", err)
@@ -281,7 +281,7 @@ func TestStreamProcessBridgeETWModes(t *testing.T) {
 					t.Error("capture was not closed when the capturer returned")
 				}
 				if tt.capture.sampled() == 0 {
-					t.Error("the sampler was never consulted — NetworkBytes was not wired into poll.Options")
+					t.Error("the sampler was never consulted - NetworkBytes was not wired into poll.Options")
 				}
 			}
 		})
@@ -408,12 +408,24 @@ func TestCapturerDecodeStatsReporting(t *testing.T) {
 				}
 			}
 			got := runBridgeCapturer(t, opts)
-			if len(got.stats) != len(tc.want) {
+			if len(tc.want) == 0 {
+				// Silence is the assertion: no decoder, no frame, ever.
+				if len(got.stats) != 0 {
+					t.Fatalf("got %d stats frame(s) %+v, want none", len(got.stats), got.stats)
+				}
+				return
+			}
+			// The immediate report comes first. A run that waited past
+			// capturerStatsInterval for its first event (a very loaded host)
+			// may also carry heartbeat repeats; with the fake's fixed
+			// counters each must be the same report, never a different one.
+			if len(got.stats) < len(tc.want) {
 				t.Fatalf("got %d stats frame(s) %+v, want %d", len(got.stats), got.stats, len(tc.want))
 			}
-			for i := range tc.want {
-				if got.stats[i] != tc.want[i] {
-					t.Errorf("stats[%d] = %+v, want %+v", i, got.stats[i], tc.want[i])
+			for i := range got.stats {
+				want := tc.want[min(i, len(tc.want)-1)]
+				if got.stats[i] != want {
+					t.Errorf("stats[%d] = %+v, want %+v", i, got.stats[i], want)
 				}
 			}
 		})

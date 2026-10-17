@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs && !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -34,7 +36,7 @@ func etwReviewServer(t *testing.T, lm LaunchManager, masterEnabled, etwEnabled b
 	if err := config.WriteToml(cfgPath, cfg); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestETWStatusWithholdsLocalDetailFromRemote(t *testing.T) {
 		t.Errorf("remote probe = %q, want the probe tri-state intact", remote.Probe)
 	}
 	if !remote.SchtasksPresent {
-		t.Error("schtasks_present must survive — it is not a disclosure")
+		t.Error("schtasks_present must survive - it is not a disclosure")
 	}
 }
 
@@ -172,7 +174,7 @@ func TestETWStatusRemoteWithholdsPathBearingReasons(t *testing.T) {
 			t.Errorf("remote caller learned the config path: %q", remote.PlanUndetectableReason)
 		}
 		if remote.PlanDetectable {
-			t.Error("plan_detectable must still be false — it is the honest state, not a disclosure")
+			t.Error("plan_detectable must still be false - it is the honest state, not a disclosure")
 		}
 	})
 }
@@ -215,7 +217,7 @@ func TestETWStatusMasterSwitchOffIsADisabledSkip(t *testing.T) {
 	}
 	resp := getETWStatus(t, server)
 	if resp.State != etwStateSkip || resp.SkipReason != etwSkipDisabled {
-		t.Errorf("state=%q skip=%q, want skip/etw_disabled — the feed cannot run with the master switch off",
+		t.Errorf("state=%q skip=%q, want skip/etw_disabled - the feed cannot run with the master switch off",
 			resp.State, resp.SkipReason)
 	}
 	if resp.Command != "" {
@@ -279,7 +281,7 @@ func TestETWStatusRemoteRedactionThroughTheRealAuthzChain(t *testing.T) {
 	if err := config.WriteToml(cfgPath, cfg); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

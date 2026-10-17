@@ -134,9 +134,9 @@ func TestPathRedactor(t *testing.T) {
 			// the sibling ETW route already withholds.
 			name: "cross-OS home",
 			in: "claude-code-windows: /mnt/c/Users/Default/.claude/settings.json present " +
-				"but NOT routed — run `observer init` to point it at the WSL proxy",
+				"but NOT routed - run `observer init` to point it at the WSL proxy",
 			want: "claude-code-windows: <other-home>/.claude/settings.json present " +
-				"but NOT routed — run `observer init` to point it at the WSL proxy",
+				"but NOT routed - run `observer init` to point it at the WSL proxy",
 		},
 		{
 			// Two cross-OS homes, one a string prefix of the other. Longest

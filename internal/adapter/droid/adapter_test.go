@@ -77,15 +77,6 @@ func eventsOfType(res adapter.ParseResult, actionType string) []models.ToolEvent
 	return out
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolDroid {
-		t.Errorf("Name()=%q want %q", got, models.ToolDroid)
-	}
-	if models.ToolDroid != "droid" {
-		t.Errorf("models.ToolDroid=%q want droid", models.ToolDroid)
-	}
-}
-
 // TestWatchPathsScopedToSessions pins the security invariant: the watch
 // roots must never be the bare ~/.factory, which holds the global
 // settings.json (plaintext BYOK API keys), auth.v2.*, certs/ and

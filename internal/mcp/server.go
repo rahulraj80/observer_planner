@@ -12,9 +12,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 	"github.com/marmutapp/superbased-observer/internal/stash"
@@ -39,8 +41,18 @@ type Options struct {
 	// ServerName, ServerVersion are echoed to clients during initialize.
 	ServerName    string
 	ServerVersion string
+	// ToolCallTimeout bounds one tools/call invocation. Database-backed tools
+	// receive the deadline through context, ensuring a stalled query cannot
+	// pin a WAL read snapshot indefinitely. Zero disables the deadline.
+	ToolCallTimeout time.Duration
 	// ExtraTools lets callers add custom tools on top of the built-in set.
 	ExtraTools []Tool
+	// CostDisplay resolves the developer cost display ("usd" or "tokens",
+	// store.ResolveDeveloperCostDisplay). Under "tokens" every tool result
+	// reaches the AI client without its dollar-keyed fields and with the
+	// dollar amounts in its text hidden (T-204): the agent relays what it
+	// reads to the developer. Nil is dollars.
+	CostDisplay func() string
 	// CostEngine optionally overrides the built-in cost engine (pricing table
 	// with baked-in defaults only). Pass a config-aware engine from the CLI
 	// so user-configured pricing overrides flow into get_cost_summary.
@@ -49,13 +61,23 @@ type Options struct {
 	// reports the operator's real thresholds + keep-warm mode. Zero value
 	// (Enabled=false) makes cache_status report the disabled state.
 	CacheWarm config.CacheWarmConfig
+	// Tasks carries the [tasks] tunables for the get_session_tasks tool:
+	// Enabled is checked inside Invoke, not at registration (the
+	// cache_status rule), so the tool is always LISTED but reports
+	// disabled=true/false honestly per current config; MatchMode/
+	// ConcurrentAttribution/IncludeSidechains are threaded into an
+	// explicit taskflow.Options on every call — NOT read off a fresh
+	// store.New(db)'s Store.TasksOptions(), which would silently return
+	// the zero value here (this server's db never had SetTasksOptions
+	// called on it; see taskreport.LoadSessionTaskReport's doc comment).
+	Tasks config.TasksConfig
 	// CodeIntel is the code-intelligence provider for structural
-	// enrichment (the strangler-fig seam — codeintel.Provider). When
+	// enrichment (the strangler-fig seam, codeintelapi.Provider). When
 	// non-nil and Available(), check_file_freshness and get_file_history
 	// include a `structure` block with functions, callers, and imports,
 	// and the get_symbols / get_relations retrieval tools are served from
 	// it. Nil is treated as an unavailable provider.
-	CodeIntel codeintel.Provider
+	CodeIntel codeintelapi.Provider
 	// Stash, when non-nil, registers the `retrieve_stashed` MCP tool.
 	// Pairs with the v1.4.41 / Tier 1 / G31 (CCR) feature: the proxy
 	// stashes large tool_result bodies and replaces them with a marker
@@ -145,10 +167,12 @@ type SignalRecorder interface {
 // Server is the MCP stdio JSON-RPC server. Safe for concurrent use after
 // Run; Run itself is single-threaded (reads stdio serially).
 type Server struct {
-	db      *sql.DB
-	logger  *slog.Logger
-	name    string
-	version string
+	db              *sql.DB
+	logger          *slog.Logger
+	name            string
+	version         string
+	toolCallTimeout time.Duration
+	costDisplay     func() string
 
 	mu    sync.RWMutex
 	tools map[string]Tool
@@ -164,11 +188,13 @@ func New(opts Options) (*Server, error) {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	s := &Server{
-		db:      opts.DB,
-		logger:  logger,
-		name:    defaultIfEmpty(opts.ServerName, "observer"),
-		version: defaultIfEmpty(opts.ServerVersion, "dev"),
-		tools:   map[string]Tool{},
+		db:              opts.DB,
+		logger:          logger,
+		name:            defaultIfEmpty(opts.ServerName, "observer"),
+		version:         defaultIfEmpty(opts.ServerVersion, "dev"),
+		toolCallTimeout: opts.ToolCallTimeout,
+		costDisplay:     opts.CostDisplay,
+		tools:           map[string]Tool{},
 	}
 	engine := opts.CostEngine
 	if engine == nil {
@@ -176,12 +202,12 @@ func New(opts Options) (*Server, error) {
 	}
 	cg := opts.CodeIntel
 	if cg == nil {
-		cg = codeintel.Unavailable()
+		cg = codeintelapi.Unavailable()
 	}
 	for _, t := range builtinTools(opts.DB, cg, opts.SignalRecorder) {
 		s.Register(t)
 	}
-	for _, t := range extraBuiltinTools(opts.DB, engine, opts.CacheWarm) {
+	for _, t := range extraBuiltinTools(opts.DB, engine, opts.CacheWarm, opts.Tasks) {
 		s.Register(t)
 	}
 	// continue_session (session handoff, P2): always registered so the
@@ -191,6 +217,11 @@ func New(opts Options) (*Server, error) {
 	// get_session_message (session handoff): always registered for a
 	// deterministic tool surface; degrades honestly when unwired.
 	s.Register(newGetSessionMessageTool(opts.GetSessionMessage))
+	// get_project_guidance (agent-guidance inventory): always registered —
+	// it reads node-local rows the daemon's scan loop already persisted and
+	// answers honestly ("nothing scanned yet") on a fresh install, so there
+	// is nothing to gate.
+	s.Register(newGetProjectGuidanceTool(opts.DB))
 	if opts.Stash != nil && !opts.RetrieveStashedDisabled && shouldRegisterV7_12Tool(opts.Features, "retrieve_stashed") {
 		s.Register(newRetrieveStashedTool(opts.Stash, opts.SignalRecorder, opts.AuditWriter, opts.RetrieveStashedMaxShasPerCall))
 	}
@@ -375,7 +406,18 @@ func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (a
 	if !ok {
 		return nil, &rpcError{Code: errMethodNotFound, Message: "unknown tool: " + p.Name}
 	}
-	result, err := tool.Invoke(ctx, p.Arguments)
+	callCtx := ctx
+	var cancel context.CancelFunc
+	if s.toolCallTimeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, s.toolCallTimeout)
+		defer cancel()
+	}
+	result, err := tool.Invoke(callCtx, p.Arguments)
+	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+		s.logger.Warn("mcp: tool call exceeded read-transaction watchdog deadline",
+			"tool", p.Name, "timeout", s.toolCallTimeout)
+		err = fmt.Errorf("tool call timed out after %s: %w", s.toolCallTimeout, callCtx.Err())
+	}
 	if err != nil {
 		// Tool errors are returned as in-band tool-result errors (isError=true),
 		// not JSON-RPC transport errors — per MCP spec, so the model can see
@@ -388,6 +430,11 @@ func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (a
 	body, mErr := json.MarshalIndent(result, "", "  ")
 	if mErr != nil {
 		return nil, &rpcError{Code: errInternalError, Message: "marshal tool result: " + mErr.Error()}
+	}
+	if s.costDisplay != nil && costtext.Tokens(s.costDisplay()) {
+		if shaped, ok := costtext.ShapeJSON(body); ok {
+			body = shaped
+		}
 	}
 	return toolCallResult{
 		Content: []toolContent{{Type: "text", Text: string(body)}},

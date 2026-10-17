@@ -27,22 +27,26 @@ type messageSortField struct {
 	// Seq is the 1..N chronological ordinal. It is the default sort key AND
 	// the final tie-break for every other key, so equal values never jitter
 	// between auto-refresh polls.
-	Seq          int
-	Timestamp    string
-	MessageID    string
-	Role         string
-	Model        string
-	EffortLevel  string
-	Input        int64
-	CacheRead    int64
-	CacheWrite   int64
-	Output       int64
-	ElapsedMs    *int64
-	TokensPerSec *float64
-	ToolCalls    int
-	AICostUSD    float64
-	ToolCostUSD  float64
-	CostUSD      float64
+	Seq            int
+	Timestamp      string
+	MessageID      string
+	Role           string
+	Model          string
+	Account        string
+	AccountUnknown bool
+	EffortLevel    string
+	Input          int64
+	CacheRead      int64
+	CacheWrite     int64
+	Output         int64
+	ElapsedMs      *int64
+	ResponseMs     *int64
+	TokensPerSec   *float64
+	ToolCalls      int
+	Attachments    int
+	AICostUSD      float64
+	ToolCostUSD    float64
+	CostUSD        float64
 	// Content mirrors the string the table's Content cell renders (see
 	// messageContentSortKey) so sorting matches what the operator reads.
 	Content string
@@ -61,13 +65,17 @@ type messageSortComparator struct {
 
 // messageSortKeys is the allow-list of sortable columns for
 // /api/session/<id>/messages, keyed by the `sort_by` query value. The keys are
-// exactly the 17 columns the dashboard's Messages table renders, in table
+// exactly the 18 columns the dashboard's Messages table renders, in table
 // order. A key that is not in this table falls back to the default
 // (messageSortDefaultKey, ascending) — an unknown column is never an error.
 //
 // Table-driven by design (CLAUDE.md rule 5): adding a column is one row here
 // plus one row in the test table, never a new branch in a conditional ladder.
 var messageSortKeys = map[string]messageSortComparator{
+	"account": {
+		less:    func(a, b messageSortField) bool { return strings.ToLower(a.Account) < strings.ToLower(b.Account) },
+		missing: func(f messageSortField) bool { return f.AccountUnknown },
+	},
 	"seq":       {less: func(a, b messageSortField) bool { return a.Seq < b.Seq }},
 	"timestamp": {less: func(a, b messageSortField) bool { return a.Timestamp < b.Timestamp }},
 	"message_id": {
@@ -99,14 +107,25 @@ var messageSortKeys = map[string]messageSortComparator{
 		less:    func(a, b messageSortField) bool { return *a.ElapsedMs < *b.ElapsedMs },
 		missing: func(f messageSortField) bool { return f.ElapsedMs == nil },
 	},
+	"response_ms": {
+		less:    func(a, b messageSortField) bool { return *a.ResponseMs < *b.ResponseMs },
+		missing: func(f messageSortField) bool { return f.ResponseMs == nil },
+	},
 	"tokens_per_sec": {
 		less:    func(a, b messageSortField) bool { return *a.TokensPerSec < *b.TokensPerSec },
 		missing: func(f messageSortField) bool { return f.TokensPerSec == nil },
 	},
 	"tool_call_count": {less: func(a, b messageSortField) bool { return a.ToolCalls < b.ToolCalls }},
-	"ai_cost_usd":     {less: func(a, b messageSortField) bool { return a.AICostUSD < b.AICostUSD }},
-	"tool_cost_usd":   {less: func(a, b messageSortField) bool { return a.ToolCostUSD < b.ToolCostUSD }},
-	"cost_usd":        {less: func(a, b messageSortField) bool { return a.CostUSD < b.CostUSD }},
+	"attachments": {
+		less: func(a, b messageSortField) bool { return a.Attachments < b.Attachments },
+		// Attachments are the exception, not the rule: nearly every turn has
+		// none. Treat "no attachments" as absent so neither direction opens
+		// with a screenful of "-" — same null-sink as effort_level.
+		missing: func(f messageSortField) bool { return f.Attachments == 0 },
+	},
+	"ai_cost_usd":   {less: func(a, b messageSortField) bool { return a.AICostUSD < b.AICostUSD }},
+	"tool_cost_usd": {less: func(a, b messageSortField) bool { return a.ToolCostUSD < b.ToolCostUSD }},
+	"cost_usd":      {less: func(a, b messageSortField) bool { return a.CostUSD < b.CostUSD }},
 	"content": {
 		less: func(a, b messageSortField) bool {
 			return strings.ToLower(a.Content) < strings.ToLower(b.Content)

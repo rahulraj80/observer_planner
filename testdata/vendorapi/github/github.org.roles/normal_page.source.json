@@ -1,0 +1,52 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "roles": "VerifiedOfficial",
+    "roles[]": "VerifiedOfficial",
+    "roles[].created_at": "VerifiedOfficial",
+    "roles[].description": "VerifiedOfficial",
+    "roles[].id": "VerifiedOfficial",
+    "roles[].name": "VerifiedOfficial",
+    "roles[].organization": "VerifiedOfficial",
+    "roles[].organization.avatar_url": "VerifiedOfficial",
+    "roles[].organization.events_url": "VerifiedOfficial",
+    "roles[].organization.followers_url": "VerifiedOfficial",
+    "roles[].organization.following_url": "VerifiedOfficial",
+    "roles[].organization.gists_url": "VerifiedOfficial",
+    "roles[].organization.gravatar_id": "VerifiedOfficial",
+    "roles[].organization.html_url": "VerifiedOfficial",
+    "roles[].organization.id": "VerifiedOfficial",
+    "roles[].organization.login": "VerifiedOfficial",
+    "roles[].organization.node_id": "VerifiedOfficial",
+    "roles[].organization.organizations_url": "VerifiedOfficial",
+    "roles[].organization.received_events_url": "VerifiedOfficial",
+    "roles[].organization.repos_url": "VerifiedOfficial",
+    "roles[].organization.site_admin": "VerifiedOfficial",
+    "roles[].organization.starred_url": "VerifiedOfficial",
+    "roles[].organization.subscriptions_url": "VerifiedOfficial",
+    "roles[].organization.type": "VerifiedOfficial",
+    "roles[].organization.url": "VerifiedOfficial",
+    "roles[].permissions": "VerifiedOfficial",
+    "roles[].permissions[]": "VerifiedOfficial",
+    "roles[].updated_at": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "48984db39496b9fce472f57fbfb091b265fdfe765798b4f42e738cec38d6e8f9",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/orgs/{org}/organization-roles",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /orgs/{org}/organization-roles (operationId orgs/list-org-roles).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.org.roles"
+}

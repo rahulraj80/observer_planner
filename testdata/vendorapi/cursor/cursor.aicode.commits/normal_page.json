@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "commitHash": "a1b2c3d4",
+      "userId": "user_3k9x8q...",
+      "userEmail": "developer@company.com",
+      "repoName": "company/repo",
+      "branchName": "main",
+      "isPrimaryBranch": true,
+      "commitSource": "ide",
+      "totalLinesAdded": 120,
+      "totalLinesDeleted": 30,
+      "tabLinesAdded": 50,
+      "tabLinesDeleted": 10,
+      "composerLinesAdded": 40,
+      "composerLinesDeleted": 5,
+      "nonAiLinesAdded": 30,
+      "nonAiLinesDeleted": 15,
+      "message": "Refactor: extract analytics client",
+      "commitTs": "2025-07-30T14:12:03.000Z",
+      "createdAt": "2025-07-30T14:12:30.000Z"
+    }
+  ],
+  "totalCount": 42,
+  "page": 1,
+  "pageSize": 100
+}

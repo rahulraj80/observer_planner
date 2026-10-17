@@ -37,6 +37,12 @@
 // NODE-LOCAL and pinned out of the org-push wire path by
 // tests/invariant/privacy_test.go.
 //
+// Model split (modular packaging phase PB): the row and envelope types and
+// the pure derivations (correlation, findings, launch seeds, cross-OS
+// matching, sink-error and transport vocabulary) live in internal/procmodel,
+// which core packages import instead of this one; model_aliases.go
+// re-exports them here, so this runtime and its backends are unchanged.
+//
 // PID reuse (spec §9.3): nothing in this package joins on pid alone. Every
 // run and event is keyed by ProcessKey = sha256(boot_id:pid:start_time).
 // An event whose start time could not be read is counted for health but

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -10,7 +12,6 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/compression/conversation"
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/messagesummary"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/profilerouter"
@@ -92,11 +93,7 @@ func newCompressionRouter(cfg config.Config, masterPath string, loadFresh func()
 	// owned, OFF by default. Resolved once here; applied per profile in
 	// newProfilePipeline when a stash is wired. The per-language opt-in
 	// is expanded to the concrete extension set the collapse hook checks.
-	if cfg.CodeIntel.Enabled && cfg.CodeIntel.Compression.CodeAggressive {
-		deps.aggressiveCodeEnabled = true
-		deps.aggressiveCodeExts = aggressiveExtsFor(cfg.CodeIntel.Compression.AggressiveLanguages)
-		deps.aggressiveCodePreview = cfg.CodeIntel.Compression.PreviewOnly
-	}
+	deps.aggressiveCodeEnabled, deps.aggressiveCodeExts, deps.aggressiveCodePreview = codeCollapseSettings(cfg)
 	if cfg.Compression.Conversation.Stash.Enabled {
 		st, err := stash.New(stash.Options{
 			Dir:        cfg.Compression.Conversation.Stash.Dir,
@@ -121,7 +118,7 @@ func newCompressionRouter(cfg config.Config, masterPath string, loadFresh func()
 	}
 	if cfg.Compression.Conversation.Rolling.Enabled {
 		deps.authCache = messagesummary.NewAuthCache(cfg.Compression.Conversation.Rolling.AuthCacheSize)
-		deps.recorder = messagesummary.NewDBRecorder(database, costEnginePricingAdapter{e: cost.NewEngine(cfg.Intelligence)})
+		deps.recorder = messagesummary.NewDBRecorder(database, costEnginePricingAdapter{e: acquireProcessCostEngine(context.Background(), cfg, database, logger)})
 	}
 
 	// The Resolve/Build closures read assignments and master

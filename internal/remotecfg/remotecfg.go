@@ -153,7 +153,7 @@ func Disable(cfg config.Config, cfgPath string) (removedSecret bool, err error) 
 func Rotate(cfg config.Config, cfgPath string) (PairingInfo, error) {
 	_ = cfgPath // rotate does not rewrite config; kept for signature symmetry with Enable/Disable
 	if !cfg.Remote.Enabled {
-		return PairingInfo{}, fmt.Errorf("remotecfg.Rotate: remote access is not enabled — run enable first")
+		return PairingInfo{}, fmt.Errorf("remotecfg.Rotate: remote access is not enabled - run enable first")
 	}
 	host := firstTrustedHost(cfg.Remote.TrustedHosts)
 	raw, enc, err := remoteauth.GenerateSecret()
@@ -222,10 +222,10 @@ func StandingTerminalSecretPath(cfg config.Config) string {
 // secret is returned once (the only place it crosses the boundary).
 func StandingTerminalEnable(cfg config.Config, cfgPath string) (StandingInfo, error) {
 	if !cfg.Remote.Enabled {
-		return StandingInfo{}, fmt.Errorf("remotecfg.StandingTerminalEnable: remote access is not enabled — arm remote access first")
+		return StandingInfo{}, fmt.Errorf("remotecfg.StandingTerminalEnable: remote access is not enabled - arm remote access first")
 	}
 	if !cfg.Remote.AllowTerminal {
-		return StandingInfo{}, fmt.Errorf("remotecfg.StandingTerminalEnable: remote terminal control (allow_terminal) is off — enable it first; standing access only grants what allow_terminal permits")
+		return StandingInfo{}, fmt.Errorf("remotecfg.StandingTerminalEnable: remote terminal control (allow_terminal) is off - enable it first; standing access only grants what allow_terminal permits")
 	}
 	rotated := cfg.Remote.AllowStandingTerminalControl
 

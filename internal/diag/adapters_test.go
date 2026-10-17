@@ -4,9 +4,22 @@ import (
 	"strings"
 	"testing"
 
+	adapterdefaults "github.com/marmutapp/superbased-observer/internal/adapter/defaults"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/toolresolve"
 )
+
+// adapterInBuild reports whether tool's adapter is registered in this test
+// binary (an sbo_omit_adapter_* tag removes it from adapterdefaults).
+func adapterInBuild(tool string) bool {
+	for _, a := range adapterdefaults.Adapters() {
+		if a.Name() == tool {
+			return true
+		}
+	}
+	return false
+}
 
 func TestAzureProviderConfigured(t *testing.T) {
 	for _, k := range []string{"AZURE_RESOURCE_NAME", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_API_KEY", "OPENAI_API_TYPE"} {
@@ -109,6 +122,98 @@ func TestNativeRailsSummary(t *testing.T) {
 	}
 }
 
+// TestVocabularySummary pins the doctor's native-tool-vocabulary line
+// (WP-T7): an in-taxonomy row states the coverage plainly, an honest-zero
+// row is rendered as its registry Note VERBATIM (never paraphrased), and an
+// undeclared zero value refuses to invent a claim.
+func TestVocabularySummary(t *testing.T) {
+	tests := []struct {
+		name string
+		in   integration.Vocabulary
+		want string
+	}{
+		{
+			"in taxonomy",
+			integration.Vocabulary{InTaxonomy: true},
+			"in taxonomy (native tool names classified via internal/tooltax)",
+		},
+		{
+			"in taxonomy with caveat",
+			integration.Vocabulary{InTaxonomy: true, Note: "shell calls only"},
+			"in taxonomy (native tool names classified via internal/tooltax) - shell calls only",
+		},
+		{
+			"honest zero renders the note verbatim",
+			integration.Vocabulary{Note: "no native tool vocabulary: browser-captured chat turns only"},
+			"no native tool vocabulary: browser-captured chat turns only",
+		},
+		{"undeclared", integration.Vocabulary{}, "not declared in the integration registry"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := vocabularySummary(tc.in); got != tc.want {
+				t.Errorf("vocabularySummary(%+v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCheckAdapterVocabularyNote pins that `observer doctor <tool>` carries
+// the vocabulary line for both registry shapes, read straight off the
+// registry so the assertion can't drift from it:
+//
+//   - an InTaxonomy adapter (claude-code) states the taxonomy coverage;
+//   - an honest-zero adapter (chatgpt-web, one of the five browser-capture
+//     `*-web` rows) prints its registry Note VERBATIM. Paraphrasing the Note
+//     is the exact failure this pins against.
+func TestCheckAdapterVocabularyNote(t *testing.T) {
+	// The launch-resolution probe is irrelevant here — stub it so the
+	// check never shells out for a login PATH capture.
+	swapLaunchResolve(t, func(integration.BinaryResolveSpec) toolresolve.Resolution {
+		return toolresolve.Resolution{Verdict: toolresolve.VerdictNotFound}
+	})
+
+	inTax, ok := integration.For("claude-code")
+	if !ok || !inTax.Vocabulary.InTaxonomy {
+		t.Fatalf("fixture assumption broken: claude-code Vocabulary = %+v (want InTaxonomy)", inTax.Vocabulary)
+	}
+	c, ok := CheckAdapter("claude-code", config.Config{})
+	if !ok {
+		t.Fatal("claude-code should be a known adapter")
+	}
+	if !joinedHas(c.Details, "vocabulary: in taxonomy (native tool names classified via internal/tooltax)") {
+		t.Errorf("in-taxonomy adapter missing the vocabulary line: %v", c.Details)
+	}
+
+	zero, ok := integration.For("chatgpt-web")
+	if !ok || zero.Vocabulary.InTaxonomy || zero.Vocabulary.Note == "" {
+		t.Fatalf("fixture assumption broken: chatgpt-web Vocabulary = %+v (want honest zero)", zero.Vocabulary)
+	}
+	if !adapterInBuild(zero.Tool) {
+		// A build without the browser-capture adapters (the minimal distro,
+		// D-535): pin the same rule on any honest-zero adapter this build
+		// does carry, so the Note-verbatim check keeps running.
+		zero = integration.Capability{}
+		for _, c := range integration.Capabilities() {
+			if !c.Vocabulary.InTaxonomy && c.Vocabulary.Note != "" && adapterInBuild(c.Tool) {
+				zero = c
+				break
+			}
+		}
+		if zero.Tool == "" {
+			t.Skip("no honest-zero adapter is compiled into this build")
+		}
+	}
+	w, ok := CheckAdapter(zero.Tool, config.Config{})
+	if !ok {
+		t.Fatalf("%s should be a known adapter", zero.Tool)
+	}
+	if !joinedHas(w.Details, "vocabulary: "+zero.Vocabulary.Note) {
+		t.Errorf("honest-zero adapter should print its registry Note verbatim (%q): %v",
+			zero.Vocabulary.Note, w.Details)
+	}
+}
+
 // TestTokenTierSummary pins the doctor's token/cost coverage gauge (Phase 5):
 // best tier always named; a known gap appended honestly; empty best → unknown.
 func TestTokenTierSummary(t *testing.T) {
@@ -118,7 +223,7 @@ func TestTokenTierSummary(t *testing.T) {
 		want string
 	}{
 		{"clean", integration.TokenTier{Best: "proxy"}, "best tier=proxy (no known gap)"},
-		{"gapped", integration.TokenTier{Best: "sqlite", Gap: "model often blank"}, "best tier=sqlite — known gap: model often blank"},
+		{"gapped", integration.TokenTier{Best: "sqlite", Gap: "model often blank"}, "best tier=sqlite - known gap: model often blank"},
 		{"unknown", integration.TokenTier{}, "best tier=unknown (no known gap)"},
 	}
 	for _, tc := range tests {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // newOpenInterpreterCmd implements `observer open-interpreter` (alias
@@ -45,7 +47,7 @@ func newOpenInterpreterCmd() *cobra.Command {
 		Short:   "Launch Open Interpreter; with --continue-from, seed a handover as its positional prompt",
 		Long: "Wraps Open Interpreter (binary `interpreter`), a rebadged OpenAI\n" +
 			"Codex CLI build under ~/.openinterpreter. This launcher is\n" +
-			"NON-PROXIED — unlike `observer codex` it injects NO base-URL\n" +
+			"NON-PROXIED - unlike `observer codex` it injects NO base-URL\n" +
 			"override, because the fork's proxy lane is unprobed. Token capture\n" +
 			"happens via observer's local open-interpreter adapter (the codex\n" +
 			"rollout parser retagged), not the proxy.\n\n" +
@@ -56,8 +58,13 @@ func newOpenInterpreterCmd() *cobra.Command {
 			"All arguments after the subcommand are forwarded to interpreter.\n" +
 			"Use `--` to separate observer flags from interpreter flags. NEVER\n" +
 			"touches API keys or stored auth.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach gate (attach-all-launchers): default-on attach hands the PTY
 			// to the daemon. Seed-only spec (launched non-proxied — no proxy env,
 			// no escape-hatch flag); incompatible when a handoff fork is engaged
@@ -127,7 +134,13 @@ func newOpenInterpreterCmd() *cobra.Command {
 				continueDir = cwd
 			}
 
-			return runSeedOnlyLaunch("open-interpreter", bin, args, continueDir)
+			// Best-effort attribution config: a load failure just disables
+			// the launch seed (recordLaunchSeed treats "" as off).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+			}
+			return runSeedOnlyLaunchSeeded(configPath, dbPath, "open-interpreter", "open-interpreter", bin, args, continueDir)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
@@ -138,7 +151,6 @@ func newOpenInterpreterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "open-interpreter")
 	resume = registerResumeFlag(cmd, "open-interpreter")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 

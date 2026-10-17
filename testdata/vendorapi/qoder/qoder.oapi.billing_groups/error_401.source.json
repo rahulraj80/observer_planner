@@ -1,0 +1,23 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "code": "VerifiedOfficial",
+    "message": "VerifiedOfficial",
+    "requestId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ec7ad8741715fd9ab67342aa2531b3d391a6a9abb08a643017b3f49156e5aa3c",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/{organization_id}/billing-groups",
+    "status": 401
+  },
+  "notes": "The documented error object (requestId, code, message) with the documented 401 Unauthorized code; values synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Qoder Teams OpenAPI Conventions (conventions.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "0af70ca83059a939fc1ef37a2fd7a83c6190ee405c8b3f96189d5b4b49df2265",
+  "source_url": "https://docs.qoder.com/account/teams/openapi/conventions.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "qoder.oapi.billing_groups"
+}

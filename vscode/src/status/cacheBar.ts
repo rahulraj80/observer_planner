@@ -12,6 +12,7 @@
 
 import * as vscode from 'vscode';
 import type { DaemonManager } from '../daemon';
+import type { ComponentGate } from '../components';
 import type { CacheStatusResponse, CacheWindowStatus } from '../api/types';
 import { output } from '../output';
 
@@ -25,6 +26,7 @@ export interface StatusBarController extends vscode.Disposable {
 export function createCacheStatusBar(
   ctx: vscode.ExtensionContext,
   daemon: DaemonManager,
+  gate?: Pick<ComponentGate, 'routeInactive'>,
 ): StatusBarController | undefined {
   const cfg = vscode.workspace.getConfiguration('observer');
   if (!cfg.get<boolean>('cacheStatusBar.enabled', true)) {
@@ -46,6 +48,12 @@ export function createCacheStatusBar(
     if (disposed) return;
     const state = daemon.getState();
     if (state.status === 'idle') {
+      item.hide();
+      return;
+    }
+    // The route belongs to a component that is not active on this machine
+    // (T-670): stay hidden and do not poll a route that answers 404.
+    if (gate?.routeInactive('/api/cache/status')) {
       item.hide();
       return;
     }
@@ -122,7 +130,7 @@ function buildTooltip(mode: string, windows: CacheWindowStatus[]): vscode.Markdo
   for (const w of windows.slice(0, 6)) {
     const when = w.severity === 'cold' ? 'cold' : countdown(w.seconds_to_expiry, w.estimated);
     lines.push(
-      `- ${sev(w.severity)} **${w.window.model}** — ${when}, ${formatUSD(
+      `- ${sev(w.severity)} **${w.window.model}** - ${when}, ${formatUSD(
         w.value_at_risk_usd,
       )} at risk`,
     );

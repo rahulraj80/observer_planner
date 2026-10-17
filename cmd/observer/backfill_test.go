@@ -4,15 +4,24 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
+	"github.com/marmutapp/superbased-observer/internal/adapter"
+	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
+	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/store"
+	"github.com/marmutapp/superbased-observer/internal/watcher"
 )
 
 // TestBackfillCacheTier_RecoversNullColumns simulates the pre-migration-008
@@ -27,7 +36,7 @@ func TestBackfillCacheTier_RecoversNullColumns(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +148,7 @@ func TestBackfillCodexMessageIDAndModel(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +230,7 @@ func TestBackfillCursorMessageID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,140 +268,6 @@ func TestBackfillCursorMessageID(t *testing.T) {
 	}
 }
 
-func TestBackfillCursorHookUsage(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO projects (id, root_path, created_at) VALUES (1, '/repo', '2026-04-29T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO sessions (id, tool, started_at, project_id) VALUES ('cursor-session', 'cursor', '2026-04-29T00:00:00Z', 1)`); err != nil {
-		t.Fatal(err)
-	}
-
-	logs := filepath.Join(root, "logs", "20260429T190737", "window1", "output_20260429T190743")
-	if err := os.MkdirAll(logs, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(logs, "cursor.hooks.workspaceId-test.log")
-	body := strings.Join([]string{
-		"INPUT:",
-		`{"conversation_id":"cursor-session","generation_id":"gen-123","hook_event_name":"stop","workspace_roots":["/repo"],"model":"default","input_tokens":100,"output_tokens":20,"cache_read_tokens":50,"cache_write_tokens":0}`,
-		"OUTPUT:",
-		`{"permission":"allow","continue":true}`,
-		"",
-	}, "\n")
-	if err := os.WriteFile(logPath, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := backfillCursorHookUsage(ctx, database, filepath.Join(root, "logs"), 0)
-	if err != nil {
-		t.Fatalf("backfillCursorHookUsage: %v", err)
-	}
-	if res.FilesScanned != 1 || res.TokenUsageUpdated != 1 {
-		t.Fatalf("unexpected summary: %+v", res)
-	}
-
-	var model string
-	var input, output int64
-	if err := database.QueryRowContext(ctx,
-		`SELECT model, input_tokens, output_tokens FROM token_usage WHERE source_event_id = ?`,
-		"gen-123:"+cursor.EventStop).Scan(&model, &input, &output); err != nil {
-		t.Fatal(err)
-	}
-	// input_tokens is NET non-cached: fixture's gross 100 with
-	// cache_read_tokens=50 → 50. See cursor.BuildStopTokenEvent.
-	if model != "default" || input != 50 || output != 20 {
-		t.Fatalf("token row mismatch: model=%q in=%d out=%d (want in=50 net of 50 cached)", model, input, output)
-	}
-	if err := database.QueryRowContext(ctx,
-		`SELECT model FROM sessions WHERE id = 'cursor-session'`).Scan(&model); err != nil {
-		t.Fatal(err)
-	}
-	if model != "default" {
-		t.Fatalf("session model = %q", model)
-	}
-}
-
-func TestBackfillCursorTranscriptActions(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO projects (id, root_path, created_at) VALUES (1, '/repo', '2026-04-29T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO sessions (id, tool, model, started_at, project_id) VALUES ('cursor-session', 'cursor', 'default', '2026-04-29T00:00:00Z', 1)`); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range []struct {
-		msg string
-		ts  string
-	}{
-		{"gen-1", "2026-04-29T00:00:10Z"},
-		{"gen-2", "2026-04-29T00:00:20Z"},
-	} {
-		if _, err := database.ExecContext(ctx,
-			`INSERT INTO token_usage (session_id, timestamp, tool, model, source_file, source_event_id, message_id, input_tokens, output_tokens, source, reliability)
-			 VALUES ('cursor-session', ?, 'cursor', 'default', 'cursor:hook', ?, ?, 10, 5, 'hook', 'accurate')`,
-			row.ts, row.msg+":"+cursor.EventStop, row.msg); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	transcriptDir := filepath.Join(root, "projects", "demo", "agent-transcripts", "cursor-session")
-	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	transcriptPath := filepath.Join(transcriptDir, "cursor-session.jsonl")
-	body := strings.Join([]string{
-		`{"role":"user","message":{"content":[{"type":"text","text":"one"}]}}`,
-		`{"role":"assistant","message":{"content":[{"type":"text","text":"scan"},{"type":"tool_use","name":"Glob","input":{"glob_pattern":"*"}}]}}`,
-		`{"role":"user","message":{"content":[{"type":"text","text":"two"}]}}`,
-		`{"role":"assistant","message":{"content":[{"type":"text","text":"read"},{"type":"tool_use","name":"ReadFile","input":{"path":"d:\\repo\\README.md"}}]}}`,
-		"",
-	}, "\n")
-	if err := os.WriteFile(transcriptPath, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := backfillCursorTranscriptActions(ctx, database, filepath.Join(root, "projects"), 0)
-	if err != nil {
-		t.Fatalf("backfillCursorTranscriptActions: %v", err)
-	}
-	// Each assistant turn emits 1 cursor.assistant_text row (text part)
-	// plus 1 tool_use row = 2 actions per turn, 4 total across the two
-	// generations covered by token_usage. The pre-v1.4.49 expected count
-	// was 2 (tool_use only); v1.4.49 doubles it via the new emission.
-	if res.ActionsUpdated != 4 {
-		t.Fatalf("ActionsUpdated: got %d want 4 (2 turns × {assistant_text + tool_use})", res.ActionsUpdated)
-	}
-	var count int
-	if err := database.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM actions WHERE tool = 'cursor' AND message_id IN ('gen-1','gen-2')`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 4 {
-		t.Fatalf("action count = %d want 4", count)
-	}
-}
-
 // TestBackfillsAllPrepareCleanlyOnEmptyDB is a defensive smoke test:
 // every backfill function must compile its prepared statements
 // against the canonical post-migrations schema. Pre-fix this would
@@ -405,7 +280,7 @@ func TestBackfillsAllPrepareCleanlyOnEmptyDB(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,81 +289,84 @@ func TestBackfillsAllPrepareCleanlyOnEmptyDB(t *testing.T) {
 	// Empty source dirs — every JSONL-walking pass should report zero
 	// files scanned and zero rows updated.
 	emptyDir := filepath.Join(root, "empty")
-	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Fatal(err)
 	}
 
-	if _, err := backfillIsSidechain(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillIsSidechain(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillIsSidechain: %v", err)
 	}
-	if _, err := backfillCacheTier(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCacheTier(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCacheTier: %v", err)
 	}
-	if _, err := backfillMessageID(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillMessageID(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillMessageID: %v", err)
 	}
-	if _, err := backfillCodexMessageID(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCodexMessageID(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCodexMessageID: %v", err)
 	}
-	if _, err := backfillCursorMessageID(ctx, database); err != nil {
+	if _, err := backfillCursorMessageID(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCursorMessageID: %v", err)
 	}
-	if _, err := backfillCursorHookUsage(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCursorHookUsage(ctx, database, []string{emptyDir}, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCursorHookUsage: %v", err)
 	}
-	if _, err := backfillCursorTranscriptActions(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCursorTranscriptActions(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCursorTranscriptActions: %v", err)
 	}
-	if _, err := backfillOpenCodeMessageID(ctx, database); err != nil {
+	if _, err := backfillOpenCodeMessageID(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenCodeMessageID: %v", err)
 	}
-	if _, err := backfillOpenCodeParts(ctx, database); err != nil {
+	if _, err := backfillOpenCodeParts(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenCodeParts: %v", err)
 	}
-	if _, err := backfillOpenClawActionTypes(ctx, database); err != nil {
+	if _, err := backfillOpenClawActionTypes(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenClawActionTypes: %v", err)
 	}
-	if _, err := backfillOpenClawModel(ctx, database); err != nil {
+	if _, err := backfillOpenClawModel(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenClawModel: %v", err)
 	}
-	if _, err := backfillOpenClawProjectRoot(ctx, database, []string{emptyDir}, 0); err != nil {
+	if _, err := backfillOpenClawProjectRoot(ctx, database, []string{emptyDir}, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenClawProjectRoot: %v", err)
 	}
-	if _, err := backfillOpenClawReasoning(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillOpenClawReasoning(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenClawReasoning: %v", err)
 	}
-	if _, err := backfillOpenClawSessionID(ctx, database, []string{emptyDir}, 0); err != nil {
+	if _, err := backfillOpenClawSessionID(ctx, database, []string{emptyDir}, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenClawSessionID: %v", err)
 	}
-	if _, err := backfillCodexReasoning(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCodexReasoning(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCodexReasoning: %v", err)
 	}
-	if _, err := backfillCodexProjectRoot(ctx, database, []string{emptyDir}, 0); err != nil {
+	if _, err := backfillCodexProjectRoot(ctx, database, []string{emptyDir}, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCodexProjectRoot: %v", err)
 	}
-	if _, err := backfillCursorModel(ctx, database); err != nil {
+	if _, err := backfillCursorModel(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCursorModel: %v", err)
 	}
-	if _, err := backfillCopilotMessageID(ctx, database); err != nil {
+	if _, err := backfillCopilotMessageID(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCopilotMessageID: %v", err)
 	}
-	if _, err := backfillPiMessageID(ctx, database); err != nil {
+	if _, err := backfillPiMessageID(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillPiMessageID: %v", err)
 	}
-	if _, err := backfillOpenCodeTokens(ctx, database); err != nil {
+	if _, err := backfillOpenCodeTokens(ctx, database); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillOpenCodeTokens: %v", err)
 	}
-	if _, err := backfillClaudeCodeUserPrompts(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillClaudeCodeUserPrompts(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillClaudeCodeUserPrompts: %v", err)
 	}
-	if _, err := backfillClaudeCodeAPIErrors(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillClaudeCodeAPIErrors(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillClaudeCodeAPIErrors: %v", err)
 	}
-	if _, err := backfillCursorUserPrompts(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCursorUserPrompts(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCursorUserPrompts: %v", err)
 	}
-	if _, err := backfillCursorSubagents(ctx, database, emptyDir, 0); err != nil {
+	if _, err := backfillCursorSubagents(ctx, database, emptyDir, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
 		t.Errorf("backfillCursorSubagents: %v", err)
+	}
+	if _, err := store.New(database).BackfillTaskItems(ctx, 0); err != nil && !errors.Is(err, errAdapterNotInBuild) {
+		t.Errorf("BackfillTaskItems: %v", err)
 	}
 }
 
@@ -498,10 +376,11 @@ func TestBackfillsAllPrepareCleanlyOnEmptyDB(t *testing.T) {
 // before the adapter started emitting them. Idempotent via the
 // (source_file, source_event_id) UNIQUE index.
 func TestBackfillClaudeCodeUserPrompts(t *testing.T) {
+	requireAdapter(t, "claude-code")
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,102 +465,6 @@ func TestBackfillClaudeCodeUserPrompts(t *testing.T) {
 	}
 }
 
-// TestBackfillCursorSubagents pins the v1.4.21 sidechain ingest:
-// agent-transcripts/<parent>/subagents/<sub>.jsonl is walked, parsed
-// via the cursor adapter's transcript path, and emitted as ToolEvents
-// with IsSidechain=true under the parent session_id. Tests both the
-// session-id linkage and the sidechain flag landing on inserted rows.
-func TestBackfillCursorSubagents(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-
-	// Build a tiny cursor project tree with one parent transcript and
-	// one subagent transcript inside it.
-	parentSessionID := "parent-sess"
-	subUUID := "sub-AAA"
-	transcriptDir := filepath.Join(root, "projects", "demo", "agent-transcripts", parentSessionID)
-	subagentDir := filepath.Join(transcriptDir, "subagents")
-	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	subPath := filepath.Join(subagentDir, subUUID+".jsonl")
-	body := strings.Join([]string{
-		`{"role":"user","message":{"content":[{"type":"text","text":"<user_query>research X</user_query>"}]}}`,
-		`{"role":"assistant","message":{"content":[{"type":"text","text":"On it."},{"type":"tool_use","name":"WebFetch","input":{"url":"https://example.com"}}]}}`,
-	}, "\n")
-	if err := os.WriteFile(subPath, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Seed parent project + session — backfill skips files whose
-	// parent session_id has no DB entry (no projectRoot to attribute).
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO projects (id, root_path, created_at) VALUES (1, '/tmp/demo', '2026-05-01T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO sessions (id, tool, started_at, project_id) VALUES (?, 'cursor', '2026-05-01T00:00:00Z', 1)`, parentSessionID); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := backfillCursorSubagents(ctx, database, filepath.Join(root, "projects"), 0)
-	if err != nil {
-		t.Fatalf("backfillCursorSubagents: %v", err)
-	}
-	if res.FilesScanned != 1 {
-		t.Errorf("FilesScanned = %d, want 1", res.FilesScanned)
-	}
-	if res.EventsBuilt != 3 {
-		// 1 user_prompt + 1 cursor.assistant_text + 1 WebFetch tool_use
-		t.Errorf("EventsBuilt = %d, want 3", res.EventsBuilt)
-	}
-	if res.ActionsInserted != 3 {
-		t.Errorf("ActionsInserted = %d, want 3", res.ActionsInserted)
-	}
-
-	// All inserted rows must carry IsSidechain=1 and the parent SessionID.
-	var sidechainCount, otherCount int
-	if err := database.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM actions WHERE session_id = ? AND is_sidechain = 1`, parentSessionID).Scan(&sidechainCount); err != nil {
-		t.Fatal(err)
-	}
-	if sidechainCount != 3 {
-		t.Errorf("sidechain rows: %d want 3", sidechainCount)
-	}
-	if err := database.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM actions WHERE session_id = ? AND is_sidechain = 0`, parentSessionID).Scan(&otherCount); err != nil {
-		t.Fatal(err)
-	}
-	if otherCount != 0 {
-		t.Errorf("non-sidechain rows for parent: %d want 0", otherCount)
-	}
-
-	// Idempotency: re-running must not duplicate rows. v1.4.28's
-	// ON CONFLICT DO UPDATE for actions.duration_ms shifted the
-	// inserted-counter semantics to "rows touched"; check the
-	// table-level row count instead.
-	var beforeCount int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM actions`).Scan(&beforeCount); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := backfillCursorSubagents(ctx, database, filepath.Join(root, "projects"), 0); err != nil {
-		t.Fatal(err)
-	}
-	var afterCount int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM actions`).Scan(&afterCount); err != nil {
-		t.Fatal(err)
-	}
-	if afterCount != beforeCount {
-		t.Errorf("second run added rows: before=%d after=%d", beforeCount, afterCount)
-	}
-}
-
 // TestBackfillClaudeCodeAPIErrors pins the v1.4.20 recovery pass for
 // upstream API failures: re-runs the adapter on every JSONL, picks
 // out the api_error events the previous adapter version would have
@@ -689,10 +472,11 @@ func TestBackfillCursorSubagents(t *testing.T) {
 // (source_file, source_event_id) UNIQUE index — a second run is a
 // no-op.
 func TestBackfillClaudeCodeAPIErrors(t *testing.T) {
+	requireAdapter(t, "claude-code")
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -788,7 +572,7 @@ func TestBackfillOpenCodeTokens(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -902,7 +686,7 @@ func TestBackfillCopilotMessageID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +770,7 @@ func TestBackfillPiMessageID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1068,7 +852,7 @@ func TestBackfillOpenCodeParts(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1174,7 +958,7 @@ func TestBackfillOpenClawModel(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1273,7 +1057,7 @@ func TestBackfillOpenCodeMessageID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1368,7 +1152,7 @@ func TestBackfillOpenClawActionTypes(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1458,7 +1242,7 @@ func TestBackfillOpenClawProjectRoot_ReattributesAliasSessions(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1555,7 +1339,7 @@ func TestBackfillOpenClawSessionID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1661,7 +1445,7 @@ func TestBackfillCursorModel(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1728,6 +1512,79 @@ func TestBackfillCursorModel(t *testing.T) {
 	}
 }
 
+// TestBackfillSessionModels pins the --session-models CLI wiring over
+// store.BackfillSessionModels: the rollup is ADAPTER-AGNOSTIC (unlike
+// --cursor-model), fills only an empty sessions.model, takes the NEWEST
+// model-bearing token row, leaves a session with no such row alone, and
+// is idempotent on a second run.
+func TestBackfillSessionModels(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "obs.db")
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO projects (id, root_path, created_at) VALUES (1, '/tmp/test', '2026-04-30T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []struct{ id, tool, model string }{
+		{"s1", "codex", ""},        // empty + token rows → filled with the newest
+		{"s2", "cline", ""},        // empty + no token row → untouched
+		{"s3", "cowork", "opus-4"}, // already set → never overwritten
+	} {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO sessions (id, tool, model, started_at, project_id)
+			 VALUES (?, ?, ?, '2026-04-30T00:00:00Z', 1)`, s.id, s.tool, s.model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tk := range []struct{ session, model, ts, evt string }{
+		{"s1", "gpt-5-mini", "2026-04-30T00:00:00Z", "s1-a"},
+		{"s1", "gpt-5", "2026-04-30T01:00:00Z", "s1-b"}, // newest wins
+		{"s3", "haiku-4-5", "2026-04-30T02:00:00Z", "s3-a"},
+	} {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO token_usage (session_id, timestamp, tool, model, source_file, source_event_id, input_tokens, output_tokens, source, reliability)
+			 VALUES (?, ?, 'codex', ?, '/tmp/x.jsonl', ?, 10, 5, 'jsonl', 'estimated')`,
+			tk.session, tk.ts, tk.model, tk.evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := backfillSessionModels(ctx, database)
+	if err != nil {
+		t.Fatalf("backfillSessionModels: %v", err)
+	}
+	if res.SessionsUpdated != 1 {
+		t.Errorf("SessionsUpdated = %d, want 1 (only s1)", res.SessionsUpdated)
+	}
+	for _, c := range []struct{ id, want string }{
+		{"s1", "gpt-5"},
+		{"s2", ""},
+		{"s3", "opus-4"},
+	} {
+		var got sql.NullString
+		if err := database.QueryRowContext(ctx,
+			`SELECT model FROM sessions WHERE id = ?`, c.id).Scan(&got); err != nil {
+			t.Fatalf("query %s: %v", c.id, err)
+		}
+		if got.String != c.want {
+			t.Errorf("session %s: model = %q, want %q", c.id, got.String, c.want)
+		}
+	}
+
+	again, err := backfillSessionModels(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.SessionsUpdated != 0 {
+		t.Errorf("second run not idempotent: %d", again.SessionsUpdated)
+	}
+}
+
 // TestBackfillCodexReasoning pins the codex agent_message → preceding_reasoning
 // pass: agent_message text per turn lands on every action row with
 // the matching message_id (turn_id).
@@ -1735,7 +1592,7 @@ func TestBackfillCodexReasoning(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1829,7 +1686,7 @@ func TestBackfillCodexProjectRoot_ReattributesWindowsCwd(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1946,6 +1803,156 @@ func TestBackfillCodexProjectRoot_ReattributesWindowsCwd(t *testing.T) {
 	}
 }
 
+// gitAvailableForBackfill skips a test when the git binary isn't on PATH,
+// mirroring internal/git's own gitAvailable helper (unexported there, so
+// this package needs its own copy).
+func gitAvailableForBackfill(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+}
+
+// initRepoWithRemote creates a real git repo with one commit and an
+// "origin" remote, so a backfill call site's git.Resolve sees a real
+// info.Remote to normalize (B3 reattribution residual).
+func initRepoWithRemote(t *testing.T, remoteURL string) string {
+	t.Helper()
+	gitAvailableForBackfill(t)
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"symbolic-ref", "HEAD", "refs/heads/main"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+		{"remote", "add", "origin", remoteURL},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// TestBackfillProjectRootReattribution_CarriesNormalizedRemote is the B3
+// residual regression test: cmd/observer/backfill.go's five re-attribution
+// call sites (codex, claudecode, cowork, openclaw, antigravity) used to
+// hardcode "" for store.UpsertProject's remote argument even when the
+// resolved cwd sat inside a real git working tree with an "origin" remote
+// available — so a backfill-driven reattribution could never populate
+// projects.git_remote the way a live parse does. This exercises the codex
+// and claudecode paths (both call git.Resolve directly) end-to-end and
+// asserts the stored git_remote is the SAME normalized form git.NormalizeRemote
+// produces for the live adapters.
+func TestBackfillProjectRootReattribution_CarriesNormalizedRemote(t *testing.T) {
+	ctx := context.Background()
+	remoteURL := "git@github.com:acme/widget.git"
+	wantRemote := git.NormalizeRemote(remoteURL) // "github.com/acme/widget"
+
+	t.Run("codex", func(t *testing.T) {
+		root := t.TempDir()
+		dbPath := filepath.Join(root, "obs.db")
+		database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer database.Close()
+
+		realProject := initRepoWithRemote(t, remoteURL)
+
+		sessionsDir := filepath.Join(root, "codex-sessions")
+		if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		rollout := filepath.Join(sessionsDir, "rollout-s-cx-remote.jsonl")
+		body := strings.Join([]string{
+			`{"timestamp":"2026-04-30T00:00:01.000Z","type":"session_meta","payload":{"id":"s-cx-remote","cwd":` + jsonString(realProject) + `,"model":"gpt-5"}}`,
+			"",
+		}, "\n")
+		if err := os.WriteFile(rollout, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		res, err := backfillCodexProjectRoot(ctx, database, []string{sessionsDir}, 0)
+		if err != nil {
+			t.Fatalf("backfillCodexProjectRoot: %v", err)
+		}
+		if res.FilesScanned != 1 {
+			t.Fatalf("FilesScanned = %d, want 1", res.FilesScanned)
+		}
+
+		var gotRemote string
+		if err := database.QueryRowContext(
+			ctx,
+			`SELECT git_remote FROM projects WHERE root_path = ?`, realProject,
+		).Scan(&gotRemote); err != nil {
+			t.Fatal(err)
+		}
+		if gotRemote != wantRemote {
+			t.Errorf("projects.git_remote = %q, want %q", gotRemote, wantRemote)
+		}
+	})
+
+	t.Run("claudecode", func(t *testing.T) {
+		root := t.TempDir()
+		dbPath := filepath.Join(root, "obs.db")
+		database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer database.Close()
+
+		realProject := initRepoWithRemote(t, remoteURL)
+
+		projectsDir := filepath.Join(root, "claude-projects")
+		if err := os.MkdirAll(projectsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		transcript := filepath.Join(projectsDir, "s-cc-remote.jsonl")
+		body := strings.Join([]string{
+			`{"sessionId":"s-cc-remote","cwd":` + jsonString(realProject) + `,"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-04-30T00:00:01.000Z"}`,
+			"",
+		}, "\n")
+		if err := os.WriteFile(transcript, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		res, err := backfillClaudecodeProjectRoot(ctx, database, []string{projectsDir}, 0)
+		if err != nil {
+			t.Fatalf("backfillClaudecodeProjectRoot: %v", err)
+		}
+		if res.FilesScanned != 1 {
+			t.Fatalf("FilesScanned = %d, want 1", res.FilesScanned)
+		}
+
+		var gotRemote string
+		if err := database.QueryRowContext(
+			ctx,
+			`SELECT git_remote FROM projects WHERE root_path = ?`, realProject,
+		).Scan(&gotRemote); err != nil {
+			t.Fatal(err)
+		}
+		if gotRemote != wantRemote {
+			t.Errorf("projects.git_remote = %q, want %q", gotRemote, wantRemote)
+		}
+	})
+}
+
 // codexForkDedupRolloutBody builds a synthetic codex fork/subagent
 // rollout mirroring the real 0.144 replay shape: an owning session_meta
 // (fork markers), a replayed parent session_meta, a replayed
@@ -1979,10 +1986,11 @@ func codexForkDedupRolloutBody() string {
 // rollout is gone from disk, and (e) backfill session lineage under
 // --apply (but not on a dry run).
 func TestBackfillCodexForkDedup(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2136,7 +2144,7 @@ func TestBackfillCodexForkDedup(t *testing.T) {
 		t.Errorf("second apply not idempotent: matched=%d deleted=%d", again.RowsMatched, again.RowsDeleted)
 	}
 	if again.LineageBackfilled != 0 {
-		t.Errorf("second apply LineageBackfilled = %d, want 0 (already stamped — honest counter)", again.LineageBackfilled)
+		t.Errorf("second apply LineageBackfilled = %d, want 0 (already stamped - honest counter)", again.LineageBackfilled)
 	}
 	if countRows() != 2 {
 		t.Errorf("second apply mutated rows: %d, want 2", countRows())
@@ -2181,10 +2189,11 @@ func TestLastPathSegment(t *testing.T) {
 // trailing basename. Also pins finding #8's report completeness
 // (reasoning / web_search / estimated_cost sums).
 func TestBackfillCodexForkDedupWindowsBasename(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "obs.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2292,7 +2301,7 @@ func TestBackfillDryRun_SnapshotAndRedirect(t *testing.T) {
 	// Build a non-trivial live DB so VACUUM INTO actually copies
 	// content (zero-row DBs round-trip but exercise less of the
 	// path).
-	live, err := db.Open(ctx, db.Options{Path: livePath})
+	live, err := dbtemplate.Open(ctx, db.Options{Path: livePath})
 	if err != nil {
 		t.Fatalf("open live: %v", err)
 	}
@@ -2352,7 +2361,7 @@ enabled = false
 	if _, err := os.Stat(snapshotPath); err != nil {
 		t.Fatalf("snapshot not on disk: %v", err)
 	}
-	snap, err := db.Open(ctx, db.Options{Path: snapshotPath})
+	snap, err := dbtemplate.Open(ctx, db.Options{Path: snapshotPath})
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)
 	}
@@ -2410,7 +2419,7 @@ func TestBackfillDryRun_RefusesOverwrite(t *testing.T) {
 	dst := filepath.Join(root, "dst.db")
 
 	// Build a valid source DB.
-	live, err := db.Open(ctx, db.Options{Path: src})
+	live, err := dbtemplate.Open(ctx, db.Options{Path: src})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2428,4 +2437,283 @@ func TestBackfillDryRun_RefusesOverwrite(t *testing.T) {
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("error text: %v (want 'already exists')", err)
 	}
+}
+
+// --- observer backfill --content ---
+//
+// TestBackfillContent_GatedOff exercises `--content` through the real cobra
+// command: contentCaptureBlockReason short-circuits before buildWatcher is
+// ever called, so the test never touches anything outside its own temp dir
+// and is safe to run as written.
+//
+// The two gate-OPEN tests below (CaptureParity, Idempotent) deliberately do
+// NOT go through the cobra command / buildWatcher. buildWatcher registers
+// EVERY adapter via adapterdefaults.Adapters(), and claude-code's default
+// WatchPaths() walks crossmount.AllHomes() — which on a WSL2 host
+// unconditionally scans /mnt/c/Users for a Windows-side ~/.claude/projects
+// tree (internal/platform/crossmount/crossmount.go::wslWindowsHomes; no env
+// var or config knob disables it, by design — the doc comment there says as
+// much — and t.Setenv("HOME", ...) only redirects the *native* home
+// candidate, not this one). On a machine with a real Windows Claude Code
+// install, a naive cobra-level test therefore reads and parses the
+// OPERATOR'S OWN live session history during `go test`: an earlier draft of
+// this test parsed 56 real transcripts instead of the 1-file fixture it
+// asked for, and failed its exact files_processed assertion because of it.
+//
+// The two tests below instead hand-build the exact same production chain
+// (wireContentCapture -> registry -> watcher.New -> Rescan ->
+// Store.Ingest -> captureMessageContent) via runScopedContentRescan, using
+// claudecode.NewWithOptions(scrub.New(), watchRoot) — an EXPLICIT watch
+// root, which Adapter.WatchPaths() returns verbatim instead of consulting
+// crossmount.AllHomes(). Same adapter, same watcher, same store seam
+// production uses; only the registry's adapter LIST differs (one adapter
+// with an explicit root, vs adapterdefaults.Adapters()'s full ~37-adapter
+// default registry) — a test-hermeticity substitution, not a second
+// implementation of the rescan logic. The CLI-level flag/gate/message
+// wiring itself is covered by TestBackfillContent_GatedOff (blocked
+// branch); the unblocked branch in backfill.go's --content block is a
+// two-line composition of buildWatcher + Rescan + fmt.Sprintf over pieces
+// already pinned here and in content_capture_wire_test.go /
+// internal/store/messagecontent_test.go.
+
+// contentFixtureSession writes one Claude Code session JSONL (a user prompt
+// + an assistant text reply) predating the message-content producer
+// (263a3cadc) under <tmp>/projects/demo/sess-content.jsonl — simulating
+// exactly the historical-session gap --content exists to close — and
+// returns the projects directory, suitable as an adapter's explicit
+// watchRoot.
+func contentFixtureSession(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "demo")
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join([]string{
+		`{"sessionId":"sess-content","cwd":"/tmp","timestamp":"2026-05-12T00:00:00Z","uuid":"u-prompt","message":{"role":"user","content":[{"type":"text","text":"hello there"}]}}`,
+		`{"sessionId":"sess-content","cwd":"/tmp","timestamp":"2026-05-12T00:00:01Z","uuid":"u-asst","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hi there"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(projects, "sess-content.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(root, "projects")
+}
+
+// runScopedContentRescan hand-builds the same wireContentCapture ->
+// registry -> watcher.New -> Rescan chain `observer backfill --content`
+// composes in backfill.go, scoped to a single claude-code adapter with an
+// explicit watchRoot (see the package comment above for why this bypasses
+// buildWatcher). Content sharing is turned on exactly as
+// [org_client.share] full_content = true resolves via
+// contentCapturePosture/wireContentCapture — the same production seam,
+// asserted open first so a regression there fails loudly instead of
+// silently producing zero rows.
+func runScopedContentRescan(t *testing.T, ctx context.Context, dbPath, watchRoot string) watcher.ScanResult {
+	t.Helper()
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	st := store.New(database)
+	cfg := config.Config{OrgClient: config.OrgClientConfig{
+		Share: config.OrgClientShareConfig{FullContent: true},
+	}}
+	if reason := contentCaptureBlockReason(cfg); reason != "" {
+		t.Fatalf("fixture cfg should leave the content-capture gate open, got block reason: %q", reason)
+	}
+	wireContentCapture(cfg, st)
+
+	reg := adapter.NewRegistry()
+	reg.Register(claudecode.NewWithOptions(scrub.New(), watchRoot))
+	w := watcher.New(st, reg, watcher.Options{Allow: []string{"claude-code"}})
+
+	res, err := w.Rescan(ctx)
+	if err != nil {
+		t.Fatalf("Rescan: %v", err)
+	}
+	return res
+}
+
+// runBackfillContent invokes `observer backfill --content --config
+// configPath` through the real cobra command and returns its combined
+// stdout/stderr. Only used by TestBackfillContent_GatedOff — see the
+// package comment above for why the gate-open tests use
+// runScopedContentRescan instead.
+func runBackfillContent(t *testing.T, configPath string) string {
+	t.Helper()
+	var out strings.Builder
+	cmd := newBackfillCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--content", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("backfill --content: %v", err)
+	}
+	return out.String()
+}
+
+// countOTelContentRows opens dbPath and returns the total otel_content row
+// count.
+func countOTelContentRows(t *testing.T, ctx context.Context, dbPath string) int {
+	t.Helper()
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM otel_content`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestBackfillContent_GatedOff pins the honest no-op contract for
+// `observer backfill --content` when the node's content-capture gate is
+// closed — the default posture, no [org_client.share] section at all. It
+// must not populate otel_content, and must print a message naming the
+// specific blocking config key rather than a bare "did nothing"
+// (CLAUDE.md's honest-disabled-copy convention).
+//
+// Mutation-proof target: deleting the
+//
+//	if reason := contentCaptureBlockReason(gateCfg); reason != "" { ... }
+//
+// gate check in backfill.go's --content block (so it always falls through
+// to buildWatcher+Rescan) makes this test fail by name — the skip message
+// disappears from stdout and/or otel_content gains rows it must not have on
+// a metadata-only node.
+func TestBackfillContent_GatedOff(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "obs.db")
+
+	configPath := filepath.Join(root, "config.toml")
+	if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`[observer]
+db_path = %q
+log_level = "warn"
+
+[observer.watch]
+poll_interval_seconds = 2
+max_file_size_mb = 64
+enabled_adapters = ["claude-code"]
+
+[observer.scrubber]
+enabled = true
+
+[observer.proxy]
+enabled = false
+
+[observer.mcp]
+enabled = false
+`, dbPath)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runBackfillContent(t, configPath)
+
+	if !strings.Contains(out, "content backfill skipped:") {
+		t.Errorf("output missing skip message: %q", out)
+	}
+	if !strings.Contains(out, "[org_client.share]") {
+		t.Errorf("skip message must name the blocking key: %q", out)
+	}
+
+	if n := countOTelContentRows(t, ctx, dbPath); n != 0 {
+		t.Errorf("otel_content rows = %d, want 0 (gate was closed)", n)
+	}
+}
+
+// TestBackfillContent_CaptureParity backfills a fixture session predating
+// the message-content producer and verifies the --content chain (see
+// runScopedContentRescan) reproduces exactly the otel_content rows live
+// ingest would have written for the same transcript: one kindPrompt row for
+// the user turn and one kindAssistant row for the reply — parsed through
+// the adapter's own real parser (internal/adapter/claudecode), not a second
+// hand-rolled implementation.
+func TestBackfillContent_CaptureParity(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "obs.db")
+	watchRoot := contentFixtureSession(t)
+
+	res := runScopedContentRescan(t, ctx, dbPath, watchRoot)
+	if res.FilesProcessed != 1 || res.Errors != 0 {
+		t.Fatalf("ScanResult = %+v, want FilesProcessed=1 Errors=0", res)
+	}
+
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	rows, err := database.QueryContext(ctx,
+		`SELECT kind, content FROM otel_content WHERE session_id = 'sess-content' ORDER BY kind`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var kind, content string
+		if err := rows.Scan(&kind, &content); err != nil {
+			t.Fatal(err)
+		}
+		got[kind] = content
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"assistant": "hi there", "prompt": "hello there"}
+	if len(got) != len(want) {
+		t.Fatalf("otel_content rows = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("otel_content[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// TestBackfillContent_Idempotent runs the --content chain (see
+// runScopedContentRescan) twice over the same unmodified session file and
+// asserts the otel_content row count is identical both times: the table's
+// (content_hash, kind, request_id, tool_use_id) UNIQUE key — tool_use_id
+// carrying a session-scoped event key — must absorb the re-parse via ON
+// CONFLICT DO NOTHING rather than duplicating rows.
+//
+// Mutation-proof target: dropping InsertOTelContent's ON CONFLICT clause
+// (or un-scoping eventContentKey back to a bare per-event id) makes this
+// test fail by name — the second run's count comes back doubled instead of
+// unchanged.
+func TestBackfillContent_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "obs.db")
+	watchRoot := contentFixtureSession(t)
+
+	runScopedContentRescan(t, ctx, dbPath, watchRoot)
+	first := countOTelContentRows(t, ctx, dbPath)
+	if first == 0 {
+		t.Fatal("first rescan produced 0 otel_content rows; fixture not being captured")
+	}
+
+	runScopedContentRescan(t, ctx, dbPath, watchRoot)
+	second := countOTelContentRows(t, ctx, dbPath)
+
+	if second != first {
+		t.Errorf("otel_content rows after 2nd rescan = %d, want %d (unchanged - re-parse must not duplicate)", second, first)
+	}
+}
+
+func cursorUsageBlock(ts, gen, kind string, in int64) string {
+	return strings.Join([]string{
+		"[" + ts + "] Running hook 1",
+		"INPUT:",
+		fmt.Sprintf(`{"conversation_id":"cc","generation_id":%q,"hook_event_name":%q,"workspace_roots":["/repo"],"model":"m","text":"ok","input_tokens":%d,"output_tokens":53139,"cache_read_tokens":0,"cache_write_tokens":0}`, gen, kind, in),
+		"OUTPUT:",
+		`{}`,
+		"",
+	}, "\n")
 }

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package dashboard
 
 import (
@@ -100,7 +102,7 @@ func (s *Server) serveRoutingApplyPreview(w http.ResponseWriter, r *http.Request
 			"snippet":    snippet,
 			"deltas":     rep.GlobalDeltasFor(weak),
 			"note": "Paste-emission tool (§R10.2): observer prints the exact native-config block but does not " +
-				"write this tool's files — paste it into the tool's own config.",
+				"write this tool's files - paste it into the tool's own config.",
 		})
 		return
 	}
@@ -132,9 +134,9 @@ func (s *Server) serveRoutingApplyPreview(w http.ResponseWriter, r *http.Request
 		"changes":    rows,
 		"skipped":    skipped,
 		"backups":    backups,
-		"note": "Dry-run preview — nothing is written until you confirm a change. Writes edit only the model: " +
+		"note": "Dry-run preview - nothing is written until you confirm a change. Writes edit only the model: " +
 			"frontmatter line (a .bak-observer-<stamp> backup lands next to each file); claude-code picks the " +
-			"change up at the next session spawn — no observer restart. Files live on the daemon's host.",
+			"change up at the next session spawn - no observer restart. Files live on the daemon's host.",
 	})
 }
 
@@ -155,7 +157,7 @@ func (s *Server) applyRoutingChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if mode != routingapply.ModeWritable {
-		http.Error(w, fmt.Sprintf("%s is %s per the §R10.2 matrix — only claude-code is written directly; use the preview's snippet/evidence instead", req.Tool, mode), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("%s is %s per the §R10.2 matrix - only claude-code is written directly; use the preview's snippet/evidence instead", req.Tool, mode), http.StatusBadRequest)
 		return
 	}
 	days := req.Days
@@ -178,8 +180,18 @@ func (s *Server) applyRoutingChange(w http.ResponseWriter, r *http.Request) {
 		return c.Path == req.Path && c.ToModel == req.ToModel
 	})
 	if idx < 0 {
-		http.Error(w, "no currently-planned change matches this path + target — the preview is stale (or the change already applied); re-run the preview", http.StatusConflict)
+		http.Error(w, "no currently-planned change matches this path + target - the preview is stale (or the change already applied); re-run the preview", http.StatusConflict)
 		return
+	}
+	// W5.1 org-governed feature gate: node.features.routing_apply. Fail-open
+	// (nil FeatureGate, or no accepted policy) — checked as late as
+	// possible, right before the write, so a denied request never even
+	// leaves a stale-preview error path unexplained.
+	if s.opts.FeatureGate != nil {
+		if allowed, reason := s.opts.FeatureGate(nodeFeatureRoutingApply); !allowed {
+			http.Error(w, reason, http.StatusForbidden)
+			return
+		}
 	}
 	c := changes[idx]
 	stamp := routingapply.Stamp(time.Now())
@@ -191,7 +203,7 @@ func (s *Server) applyRoutingChange(w http.ResponseWriter, r *http.Request) {
 		"written": true,
 		"change":  c,
 		"backup":  c.Path + routingapply.BackupPrefix + stamp,
-		"note":    "claude-code reads agent files at session spawn — new sessions pick this up; no observer restart needed.",
+		"note":    "claude-code reads agent files at session spawn - new sessions pick this up; no observer restart needed.",
 	}
 	// Audit trail (R2.5): best-effort — the write already landed with
 	// its backup; a ledger failure is surfaced, never a write failure.

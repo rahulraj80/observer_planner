@@ -1,0 +1,60 @@
+{
+  "data": [
+    {
+      "ending_at": "2025-08-03T00:00:00Z",
+      "results": [
+        {
+          "amount": "0.5",
+          "context_window": null,
+          "cost_type": "code_execution",
+          "currency": "USD",
+          "description": "synthetic code_execution",
+          "inference_geo": null,
+          "model": null,
+          "service_tier": null,
+          "token_type": null,
+          "workspace_id": null
+        },
+        {
+          "amount": "12",
+          "context_window": null,
+          "cost_type": "session_usage",
+          "currency": "USD",
+          "description": "synthetic session_usage",
+          "inference_geo": null,
+          "model": null,
+          "service_tier": null,
+          "token_type": null,
+          "workspace_id": null
+        },
+        {
+          "amount": "987654321.123456",
+          "context_window": "200k-1M",
+          "cost_type": "tokens",
+          "currency": "USD",
+          "description": "synthetic tokens",
+          "inference_geo": "us",
+          "model": "claude-sonnet-5",
+          "service_tier": "batch",
+          "token_type": "output_tokens",
+          "workspace_id": null
+        },
+        {
+          "amount": "3",
+          "context_window": null,
+          "cost_type": "web_search",
+          "currency": "USD",
+          "description": "synthetic web_search",
+          "inference_geo": "not_available",
+          "model": null,
+          "service_tier": null,
+          "token_type": null,
+          "workspace_id": null
+        }
+      ],
+      "starting_at": "2025-08-02T00:00:00Z"
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

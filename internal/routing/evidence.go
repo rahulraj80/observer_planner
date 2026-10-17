@@ -38,15 +38,6 @@ func (e EvidenceSample) ToolFailureRate() float64 {
 	return float64(e.ToolFailures) / float64(e.ToolGraded)
 }
 
-// QualityEvidence is the calibration-derived expectation for one
-// (turn-kind, target tier) move: the quality signal plus the confidence
-// in it (0..1). Zero confidence means uncalibrated — callers then render
-// the benefit as "quality unknown" (§5.4).
-type QualityEvidence struct {
-	Signal     QualitySignal
-	Confidence float64
-}
-
 // MinEvidenceSample is the §R7.2 evidence floor: below this many graded
 // observations on BOTH sides the verdict degrades to unknown — no claim.
 const MinEvidenceSample int64 = 50

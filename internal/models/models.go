@@ -1,8 +1,9 @@
 package models
 
 import (
-	"strings"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/tooltax"
 )
 
 // IsMCPToolName reports whether a raw tool name is an MCP tool call in the
@@ -13,8 +14,14 @@ import (
 // `use_mcp_tool` — map those names explicitly rather than through this
 // predicate. Keeping the "what is an MCP tool name" test in one place
 // keeps the detection consistent across adapters.
+//
+// Thin wrapper: internal/tooltax.MCPIdentity is the SINGLE Go owner of
+// the `mcp__<server>__<tool>` parse (taxonomy plan §1). tooltax imports
+// nothing project-internal, so this dependency direction is acyclic by
+// construction. Behaviour is unchanged — MCPIdentity's ok result is
+// exactly the `mcp__` prefix test this function has always been.
 func IsMCPToolName(name string) bool {
-	return strings.HasPrefix(name, "mcp__")
+	return tooltax.IsMCPToolName(name)
 }
 
 // Tool identifiers. These are the stable string values stored in the `tool`
@@ -31,12 +38,33 @@ const (
 	// (the npm-distributed `cline` 3.x CLI), which is a different
 	// product from the same authors with its own SQLite-backed
 	// persistence at `~/.cline/data/`.
-	ToolCline    = "cline"
-	ToolRooCode  = "roo-code"
+	ToolCline   = "cline"
+	ToolRooCode = "roo-code"
+	// ToolZooCode is ZooCode (`ZooCodeOrganization.zoo-code`), the
+	// community continuation of Roo Code v3.54.0 published on the VS
+	// Code Marketplace since 2026-05-16 after Roo's 2026-04-21
+	// shutdown — the vendor's own listing describes it as "same
+	// features, settings structure" as Roo v3.54.0. Like ToolRooCode
+	// it is a cline-package RETAG, not an adapter of its own:
+	// internal/adapter/cline recognises its globalStorage directory
+	// (`zoocodeorganization.zoo-code` — VS Code lower-cases the
+	// marketplace id on disk; the on-disk spelling is still unconfirmed
+	// on a live install) via the clineExtensions table and emits
+	// Tool="zoo-code" for tasks found there, parsed by the exact same
+	// Roo-shaped task layout. Matching the roo-code precedent, it has
+	// no internal/integration registry row by design (see
+	// registryRowlessTaxonomyTools in internal/integration).
+	ToolZooCode  = "zoo-code"
 	ToolCopilot  = "copilot"
 	ToolOpenCode = "opencode"
 	ToolOpenClaw = "openclaw"
-	ToolPi       = "pi"
+	// ToolPi is the pi coding agent (npm
+	// @earendil-works/pi-coding-agent, pi.dev), which persists session
+	// JSONL under ~/.pi/agent/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl.
+	// Distinct from ToolPrimeAgent, which is a HARD FORK of the same
+	// upstream (pi-mono) with its own data home, session layout, entry
+	// vocabulary and single-tool (`ipython`) surface.
+	ToolPi = "pi"
 	// ToolGeminiCLI is Google's Gemini CLI agent (`@google/gemini-cli`),
 	// the Node.js terminal AI tool that writes plain JSON / JSONL
 	// session files under ~/.gemini/tmp/<project_hash>/chats/.
@@ -167,7 +195,10 @@ const (
 	// history,lock}` (the `.json` state carries per-turn
 	// `conversation_metadata.user_turn_metadatas[]` with
 	// input/output_token_count + credit `metering_usage`; the `.jsonl` is
-	// the Prompt/AssistantMessage stream), while `--no-interactive` runs
+	// the Prompt / AssistantMessage / ToolResults stream, whose content
+	// blocks are POLYMORPHIC — only `kind:"text"` carries a string,
+	// while `thinking` / `toolUse` / `toolResult` carry objects), while
+	// `--no-interactive` runs
 	// write ONLY the SQLite `conversations_v2` table in
 	// `~/.local/share/kiro-cli/data.sqlite3` (Windows:
 	// `%LOCALAPPDATA%\Kiro-Cli\data.sqlite3`), keyed by the RAW cwd string
@@ -215,6 +246,10 @@ const (
 	// and need session correlation. `session_search.sqlite` is an FTS
 	// index only — not the store. Directory names percent-encode the cwd;
 	// records carry the raw OS path.
+	//
+	// DISTINCT from ToolGrokbot, the Grok Bot DESKTOP app: different
+	// product, different vendor stack, different on-disk format, no path
+	// overlap (~/.grok vs %APPDATA%\Grok Bot).
 	ToolGrok = "grok"
 	// ToolDevin is Cognition's Devin CLI (binary `devin`, the local CLI
 	// released ~2026-04, distinct from cloud Devin; proprietary,
@@ -342,6 +377,257 @@ const (
 	// COMMAND_CODE_API_KEY / COMMANDCODE_API_ENV point at Command Code's
 	// own closed gateway, not a BYOK Anthropic/OpenAI-shaped endpoint.
 	ToolCommandCode = "command-code"
+	// ToolMuse is Meta's Muse Code CLI ("muse") — a statically linked Rust
+	// binary (`fbcode/musecode`, internal crate prefix `tbh_`) fronted by a
+	// self-updating shell launcher at ~/.local/bin/muse. Linux + macOS only;
+	// there is no Windows build. Persists an append-only EVENT-SOURCED log
+	// (NOT a chat transcript) at the date-sharded path
+	// ~/.local/share/muse/sessions/YYYY/MM/DD/<session-uuid>/session.jsonl,
+	// with child-agent logs under `<session>/subagent/<child-uuid>/`. Every
+	// line is a record envelope {schema_version,id,stream,sequence,
+	// recorded_at,record_type,payload_type,payload}; `recorded_at` is
+	// MICROSECONDS since epoch. Tokens come from the `model_completed`
+	// event's usage envelope, where BOTH gross fields must be netted:
+	// input_tokens INCLUDES cache_read_tokens and output_tokens INCLUDES
+	// reasoning_tokens (the OpenAI-Responses convention this backend
+	// speaks — `resp_`/`rs_`/`fc_`/`msg_` item ids). Model traffic goes to
+	// https://api.meta.ai/v1 with a login-MINTED base URL, so there is no
+	// operator-settable BYOK endpoint and no proxy lane today.
+	ToolMuse = "muse"
+	// ToolPrimeAgent is Prime Intellect's Prime Agent CLI ("prime-agent";
+	// installed via curl -fsSL https://app.primeintellect.ai/prime-agent/
+	// install.sh | sh — NOT a published npm package: the on-disk install is
+	// npm-package-SHAPED (`npm ls -g` reports it as `prime-agent@0.7.0`)
+	// but registry.npmjs.org/prime-agent 404s; see the integration
+	// registry's Binary comment on this row, corrected 2026-08-07). A HARD
+	// FORK of pi-mono — it still carries the inherited `@earendil-works/pi-*`
+	// package identifiers and a `piConfig` manifest key — so its session
+	// ENVELOPE is recognisably pi-shaped, but it is NOT a rebadge of
+	// ToolPi: the data home is ~/.prime/agent (not ~/.pi/agent), sessions
+	// are FLAT `sessions/<session-uuid>.jsonl` (not per-project
+	// directories with a timestamp-prefixed basename), the entry
+	// vocabulary adds compaction / child_usage_attributed / agent_status /
+	// session_state / git_state / label / session_info, and the model is
+	// given exactly ONE built-in tool, `ipython`, a persistent Python
+	// kernel it drives to read, edit and run everything. Entry timestamps
+	// are ISO-8601 strings; the inner `message.timestamp` is Unix
+	// MILLISECONDS. `usage.input` is already NET of `cacheRead`
+	// (totalTokens == input+output+cacheRead+cacheWrite holds exactly), and
+	// the envelope publishes no reasoning-token count. Sessions carry a
+	// provider-reported `usage.cost` breakdown.
+	ToolPrimeAgent = "prime-agent"
+	// ToolDeepSeek is DeepSeek Harness ("deepseek"; npm package
+	// "@deepseek-ai/dsh", launched web-only via `npx @deepseek-ai/dsh
+	// web` — a local GUI at http://127.0.0.1:3080, no separate
+	// terminal/TUI mode). Its own event-sourced parser (not a §2.1 retag):
+	// sessions live at ~/.dsh/sessions/<cwd-slug>/session-<uuid>/
+	// session.jsonl.zstd, identical path on WSL and native Windows, and
+	// the file is REWRITTEN WHOLE on every flush (full recompress, not an
+	// append) — internal/adapter/deepseek re-decodes the entire file each
+	// poll rather than streaming from a byte offset. Envelope shape
+	// {"type","seq","time","data":{...}}; assistant/message carries a
+	// data.usage SIBLING of data.message with {inputTokens,outputTokens,
+	// cacheReadTokens?} already NET of cache (confirmed live: an
+	// inputTokens smaller than that row's cacheReadTokens). Scope is
+	// deliberately usage-capture only: no proxy, no hooks, no MCP, no
+	// terminal/remote — see the package doc for the full record-shape
+	// reference and the honest known-gaps list (Windows sessions are
+	// backfill-only; sub-agent rollup is ungrounded).
+	ToolDeepSeek = "deepseek"
+	// ToolJunie is JetBrains Junie ("junie"), the TUI coding agent
+	// embedded in JetBrains IDEs. Own event-sourced parser (not a §2.1
+	// retag): sessions live at ~/.junie/sessions/<session-id>/
+	// events.jsonl, one JSON envelope per line ({"kind",...} at the top
+	// level, with agent-facing UI updates wrapped in a
+	// SessionA2uxEvent{"event":{"kind",...}}). Blocks (Terminal /
+	// FileChanges / Result) are collapsed by their stable `stepId`: the
+	// SAME id recurs across IN_PROGRESS -> terminal-status transitions
+	// and is REBROADCAST once more, byte-identical, at outer task
+	// completion — the parser keys on stepId and updates in place rather
+	// than emitting duplicates. Project root resolves from the first
+	// non-empty CurrentDirectoryUpdatedEvent.currentDirectory seen in the
+	// stream (empty on early occurrences, populated later), falling back
+	// to the sibling ~/.junie/sessions/index.jsonl's projectDir keyed by
+	// session id. Token usage comes from LlmResponseMetadataEvent.
+	// modelUsage[], one entry per model, already NET of cache (no gross
+	// subtraction needed). No proxy, no hooks, no MCP, no verified
+	// interactive-seed/resume contract — see the package doc for the full
+	// record-shape reference and the honest known-gaps list.
+	ToolJunie = "junie"
+	// ToolZcode is Z.AI's zcode CLI ("zcode"; npm `zcode-app-cli`), an
+	// OpenCode fork. Structural transposition of internal/adapter/opencode
+	// with ONE difference: OpenCode's per-message token bundle is ZEROED in
+	// zcode, so tokens come from zcode's own model_usage table (per-call,
+	// provider_id/model_id, full cache split; netInput = input_tokens -
+	// cache_read) and the watermark includes model_usage. SQLite store at
+	// ~/.zcode/cli/db/db.sqlite (same layout Linux/macOS/Windows). See
+	// internal/adapter/zcode and docs/zcode-adapter.md.
+	ToolZcode = "zcode"
+	// ToolMistralCode is Mistral AI's `vibe` CLI ("mistral-code"; uv-tool
+	// console script, Python 3.12+). Per-session-dir store at
+	// ~/.vibe/logs/session/<...>/ (messages.jsonl + meta.json). Tokens are
+	// SESSION-LEVEL from meta.json/stats (session_prompt_tokens GROSS →
+	// netted vs session_cached_tokens; ON CONFLICT MAX-upgrade); no
+	// per-message usage. See internal/adapter/mistralcode and
+	// docs/mistral-code-adapter.md.
+	ToolMistralCode = "mistral-code"
+	// ToolFreebuff is Freebuff ("freebuff"; npm `freebuff`), the Manicode →
+	// Codebuff → Freebuff lineage. Store under the legacy manicode dir:
+	// ~/.config/manicode/projects/<slug>/chats/<RFC3339>/chat-messages.json
+	// (+ run-state.json for the real cwd; `.config/manicode` on EVERY OS).
+	// The whole-file cursor is a MESSAGE COUNT (the array is rewritten in
+	// place). THIN store: NO billable tokens (contextTokenCount is a
+	// context-window size, not usage) — sessions + actions only. See
+	// internal/adapter/freebuff and docs/freebuff-adapter.md.
+	ToolFreebuff = "freebuff"
+	// ToolGrokbot is Grok Bot, the xAI DESKTOP agent app (Electron;
+	// productName "Grok Bot", internal package name "sand", author
+	// "SpaceXAI", built on Anysphere/Cursor's agent stack — the asar
+	// depends on 30+ @anysphere/* workspaces and ships cursor-proclist).
+	//
+	// DISTINCT from ToolGrok, the Grok CLI: different product, different
+	// format, no path overlap.
+	//
+	// Store: <electron userData>/sand-client-persistence/<base32(key)>.blob
+	// (%APPDATA%\Grok Bot on Windows, ~/Library/Application Support/Grok Bot
+	// on macOS; not distributed for Linux). Every blob is PLAINTEXT JSON
+	// {"schemaVersion":N,"value":{…}} — no encryption/DPAPI/protobuf/SQLite.
+	// The filename is the persistence-slice key in RFC-4648 base32 over a
+	// LOWERCASE alphabet, unpadded. Only the
+	// `…transcript.replicas.<agentId>` slice is ingested (one blob per
+	// conversation, whole-file rewrite ⇒ the cursor is an ENTRY COUNT); the
+	// sibling roster slice is deliberately not watched.
+	//
+	// THIN store: the agent executes in a REMOTE sandbox ("the box"), so
+	// there are NO tokens, NO model names, NO cost and NO cwd on disk —
+	// sessions + actions only, under the synthetic root "[grokbot]". The
+	// roster's `path` (/home/box/sand-data/…) is a REMOTE path and must
+	// never be resolved. NEVER read sand-secrets.json, the sealed
+	// local-exec-daemon-*.json, "Local State", or Network/Cookies. See
+	// internal/adapter/grokbot and
+	// docs/plans/grokbot-adapter-plan-2026-08-28.md.
+	ToolGrokbot = "grokbot"
+	// ToolKiroCrew is AWS's Kiro Crew — the multi-agent orchestration
+	// layer on top of Kiro: a desktop app (installed under
+	// %LOCALAPPDATA%\kirocrew-desktop-updater on Windows) plus a
+	// `kirocrew` CLI, both talking to a local HTTP Gateway on
+	// localhost:5476. AWS Builder ID / Google sign-in; same auth gate as
+	// kiro-cli. Grounded on a live signed-in Windows run 2026-09-03.
+	//
+	// Store: `~/.kiro/crew/sessions/<thread>_<slot>.jsonl` (override
+	// KIROCREW_HOME) — one JSONL per desktop chat tab, line 1 a MUTABLE
+	// `{"_type":"metadata", …}` header (title/project/agent/model/tags),
+	// then `role` ∈ {user, assistant, tool} lines. NOT the
+	// `conversations/` directory the vendor README's tree implies; that
+	// directory does not exist on a live install.
+	//
+	// OWNERSHIP / DOUBLE-COUNT: Crew DRIVES kiro-cli as its execution
+	// engine, and the driven session writes its own richer store at
+	// `~/.kiro/sessions/cli/<sid>.{json,jsonl}` with `session_state.
+	// agent_name == "kirocrew"` and BYTE-IDENTICAL `tooluse_*` call ids.
+	// kiro-cli is the CANONICAL owner of the conversation (it is the
+	// superset — 3 Crew-driven sessions on the grounded host vs 1 Crew
+	// transcript — and carries typed tool kinds, per-turn metering and
+	// the model id); the kirocli adapter stamps those sessions
+	// `desktop`/`kiro-crew`. This adapter emits conversation rows ONLY
+	// for a Crew chat with no kiro-cli twin, resolved through the
+	// Gateway's `~/.kiro/crew/session_map.json` index.
+	//
+	// Tokens: NONE. The Crew transcript carries no usage fields at all,
+	// and the driven kiro-cli bundle reports input/output_token_count
+	// structurally 0 with billing in CREDITS (deliberately not tokens).
+	//
+	// NEVER read `~/.kiro/crew/.env` (Slack bot tokens, workspace owner
+	// id), `config.json`, `audit.log`, `memory.db`, `workspace/**` or
+	// `security_events.jsonl`. See internal/adapter/kirocrew and
+	// docs/kiro-crew-adapter.md.
+	ToolKiroCrew = "kiro-crew"
+	// ToolPoolside is Poolside's agentic coding model ("laguna"), reached
+	// today ONLY as a JetBrains AI Assistant ACP agent
+	// (`acp.registry.poolside`) — no standalone CLI/TUI launch surface was
+	// found on the grounding host. JetBrains downloads the per-OS binary
+	// under `<JetBrains vendor root>/acp-agents/poolside/<ver>/
+	// pool-<os>-<arch>[.exe]` (Windows-grounded 2026-09-05:
+	// `pool-windows-amd64.exe`); config/skills/credentials live at the
+	// UNIVERSAL (even on Windows) `~/.config/poolside/` XDG path
+	// (settings.yaml, credentials.json — NEVER READ — skills/).
+	//
+	// Store: `<AppData-Local-equivalent>/poolside/trajectories/
+	// trajectory-<agentId>_<sessionId>.ndjson` — an event-sourced,
+	// flat-envelope NDJSON (one `{"type":"<kind>","<kind_with_dots_as_
+	// underscores>":{...}}` record per line) recording the FULL turn
+	// loop: thought.start/end (model reasoning), assistant_message.
+	// start/end (visible reply), tool_call.parsed (name + args, a JSON
+	// OBJECT not a string) + tool_call.approval (user allow/deny) +
+	// tool_call.result (a per-tool typed result object PLUS a generic
+	// `observation` string), and tool_call.inference.start/.end (the
+	// PER-CALL token usage — richer than most Tier-2 sources). The
+	// SESSION ID lives ONLY in the filename (no `session_id` field
+	// anywhere in the body), matching the ACP registry pointer's sid
+	// VERBATIM — grounded 2026-09-05 against a live IntelliJ IDEA
+	// 2026.2.2 run (`acp.registry.poolside:01a06e04-7ef2-…`).
+	//
+	// Tokens: `tool_call_inference_end.input_tokens` is GROSS (includes
+	// `cache_read_input_tokens`, confirmed by summing every per-call
+	// value against the session-level `usageTotals` rollup in the
+	// sibling flat `acp/<encoded-cwd>/<sessionId>.json` summary file —
+	// exact match); netted the same way as muse/codex. No reasoning-
+	// token field is present. No pricing entry exists for
+	// `poolside/laguna-*` models, so cost rows resolve as `unknown`.
+	//
+	// NEVER reads `~/.config/poolside/credentials.json` (OAuth/API
+	// tokens) or the sibling `acp/…/<id>.json` flat summary and
+	// `pool/logs/…/acp.log.jsonl` protocol log — both are redundant with
+	// (and derivable from) the trajectory this adapter parses. See
+	// internal/adapter/poolside and docs/poolside-adapter.md.
+	ToolPoolside = "poolside"
+
+	// ToolZed is Zed's own NATIVE coding agent (zed.dev; the Claude-ACP-in-
+	// Zed integration path did not persist a usable local store, so this
+	// adapter targets the built-in agent instead). Grounded live 2026-09-06.
+	//
+	// Store: `<Zed-app-data-dir>/threads/threads.db` (SQLite, opened
+	// read-only, WAL-tolerant) — a per-OS app-data directory (%LOCALAPPDATA%
+	// \Zed on Windows, ~/Library/Application Support/Zed on macOS,
+	// ~/.local/share/zed on Linux — note the Linux path is XDG_DATA_HOME,
+	// NOT ~/.config). One `threads` row is one session; `data_type`="zstd"
+	// + `data` (a zstd-compressed JSON blob, magic 28 B5 2F FD) hold the
+	// FULL thread, REWRITTEN WHOLE on every turn — the freebuff-desktop
+	// rewrite-in-place pattern, not an append. `updated_at` (TEXT,
+	// RFC3339Nano) is the watermark; there is no per-message timestamp
+	// anywhere in the payload, so per-block Timestamps are synthesized
+	// from a session-start base plus a per-message-index increment (the
+	// freebuff CLI-layout precedent) — never taken as literal wall-clock
+	// times.
+	//
+	// The decompressed JSON's `messages` array is an EXTERNALLY-TAGGED
+	// enum: each element is `{"User":{...}}` or `{"Agent":{...}}}`. A User
+	// message carries `content:[{"Text":...}]`; an Agent message carries
+	// `content` blocks (`Text` / `ToolUse` / `Thinking`, at minimum —
+	// unknown kinds are skipped, never guessed) plus a `tool_results` map
+	// keyed by the ToolUse call id. 7 grounded native tool names: read_file
+	// / write_file / edit_file / list_directory / find_path / terminal /
+	// delete_path.
+	//
+	// Tokens: `request_token_usage` (keyed by the user message id) is
+	// per-turn and, unlike most adapters here, `input_tokens` is ALREADY
+	// NET of `cache_read_input_tokens` — no netting arithmetic applies.
+	// `cumulative_token_usage` is a thread-level running total and is
+	// never itself turned into a row (it would double-count every
+	// `request_token_usage` entry). Model traffic in the one grounded
+	// capture reports `model.provider`="zed.dev" / `model.model`=
+	// "gpt-5.6-luna" — Zed's own managed model gateway; no pricing entry
+	// exists for it (a closed, non-mainstream backend), so cost rows
+	// resolve as unknown rather than a fabricated price.
+	//
+	// Surface: stamped SurfaceIDE / "zed" — Zed is itself the editor, and
+	// its built-in agent has no separate CLI/TUI launch surface for
+	// `observer zed` to start (capture-only: no proxy, no hook, no MCP).
+	//
+	// NEVER reads Zed's `settings.json` / `keymap.json` or any credential
+	// store — only `threads/threads.db` (+ its `-wal` / `-shm` siblings).
+	// See internal/adapter/zed and docs/zed-adapter.md.
+	ToolZed = "zed"
 )
 
 // Normalized action types. See spec §5. Adapters map their tool-specific
@@ -370,18 +656,72 @@ const (
 	// / TaskOutput / TaskStop — administrative tools the agent uses to
 	// track its own work plan. Distinct from spawn_subagent (Agent) and
 	// from task_complete (legacy).
-	ActionTodoUpdate   = "todo_update"
+	ActionTodoUpdate = "todo_update"
+	// ActionTaskComplete is an EVIDENCE-GROUNDED turn terminus: a row an
+	// adapter emits because the source stream said the turn ended, not
+	// because the assistant happened to speak. The contract is narrow on
+	// purpose — a row may only carry this type when the harness itself
+	// supplies the terminal signal:
+	//
+	//   - a stop/finish reason on the message (openclaw
+	//     `message.assistant.stop`, gated on StopReason=="stop"; kilo-code-cli
+	//     `assistant.stop`; opencode `complete:` rows),
+	//   - a dedicated terminal event in the wire format (codex's
+	//     `event_msg`/`task_complete`),
+	//   - a turn-terminal HOOK firing (claude-code's Stop hook,
+	//     cmd/observer/hook.go::buildClaudeStopEvent), or
+	//   - a native completion tool the model called on purpose (cline
+	//     `attempt_completion`, cline-cli `submit_and_exit`).
+	//
+	// It is NOT the label for the assistant merely producing text — use
+	// ActionAssistantMessage for that. See its doc comment for the
+	// exemplar pattern the whole family converges on.
 	ActionTaskComplete = "task_complete"
 	ActionAskUser      = "ask_user"
 	ActionUserPrompt   = "user_prompt"
 	// ActionAssistantMessage is the model's natural-language response text
-	// (an assistant message / agent reply). Historically adapters recorded
-	// this as ActionTaskComplete with RawToolName "<tool>.assistant_text",
-	// which is the wrong semantic label (the assistant talking is not a task
-	// completion). New/swept adapters use this dedicated type; the dashboard
-	// assistant-text surface keys off the RawToolName "<tool>.assistant_text"
-	// suffix (not the ActionType), so the relabel is display-safe. Reasoning
-	// rows reuse "<tool>.reasoning"; this is for the spoken response.
+	// (an assistant message / agent reply), recorded PER MESSAGE — one row
+	// per text block / text part / prose chunk, mid-turn rows included.
+	// Adapters emit it with RawToolName "<tool>.assistant_text".
+	//
+	// The exemplar is openclaw (internal/adapter/openclaw/adapter.go): each
+	// text part of an assistant message becomes an `openclaw.assistant_text`
+	// assistant_message row, AND a separate, stop-reason-gated
+	// `message.assistant.stop` row carries ActionTaskComplete. Two raw
+	// names, two action types, one unambiguous meaning each — per-message
+	// text and turn terminus are different facts and get different rows.
+	// claude-code is the same shape across two producers: the JSONL walker
+	// emits the per-block assistant_message rows, its Stop hook emits the
+	// task_complete one.
+	//
+	// Historically most adapters recorded assistant text as
+	// ActionTaskComplete, which conflated the two facts (an assistant
+	// narrating mid-turn is not a task completion — 85% of claude-code and
+	// codex turns carry more than one such row). WP-T6/B2 swept the
+	// remaining emit sites and migration 078 repairs the rows already on
+	// disk, EXCEPT the claude-code Stop-hook rows, which are genuinely
+	// terminal and keep task_complete.
+	//
+	// The dashboard assistant-text surface keys off the RawToolName
+	// "<tool>.assistant_text" suffix (not the ActionType), and both types
+	// sit in tooltax CategoryMeta, so the relabel is display- and
+	// aggregate-safe. This type is for the spoken response only —
+	// chain-of-thought must not be folded into it.
+	//
+	// Reasoning is NOT an action and has no action type (WP-T6/B3,
+	// resolved 2026-07-31). A model thinking is not something it DID: the
+	// chain-of-thought rides the successor event's PrecedingReasoning
+	// column and never becomes a row of its own. The reference shape is
+	// grok (internal/adapter/grok/adapter.go): capture the thinking into
+	// pending state, flush it onto the next assistant-message / tool-call
+	// event, scrub at flush, discard at the user-turn boundary. The
+	// CONSUMPTION semantics are deliberately per-adapter — consumed-once
+	// (grok/crush/hermes/cline-cli/antigravity), fan-out
+	// (cline/cowork/codex-per-turn), shared-preamble (openclaw) — each
+	// documented at its own emit site, because they track how the source
+	// format scopes a preamble. An opaque placeholder (codex's
+	// "(encrypted reasoning, N bytes)") is not content and is threaded
+	// nowhere: it simply vanishes.
 	ActionAssistantMessage = "assistant_message"
 	// ActionTurnAborted is a turn that was interrupted before completion
 	// (user pressed esc, cancelled the agent, etc.). Distinct from
@@ -552,6 +892,14 @@ const (
 	// register by default — incorrect handler behavior cannot break
 	// spawns.
 	ActionWorktreeRemove = "worktree_remove"
+	// ActionTaskEvent captures a host's task / todo lifecycle HOOK event
+	// (Claude Code TaskCreated / TaskCompleted, Qwen Code TodoCreated /
+	// TodoCompleted; hook-parity Lane E, task_observe). Capture only: the
+	// hook never decides anything, and the transcript's own TaskCreate /
+	// TodoWrite tool calls stay the task-tracking source (internal/taskflow
+	// decodes those, never this row). Target is "created: <title>" or
+	// "completed: <title>"; RawToolName is the native event name.
+	ActionTaskEvent = "task_event"
 	// ActionRateLimit captures a host-emitted rate-limit status check.
 	// Cowork's audit.jsonl emits a `rate_limit_event` record per poll
 	// (~50/session in observed data) carrying the current window
@@ -564,7 +912,64 @@ const (
 	// is scrubbed into RawToolInput; typed fields land on
 	// ActionMetadata.RateLimit*.
 	ActionRateLimit = "rate_limit"
-	ActionUnknown   = "unknown"
+
+	// The agent-orchestration + harness family, added by the tool-taxonomy
+	// plan (docs/plans/tool-taxonomy-standardization-plan-2026-07-31.md
+	// §1/§6 WP-T4). They close the measured `unknown` gap that migration
+	// 024's comment deferred as "a separate taxonomy decision": the codex
+	// wait/wait_agent/spawn_agent/send_message/write_stdin family and the
+	// claude-code ToolSearch/Monitor/SendMessage/Skill/ScheduleWakeup/
+	// StructuredOutput family. internal/tooltax re-declares these VALUES
+	// (it may not import this package); migration 077 backfills the
+	// historical rows.
+
+	// ActionSubagentWait is a blocking wait on one or more already-spawned
+	// sub-agents (codex `wait` / `wait_agent`). Distinct from
+	// ActionSpawnSubagent (the launch) and from ActionSubagentStart /
+	// ActionSubagentStop (the child's own lifecycle bracket) — this row is
+	// the PARENT blocking on a child.
+	ActionSubagentWait = "subagent_wait"
+	// ActionAgentMessage is an inter-agent message: work or instructions
+	// handed to an EXISTING agent thread rather than to a new one (codex
+	// `send_message` / `followup_task`, claude-code `SendMessage`).
+	ActionAgentMessage = "agent_message"
+	// ActionAgentControl is an orchestration verb that neither spawns,
+	// waits, nor messages — enumerating, inspecting or interrupting the
+	// agent/thread pool (codex `list_agents` / `interrupt_agent` /
+	// `read_thread` / `list_threads` / `read_thread_terminal`,
+	// claude-code `Monitor`).
+	ActionAgentControl = "agent_control"
+	// ActionSkillInvoke is a skill / packaged-instruction-set invocation
+	// (claude-code `Skill`). It is countable separately from MCP tool use
+	// on purpose; note the cowork adapter deliberately folds its own
+	// `Skill` into ActionMCPCall, which stays a cowork-specific semantic
+	// remap rather than being flattened here.
+	ActionSkillInvoke = "skill_invoke"
+	// ActionSchedule is a scheduling primitive: register / inspect /
+	// cancel a future or recurring agent run (claude-code
+	// `ScheduleWakeup` / `CronCreate` / `CronDelete` / `CronList`). The
+	// droid adapter maps its own Cron*/Automation* family to
+	// ActionConfigChange instead ("the closest honest bucket",
+	// droid/records.go) — a recorded divergence, not an oversight.
+	ActionSchedule = "schedule"
+	// ActionToolSearch is the deferred-tool loader: the agent searching
+	// the tool REGISTRY for a tool to load (claude-code `ToolSearch`). It
+	// is a search over the harness, not over the project, which is why it
+	// is not ActionSearchText / ActionSearchFiles.
+	ActionToolSearch = "tool_search"
+	// ActionStdinWrite writes to the stdin of a live agent / exec session
+	// (codex `write_stdin`). It is the channel into an ALREADY-RUNNING
+	// thread, not a fresh shell invocation, so it is not ActionRunCommand.
+	ActionStdinWrite = "stdin_write"
+	// ActionHarnessCall is the honest bucket for host-harness builtins
+	// that are neither file, command, search, web, agent, skill nor MCP
+	// work — claude-code `StructuredOutput` / `SendUserFile` / `Artifact`
+	// / `Workflow`, codex `imagegen`, copilot-cli `report_intent`, the
+	// `<tool>.step_finish` turn markers. It exists so these stop being
+	// indistinguishable from genuinely unmapped tools in ActionUnknown.
+	ActionHarnessCall = "harness_call"
+
+	ActionUnknown = "unknown"
 )
 
 // Freshness classifications for file and command accesses. See spec §7.
@@ -625,12 +1030,32 @@ const (
 // Project is a git-root-scoped grouping of sessions. Non-git directories use
 // the working directory as the project root. See spec §20.
 type Project struct {
-	ID            int64
-	RootPath      string
-	GitRemote     string
-	Name          string
-	CreatedAt     time.Time
-	LastSessionAt time.Time
+	ID        int64
+	RootPath  string
+	GitRemote string
+	// The following fields are the Project Identity Resolver v2 identity
+	// bundle (docs/plans/project-identity-resolver-v2-plan-2026-09-06.md
+	// §3.1 / W1, migration 102). GitUpstreamRemote ships raw only under
+	// ShareOptions.shipsRawContent() (like GitRemote); GitRemoteOwner and
+	// GitUpstreamOwner have NO raw column at all — they exist only as
+	// their sha256 hash (git_remote_owner_hash / git_upstream_owner_hash),
+	// computed at store time from these transient string values.
+	// RootCommitSHA and ContentFingerprint are NODE-LOCAL pre-images
+	// (root_commit_sha / content_fingerprint columns) that never leave
+	// the node in any share mode — only sha256(RootCommitSHA) and
+	// sha256(ContentFingerprint) ship, always. RootCommitCheckedAt is the
+	// 7-day retry fence for the lazy root-commit exec (see
+	// internal/store/projectidentity.go's RootCommitNeedsCheck) and is
+	// never on the wire.
+	GitUpstreamRemote   string
+	GitRemoteOwner      string
+	GitUpstreamOwner    string
+	RootCommitSHA       string
+	ContentFingerprint  string
+	RootCommitCheckedAt time.Time
+	Name                string
+	CreatedAt           time.Time
+	LastSessionAt       time.Time
 }
 
 // Session is a single AI coding tool run. Session IDs are tool-supplied
@@ -659,6 +1084,39 @@ type Session struct {
 	ForkedFromID   string
 	ParentThreadID string
 	ThreadSource   string
+	// Workspace / IsWorktree are the per-session half of the Project
+	// Identity Resolver v2 bundle (migration 102, §3.1). Workspace is
+	// the session cwd's position inside the repo ("" == repo root);
+	// its raw value ships only under ShareOptions.shipsRawContent(),
+	// like GitBranch, while workspace_hash ships always. IsWorktree
+	// (whether this session's cwd reached the root through a linked git
+	// worktree) ships always as a plain bool, never content.
+	Workspace  string
+	IsWorktree bool
+	// Surface / SurfaceHost are the normalized capture-surface
+	// attribution (migration 107): WHICH kind of client produced the
+	// session (SurfaceCLI / SurfaceIDE / SurfaceDesktop / SurfaceSDK /
+	// SurfaceWeb) and the concrete host token ("vscode", "cursor",
+	// "jetbrains", "claude-desktop", ...). NODE-LOCAL — never on the
+	// org-push wire. Written ONLY through Store.SetSessionSurface (not
+	// UpsertSession), FIRST-WINS-UNLESS-EMPTY per column: the first
+	// grounded stamp sticks and a later parse can only fill a column
+	// that is still empty. Empty = the adapter found no grounded
+	// discriminator on disk (never fabricated).
+	Surface     string
+	SurfaceHost string
+	// ToolVersion is the captured tool/CLI version that produced the
+	// session (migration 125): the free-form semver string an adapter
+	// resolved from a grounded on-disk field (Codex
+	// `session_meta.cli_version`, Cline `cline_version`, Claude Code
+	// transcript top-level `version`, ...). Since 2026-09-22 it ships on
+	// the org-push wire UNCONDITIONALLY as metadata (server migration
+	// 161 / pg 0027, positive canary in tests/invariant/privacy_test.go,
+	// docs/security.md TOOLVERSION-1). Written ONLY through Store.SetSessionToolVersion
+	// (not UpsertSession), FIRST-WINS-UNLESS-EMPTY. Empty = the adapter
+	// found no grounded version on disk — the honest "unknown", NEVER
+	// fabricated.
+	ToolVersion string
 }
 
 // ActionMetadata is the per-event JSON-marshaled metadata column on
@@ -802,6 +1260,19 @@ type ActionMetadata struct {
 	// non-browser adapters and for turns with no estimate.
 	PromptTokensEst   int64 `json:"prompt_tokens_est,omitempty"`
 	ResponseTokensEst int64 `json:"response_tokens_est,omitempty"`
+	// CaptureSource is the RAW client-discriminator value an adapter read
+	// from the store before resolving it into the normalized
+	// SessionSurface (antigravity: `trajectory_meta.source=<int>`).
+	// Recorded on the session-opening user_prompt rows so an unmapped
+	// value stays auditable after the fact; never interpreted downstream.
+	CaptureSource string `json:"capture_source,omitempty"`
+	// RetryReplays is how many times the host re-wrote this same assistant
+	// reply into its transcript while retrying the model request inside one
+	// turn (cursor: a LostConnection retry appends the identical reply
+	// again). The adapter stores the reply ONCE and counts the replays here,
+	// so retries stay countable without inflating the message count. Zero
+	// when the reply was written once.
+	RetryReplays int `json:"retry_replays,omitempty"`
 }
 
 // IsZero reports whether the struct has no non-zero fields. Used by
@@ -833,7 +1304,7 @@ func (m ActionMetadata) telemetryFieldsZero() bool {
 	return m.CoworkProcessName == "" && m.CoworkTitle == "" && !m.HostLoopMode &&
 		m.ServiceTier == "" && m.InferenceGeo == "" &&
 		m.CacheCreate5mTok == 0 && m.CacheCreate1hTok == 0 && m.TotalCostUSD == 0 &&
-		m.CoworkToolSummary == ""
+		m.CoworkToolSummary == "" && m.RetryReplays == 0
 }
 
 // rateLimitFieldsZero reports whether the rate-limit and permission-location
@@ -850,7 +1321,7 @@ func (m ActionMetadata) identityFieldsZero() bool {
 	return m.ParentSessionID == "" && m.ParentAgentID == "" && m.AgentID == "" &&
 		!m.IsSubagent && m.TeamName == "" && m.StopReason == "" &&
 		m.RequestURL == "" && m.IDSource == "" && m.Granularity == "" &&
-		m.PromptTokensEst == 0 && m.ResponseTokensEst == 0
+		m.PromptTokensEst == 0 && m.ResponseTokensEst == 0 && m.CaptureSource == ""
 }
 
 // Action is one normalized tool call within a session. The
@@ -921,19 +1392,80 @@ type Action struct {
 	// authored nothing (reads, searches) and on adapters that don't yet
 	// compute it. NODE-LOCAL — not on the org-push seam.
 	ContentBytes int64
+	// UserAttachments records the files/images/audio a USER attached to a
+	// prompt turn (Issue 1, migration 126). PRESENCE + COUNT + KIND
+	// (+ optional MediaType) only — NEVER filenames or bytes, since a
+	// filename can encode ticket/codename ids (the same reasoning that
+	// gated git_branch). Nil/empty = no attachments; the store layer
+	// marshals a non-empty slice to JSON for actions.user_attachments.
+	// NODE-LOCAL — not on the org-push seam.
+	UserAttachments []UserAttachment
+}
+
+// UserAttachment is a single file/image/audio a user attached to a prompt
+// turn. Metadata only, by design: Kind is the coarse class ("image" |
+// "file" | "audio"), MediaType the optional IANA type ("image/png",
+// "application/pdf") when the source exposes it. It deliberately carries
+// NO filename and NO bytes — those are content and are never captured
+// (Issue 1 privacy rule; same reasoning that gated git_branch). Captured
+// at each adapter's own boundary (CLAUDE.md #3), resolved into these
+// capability fields so nothing downstream switches on source shape.
+type UserAttachment struct {
+	Kind      string `json:"kind"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 // ToolEvent is the adapter → storage transport type for a single tool call.
 // It carries everything needed to insert an Action plus upsert its Session
 // and Project.
 type ToolEvent struct {
-	SourceFile         string
-	SourceEventID      string
-	SessionID          string
-	ProjectRoot        string
-	Timestamp          time.Time
-	TurnIndex          int
-	GitBranch          string
+	SourceFile    string
+	SourceEventID string
+	SessionID     string
+	ProjectRoot   string
+	Timestamp     time.Time
+	TurnIndex     int
+	GitBranch     string
+	// GitRemote is the adapter's normalized "origin" remote (via
+	// git.NormalizeRemote — see internal/git/normalize.go), mirroring
+	// GitBranch: adapters that resolve project git metadata set both
+	// from the same internal/git.Info. Empty when the adapter has no
+	// git remote to offer (a non-git project root, or an adapter whose
+	// project-root resolution never calls internal/git — see the Team
+	// Project Identity Mapping plan, 2026-08-21, §0.4). Flows to
+	// Store.Ingest -> UpsertProject as the project-level identity
+	// signal used for cross-machine/cross-developer team grouping.
+	GitRemote string
+	// The following six fields are the Project Identity Resolver v2
+	// capture bundle (docs/plans/project-identity-resolver-v2-plan-2026-
+	// 09-06.md §3.1 / W1), set from the same internal/git.Identity a
+	// git-aware adapter already resolves alongside GitRemote/GitBranch.
+	// Every field here ships to an org server as a hash ALWAYS
+	// (git_upstream_remote_hash, git_remote_owner_hash,
+	// git_upstream_owner_hash, root_commit_hash, content_fingerprint_hash,
+	// workspace_hash — unsalted sha256, joinable across nodes); the raw
+	// GitUpstreamRemote and Workspace values additionally ship in the
+	// clear ONLY under ShareOptions.shipsRawContent(), exactly like
+	// GitRemote/ProjectRoot today (internal/store/orgpush.go). RootCommitSHA
+	// and ContentFingerprint have NO raw wire counterpart in any share
+	// mode — only their hashes ever leave the node. All are honestly
+	// empty when the adapter has no git info to offer, or (RootCommitSHA)
+	// when the lazy per-project exec hasn't run yet — see
+	// internal/store/projectidentity.go.
+	GitUpstreamRemote  string
+	GitRemoteOwner     string
+	GitUpstreamOwner   string
+	RootCommitSHA      string
+	ContentFingerprint string
+	// Workspace is this session's position inside the repo — the cwd's
+	// nearest ancestor manifest directory, relative to the git root (""
+	// == repo root). Raw value gated like GitUpstreamRemote above;
+	// workspace_hash ships always.
+	Workspace string
+	// IsWorktree marks a session whose cwd reached its project root
+	// through a linked git worktree rather than the main checkout. Ships
+	// always (bool, not content).
+	IsWorktree         bool
 	Model              string
 	Tool               string
 	ActionType         string
@@ -969,6 +1501,48 @@ type ToolEvent struct {
 	// ToolEvent → Action conversion in store.Ingest. Nil when the
 	// adapter has no metadata to record. See [ActionMetadata].
 	Metadata *ActionMetadata
+	// OutcomePending marks a tool call whose in-window outcome was
+	// never observed: the parse window ended before the tool_result
+	// record, so Success=true here is optimistic, not measured.
+	// Failure-context bookkeeping must wait for the matching
+	// [ActionOutcomeUpdate] — recording it at insert time would file
+	// an unobserved success, wrongly marking prior failures of the
+	// same command eventually_succeeded. The action row itself still
+	// inserts normally.
+	OutcomePending bool
+	// UserAttachments records the files/images/audio a USER attached to
+	// this prompt turn (Issue 1, migration 126). PRESENCE + COUNT + KIND
+	// (+ optional MediaType) only, NEVER filenames or bytes. Set by the
+	// adapter at its own boundary from its own source shape; flows through
+	// store.Ingest into actions.user_attachments. See [UserAttachment].
+	UserAttachments []UserAttachment
+}
+
+// ActionOutcomeUpdate carries the late-arriving outcome of an already-
+// persisted action: a tool_result parsed in a LATER watcher tick than the
+// tool_use that created the row. Keyed by the action's
+// (SourceFile, SourceEventID) uniqueness pair. Applied via
+// Store.UpdateActionOutcome, whose merge rules hold: success is
+// authoritative, error_message only written when non-empty, duration
+// only backfills a zero, output length-merges.
+//
+// It deliberately carries no tool name / target: cross-tick the parser
+// has already forgotten them (the tool_use lives in the previous parse
+// window). The FTS index call tolerates the empty strings.
+type ActionOutcomeUpdate struct {
+	SourceFile    string
+	SourceEventID string
+	// SuccessKnown gates the Success field. False (the zero value, so
+	// the safe default for a parser that forgets to set it) means the
+	// result record reported no verdict and the persisted success
+	// column must be left exactly as it is — writing an invented
+	// success would flip a row an earlier telemetry record already
+	// marked failed. True means Success is authoritative.
+	SuccessKnown bool
+	Success      bool
+	ErrorMessage string
+	ToolOutput   string
+	DurationMs   int64
 }
 
 // TokenEvent is the adapter → storage transport type for per-turn token
@@ -979,11 +1553,29 @@ type ToolEvent struct {
 // owning session even for JSONL lines that have usage data but no tool_use
 // block (e.g. subagent compaction turns).
 type TokenEvent struct {
-	SourceFile          string
-	SourceEventID       string
-	SessionID           string
-	ProjectRoot         string
-	GitBranch           string
+	SourceFile    string
+	SourceEventID string
+	SessionID     string
+	ProjectRoot   string
+	GitBranch     string
+	// GitRemote is the adapter's normalized "origin" remote, mirroring
+	// ToolEvent.GitRemote exactly (see that field's doc comment). Set
+	// from the same per-session state GitBranch already flows through
+	// wherever an adapter builds TokenEvent and ToolEvent from the same
+	// source.
+	GitRemote string
+	// The following six fields mirror ToolEvent's Project Identity
+	// Resolver v2 bundle exactly (see that struct's doc comment for the
+	// full field-by-field hash-always / raw-gated wire posture); set
+	// from the same per-session internal/git.Identity wherever an
+	// adapter builds a TokenEvent and ToolEvent from the same source.
+	GitUpstreamRemote   string
+	GitRemoteOwner      string
+	GitUpstreamOwner    string
+	RootCommitSHA       string
+	ContentFingerprint  string
+	Workspace           string
+	IsWorktree          bool
 	Timestamp           time.Time
 	Tool                string
 	Model               string
@@ -1037,7 +1629,65 @@ type TokenEvent struct {
 	// persisted as NULL otherwise.
 	OrgID     string
 	UserEmail string
+	// IsSidechain marks usage rows emitted inside a sub-agent runtime —
+	// the token-usage analogue of [Action.IsSidechain] (migration 010):
+	// claudecode reads the flag straight off each transcript line, so a
+	// sub-agent's turns land on the PARENT's session flagged 1 and the
+	// per-sub-agent token/cost rollups (dashboard sub-agents view,
+	// migration 087) can bucket them without a separate session row.
+	// NODE-LOCAL — not on the org-push wire.
+	IsSidechain bool
+	// GenMs is the per-call GENERATION DURATION the adapter captured for
+	// this model call (agent migration 136, token_usage.gen_ms), in
+	// milliseconds, normalised at the adapter boundary (hermes float
+	// seconds, poolside/muse/etc. timestamps -> ms). 0 = none captured, the
+	// common case - stored NULL. Set ONLY when the row is COMPLETE (the
+	// record carrying the final usage / the duration itself). A transcript-
+	// timed adapter may prove the span only in a LATER parse; it then
+	// re-emits the row with GenStampOnly set. The org push holds such rows
+	// back briefly (store.PushSettle) so the first push carries the stamp.
+	// Never derived from Timestamp or a neighbour row. Feeds
+	// internal/sessionmsg's Speed (Tok/s) only. S10-SPEED.
+	GenMs int64
+	// GenBasis names GenMs's basis: GenBasisNative (the tool's own store
+	// recorded the call's duration or start+end) or GenBasisTranscript
+	// (an in-window, proven transcript span). Empty when GenMs is 0.
+	GenBasis string
+	// GenTimingV is the adapter's gen-timing parser version: an upsert
+	// replaces a stored duration only when this is strictly newer (a bug
+	// fix re-derives on rescan; a same-version re-parse is a no-op).
+	GenTimingV int
+	// GenStampOnly marks a re-emission whose ONLY purpose is to stamp the
+	// generation timing of a row an earlier parse already inserted (the
+	// claude-code look-back). The store applies it as a narrow UPDATE of
+	// gen_ms / gen_basis / gen_timing_v on the existing (source_file,
+	// source_event_id) row and NEVER inserts it, so it cannot resurrect a
+	// row retention pruned or rewrite any token / sidechain column.
+	GenStampOnly bool
+	// HookEvent names the hook event that delivered this usage, in the
+	// emitting adapter's own event vocabulary (Cursor: "stop" /
+	// "afterAgentResponse"). Empty for every non-hook source. It is
+	// IN-MEMORY provenance only - never persisted, never on the org-push
+	// wire - and exists so a store-side dedup can act on WHICH hook
+	// delivered a row instead of inferring a restatement from counter
+	// equality alone (review finding F3, 2026-09-26).
+	HookEvent string
+	// Restates is the MessageID of an EARLIER row of the same session that
+	// the emitting adapter has PROVEN, from both halves in its own source,
+	// this event merely restates under a different identity (Cursor's
+	// mislabelled stop, which carries the NEXT request's generation id with
+	// the previous request's usage). The store never writes such an event,
+	// and removes a row already stored under its key only when that row
+	// still carries exactly this restated usage. Empty in every other case.
+	Restates string
 }
+
+// Generation-timing bases (TokenEvent.GenBasis). The values are the
+// internal/sessionmsg Basis vocabulary for adapter-captured durations.
+const (
+	GenBasisNative     = "native"
+	GenBasisTranscript = "transcript"
+)
 
 // APITurn is one request/response pair observed by the proxy. Accurate token
 // counts come from the provider's response body; session/project linkage is
@@ -1107,7 +1757,13 @@ type APITurn struct {
 	// request body carries "speed":"fast". Persisted to api_turns.fast
 	// via migration 035. The CostUSD on this row is the FastMultiplier-
 	// applied total computed at insert time.
-	Fast             bool
+	Fast bool
+	// ServiceTier is the provider processing tier that served the turn
+	// (OpenAI's response `service_tier`, else the requested one on a path
+	// with no response). CAPTURE-TIME ONLY — there is no api_turns column;
+	// the proxy hands it to the cost computer so a tier sold as its own SKU
+	// (OpenAI Ultrafast → `<model>-ultrafast`) is priced into CostUSD.
+	ServiceTier      string
 	CostUSD          float64
 	MessageCount     int
 	ToolUseCount     int
@@ -1163,7 +1819,85 @@ type APITurn struct {
 	// the same request_id is seen by more than one source. Node-local
 	// metadata — never pushed to the org wire.
 	Source string
+	// Route / RoutingGeneration / AuthoritySource are the Plane B per-turn
+	// authority stamps (Sol S5 / Luna L15, migration 095). Content-free
+	// routing metadata — enum strings + an integer generation, never text
+	// from a request. Unlike Source these DO ride the org wire
+	// (orgcontract.APITurnRow) so a mixed-mode fleet's rollup can single-
+	// count a turn and know which source owns its usage authority.
+	//
+	// Route is TurnRouteDirect / TurnRouteGateway / TurnRouteFallback (empty
+	// == direct). RoutingGeneration is the immutable routing-snapshot
+	// generation (proxy.Proxy.RoutingGeneration) the turn was served under;
+	// 0 when no org route was live. AuthoritySource is TurnAuthorityNode /
+	// TurnAuthorityGateway (empty == node).
+	Route             string
+	RoutingGeneration int64
+	AuthoritySource   string
+	// PromptID is the client-supplied id of the user prompt this request
+	// serves (migration 139): every request serving one prompt, including
+	// the subagent turns it started, carries the same value. The proxy reads
+	// it from a known prompt-grouping request header (today Claude Code's
+	// x-claude-code-prompt-id gateway hint); empty when the client sent
+	// none. An opaque random id, never prompt text. Node-local metadata -
+	// not on the org wire.
+	PromptID string
+	// RequestClass is the client-declared kind of request (migration 144):
+	// one of the APIRequestClass* values, or empty when the client sent no
+	// request-class hint or sent a value outside the documented closed
+	// vocabulary (unknown is never mapped to a known class). The proxy reads
+	// it from a known request-class header (today Claude Code's
+	// x-claude-code-request-class gateway hint). Node-local metadata - not
+	// on the org wire.
+	RequestClass string
 }
+
+// Request classes for APITurn.RequestClass (migration 144). A closed,
+// content-free enum: exactly the values Claude Code documents for its
+// x-claude-code-request-class gateway hint
+// (https://code.claude.com/docs/en/llm-gateway-protocol#gateway-hint-headers).
+const (
+	// APIRequestClassMain is a turn of the main conversation.
+	APIRequestClassMain = "main"
+	// APIRequestClassSubagent is a turn of a subagent.
+	APIRequestClassSubagent = "subagent"
+	// APIRequestClassWorkflow is an agent running inside a workflow.
+	APIRequestClassWorkflow = "workflow"
+	// APIRequestClassCompaction is the summarization request that compacts
+	// a conversation.
+	APIRequestClassCompaction = "compaction"
+	// APIRequestClassAuxiliary is a side request such as a session title,
+	// a classifier or a summary.
+	APIRequestClassAuxiliary = "auxiliary"
+)
+
+// Route classes for APITurn.Route (Plane B per-turn authority stamp, Sol
+// S5). Content-free enum: how the node proxy served a turn.
+const (
+	// TurnRouteDirect is a turn forwarded straight to the fixed provider
+	// upstream — Node Mode, or a build with no org route installed. The
+	// zero value ("") is treated as direct everywhere.
+	TurnRouteDirect = "direct"
+	// TurnRouteGateway is a turn forwarded to the org AI Gateway primary
+	// (Gateway Mode, Sol S8 default-lane redirect).
+	TurnRouteGateway = "gateway"
+	// TurnRouteFallback is a turn served via an org AI Gateway fallback
+	// rung after the primary was unreachable (Sol S10 ladder).
+	TurnRouteFallback = "fallback"
+)
+
+// Authority sources for APITurn.AuthoritySource (Sol S12 — who owns the
+// org-level usage authority for a turn). Content-free enum.
+const (
+	// TurnAuthorityNode means this node's proxy observation is the
+	// authority for the turn's org-level usage. The zero value ("") is
+	// treated as node everywhere.
+	TurnAuthorityNode = "node"
+	// TurnAuthorityGateway means the org AI Gateway's own audit row is the
+	// authority; this api_turns row is the node-side shadow and an org
+	// rollup must let the gateway row win on a request_id collision.
+	TurnAuthorityGateway = "gateway"
+)
 
 // OTelContent is one captured content body from a coding assistant's native
 // OTel stream (native-console integration, migration 048): a user prompt, tool
@@ -1173,13 +1907,20 @@ type APITurn struct {
 // ships ContentHash always and Content (raw) only under the content-sharing
 // gate (full_content / admin_managed).
 type OTelContent struct {
-	ID          int64
-	RequestID   string // turn join key (may be empty for session-level prompts)
-	SessionID   string
-	ToolUseID   string // set for tool_input/tool_output kinds
-	Kind        string // prompt | tool_input | tool_output | raw_body
-	Content     string // scrubbed raw body
-	ContentHash string // sha256-hex of Content
+	ID        int64
+	RequestID string // turn join key (may be empty for session-level prompts)
+	SessionID string
+	ToolUseID string // set for tool_input/tool_output kinds
+	Kind      string // prompt | tool_input | tool_output | raw_body
+	Content   string // scrubbed raw body, bounded to a storage cap (may be truncated)
+	// ContentHash is the sha256-hex of the FULL scrubbed body as received,
+	// BEFORE any storage truncation — never of the (possibly-truncated)
+	// Content above. It is the dedup/idempotency anchor
+	// (UNIQUE(content_hash, kind, request_id, tool_use_id)); hashing the
+	// truncated text would collide two distinct large bodies that share an
+	// identical prefix and silently drop the second on insert. See
+	// store.HashOTelContent / the ContentHash note on store.InsertOTelContent.
+	ContentHash string
 	Timestamp   time.Time
 	Source      string // cc_otel
 }
@@ -1346,6 +2087,44 @@ type SessionProcessSeed struct {
 	ExecHint string
 }
 
+// SubagentActionRef is the lean per-action projection the session-detail
+// sub-agents read model consumes (store.SidechainActionsForSession). It
+// carries identity + lifecycle shape only — never tool bodies. NODE-LOCAL:
+// derived entirely from actions rows already pinned out of the org-push
+// wire's content columns; no wire surface of its own.
+type SubagentActionRef struct {
+	ID          int64
+	Timestamp   time.Time
+	ActionType  string
+	Target      string
+	Success     bool
+	DurationMs  int64
+	RawToolName string
+	// Metadata carries the structured sub-agent identity when the capture
+	// path stamped it (hook SubagentStart/Stop, transcript agent-name
+	// rows). Nil otherwise — the read model then falls back to time-window
+	// grouping.
+	Metadata *ActionMetadata
+	// IsSidechain marks activity inside a sub-agent runtime (migration 010).
+	IsSidechain bool
+}
+
+// SubagentTokenRef is the lean per-usage-row projection the session-detail
+// sub-agents read model consumes (store.SidechainTokenUsageForSession) —
+// the token half of buildSubagentSummaries' input, alongside
+// [SubagentActionRef]. It carries usage magnitudes only — never prompts,
+// outputs, model ids, or source paths. NODE-LOCAL: derived entirely from
+// token_usage rows flagged is_sidechain (migration 087), a column with no
+// org-push wire surface; this type has none of its own either.
+type SubagentTokenRef struct {
+	Timestamp           time.Time
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	EstimatedCostUSD    float64
+}
+
 // SessionLineage is a codex-session fork/subagent lineage marker an
 // adapter captures from the owning session_meta record. It is
 // NODE-LOCAL (migration 069): these columns must never enter the
@@ -1354,6 +2133,12 @@ type SessionProcessSeed struct {
 // are no-ops (COALESCE-preserving), so a re-parse never clobbers a
 // captured value.
 type SessionLineage struct {
+	// SourceFile identifies a transcript that older adapters stored under
+	// ParentThreadID. Ingest transfers its existing rows to SessionID before
+	// replay, preserving row IDs and avoiding duplicate usage. Empty is a no-op.
+	SourceFile string
+	// AgentID is the native runtime identity for that transcript, when known.
+	AgentID string
 	// SessionID is the owning (child) session the markers belong to.
 	SessionID string
 	// ForkedFromID is the parent session a user-fork or subagent spawn
@@ -1365,4 +2150,106 @@ type SessionLineage struct {
 	// ThreadSource discriminates the rollout origin: "user" (normal +
 	// user-fork) or "subagent".
 	ThreadSource string
+}
+
+// Surface KIND vocabulary — the normalized answer to "what kind of
+// client produced this session?". Every adapter resolves its vendor's
+// own discriminator (Claude Code `entrypoint`, Codex `originator` /
+// `source`, Cline `source`, a path shape, ...) into one of these at
+// its boundary through a table (CLAUDE.md #3/#5), so nothing
+// downstream ever switches on a tool name to infer the surface. The
+// finer identity of the host rides separately in SessionSurface.
+// SurfaceHost so the kind set stays closed and small.
+//
+// "ide-vscode" in the audit's shorthand is Surface=SurfaceIDE +
+// SurfaceHost="vscode"; "ide-jetbrains" is SurfaceIDE + "jetbrains".
+const (
+	// SurfaceCLI is an interactive or non-interactive terminal run of
+	// the tool's own CLI (incl. `codex exec`, `claude -p`).
+	SurfaceCLI = "cli"
+	// SurfaceIDE is an editor extension / plugin / IDE fork driving the
+	// tool (VS Code, JetBrains, Neovim, Cursor, Kiro, Windsurf, ...).
+	SurfaceIDE = "ide"
+	// SurfaceDesktop is a standalone desktop app (Claude Desktop,
+	// Codex Desktop, Hermes Desktop, ...).
+	SurfaceDesktop = "desktop"
+	// SurfaceSDK is a programmatic embedding (Agent SDK, API harness).
+	SurfaceSDK = "sdk"
+	// SurfaceWeb is a browser / web-app surface.
+	SurfaceWeb = "web"
+)
+
+// SessionSurface is the per-session capture-surface attribution an
+// adapter resolved from a grounded on-disk discriminator. NODE-LOCAL
+// (migration 107): `sessions.surface` / `sessions.surface_host` never
+// enter the org-push wire (pinned by tests/invariant/privacy_test.go).
+// Written through the single store seam Store.SetSessionSurface with
+// FIRST-WINS-UNLESS-EMPTY semantics, per column: the first grounded
+// stamp sticks, a later parse can only FILL a still-empty column, and a
+// re-parse can never clear or change a captured value (an identical
+// re-stamp — and a differing later one — are both no-ops). The surface
+// is a property of the session's ORIGIN, fixed when the session was
+// created, so a later re-derivation from less context is not a
+// correction; genuine repair is a backfill concern. An adapter that
+// finds NO grounded discriminator emits nothing — the zero value on
+// the session row is the honest "unknown", never a guess.
+type SessionSurface struct {
+	// SessionID is the session the attribution belongs to.
+	SessionID string
+	// Surface is one of the Surface* kind constants.
+	Surface string
+	// SurfaceHost is a lowercase host token refining Surface: "vscode",
+	// "cursor", "jetbrains", "neovim", "kiro", "claude-desktop",
+	// "codex-desktop", "codex-exec", "cursor-agent", ... Never prose,
+	// never a path. Optional.
+	SurfaceHost string
+	// Hosted marks a stamp that comes from the HOSTING layer's own
+	// record rather than the agent's self-report: an IDE orchestration
+	// store that names which agent session it drove (JetBrains
+	// `aia-task-history/*.agentsession`, Qoder Work `main.sqlite`).
+	// The host layer is strictly better informed about the session's
+	// origin than the agent it spawned — Claude Code inside IntelliJ
+	// truthfully reports `entrypoint=sdk-ts`, Qoder driven by Qoder Work
+	// truthfully reports `entrypoint=cli` — so a hosted stamp is not a
+	// weaker re-derivation of the same fact, it is the fact the
+	// self-report cannot see. Store.SetSessionSurface therefore lets a
+	// hosted stamp REPLACE a differing self-reported value (host-wins),
+	// while an empty field still never clears a stored one and an
+	// identical re-stamp is still a no-op. Zero value = the ordinary
+	// first-wins-unless-empty self-report every adapter emits today.
+	Hosted bool
+}
+
+// SessionToolVersion is the per-session tool/CLI version an adapter
+// resolved from a grounded on-disk field (migration 125). Since
+// 2026-09-22 `sessions.tool_version` ships on the org-push wire
+// unconditionally as metadata (server migration 161 / pg 0027; positive
+// canary in tests/invariant/privacy_test.go). Written through the single store
+// seam Store.SetSessionToolVersion with FIRST-WINS-UNLESS-EMPTY
+// semantics: the first grounded stamp sticks, a later parse can only
+// FILL a still-empty column, and a re-parse can never clear or change a
+// captured value. The version is a property of the session's ORIGIN
+// (the build that produced it), fixed when the session was created. An
+// adapter that finds NO grounded version emits nothing — the zero value
+// on the session row is the honest "unknown", never a guess.
+type SessionToolVersion struct {
+	// SessionID is the session the version belongs to.
+	SessionID string
+	// Version is the free-form semver-ish token the adapter read from a
+	// grounded on-disk field ("0.150.0", "3.17.4"). Not an enum, but a
+	// bounded token: the store length-caps it and rejects whitespace /
+	// control / prose so a stray free-text field can never be persisted.
+	Version string
+}
+
+// KnownSurface reports whether kind is one of the Surface* constants.
+// Adapters should never need it (their tables emit constants), but
+// the store uses it to refuse an out-of-vocabulary write loudly rather
+// than persist a vendor token as a kind.
+func KnownSurface(kind string) bool {
+	switch kind {
+	case SurfaceCLI, SurfaceIDE, SurfaceDesktop, SurfaceSDK, SurfaceWeb:
+		return true
+	}
+	return false
 }

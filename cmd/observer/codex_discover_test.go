@@ -162,7 +162,7 @@ func TestRunCodexDiscovery(t *testing.T) {
 		// It must NOT announce at ~2 polls (the pre-fix bug) — it waits the window
 		// so a late second candidate can still force abstention.
 		if elapsed < cfg.window/2 {
-			t.Fatalf("announced after %v — must observe the whole window before announcing (>= %v)", elapsed, cfg.window/2)
+			t.Fatalf("announced after %v - must observe the whole window before announcing (>= %v)", elapsed, cfg.window/2)
 		}
 	})
 

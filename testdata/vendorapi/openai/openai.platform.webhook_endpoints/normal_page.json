@@ -1,0 +1,20 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "string",
+      "object": "webhook_endpoint",
+      "created_at": 1,
+      "updated_at": 1,
+      "name": "string",
+      "url": "string",
+      "event_types": [
+        "string"
+      ],
+      "signing_secret_hint": "string"
+    }
+  ],
+  "first_id": "string",
+  "last_id": "string",
+  "has_more": true
+}

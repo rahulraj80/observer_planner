@@ -1,0 +1,32 @@
+{
+  "tasks": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Fix the login button on the homepage",
+      "creator": {
+        "id": 1
+      },
+      "creator_type": "user",
+      "owner": {
+        "id": 1
+      },
+      "repository": {
+        "id": 1296269
+      },
+      "state": "completed",
+      "session_count": 1,
+      "artifacts": [
+        {
+          "provider": "github",
+          "type": "pull",
+          "data": {
+            "id": 42
+          }
+        }
+      ],
+      "archived_at": null,
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T01:00:00Z"
+    }
+  ]
+}

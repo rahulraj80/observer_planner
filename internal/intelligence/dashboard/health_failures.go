@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -26,7 +25,8 @@ type failureGroup struct {
 }
 
 // handleHealthFailures serves GET /api/health/failures?days=N
-// (default 7, max 30). Groups by command_hash; the bare columns ride
+// (default 7, max 30), or the closed custom range since/until through
+// windowRange like every other windowed handler (T-550). Groups by command_hash; the bare columns ride
 // SQLite's documented MAX()-row semantics, so error/session/project
 // come from each group's most recent failure.
 func (s *Server) handleHealthFailures(w http.ResponseWriter, r *http.Request) {
@@ -34,19 +34,16 @@ func (s *Server) handleHealthFailures(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "GET only", http.StatusMethodNotAllowed)
 		return
 	}
-	days := 7
-	if v := r.URL.Query().Get("days"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 30 {
-			days = n
-		}
-	}
-	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
+	days := intArg(r, "days", 7, 1, 30)
+	since, until := windowRange(r, 7, 1, 30)
+	cutoff, upper := windowBoundStrings(since, until)
 
 	groups := []failureGroup{}
 	var total int64
 	if s.db() != nil {
 		_ = s.db().QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM failure_context WHERE timestamp >= ?`, cutoff).Scan(&total)
+			`SELECT COUNT(*) FROM failure_context
+			 WHERE timestamp >= ? AND (? = '' OR timestamp < ?)`, cutoff, upper, upper).Scan(&total)
 		rows, err := s.db().QueryContext(r.Context(),
 			`SELECT f.command_summary, COUNT(*), COALESCE(SUM(f.retry_count), 0),
 			        MAX(f.eventually_succeeded), MAX(f.timestamp),
@@ -54,10 +51,10 @@ func (s *Server) handleHealthFailures(w http.ResponseWriter, r *http.Request) {
 			        f.session_id, COALESCE(p.name, '')
 			 FROM failure_context f
 			 LEFT JOIN projects p ON p.id = f.project_id
-			 WHERE f.timestamp >= ?
+			 WHERE f.timestamp >= ? AND (? = '' OR f.timestamp < ?)
 			 GROUP BY f.command_hash
 			 ORDER BY MAX(f.timestamp) DESC
-			 LIMIT 50`, cutoff)
+			 LIMIT 50`, cutoff, upper, upper)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -77,7 +74,34 @@ func (s *Server) handleHealthFailures(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{
 		"window_days": days,
+		"since":       windowMetaSince(since, until),
+		"until":       windowMetaUntil(since, until),
 		"total":       total,
 		"failures":    groups,
 	})
+}
+
+// windowBoundStrings renders a windowRange result as the two string
+// bounds a `col >= ? AND (? = ” OR col < ?)` clause binds. A zero since
+// matches every row; a zero until is the open "until now" window.
+func windowBoundStrings(since, until time.Time) (lower, upper string) {
+	if !since.IsZero() {
+		lower = since.UTC().Format(time.RFC3339Nano)
+	}
+	if !until.IsZero() {
+		upper = until.UTC().Format(time.RFC3339Nano)
+	}
+	return lower, upper
+}
+
+// windowMetaSince and windowMetaUntil echo the window actually served
+// (windowMeta's RFC3339 rendering) as additive response fields.
+func windowMetaSince(since, until time.Time) string {
+	s, _ := windowMeta(since, until)
+	return s
+}
+
+func windowMetaUntil(since, until time.Time) string {
+	_, u := windowMeta(since, until)
+	return u
 }

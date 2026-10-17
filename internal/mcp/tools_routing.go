@@ -8,7 +8,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -19,8 +19,8 @@ import (
 
 // mcpRoutingPriceFn adapts the cost engine to routing's pricing seam
 // (same adaptation the CLI boundary performs).
-func mcpRoutingPriceFn(engine *cost.Engine) routing.PriceFn {
-	return func(model string, u routing.PromptUsage) (float64, bool) {
+func mcpRoutingPriceFn(engine *cost.Engine) routingcore.PriceFn {
+	return func(model string, u routingcore.PromptUsage) (float64, bool) {
 		return engine.Compute(model, cost.TokenBundle{
 			Input:             u.Input,
 			Output:            u.Output,
@@ -38,6 +38,14 @@ func mcpRoutingPriceFn(engine *cost.Engine) routing.PriceFn {
 // get_model_recommendation
 // -----------------------------------------------------------------------------
 
+// The published bounds of get_model_recommendation's `days` argument.
+// ONE owner for both the advertised input schema and the boundary clamp,
+// so the documented `maximum` and the enforced maximum cannot drift.
+const (
+	modelRecommendationDefaultDays = 30
+	modelRecommendationMaxDays     = 365
+)
+
 type getModelRecommendationTool struct {
 	db     *sql.DB
 	engine *cost.Engine
@@ -49,7 +57,7 @@ func newGetModelRecommendationTool(db *sql.DB, engine *cost.Engine) Tool {
 
 func (*getModelRecommendationTool) Name() string { return "get_model_recommendation" }
 func (*getModelRecommendationTool) Description() string {
-	return "Evidence-backed model recommendation per turn-kind from this node's own Model Value Report: the observed baseline model, any cheaper alternative graded parity on outcomes (with sample sizes and confidence basis), and cost-per-turn comparison. Advisory only — attribution is correlational and the response says so. Use before spawning sub-agents or switching models."
+	return "Evidence-backed model recommendation per turn-kind from this node's own Model Value Report: the observed baseline model, any cheaper alternative graded parity on outcomes (with sample sizes and confidence basis), and cost-per-turn comparison. Advisory only - attribution is correlational and the response says so. Use before spawning sub-agents or switching models."
 }
 
 func (*getModelRecommendationTool) InputSchema() map[string]any {
@@ -68,7 +76,7 @@ func (*getModelRecommendationTool) InputSchema() map[string]any {
 				"type":        "integer",
 				"description": "Evidence window in days. Default 30.",
 				"minimum":     1,
-				"maximum":     365,
+				"maximum":     modelRecommendationMaxDays,
 			},
 		},
 	}
@@ -102,9 +110,25 @@ func (t *getModelRecommendationTool) Invoke(ctx context.Context, raw json.RawMes
 		}
 	}
 
+	// Silent limit clamping (docs/mcp-contract.md, "Server-level
+	// invariants"): an out-of-range `days` is capped at the documented
+	// maximum instead of erroring, the same way get_file_history clamps
+	// `limit` to 100 and get_failure_context clamps it to 50. Absent /
+	// zero / negative means "use the documented default"; anything above
+	// the schema's `maximum` is silently pinned to it, so an oversized
+	// request succeeds with the documented window rather than sending an
+	// absurd cutoff date down to LoadModelValueFacts.
+	days := args.Days
+	if days <= 0 {
+		days = modelRecommendationDefaultDays
+	}
+	if days > modelRecommendationMaxDays {
+		days = modelRecommendationMaxDays
+	}
+
 	st := store.New(t.db)
 	facts, err := st.LoadModelValueFacts(ctx, modelvalue.LoadOptions{
-		WindowDays: args.Days, ProjectRoot: args.ProjectRoot,
+		WindowDays: days, ProjectRoot: args.ProjectRoot,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load facts: %w", err)
@@ -195,7 +219,7 @@ func buildRecommendations(rep modelvalue.Report, kindFilter string) []modelRecom
 				TurnKind:      kind,
 				BaselineModel: c.Model, BaselineTier: string(c.Tier),
 				BaselineTurns: c.Turns, BaselineCost: c.CostPerTurn,
-				Note: "only one model observed for this turn-kind — no comparison evidence yet",
+				Note: "only one model observed for this turn-kind - no comparison evidence yet",
 			})
 			continue
 		}
@@ -215,7 +239,7 @@ func buildRecommendations(rep modelvalue.Report, kindFilter string) []modelRecom
 				g.best.CandidateModel, g.best.Verdict, g.best.BaselineModel,
 				g.best.VerdictBasis, g.best.NCandidate, g.best.NBaseline)
 		} else {
-			rec.Note = "no cheaper alternative graded parity on outcomes — evidence below the sample floor or candidates graded worse; stay on the baseline"
+			rec.Note = "no cheaper alternative graded parity on outcomes - evidence below the sample floor or candidates graded worse; stay on the baseline"
 		}
 		out = append(out, rec)
 	}
@@ -232,7 +256,7 @@ func newGetRoutingStatusTool(db *sql.DB) Tool { return &getRoutingStatusTool{db:
 
 func (*getRoutingStatusTool) Name() string { return "get_routing_status" }
 func (*getRoutingStatusTool) Description() string {
-	return "Model-routing layer state: phase (P0 advisory — nothing enforced), available policy templates with content hashes, tier-table size, and decision-log / calibration counters. Use to learn whether routing recommendations exist before asking for them."
+	return "Model-routing layer state: phase (P0 advisory - nothing enforced), available policy templates with content hashes, tier-table size, and decision-log / calibration counters. Use to learn whether routing recommendations exist before asking for them."
 }
 
 func (*getRoutingStatusTool) InputSchema() map[string]any {
@@ -253,22 +277,16 @@ func (t *getRoutingStatusTool) Invoke(ctx context.Context, _ json.RawMessage) (a
 		return nil, fmt.Errorf("calibration count: %w", err)
 	}
 
-	type templateInfo struct {
-		Name  string `json:"name"`
-		Hash  string `json:"hash"`
-		Rules int    `json:"rules"`
-	}
-	templates := make([]templateInfo, 0, len(routing.Templates()))
-	for _, p := range routing.Templates() {
-		templates = append(templates, templateInfo{Name: p.Name, Hash: p.Hash(), Rules: len(p.Rules)})
-	}
+	// The policy templates come from proxy.routing (tools_routing_templates.go);
+	// a build without it reports none.
+	templates := routingTemplateInfos()
 
 	out := map[string]any{
 		"phase":                  "P0",
-		"mode":                   string(routing.ModeOff),
+		"mode":                   string(routingcore.ModeOff),
 		"enforcement_available":  false,
 		"templates":              templates,
-		"tier_table_entries":     len(routing.NewTierResolver().Table().Known()),
+		"tier_table_entries":     len(routingcore.NewTierResolver().Table().Known()),
 		"router_decisions":       decisions.Count,
 		"model_calibration_rows": calibrations,
 		"note":                   "P0 is advisory intelligence: simulate + reports only; no live request is ever touched.",

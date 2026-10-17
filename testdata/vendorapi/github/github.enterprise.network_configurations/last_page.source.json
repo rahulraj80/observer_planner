@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "network_configurations": "VerifiedOfficial",
+    "network_configurations[]": "VerifiedOfficial",
+    "network_configurations[].compute_service": "VerifiedOfficial",
+    "network_configurations[].created_on": "VerifiedOfficial",
+    "network_configurations[].id": "VerifiedOfficial",
+    "network_configurations[].name": "VerifiedOfficial",
+    "network_configurations[].network_settings_ids": "VerifiedOfficial",
+    "network_configurations[].network_settings_ids[]": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "e244cad9c8255e822ee32ec0848094124d3f4e17f0a8c5ee7d40f488aeefb540",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/network-configurations",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/network-configurations (operationId hosted-compute/list-network-configurations-for-enterprise). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.enterprise.network_configurations"
+}

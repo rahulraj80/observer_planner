@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "type": "compliance_local_session",
+      "id": "clls_eyJ2IjoxLCJvIjoiOWEx…",
+      "organization_uuid": "9a1e0000-0000-0000-0000-000000000000",
+      "workspace_id": "wrkspc_01SvYKoWVRVHoEbwESNvzYdR",
+      "user": {
+        "id": "user_01GpKpLmNoPqRsTuVwXyZaBc",
+        "email_address": "engineer@example.com"
+      },
+      "product_surface": "cowork",
+      "created_at": "2026-07-09T14:02:11Z",
+      "updated_at": "2026-07-09T15:47:33Z"
+    }
+  ]
+}

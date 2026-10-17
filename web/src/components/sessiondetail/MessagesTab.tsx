@@ -1,0 +1,513 @@
+import { useMemo, useState } from "react";
+import clsx from "clsx";
+import { InlineLoading, LiveDot, Pill, SegmentedControl, Table, Tooltip } from "@/components/primitives";
+import { ChartState } from "@/components/ChartState";
+import { CopyOnClick } from "@/components/CopyOnClick";
+import { Pagination } from "@/components/DataTable";
+import { useApi } from "@/lib/useApi";
+import { costLabel, fmtClock, fmtInt } from "@/lib/format";
+import type { SessionGuardEvent, SessionGuardEventsResponse, SessionMessages, SessionRawEvents } from "@/lib/types";
+import { guardBannersWithContext } from "@shared/lib/guardMessages";
+import { decisionTone } from "@shared/lib/guardCatalog";
+import { VocabPill } from "@shared/lib/vocabPill";
+import {
+  MESSAGES_LIMIT,
+  MESSAGE_PRESETS,
+  RAW_EVENTS_LIMIT,
+  loadStoredMsgPreset,
+  storeMsgPreset,
+  visibleMessageColumns,
+  type MessageColumnPreset,
+  type MessageSortKey,
+  type SortDir,
+} from "./messagesModel";
+import { MessagesTable } from "./MessagesTable";
+
+// Messages tab — the session's substance: the per-message timeline plus the
+// raw source rows the timeline was derived from.
+//
+// EXTRACTED, NOT REWRITTEN. Every fetch still lives in the shell
+// (SessionDetailPanel): the shell owns the /messages request because its
+// `total` feeds the tab-strip count, so the count stays honest whether or not
+// this tab is on screen — and because moving the fetch here would have changed
+// polling behaviour, which this split explicitly does not do. This module is
+// presentation only.
+//
+// ONE EXCEPTION: the guard-verdict feed (/api/session/<id>/guard, LOC/
+// guardmsg/APM followups plan Item 2) IS fetched here, not lifted to the
+// shell — it feeds no tab-strip count and nothing else on the panel needs
+// it, so threading it through SessionDetailPanel would be a prop for
+// nothing. It keys off messages.data.session_id rather than taking its own
+// sessionId prop, since the shell already resolves and carries that value.
+
+// isPromptGuardEvent reports whether a guard verdict came from the
+// prompt-submit guard subsystem (R-172 secrets / R-190 PII in the prompt
+// text, event_kind=user_prompt) rather than a tool-call policy decision.
+// Both now surface through the same /api/session/<id>/guard feed (operator
+// decision 2026-09-21); this is only used to render the two distinctly —
+// see GuardVerdictsStrip.
+function isPromptGuardEvent(event: SessionGuardEvent): boolean {
+  return event.event_kind === "user_prompt" || event.rule_id === "R-172" || event.rule_id === "R-190";
+}
+
+// GuardVerdictsStrip renders the session's guard policy BLOCKS (the events
+// prop already arrives server-filtered to enforced/deny/ask — see
+// SessionGuardEvent's doc comment; informational `flag` events are dropped
+// upstream to avoid drowning the timeline) in chronological order, each
+// tagged with the seq of the message it landed after
+// (guardBannersWithContext, @shared/lib/guardMessages — the merge algorithm
+// shared with the org dashboard's OrgMessagesTab, which anchors on
+// message_id server-resolved from action_id). It sits above the message
+// table rather than literally inside it: MessagesTable.tsx is a large
+// shared row/column renderer, and true per-row interleaving would mean
+// threading guard rows through its column model for a handful of
+// low-volume events — this compact strip gives the same "what got blocked,
+// and roughly when" answer without that.
+function GuardVerdictsStrip({
+  messages,
+  events,
+}: {
+  messages: SessionMessages["messages"];
+  events: SessionGuardEvent[];
+}) {
+  const banners = useMemo(() => guardBannersWithContext(messages, events), [messages, events]);
+  if (banners.length === 0) return null;
+  return (
+    <div className="space-y-1.5 rounded-2 border border-line-2 bg-bg-1 p-2.5">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+        Guard verdicts ({banners.length})
+      </div>
+      <ul className="space-y-1">
+        {banners.map(({ event, afterSeq }) => {
+          const isPromptGuard = isPromptGuardEvent(event);
+          return (
+          <li
+            key={event.id}
+            className="flex flex-wrap items-center gap-1.5 rounded-1 border border-line-2 bg-bg-2 px-2 py-1 text-[11px]"
+          >
+            {/* Guard decision tone + glyph: the ONE owner is
+                @shared/lib/guardCatalog (+ vocabIcons), a small pure module,
+                so this eagerly-mounted panel no longer copies a table to
+                avoid pulling the lazy Security page into the main bundle. */}
+            <VocabPill vocab="guardDecision" value={event.decision} tone={decisionTone(event.decision)}>
+              {event.decision || "verdict"}
+            </VocabPill>
+            {isPromptGuard ? (
+              <Pill variant="accent">prompt guard</Pill>
+            ) : (
+              event.tool && <span className="text-fg-4">via {event.tool}</span>
+            )}
+            <span className="font-mono text-fg-2">{event.rule_id}</span>
+            {event.category && <span className="text-fg-3">{event.category}</span>}
+            <span className="text-fg-4">{fmtClock(event.ts)}</span>
+            {afterSeq != null && <span className="text-fg-4">after turn #{afterSeq}</span>}
+            {!event.enforced && (
+              <Tooltip content="Observe mode: the policy engine recorded this verdict but did not block the call.">
+                <Pill variant="neutral">observed only</Pill>
+              </Tooltip>
+            )}
+            {event.reason && (
+              <CopyOnClick value={event.reason} className="block w-full basis-full text-fg-3">
+                {event.reason}
+                {event.target_excerpt && (
+                  <span className="ml-1 font-mono text-fg-4">- {event.target_excerpt}</span>
+                )}
+              </CopyOnClick>
+            )}
+          </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+export function MessagesTab({
+  tool,
+  messages,
+  watchMode,
+  onStopWatch,
+  effectiveDetail,
+  onTokenDetail,
+  browserSession,
+  focusMid,
+  stickToEdge,
+  onStickChange,
+  followEdge,
+  sortBy,
+  sortDir,
+  onSort,
+  msgPage,
+  onMsgPage,
+  raw,
+}: {
+  tool: string | undefined;
+  messages: {
+    data: SessionMessages | null;
+    loading: boolean;
+    error: Error | null;
+    denied?: boolean;
+    deniedPermission?: string | null;
+  };
+  watchMode: boolean;
+  onStopWatch: () => void;
+  effectiveDetail: "turn" | "inference";
+  onTokenDetail: (v: "turn" | "inference") => void;
+  browserSession: boolean;
+  focusMid: string | null;
+  stickToEdge: boolean;
+  onStickChange: (atEdge: boolean) => void;
+  followEdge: "bottom" | "top" | "none";
+  sortBy: MessageSortKey;
+  sortDir: SortDir;
+  onSort: (key: MessageSortKey) => void;
+  msgPage: number;
+  onMsgPage: (p: number) => void;
+  raw: {
+    open: boolean;
+    onToggle: () => void;
+    data: SessionRawEvents | null;
+    loading: boolean;
+    error: Error | null;
+    denied?: boolean;
+    deniedPermission?: string | null;
+    page: number;
+    onPage: (p: number) => void;
+  };
+}) {
+  // Column preset. Lives HERE, not in the shell: it is presentation state
+  // that touches no request param (the server already returns every field and
+  // sorts the whole timeline regardless), so routing it through
+  // SessionDetailPanel would add a prop pair for nothing. Seeded from
+  // localStorage so the operator's pick survives closing the panel.
+  const [preset, setPreset] = useState<MessageColumnPreset>(loadStoredMsgPreset);
+  const columns = visibleMessageColumns(preset, sortBy);
+  // Out of the columns this view can show at all ("All"): the org's
+  // token-usage view drops the dollar-only ones, which are not "hidden".
+  const reachable = visibleMessageColumns("all", sortBy).length;
+  const hidden = reachable - columns.length;
+  // Guard-verdict feed. Keyed off the messages payload's own session_id
+  // (see the file header note) rather than a new prop. Low-volume by
+  // design (allow verdicts never persist), so the same live-refresh cadence
+  // as the message stream is cheap; watch mode's faster 4s cadence matters
+  // here too — a deny that stopped a tool call while an operator is
+  // watching live should show up promptly.
+  const sessionId = messages.data?.session_id ?? null;
+  const guard = useApi<SessionGuardEventsResponse>(
+    sessionId ? `/api/session/${sessionId}/guard` : null,
+    undefined,
+    [sessionId],
+    { refreshMs: watchMode ? 4000 : 8000 },
+  );
+  return (
+    <div className="space-y-5">
+      <RawEventsPanel
+        open={raw.open}
+        onToggle={raw.onToggle}
+        data={raw.data}
+        loading={raw.loading}
+        error={raw.error}
+        denied={raw.denied}
+        deniedPermission={raw.deniedPermission}
+        page={raw.page}
+        onPage={raw.onPage}
+      />
+      {messages.data && (
+        <GuardVerdictsStrip messages={messages.data.messages} events={guard.data?.events ?? []} />
+      )}
+
+      {messages.data?.account_summary && (
+        <div className="rounded-2 border border-line-2 px-3 py-2 text-small text-fg-3" aria-label="Session account coverage">
+          <span className="font-medium text-fg-2">Observed accounts: </span>
+          {messages.data.account_summary.accounts.map(a => a.email || a.name || a.account_id).join(", ") || "None captured"}
+          <span className="block mt-1">{messages.data.account_summary.observed} messages with login evidence · {messages.data.account_summary.unknown} unknown · {messages.data.account_summary.conflicts} conflicting. Login snapshots do not confirm billing identity.</span>
+        </div>
+      )}
+      <section className="space-y-2">
+        {/* flex-wrap on both rails: the header now carries up to three
+            controls, and on a sub-lg screen they must stack rather than push
+            the section (and the table's scroll container) sideways. */}
+        <h3 className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+            Messages
+          </span>
+          <span className="flex flex-wrap items-center gap-3">
+            {watchMode && (
+              <Pill variant="success" className="gap-1.5">
+                <LiveDot tone="success" className="h-1.5 w-1.5 shrink-0" />
+                Watching live - read-only
+                <Tooltip content="Stop watching - return to normal 8s refresh and free navigation.">
+                  <button
+                    type="button"
+                    onClick={onStopWatch}
+                    className="ml-1 text-fg-3 underline hover:text-fg-1 focus:outline-none"
+                  >
+                    stop
+                  </button>
+                </Tooltip>
+              </Pill>
+            )}
+            {/* Group toggle is meaningful for codex (v1.7.24+ emits
+                one token row per model inference). Codex DEFAULTS to
+                "inference" (its informative grain — turn collapses
+                the per-inference rows). For Anthropic adapters
+                (claudecode et al.) "inference" is identical to "turn"
+                — the watcher already emits one row per upstream
+                msg_xxx — so the toggle is a no-op and stays hidden. */}
+            {tool === "codex" && (
+              <>
+                <Tooltip content="Group token rows by model inference (default for codex - one row per token_count event) or by user-turn (sums each turn's inferences). Tool calls always stay grouped at the turn level. Tok/s is shown only for model calls whose duration was captured (the proxy, or a span proven from the rollout); a Turn row divides the timed calls' tokens by their summed durations, never by the turn's wall-clock span, which includes tool runs.">
+                  <span>
+                    <SegmentedControl
+                      size="sm"
+                      value={effectiveDetail}
+                      onChange={(v) => onTokenDetail(v as "turn" | "inference")}
+                      options={[
+                        { value: "turn", label: "Turn" },
+                        { value: "inference", label: "Inference" },
+                      ]}
+                    />
+                  </span>
+                </Tooltip>
+              </>
+            )}
+            {/* Column preset. SegmentedControl (not a checkbox popover) for
+                the same reason the Turn/Inference toggle beside it is one:
+                this is a small set of MUTUALLY EXCLUSIVE views, and the
+                dashboard's established control for that, in this exact
+                header, is the segmented pill. Four short labels stay one row
+                at phone width; the tooltip carries what each one shows,
+                following the Turn/Inference precedent of wrapping the whole
+                control rather than inventing per-option tooltips. */}
+            <Tooltip
+              content={
+                <span className="block">
+                  Which columns the timeline shows. All {reachable}{" "}
+                  columns stay one click away under “All”; the active sort
+                  column is always shown, whatever the preset.
+                  {MESSAGE_PRESETS.map((p) => (
+                    <span key={p.id} className="mt-1 block">
+                      <b>{presetLabel(p)}</b> - {presetHint(p)}
+                    </span>
+                  ))}
+                </span>
+              }
+              maxWidth={420}
+            >
+              <span>
+                <SegmentedControl
+                  size="sm"
+                  value={preset}
+                  onChange={(v) => {
+                    const next = v as MessageColumnPreset;
+                    setPreset(next);
+                    storeMsgPreset(next);
+                  }}
+                  options={MESSAGE_PRESETS.map((p) => ({
+                    value: p.id,
+                    label: presetLabel(p),
+                  }))}
+                />
+              </span>
+            </Tooltip>
+            <span className="text-[10.5px] text-fg-3">
+              {messages.data
+                ? `${fmtInt(messages.data.total)} total · click row to expand tool calls`
+                : (
+                    <InlineLoading size="sm" label="Loading messages" />
+                  )}
+              {/* Say out loud that columns are hidden — a narrowed table that
+                  doesn't admit it reads as missing data. */}
+              {hidden > 0 && ` · ${hidden} columns hidden`}
+            </span>
+          </span>
+        </h3>
+        <ChartState
+          loading={messages.loading}
+          error={messages.error}
+          denied={messages.denied}
+          deniedPermission={messages.deniedPermission}
+          empty={!messages.data?.messages.length}
+          emptyHint="No messages indexed for this session."
+          height={160}
+        >
+          {messages.data && (
+            <MessagesTable
+              rows={messages.data.messages}
+              columns={columns}
+              focusMid={focusMid}
+              browser={browserSession}
+              watch={watchMode}
+              stick={stickToEdge}
+              onStickChange={onStickChange}
+              follow={followEdge}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              onSort={onSort}
+            />
+          )}
+        </ChartState>
+        {messages.data && messages.data.total > MESSAGES_LIMIT && (
+          <Pagination
+            page={msgPage}
+            limit={MESSAGES_LIMIT}
+            total={messages.data.total}
+            onPage={onMsgPage}
+            loading={messages.loading}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RawEventsPanel({
+  open,
+  onToggle,
+  data,
+  loading,
+  error,
+  denied,
+  deniedPermission,
+  page,
+  onPage,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  data: SessionRawEvents | null;
+  loading: boolean;
+  error: Error | null;
+  denied?: boolean;
+  deniedPermission?: string | null;
+  page: number;
+  onPage: (page: number) => void;
+}) {
+  return (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+          Source rows
+        </h3>
+        <div className="flex items-center gap-3">
+          {data && (
+            <span className="text-[10.5px] text-fg-3">
+              {fmtInt(data.total)} rows · {fmtInt(data.sources.length)} sources
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onToggle}
+            className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] font-medium text-fg-1 hover:border-accent/40 hover:text-accent focus:outline-none focus:ring-2 focus:ring-accent-ring"
+          >
+            {open ? "Hide all data" : "View all data"}
+          </button>
+        </div>
+      </div>
+      {open && (
+        <>
+          <ChartState
+            loading={loading && !data}
+            error={error}
+            denied={denied}
+            deniedPermission={deniedPermission}
+            empty={!data?.rows.length}
+            emptyHint="No source JSONL rows found for this session."
+            height={140}
+          >
+            {data && (
+              <div className="overflow-hidden rounded-2 border border-line-2 bg-bg-1">
+                <div className="border-b border-line-2 bg-bg-2 px-3 py-2">
+                  <div className="flex flex-wrap gap-2">
+                    {data.sources.map((source, i) => (
+                      <Tooltip key={`${source.path}-${i}`} content={source.path}>
+                        <span
+                          tabIndex={0}
+                          className={clsx(
+                            "max-w-full truncate rounded-2 border px-2 py-0.5 font-mono text-[10.5px] focus:outline-none",
+                            source.error
+                              ? "border-warn/40 text-warn"
+                              : "border-line-2 text-fg-2",
+                          )}
+                        >
+                          {i + 1}: {source.path.split("/").pop()} · {fmtInt(source.rows)}
+                        </span>
+                      </Tooltip>
+                    ))}
+                  </div>
+                </div>
+                <Table
+                  maxHeight={520}
+                  stickyHead
+                  minWidth={980}
+                  head={
+                    <tr>
+                      <th className="w-[86px] px-3 py-2">Line</th>
+                      <th className="w-[170px] px-2 py-2">Type</th>
+                      <th className="w-[160px] px-2 py-2">ID</th>
+                      <th className="w-[180px] px-2 py-2">Time</th>
+                      <th className="px-2 py-2">Row</th>
+                    </tr>
+                  }
+                >
+                  {data.rows.map((row) => (
+                    <tr key={`${row.source_index}:${row.line}:${row.byte_offset}`} className="border-t border-line-1 align-top first:border-t-0">
+                      <td className="px-3 py-2 font-mono text-[11px] text-fg-3">
+                        {row.source_index + 1}:{row.line}
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {row.type && <Pill variant="neutral">{row.type}</Pill>}
+                          {row.payload_type && row.payload_type !== row.type && (
+                            <Pill variant="neutral">{row.payload_type}</Pill>
+                          )}
+                          {row.role && <Pill variant="neutral">{row.role}</Pill>}
+                          {!row.valid_json && <Pill variant="warn">not json</Pill>}
+                        </div>
+                      </td>
+                      <td className="max-w-[160px] truncate px-2 py-2 font-mono text-[11px] text-fg-2">
+                        {row.event_id || "-"}
+                      </td>
+                      <td className="px-2 py-2 font-mono text-[11px] text-fg-3">
+                        {row.timestamp || "-"}
+                      </td>
+                      <td className="px-2 py-2">
+                        <CopyOnClick value={row.excerpt} className="block">
+                          <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-1 bg-bg-0 p-2 font-mono text-[11px] leading-5 text-fg-1">
+                            {row.excerpt}
+                            {row.excerpt_truncated ? "\n...(truncated)" : ""}
+                          </pre>
+                        </CopyOnClick>
+                      </td>
+                    </tr>
+                  ))}
+                </Table>
+              </div>
+            )}
+          </ChartState>
+          {data && data.total > RAW_EVENTS_LIMIT && (
+            <Pagination
+              page={page}
+              limit={RAW_EVENTS_LIMIT}
+              total={data.total}
+              onPage={onPage}
+              loading={loading}
+            />
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// The "Cost" preset's columns are the token split plus the cost total, so in
+// the org's token-usage view (format.ts cost affordances) it is the Tokens
+// preset and says so.
+function presetLabel(p: (typeof MESSAGE_PRESETS)[number]): string {
+  return p.id === "cost" ? costLabel(p.label, "Tokens") : p.label;
+}
+
+function presetHint(p: (typeof MESSAGE_PRESETS)[number]): string {
+  return p.id === "cost"
+    ? costLabel(p.hint, "the token split (in / cache read / cache write / out) beside the row's token total")
+    : p.hint;
+}

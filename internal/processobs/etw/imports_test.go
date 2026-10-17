@@ -1,52 +1,27 @@
 package etw
 
 import (
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestUntaggedFilesStayPure pins the module-boundary discipline (CLAUDE.md §1)
-// for the portable half of this package, the same way internal/cachewarm,
-// internal/predict and internal/routing pin theirs.
-//
-// Until now the split was enforced only by build tags, which is a different
-// property: a build tag says "this does not compile off Windows", not "this is
-// pure decode logic". parse.go, errors.go, session.go and handles.go are the
-// package's testable surface — CI has no Windows runner, so anything that
-// migrates out of them stops being covered at all. They must therefore never
-// grow a database, an HTTP client, a file watcher, or a syscall/unsafe
-// dependency that would drag them back under a build tag.
-//
-// syscall is the one deliberate exception, allowed in errors.go only:
-// errnoFromCall normalises (*windows.LazyProc).Call's boxed syscall.Errno, and
-// syscall.Errno is a plain integer type available on every platform. That is
-// what lets the Call idiom be unit-tested on Linux. It is NOT a licence to make
-// a syscall.
+// TestUntaggedFilesStayPure pins the portable, untagged half of this package
+// (CLAUDE.md section 1): CI has no Windows runner, so parse.go, errors.go,
+// session.go and handles.go must never grow a database, HTTP, watcher or
+// syscall/unsafe dependency. syscall is allowed in errors.go only, for the
+// platform-neutral syscall.Errno type; it is NOT a licence to make a syscall.
 func TestUntaggedFilesStayPure(t *testing.T) {
 	t.Parallel()
-
-	forbidden := []string{
-		"database/sql",
-		"net/http",
-		"unsafe",
-		"golang.org/x/sys/windows",
-		"github.com/fsnotify/fsnotify",
-	}
-	// path -> the only file allowed to import it.
-	exceptions := map[string]string{
-		"syscall": "errors.go",
-	}
 
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-	fset := token.NewFileSet()
-	var checked int
+	var untagged []string
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -55,35 +30,31 @@ func TestUntaggedFilesStayPure(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		if tagged {
-			continue
-		}
-		checked++
-
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
-		}
-		for _, imp := range af.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			if only, ok := exceptions[path]; ok {
-				if f != only {
-					t.Errorf("%s imports %q, which is allowed only in %s", f, path, only)
-				}
-				continue
-			}
-			for _, bad := range forbidden {
-				if path == bad || strings.HasPrefix(path, bad+"/") {
-					t.Errorf("%s imports forbidden %q — the untagged half of internal/processobs/etw must stay portable and testable off Windows", f, bad)
-				}
-			}
+		if !tagged {
+			untagged = append(untagged, f)
 		}
 	}
-
 	// A guard that silently checked nothing would be worse than none.
-	if checked < 4 {
-		t.Fatalf("only %d untagged files found; expected at least parse.go, errors.go, session.go and handles.go", checked)
+	if len(untagged) < 4 {
+		t.Fatalf("only %d untagged files found; expected at least parse.go, errors.go, session.go and handles.go", len(untagged))
 	}
+	importpin.Check(t, importpin.Spec{
+		Files: untagged,
+		ForbiddenTrees: []string{
+			"database/sql",
+			"net/http",
+			"unsafe",
+			"golang.org/x/sys/windows",
+			"github.com/fsnotify/fsnotify",
+		},
+		Custom: func(file, p string) string {
+			if p == "syscall" && filepath.Base(file) != "errors.go" {
+				return "allowed only in errors.go"
+			}
+			return ""
+		},
+		Reason: "the untagged half of internal/processobs/etw must stay portable and testable off Windows",
+	})
 }
 
 // hasBuildConstraint reports whether a file carries a //go:build line ahead of

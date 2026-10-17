@@ -1,7 +1,6 @@
 package proxyroute
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"net/url"
@@ -9,7 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/marmutapp/superbased-observer/internal/cfgfmt"
+	"github.com/marmutapp/superbased-observer/internal/routeprov"
 )
 
 // ProviderName is the custom codex model_provider key our routing
@@ -45,6 +45,17 @@ type RegisterOptions struct {
 	// WindowsCursorHome.
 	WindowsClaudeHome string
 	WindowsCodexHome  string
+	// Writer says who is writing routes through this registrar (enrolment,
+	// `observer init`, Settings > Setup, a launcher). Every write or
+	// confirmation is recorded with it in the route-provenance file
+	// (provenance.go), which is how leaving an organization removes only the
+	// routes enrolment wrote. The zero value is "unknown", never enrolment.
+	Writer routeprov.Writer
+	// Lock takes the cross-process settings-file lock Observer's own hook
+	// and MCP writers take on the same files (internal/hook.LockSettingsFile,
+	// injected by the caller). nil locks nothing. Used by RegisterCodex and
+	// UnregisterCodex.
+	Lock func(path string) (func(), error)
 }
 
 // RegistrationResult summarizes one routing registration.
@@ -64,22 +75,52 @@ type RegistrationResult struct {
 	// operator doesn't have. The verified writers (codex/claude/hermes)
 	// never set it (they error on a missing config instead).
 	ConfigMissing bool
+	// SkipReason, when non-empty, explains a deliberate no-write that is
+	// NOT "the tool isn't installed": today only the cross-OS sandbox gate
+	// (a caller pinned HomeDir but named no Windows-side home — see
+	// crossmount.AutoDetectSuppressed, incident 2026-07-31). Set alongside
+	// ConfigMissing so existing callers keep treating it as a benign skip;
+	// Error stays nil.
+	SkipReason string
 	// PriorBaseURL / UpstreamID / UpstreamRoot are populated by writers that
 	// route through a /up/<id> prefix (hermes): the upstream the operator must
 	// add to [proxy.upstreams]. Zero for the fixed-upstream writers (codex).
 	PriorBaseURL string
 	UpstreamID   string
 	UpstreamRoot string
+	// GatewayHintsAdded is set by the Claude Code writers when they add
+	// env.CLAUDE_CODE_GATEWAY_HINT_HEADERS=1 beside the route (claude.go).
+	// It can be true alongside AlreadySet: an existing route is topped up
+	// with the hint switch without the route itself changing. On an
+	// unregister it means the switch was (or would be) removed.
+	GatewayHintsAdded bool
+	// PriorProvider is Codex's top-level model_provider before this write
+	// switched it to Observer's provider ("" when it was unset), recorded so
+	// leaving an organization can put it back.
+	PriorProvider string
+	// ProvenanceError is set when the route was written but recording who
+	// wrote it failed. The route stands; Leave then treats it as not written
+	// by enrolment and keeps it.
+	ProvenanceError error
 }
 
 // Registrar dispatches proxy-routing config writes per tool.
-type Registrar struct{ opts RegisterOptions }
+type Registrar struct {
+	opts RegisterOptions
+	// homeOverride is the caller-supplied RegisterOptions.HomeDir VERBATIM,
+	// kept before NewRegistrar defaults it to the real $HOME. Non-empty
+	// means "the caller pinned this registrar's home", which switches OFF
+	// crossmount auto-detection for the cross-OS "-windows" route writers —
+	// see crossmount.AutoDetectSuppressed (incident 2026-07-31).
+	homeOverride string
+}
 
 // NewRegistrar validates opts and returns a Registrar.
 func NewRegistrar(opts RegisterOptions) (*Registrar, error) {
 	if opts.ProxyPort <= 0 || opts.ProxyPort > 65535 {
 		return nil, fmt.Errorf("proxyroute.NewRegistrar: ProxyPort %d out of range", opts.ProxyPort)
 	}
+	homeOverride := opts.HomeDir
 	if opts.HomeDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -87,7 +128,7 @@ func NewRegistrar(opts RegisterOptions) (*Registrar, error) {
 		}
 		opts.HomeDir = home
 	}
-	return &Registrar{opts: opts}, nil
+	return &Registrar{opts: opts, homeOverride: homeOverride}, nil
 }
 
 // codexBaseURL is the value we write into the custom provider's base_url.
@@ -140,6 +181,21 @@ func (r *Registrar) RegisterCodex() RegistrationResult {
 // "codex-windows". Behaviour for the native call is byte-identical to
 // the pre-refactor method.
 func (r *Registrar) registerCodexAt(dir, want, toolLabel string) RegistrationResult {
+	return r.note(r.writeCodexAt(dir, want, toolLabel), want)
+}
+
+// writeCodexAt is registerCodexAt without the provenance record.
+//
+// The edit is surgical (T-394, the M3-16 undo's twin): cfgfmt changes only
+// the keys this writer owns ([model_providers.openai-observer]'s four keys,
+// the top-level model_provider and, with Force, the reserved
+// [model_providers.openai] table) and keeps every comment, key order and
+// blank line it does not touch. It takes the same settings-file lock the
+// undo and Observer's own codex hook / MCP writers take, keeps the file's
+// mode and writes through a unique temp file beside it. An edit the line
+// editor cannot express (our provider defined inline or inside an array of
+// tables) is refused rather than re-serializing the operator's file.
+func (r *Registrar) writeCodexAt(dir, want, toolLabel string) RegistrationResult {
 	path := filepath.Join(dir, "config.toml")
 	res := RegistrationResult{
 		Tool:       toolLabel,
@@ -148,23 +204,32 @@ func (r *Registrar) registerCodexAt(dir, want, toolLabel string) RegistrationRes
 		DryRun:     r.opts.DryRun,
 	}
 
+	if r.opts.Lock != nil && !r.opts.DryRun {
+		unlock, lerr := r.opts.Lock(path)
+		if lerr != nil {
+			res.Error = fmt.Errorf("proxyroute.codex: lock: %w", lerr)
+			return res
+		}
+		defer unlock()
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		res.Error = fmt.Errorf("proxyroute.codex: read: %w", err)
 		return res
 	}
-	root := map[string]any{}
-	if len(raw) > 0 {
-		if err := toml.Unmarshal(raw, &root); err != nil {
-			res.Error = fmt.Errorf("proxyroute.codex: parse %s: %w", path, err)
-			return res
-		}
+	doc, err := cfgfmt.ParseWith(cfgfmt.FormatTOML, raw, cfgfmt.Options{ForbidReserialize: true})
+	if err != nil {
+		res.Error = fmt.Errorf("proxyroute.codex: parse %s: %w", path, err)
+		return res
+	}
+	root, err := doc.Value()
+	if err != nil {
+		res.Error = fmt.Errorf("proxyroute.codex: parse %s: %w", path, err)
+		return res
 	}
 
 	providers, _ := root["model_providers"].(map[string]any)
-	if providers == nil {
-		providers = map[string]any{}
-	}
+	ops := []codexEdit{}
 
 	// Codex 0.128.0+ rejects [model_providers.openai] outright. If we
 	// silently leave it, codex won't load any of our changes either.
@@ -176,19 +241,16 @@ func (r *Registrar) registerCodexAt(dir, want, toolLabel string) RegistrationRes
 			)
 			return res
 		}
-		delete(providers, "openai")
+		ops = append(ops, codexEdit{path: cfgfmt.Path{"model_providers", "openai"}, del: true})
 	}
 
 	ours, _ := providers[ProviderName].(map[string]any)
-	if ours == nil {
-		ours = map[string]any{}
-	}
 
 	if existing, ok := ours["base_url"].(string); ok && existing != "" {
 		switch {
 		case existing == want:
 			// Provider block matches. Verify model_provider is also
-			// pointed at us — only then is the registration AlreadySet.
+			// pointed at us; only then is the registration AlreadySet.
 			if mp, _ := root["model_provider"].(string); mp == ProviderName {
 				res.AlreadySet = true
 				res.BaseURL = existing
@@ -217,39 +279,84 @@ func (r *Registrar) registerCodexAt(dir, want, toolLabel string) RegistrationRes
 		return res
 	}
 
-	ours["name"] = providerDisplayName
-	ours["base_url"] = want
-	ours["wire_api"] = "responses"
-	ours["requires_openai_auth"] = true
-	providers[ProviderName] = ours
-	root["model_providers"] = providers
-	root["model_provider"] = ProviderName
+	if mp, _ := root["model_provider"].(string); mp != ProviderName {
+		res.PriorProvider = mp
+	}
+	block := map[string]any{
+		"name":                 providerDisplayName,
+		"base_url":             want,
+		"wire_api":             "responses",
+		"requires_openai_auth": true,
+	}
+	if ours == nil {
+		// No provider table yet: add it whole, as one [model_providers.
+		// openai-observer] section.
+		ops = append(ops, codexEdit{path: cfgfmt.Path{"model_providers", ProviderName}, value: block})
+	} else {
+		// Keep the operator's other keys in our table; set only ours.
+		for _, k := range []string{"name", "base_url", "wire_api", "requires_openai_auth"} {
+			ops = append(ops, codexEdit{path: cfgfmt.Path{"model_providers", ProviderName, k}, value: block[k]})
+		}
+	}
+	ops = append(ops, codexEdit{path: cfgfmt.Path{"model_provider"}, value: ProviderName})
 
+	for _, op := range ops {
+		if err := op.apply(doc); err != nil {
+			res.Error = fmt.Errorf("proxyroute.codex: edit %s in %s: %w", op.path, path, err)
+			return res
+		}
+	}
 	if r.opts.DryRun {
 		res.Added = true
-		return res
-	}
-
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(root); err != nil {
-		res.Error = fmt.Errorf("proxyroute.codex: encode: %w", err)
 		return res
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		res.Error = fmt.Errorf("proxyroute.codex: mkdir: %w", err)
 		return res
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
+	if err := writeFileKeepMode(path, doc.Bytes()); err != nil {
 		res.Error = fmt.Errorf("proxyroute.codex: write: %w", err)
-		return res
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		res.Error = fmt.Errorf("proxyroute.codex: rename: %w", err)
 		return res
 	}
 	res.Added = true
 	return res
+}
+
+// codexEdit is one surgical change writeCodexAt makes.
+type codexEdit struct {
+	path  cfgfmt.Path
+	value any
+	del   bool
+}
+
+func (e codexEdit) apply(doc cfgfmt.Doc) error {
+	if e.del {
+		return deleteTOMLKey(doc, e.path)
+	}
+	return doc.Set(e.path, e.value)
+}
+
+// deleteTOMLKey deletes path from doc surgically. When path is the only key
+// of its parent table, the parent goes too: a parent that is only implied by
+// its [parent.child] headers has no line of its own, so removing its last
+// child is the removal of the parent (deleting just the child would leave an
+// empty table the line editor cannot express, and an empty
+// [model_providers] is noise in the operator's file anyway).
+func deleteTOMLKey(doc cfgfmt.Doc, path cfgfmt.Path) error {
+	if len(path) > 1 {
+		parent := append(cfgfmt.Path(nil), path[:len(path)-1]...)
+		v, found, err := doc.Get(parent)
+		if err != nil {
+			return err
+		}
+		if m, ok := v.(map[string]any); found && ok && len(m) == 1 {
+			if _, only := m[path[len(path)-1]]; only {
+				return deleteTOMLKey(doc, parent)
+			}
+		}
+	}
+	_, err := doc.Delete(path)
+	return err
 }
 
 // CodexHint returns the human-readable, no-mutation guidance string for

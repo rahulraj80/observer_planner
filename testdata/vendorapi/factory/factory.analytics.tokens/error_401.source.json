@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "detail": "VerifiedOfficial",
+    "requestId": "VerifiedOfficial",
+    "status": "VerifiedOfficial",
+    "title": "VerifiedOfficial"
+  },
+  "fixture_sha256": "1e88ae76c637bfbf7123ae1aa3b72f47f61c271b00b32fc2774cbf69b46589ae",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/analytics/tokens",
+    "status": 401
+  },
+  "notes": "The documented error response format (title, detail, status, requestId) with the 401 row of the status table; values synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Factory Analytics API reference (analytics.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "fa4729614fa5faadaedb2e0514cc8d9969bb76f15924387dcadd77cea8f1ee4b",
+  "source_url": "https://docs.factory.com/api-reference/analytics.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.analytics.tokens"
+}

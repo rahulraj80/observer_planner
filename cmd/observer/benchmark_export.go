@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import "github.com/marmutapp/superbased-observer/internal/benchmark"

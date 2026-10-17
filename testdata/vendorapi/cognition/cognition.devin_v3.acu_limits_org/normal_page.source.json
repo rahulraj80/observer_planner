@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "end_cursor": "VerifiedOfficial",
+    "has_next_page": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].cycle_acu_limit": "VerifiedOfficial",
+    "items[].org_id": "VerifiedOfficial",
+    "items[].scope": "VerifiedOfficial",
+    "items[].user_id": "VerifiedOfficial",
+    "total": "VerifiedOfficial"
+  },
+  "fixture_sha256": "1b467fb119db2596c6d7f5033352639b45f7aba7b6454cd2c01148be1c4842c0",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/consumption/acu-limits/devin",
+    "query": {
+      "first": "200"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from PaginatedResponse[ACULimitResponse] / ACULimitResponse (placeholder values). scope is the documented enum enterprise / org / user; cycle_acu_limit is an integer count of ACUs per billing cycle.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.acu_limits_org"
+}

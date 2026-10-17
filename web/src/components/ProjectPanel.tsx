@@ -4,6 +4,8 @@ import { FloatingPanel } from "@/components/primitives/FloatingPanel";
 import { ContextMenu, type ContextMenuItem } from "@/components/primitives/ContextMenu";
 import { SegmentedControl } from "@/components/primitives/SegmentedControl";
 import { TruncatedPath } from "@/components/primitives/TruncatedPath";
+import { Icon, InlineLoading, Spinner, Tooltip } from "@/components/primitives";
+import { CloudDigestCard } from "@/components/CloudDigestCard";
 import { fmtBytes } from "@/lib/format";
 import {
   computeLaneGraph,
@@ -25,6 +27,17 @@ import {
   type ProjectMeta,
   type ProjectPanelErrorCode,
 } from "@/lib/projectPanel";
+import {
+  ChevronDown,
+  ChevronRight,
+  CornerDownRight,
+  Ellipsis,
+  FolderTree,
+  GitBranch,
+  RefreshCw,
+  Tag,
+  type LucideIcon,
+} from "lucide-react";
 
 // STORAGE KEY (shared): one persisted default rect across all project panels —
 // tokens are ephemeral, so per-token rects would only accumulate garbage. The
@@ -109,19 +122,20 @@ function RowMenuHandle({
           Copied
         </span>
       )}
-      <button
-        type="button"
-        aria-label="Path actions"
-        title="Copy or paste this path"
-        onClick={(e) => {
-          e.stopPropagation();
-          const r = e.currentTarget.getBoundingClientRect();
-          onRowMenu(rel, r.right, r.bottom);
-        }}
-        className="pointer-events-auto hidden h-4 w-4 place-items-center rounded-1 bg-bg-1/80 text-fg-3 hover:bg-bg-3 hover:text-fg-0 group-hover:grid group-focus-within:grid"
-      >
-        ⋯
-      </button>
+      <Tooltip content="Copy or paste this path">
+        <button
+          type="button"
+          aria-label="Path actions"
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            onRowMenu(rel, r.right, r.bottom);
+          }}
+          className="pointer-events-auto hidden h-4 w-4 place-items-center rounded-1 bg-bg-1/80 text-fg-3 hover:bg-bg-3 hover:text-fg-0 group-hover:grid group-focus-within:grid"
+        >
+          <Icon icon={Ellipsis} size={11} />
+        </button>
+      </Tooltip>
     </span>
   );
 }
@@ -137,7 +151,16 @@ function RowMenuHandle({
 
 export type ProjectPanelTab = "files" | "git";
 
-const NO_ROOT_MSG = "This terminal was launched without a project root";
+/**
+ * Tooltip for the "working directory" label. Shown when the panel is browsing
+ * the directory the agent actually runs in rather than an allow-listed project
+ * root, so the header never implies a project that was never chosen.
+ */
+const WORKING_DIR_HINT =
+  "This terminal was launched without a project root, so these are the files in its working directory.";
+
+const NO_ROOT_MSG =
+  "This terminal has no browsable directory on this machine. An SSH terminal's files live on the remote host";
 
 /** Friendly copy for each wire error code. */
 function errorCopy(code: ProjectPanelErrorCode): { title: string; detail: string } {
@@ -148,7 +171,7 @@ function errorCopy(code: ProjectPanelErrorCode): { title: string; detail: string
         detail: "This terminal is no longer running, so its project can't be browsed.",
       };
     case "no_project_root":
-      return { title: "No project root", detail: NO_ROOT_MSG + "." };
+      return { title: "Nothing to browse", detail: NO_ROOT_MSG + "." };
     case "remote_view_disabled":
       return {
         title: "Viewing disabled",
@@ -200,17 +223,17 @@ function relTime(iso: string): string {
 }
 
 const RefreshButton = ({ onClick, busy }: { onClick: () => void; busy: boolean }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={busy}
-    title="Refresh"
-    className="grid h-6 w-6 shrink-0 place-items-center rounded-2 border border-line-2 bg-bg-2 text-[12px] text-fg-2 hover:bg-bg-3 hover:text-fg-0 disabled:opacity-50"
-  >
-    <span className={busy ? "inline-block animate-spin" : ""} aria-hidden>
-      ↻
-    </span>
-  </button>
+  <Tooltip content="Refresh">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      aria-label="Refresh"
+      className="grid h-6 w-6 shrink-0 place-items-center rounded-2 border border-line-2 bg-bg-2 text-small text-fg-2 hover:bg-bg-3 hover:text-fg-0 disabled:opacity-50"
+    >
+      <Icon icon={RefreshCw} size="xs" className={busy ? "animate-spin" : undefined} />
+    </button>
+  </Tooltip>
 );
 
 export default function ProjectPanel({
@@ -250,6 +273,10 @@ export default function ProjectPanel({
   const [menu, setMenu] = useState<RowMenuRequest | null>(null);
   const [copiedRel, setCopiedRel] = useState<string | null>(null);
   const copyTimer = useRef<number | null>(null);
+  // The served root is this terminal's own working directory, not an
+  // operator-allow-listed project root. An older daemon omits root_kind
+  // entirely; absence means "project_root", the only kind it could serve.
+  const isWorkingDir = meta?.root_kind === "working_dir";
 
   useEffect(() => {
     let cancelled = false;
@@ -350,11 +377,11 @@ export default function ProjectPanel({
       cascade={cascade}
       onRaise={onRaise}
       onClose={onClose}
-      ariaLabel={`${tool} project files`}
+      ariaLabel={isWorkingDir ? `${tool} working directory files` : `${tool} project files`}
       title={
         <span className="flex items-center gap-2">
           <span className="font-mono text-fg-0">{tool}</span>
-          <span className="text-fg-3">· project</span>
+          <span className="text-fg-3">· {isWorkingDir ? "working dir" : "project"}</span>
         </span>
       }
       subtitle={meta ? <span className="font-mono">{lastSegment(meta.root)}</span> : "resolving…"}
@@ -363,18 +390,37 @@ export default function ProjectPanel({
         <div className="flex items-center gap-2 border-b border-line-1 px-4 py-2">
           <SegmentedControl<ProjectPanelTab>
             options={[
-              { value: "files", label: "Files" },
-              { value: "git", label: "Git" },
+              { value: "files", label: "Files", icon: FolderTree },
+              { value: "git", label: "Git", icon: GitBranch },
             ]}
             value={tab}
             onChange={onTabChange}
           />
-          <div className="min-w-0 flex-1">
+          {/* Honest path label. This terminal was launched without a project
+              root, so what is being browsed is the directory the agent actually
+              runs in, not an operator-chosen project. Say so next to the path
+              rather than letting the panel imply a project. */}
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            {meta && isWorkingDir && (
+              <Tooltip content={WORKING_DIR_HINT}>
+                <span
+                  tabIndex={0}
+                  className="shrink-0 cursor-help text-[9.5px] uppercase tracking-[0.05em] text-fg-3 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-ring"
+                >
+                  working directory
+                </span>
+              </Tooltip>
+            )}
             {meta && (
               <TruncatedPath value={meta.root} className="text-[11px] text-fg-3" />
             )}
           </div>
         </div>
+        {meta && !isWorkingDir && (
+          <div className="border-b border-line-1 px-4 py-2">
+            <CloudDigestCard projectRoot={meta.root} />
+          </div>
+        )}
         <div className="min-h-0 flex-1">
           {metaErr ? (
             <ErrorState code={metaErr} />
@@ -665,10 +711,17 @@ function FilesTab({
   );
 }
 
-function entryGlyph(type: DirEntry["type"], open: boolean): string {
-  if (type === "dir") return open ? "▾" : "▸";
-  if (type === "symlink") return "↳";
-  return " ";
+// ENTRY_GLYPH is the tree-row marker per entry kind (a directory by its
+// open state); a plain file carries no marker.
+const ENTRY_GLYPH: Record<string, LucideIcon> = {
+  "dir:open": ChevronDown,
+  "dir:closed": ChevronRight,
+  symlink: CornerDownRight,
+};
+
+function entryGlyph(type: DirEntry["type"], open: boolean): LucideIcon | null {
+  const key = type === "dir" ? `dir:${open ? "open" : "closed"}` : type;
+  return ENTRY_GLYPH[key] ?? null;
 }
 
 function DirChildren({
@@ -693,7 +746,16 @@ function DirChildren({
   const state = dirs[path];
   if (!state) return null;
   if (state.loading && state.entries.length === 0) {
-    return <div className="px-2 py-1 text-[11px] text-fg-4" style={{ paddingLeft: 8 + depth * 14 }}>loading…</div>;
+    return (
+      <div
+        role="status"
+        className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-fg-4"
+        style={{ paddingLeft: 8 + depth * 14 }}
+      >
+        <Spinner size="xs" label="" />
+        loading
+      </div>
+    );
   }
   if (state.error) {
     return (
@@ -736,8 +798,11 @@ function DirChildren({
                   (isSel ? "bg-bg-3 text-fg-0" : dim ? "text-fg-4" : "text-fg-2")
                 }
               >
-                <span className="w-3 shrink-0 text-center text-fg-3" aria-hidden>
-                  {entryGlyph(e.type, isOpen)}
+                <span className="flex w-3 shrink-0 justify-center text-fg-3" aria-hidden>
+                  {(() => {
+                    const g = entryGlyph(e.type, isOpen);
+                    return g ? <Icon icon={g} size={11} /> : null;
+                  })()}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{e.name}</span>
                 {!isDir && e.type === "file" && (
@@ -824,28 +889,29 @@ function FileViewer({
         {file && !file.binary && (
           <span className="shrink-0 text-[10px] text-fg-4">{fmtBytes(file.size)}</span>
         )}
-        <button
-          type="button"
-          aria-label="Path actions"
-          title="Copy or paste this path"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            onRowMenu(path, r.right, r.bottom);
-          }}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-2 border border-line-2 bg-bg-2 text-[12px] text-fg-2 hover:bg-bg-3 hover:text-fg-0"
-        >
-          ⋯
-        </button>
+        <Tooltip content="Copy or paste this path">
+          <button
+            type="button"
+            aria-label="Path actions"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onRowMenu(path, r.right, r.bottom);
+            }}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-2 border border-line-2 bg-bg-2 text-small text-fg-2 hover:bg-bg-3 hover:text-fg-0"
+          >
+            <Icon icon={Ellipsis} size="xs" />
+          </button>
+        </Tooltip>
         <RefreshButton onClick={onRefresh} busy={loading} />
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {loading ? (
-          <div className="p-6 text-[12px] text-fg-4">Loading…</div>
+          <InlineLoading label="Loading files" className="p-6" />
         ) : error ? (
           <div className="p-6 text-[12px] text-danger">{errorCopy(error).title}</div>
         ) : !file ? null : file.binary ? (
           <div className="p-6 text-[12px] text-fg-4">
-            Binary file — not shown ({fmtBytes(file.size)}).
+            Binary file - not shown ({fmtBytes(file.size)}).
           </div>
         ) : file.content === "" ? (
           <div className="p-6 text-[12px] text-fg-4">Empty file.</div>
@@ -853,7 +919,7 @@ function FileViewer({
           <>
             {(file.too_large || file.truncated) && (
               <div className="border-b border-line-1 bg-warn-soft px-4 py-1 text-[11px] text-warn">
-                File is large — showing the first {fmtBytes(file.content.length)} only.
+                File is large - showing the first {fmtBytes(file.content.length)} only.
               </div>
             )}
             <pre className="m-0 overflow-x-auto p-0 font-mono text-[11.5px] leading-[1.5] text-fg-1">
@@ -871,7 +937,7 @@ function FileViewer({
             {total > MAX_FILE_LINES && (
               <div className="border-t border-line-1 bg-warn-soft px-4 py-1 text-[11px] text-warn">
                 Showing first {MAX_FILE_LINES.toLocaleString()} of{" "}
-                {total.toLocaleString()} lines — the rest isn't rendered.
+                {total.toLocaleString()} lines - the rest isn't rendered.
               </div>
             )}
           </>
@@ -925,7 +991,7 @@ function GitTab({
 
   if (!gitAvailable) return <ErrorState code="git_unavailable" />;
   if (err) return <ErrorState code={err} />;
-  if (loading && !info) return <div className="p-6 text-[12px] text-fg-4">Loading git…</div>;
+  if (loading && !info) return <InlineLoading label="Loading git" className="p-6" />;
   if (!info) return null;
   if (!info.is_git) {
     return (
@@ -949,6 +1015,9 @@ function GitTab({
         )}
         {(info.ahead > 0 || info.behind > 0) && (
           <span className="flex items-center gap-1 text-[11px]">
+            {/* ↑N / ↓N is the VCS's own ahead/behind notation (as `status -sb`
+                prints it), kept as text on purpose: it is data, not an icon,
+                and the project-panels e2e asserts on it. */}
             {info.ahead > 0 && <span className="text-accent">↑{info.ahead}</span>}
             {info.behind > 0 && <span className="text-warn">↓{info.behind}</span>}
           </span>
@@ -1064,7 +1133,7 @@ function ChangesSection({
           )}
           {statusTruncated && !clientCapped && (
             <div className="px-2 py-0.5 text-[10.5px] text-warn">
-              Showing first {status.length.toLocaleString()} changes — more exist on the server
+              Showing first {status.length.toLocaleString()} changes - more exist on the server
             </div>
           )}
         </div>
@@ -1115,7 +1184,7 @@ function HistorySection({ log, truncated }: { log: GitCommit[]; truncated: boole
               </div>
               <div className="min-w-0 flex-1 py-1.5 pr-2">
                 <div className="flex items-baseline gap-2">
-                  <span className="shrink-0 font-mono text-[11px] text-accent">
+                  <span className="shrink-0 font-mono text-[11px] text-accent" title={c.hash}>
                     {c.hash.slice(0, 7)}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[12px] text-fg-1">{c.subject}</span>
@@ -1154,9 +1223,9 @@ function RefChip({ label }: { label: string }) {
       : "border-line-2 text-fg-3";
   return (
     <span
-      className={`rounded-1 border px-1 py-[1px] font-mono text-[9.5px] leading-none ${cls}`}
+      className={`inline-flex items-center gap-0.5 rounded-1 border px-1 py-[1px] font-mono text-[9.5px] leading-none ${cls}`}
     >
-      {isTag ? "⚑ " : ""}
+      {isTag && <Icon icon={Tag} size={9} label="tag" />}
       {text}
     </span>
   );

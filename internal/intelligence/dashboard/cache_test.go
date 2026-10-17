@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/timebucket"
 )
 
 func testCtx(t *testing.T) context.Context {
@@ -332,7 +333,7 @@ func TestLoadCacheAnnotationsByKey_EmptyKeys(t *testing.T) {
 func TestLoadCacheAnnotationsByKey_AggregatesPerKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "cost.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "cost.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +444,7 @@ func TestCollapseTier(t *testing.T) {
 func TestLoadOverviewEvents_FiltersScopeRows(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "cache.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "cache.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,9 +500,9 @@ func TestLoadOverviewEvents_FiltersScopeRows(t *testing.T) {
 		q    cacheOverviewQuery
 		want int
 	}{
-		{"no filter — full corpus", cacheOverviewQuery{}, 5},
+		{"no filter - full corpus", cacheOverviewQuery{}, 5},
 		{"days=7 only", cacheOverviewQuery{Days: 7}, 3},
-		{"days=7 + offset=7 (events 2–14d ago excluded if <2d, included if 2–14d)", cacheOverviewQuery{Days: 7, PeriodOffsetDays: 7}, 0},
+		{"days=7 + offset=7 (events 2-14d ago excluded if <2d, included if 2-14d)", cacheOverviewQuery{Days: 7, PeriodOffsetDays: 7}, 0},
 		{"days=30 + offset=30 (40d-old event sits in [30d, 60d) window)", cacheOverviewQuery{Days: 30, PeriodOffsetDays: 30}, 1},
 		{"days=30 (excludes 40+100 day-old events)", cacheOverviewQuery{Days: 30}, 3},
 		{"tool=claude-code", cacheOverviewQuery{Tool: "claude-code"}, 4},
@@ -534,7 +535,7 @@ func TestLoadOverviewEvents_FiltersScopeRows(t *testing.T) {
 func TestLoadCacheEvents_PagesAndFilters(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "ev.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "ev.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +623,7 @@ func TestLoadCacheEvents_PagesAndFilters(t *testing.T) {
 func TestLoadCacheEntryStates_GroupsByState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "es.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "es.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +650,7 @@ func TestLoadCacheEntryStates_GroupsByState(t *testing.T) {
 	insert("unverified", 2)
 	insert("expired", 1)
 
-	rows, total, err := loadCacheEntryStates(ctx, database)
+	rows, total, err := loadCacheEntryStates(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,7 +682,7 @@ func TestLoadCacheEntryStates_GroupsByState(t *testing.T) {
 func TestLoadCacheHealthSummary_HeadlineSignals(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "h.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "h.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +712,7 @@ func TestLoadCacheHealthSummary_HeadlineSignals(t *testing.T) {
 	// denominator per cachetrack.MispredictRateGraded post-C9 fix).
 	insert("mispredict", "unknown", "hit", 50, 0)
 
-	summary, err := loadCacheHealthSummary(ctx, database)
+	summary, err := loadCacheHealthSummary(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,6 +737,14 @@ func TestLoadCacheHealthSummary_HeadlineSignals(t *testing.T) {
 	if summary.InconsistentRewriteCount != 1 {
 		t.Errorf("InconsistentRewriteCount = %d, want 1", summary.InconsistentRewriteCount)
 	}
+	// The denominators the page needs to show these as shares: 17
+	// rewrite events, and all 19 events carry a prediction.
+	if summary.RewriteEvents != 17 {
+		t.Errorf("RewriteEvents = %d, want 17", summary.RewriteEvents)
+	}
+	if summary.PredictedEvents != 19 {
+		t.Errorf("PredictedEvents = %d, want 19", summary.PredictedEvents)
+	}
 	// system_changed share = 16/19 = 0.842 > 0.80 → dominant
 	if summary.DominantCause == nil {
 		t.Fatalf("DominantCause not surfaced; expected system_changed at >80%% share. summary=%+v", summary)
@@ -757,7 +766,7 @@ func TestLoadCacheHealthSummary_HeadlineSignals(t *testing.T) {
 func TestLoadCacheHealthSummary_UntrackedProvider(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "up.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "up.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +809,7 @@ func TestLoadCacheHealthSummary_UntrackedProvider(t *testing.T) {
 	insertAPITurn("s-claude-1", "anthropic", 4*time.Hour) // excluded
 	insertAPITurn("s-codex-1", "openai", 10*24*time.Hour) // outside 7d window
 
-	summary, err := loadCacheHealthSummary(ctx, database)
+	summary, err := loadCacheHealthSummary(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +832,7 @@ func TestLoadCacheHealthSummary_UntrackedProvider(t *testing.T) {
 func TestLoadCacheTimeseries_BucketsByDay(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "ts.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "ts.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -864,7 +873,11 @@ func TestLoadCacheTimeseries_BucketsByDay(t *testing.T) {
 	// Day 3: 1 expiry_rewrite
 	insert("expiry_rewrite", "2026-06-09T10:00:00Z", 0, 3000)
 
-	got, err := loadCacheTimeseries(ctx, database, cacheOverviewQuery{})
+	daySpec, err := timebucket.Resolve(timebucket.Request{Gran: "1d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadCacheTimeseries(ctx, database, cacheTimeseriesQuery{Spec: daySpec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -873,9 +886,9 @@ func TestLoadCacheTimeseries_BucketsByDay(t *testing.T) {
 	}
 
 	want := []CacheTimeseriesPoint{
-		{Bucket: "2026-06-07", ReadTokens: 4500, WrittenTokens: 500, EventCount: 3, RewriteCount: 0},
-		{Bucket: "2026-06-08", ReadTokens: 800, WrittenTokens: 4000, EventCount: 2, RewriteCount: 1},
-		{Bucket: "2026-06-09", ReadTokens: 0, WrittenTokens: 3000, EventCount: 1, RewriteCount: 1},
+		{Bucket: "2026-06-07", T: time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC).UnixMilli(), ReadTokens: 4500, WrittenTokens: 500, EventCount: 3, RewriteCount: 0},
+		{Bucket: "2026-06-08", T: time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC).UnixMilli(), ReadTokens: 800, WrittenTokens: 4000, EventCount: 2, RewriteCount: 1},
+		{Bucket: "2026-06-09", T: time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC).UnixMilli(), ReadTokens: 0, WrittenTokens: 3000, EventCount: 1, RewriteCount: 1},
 	}
 	for i, w := range want {
 		if got[i] != w {
@@ -884,7 +897,7 @@ func TestLoadCacheTimeseries_BucketsByDay(t *testing.T) {
 	}
 
 	// Project filter zeroes the corpus when no match.
-	filtered, err := loadCacheTimeseries(ctx, database, cacheOverviewQuery{Project: "/repo/nonexistent"})
+	filtered, err := loadCacheTimeseries(ctx, database, cacheTimeseriesQuery{Spec: daySpec, Project: "/repo/nonexistent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -902,7 +915,7 @@ func TestLoadCacheTimeseries_BucketsByDay(t *testing.T) {
 func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "impl.db")})
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "impl.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -933,7 +946,7 @@ func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 	// 1 Anthropic hit so the gate has Anthropic data to grade.
 	insert("hit", "suffix_growth", "hit", 1000, 0)
 
-	summary, err := loadCacheHealthSummary(ctx, database)
+	summary, err := loadCacheHealthSummary(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,7 +982,7 @@ func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 	// sees ONLY the 1 anthropic hit event. Implicit events MUST
 	// NOT enter GradedEvents / Mispredicts / Rate / BucketMispredicts.
 	if summary.GradedEvents != 1 {
-		t.Errorf("GradedEvents = %d, want 1 (the lone anthropic hit) — implicit events leaked into the gate", summary.GradedEvents)
+		t.Errorf("GradedEvents = %d, want 1 (the lone anthropic hit) - implicit events leaked into the gate", summary.GradedEvents)
 	}
 	if summary.Mispredicts != 0 {
 		t.Errorf("Mispredicts = %d, want 0", summary.Mispredicts)
@@ -978,6 +991,71 @@ func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 		t.Errorf("Rate = %v, want 0.0", summary.Rate)
 	}
 	if summary.BucketMispredicts != 0 {
-		t.Errorf("BucketMispredicts = %d, want 0 — implicit predicted_kind mismatches MUST NOT count against the Anthropic G2 gate", summary.BucketMispredicts)
+		t.Errorf("BucketMispredicts = %d, want 0 - implicit predicted_kind mismatches MUST NOT count against the Anthropic G2 gate", summary.BucketMispredicts)
+	}
+}
+
+// TestLoadSessionCacheEvents_ZeroUsageAndCostDelta pins two things the
+// per-event loader is responsible for at the DB boundary: the ZeroUsage flag
+// is cachetrack.IsZeroUsage (a mispredict with a zero token pair — a 0/0 hit
+// is NOT vacant), and the nullable cost_delta_usd is carried through as a
+// pointer (nil when the column is NULL, the value when set).
+func TestLoadSessionCacheEvents_ZeroUsageAndCostDelta(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	database, err := openTestDB(ctx, db.Options{Path: filepath.Join(t.TempDir(), "cache.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	// A 0/0 hit (NULL cost delta), a 0/0 mispredict (NULL cost delta), and a
+	// write carrying a real cost delta.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO cache_events (session_id, tier, timestamp, model, kind, cause, tokens_read, tokens_written)
+		 VALUES ('s1', 'proxy', '2026-06-09T00:00:00Z', 'm', 'hit', 'suffix_growth', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO cache_events (session_id, tier, timestamp, model, kind, cause, tokens_read, tokens_written)
+		 VALUES ('s1', 'proxy', '2026-06-09T00:00:10Z', 'm', 'mispredict', 'unknown', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO cache_events (session_id, tier, timestamp, model, kind, cause, tokens_read, tokens_written, cost_delta_usd)
+		 VALUES ('s1', 'proxy', '2026-06-09T00:00:20Z', 'm', 'invalidation_rewrite', 'system_changed', 0, 8000, 0.15)`); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := loadSessionCacheEvents(ctx, database, "s1")
+	if err != nil {
+		t.Fatalf("loadSessionCacheEvents: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
+	}
+	// [0] hit 0/0 — NOT vacant, NULL cost delta.
+	if events[0].Kind != "hit" || events[0].ZeroUsage {
+		t.Errorf("event[0] = %+v, want a hit with ZeroUsage=false (a 0/0 hit is a real event)", events[0])
+	}
+	if events[0].CostDeltaUSD != nil {
+		t.Errorf("event[0].CostDeltaUSD = %v, want nil (NULL column)", *events[0].CostDeltaUSD)
+	}
+	// [1] mispredict 0/0 — vacant.
+	if events[1].Kind != "mispredict" || !events[1].ZeroUsage {
+		t.Errorf("event[1] = %+v, want a mispredict with ZeroUsage=true", events[1])
+	}
+	// [2] rewrite with a real cost delta — carried through as a non-nil 0.15.
+	if events[2].CostDeltaUSD == nil || *events[2].CostDeltaUSD < 0.15-1e-9 || *events[2].CostDeltaUSD > 0.15+1e-9 {
+		t.Errorf("event[2].CostDeltaUSD = %v, want a non-nil 0.15", events[2].CostDeltaUSD)
+	}
+	if events[2].ZeroUsage {
+		t.Errorf("event[2] rewrite must not be ZeroUsage")
+	}
+
+	// The efficiency tile folds the non-baseline positive delta.
+	eff := buildCacheEfficiency(events)
+	if eff.AvoidableUSD < 0.15-1e-9 || eff.AvoidableUSD > 0.15+1e-9 {
+		t.Errorf("AvoidableUSD = %v, want 0.15 (the rewrite's delta; the hit/mispredict carry none)", eff.AvoidableUSD)
 	}
 }

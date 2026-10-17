@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs && !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -32,7 +34,7 @@ func enableCaptureTestServer(t *testing.T, enabled bool, backend string) (*Serve
 	// be defensive: remove any .bak so the no-write proof in the idempotent test
 	// is unambiguous.
 	_ = os.Remove(cfgPath + ".bak")
-	database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -49,14 +51,6 @@ func enableCaptureTestServer(t *testing.T, enabled bool, backend string) (*Serve
 		GOOS: "linux", PollOK: true, EBPFOK: true, BridgeOK: true,
 	})
 	return server, cfgPath
-}
-
-// fixedCapability returns a processCapabilityFn that ignores the ProcessConfig
-// and always reports the given capability — the injected-IO seam that lets the
-// enable-capture tests exercise every GOOS-shaped capability set without the
-// real platform.
-func fixedCapability(c processCapability) func(config.ProcessConfig) processCapability {
-	return func(config.ProcessConfig) processCapability { return c }
 }
 
 func postEnableCapture(t *testing.T, server *Server) (int, enableCaptureResponse) {
@@ -160,7 +154,7 @@ func TestProcessEnableCapture_IdempotentNoWrite(t *testing.T) {
 		t.Fatalf("resp = %+v, want enabled+backend=poll+not-switched", resp)
 	}
 	if resp.RestartRequired {
-		t.Error("restart_required = true on the idempotent no-op — want false (nothing was written)")
+		t.Error("restart_required = true on the idempotent no-op - want false (nothing was written)")
 	}
 	if resp.PreviousBackend != "" {
 		t.Errorf("previous_backend = %q, want empty", resp.PreviousBackend)
@@ -170,10 +164,10 @@ func TestProcessEnableCapture_IdempotentNoWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(before) != string(after) {
-		t.Error("config.toml changed on the idempotent path — the verb must not write when already enabled + runnable")
+		t.Error("config.toml changed on the idempotent path - the verb must not write when already enabled + runnable")
 	}
 	if _, err := os.Stat(cfgPath + ".bak"); !os.IsNotExist(err) {
-		t.Errorf("a .bak appeared (%v) — config.WriteToml creates .bak on every real write, so its presence proves an unexpected write", err)
+		t.Errorf("a .bak appeared (%v) - config.WriteToml creates .bak on every real write, so its presence proves an unexpected write", err)
 	}
 }
 
@@ -248,10 +242,10 @@ func TestProcessEnableCapture_UnsupportedPlatformNoWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(before) != string(after) {
-		t.Error("config.toml changed on the unsupported-platform path — the verb must not write")
+		t.Error("config.toml changed on the unsupported-platform path - the verb must not write")
 	}
 	if _, err := os.Stat(cfgPath + ".bak"); !os.IsNotExist(err) {
-		t.Errorf("a .bak appeared (%v) — proves an unexpected write on the refusal path", err)
+		t.Errorf("a .bak appeared (%v) - proves an unexpected write on the refusal path", err)
 	}
 }
 

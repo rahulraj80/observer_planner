@@ -34,12 +34,6 @@ func parseFixture(t *testing.T) ([]models.ToolEvent, []models.TokenEvent, []stri
 	return res.ToolEvents, res.TokenEvents, res.Warnings
 }
 
-func TestName(t *testing.T) {
-	if got := (&Adapter{}).Name(); got != models.ToolGoose {
-		t.Fatalf("Name()=%q want %q", got, models.ToolGoose)
-	}
-}
-
 func TestWatchPaths_Linux(t *testing.T) {
 	orig := allHomesFunc
 	defer func() { allHomesFunc = orig }()
@@ -328,10 +322,10 @@ func TestIdempotentSourceEventIDs(t *testing.T) {
 
 func TestResolveProjectRoot(t *testing.T) {
 	a := newTestAdapter()
-	if got := a.resolveProjectRoot(""); got != "[goose]" {
-		t.Errorf("empty cwd => %q want [goose]", got)
+	if got, remote, _ := a.resolveProjectRoot(""); got != "[goose]" || remote != "" {
+		t.Errorf("empty cwd => (%q, %q) want ([goose], \"\")", got, remote)
 	}
-	if got := a.resolveProjectRoot(`C:\Users\dev\project`); strings.Contains(got, "superbased-observer") {
+	if got, _, _ := a.resolveProjectRoot(`C:\Users\dev\project`); strings.Contains(got, "superbased-observer") {
 		t.Errorf("foreign windows cwd misfiled under observer repo: %q", got)
 	}
 }

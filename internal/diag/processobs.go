@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // checkProcessObservability reports the process-observability feature's
@@ -71,7 +71,7 @@ func checkProcessObservability(ctx context.Context, database *sql.DB, cfg config
 			Name:   "process observability",
 			Status: StatusWarn,
 			Message: staleQualified(health, now, fmt.Sprintf(
-				"enabled (%s backend) — the cross-OS capturer link is REFUSING every connection: %d refused at the handshake, none authenticated; %s",
+				"enabled (%s backend) - the cross-OS capturer link is REFUSING every connection: %d refused at the handshake, none authenticated; %s",
 				p.Backend, health.TransportAuthFailures, health.authReasonClause(),
 			)),
 			Details: details,
@@ -83,7 +83,7 @@ func checkProcessObservability(ctx context.Context, database *sql.DB, cfg config
 	// surface prints nothing, which is exactly what an install that never
 	// enabled ETW prints. "Requested and broken" must not render as "not
 	// requested".
-	if haveHealth && health.TransportState == processobs.TransportStateUnavailable {
+	if haveHealth && health.TransportState == procmodel.TransportStateUnavailable {
 		reason := health.TransportUnavailableReason
 		if reason == "" {
 			reason = "no reason reported by the daemon"
@@ -92,8 +92,31 @@ func checkProcessObservability(ctx context.Context, database *sql.DB, cfg config
 			Name:   "process observability",
 			Status: StatusWarn,
 			Message: staleQualified(health, now, fmt.Sprintf(
-				"enabled (%s backend) — the cross-OS capture transport was REQUESTED but is NOT running, so no elevated capturer can connect: %s",
+				"enabled (%s backend) - the cross-OS capture transport was REQUESTED but is NOT running, so no elevated capturer can connect: %s",
 				p.Backend, reason,
+			)),
+			Details: details,
+		}
+	}
+
+	// Runs the daemon captured and then THREW AWAY because the sink kept
+	// refusing writes. This outranks every accounting warning below it: an
+	// unmeasured byte total is a missing column on a row that exists, whereas
+	// this is the row itself never landing — process history that cannot be
+	// reconstructed from anything else on the box.
+	//
+	// It fires only on the exhausted counter, never on a non-zero retention:
+	// retained runs are BUFFERED, not lost, and warning about a sink that is
+	// successfully riding out a busy database would train the operator to
+	// ignore the line that means real loss.
+	if haveHealth && health.Dropped[string(procmodel.DropSinkRetryExhausted)] > 0 {
+		lost := health.Dropped[string(procmodel.DropSinkRetryExhausted)]
+		return Check{
+			Name:   "process observability",
+			Status: StatusWarn,
+			Message: staleQualified(health, now, fmt.Sprintf(
+				"enabled (%s backend), %d process runs retained - %d captured run(s) were LOST: the sink kept failing and the retry retention overflowed. Process history for that window is gone; check for a competing writer holding the SQLite write lock (another daemon, a long backfill, a hook storm)",
+				p.Backend, runs, lost,
 			)),
 			Details: details,
 		}
@@ -103,12 +126,12 @@ func checkProcessObservability(ctx context.Context, database *sql.DB, cfg config
 	// attach is the loudest thing this check knows: the charts silently show
 	// nothing, and only the reason makes it actionable. It outranks the
 	// no-rows-yet warning below.
-	if haveHealth && health.NetworkAccountingMode == processobs.NetworkAccountingUnavailable {
+	if haveHealth && health.NetworkAccountingMode == procmodel.NetworkAccountingUnavailable {
 		return Check{
 			Name:   "process observability",
 			Status: StatusWarn,
 			Message: staleQualified(health, now, fmt.Sprintf(
-				"enabled (%s backend), %d process runs retained — per-process network accounting UNAVAILABLE (bytes are unmeasured, not zero)",
+				"enabled (%s backend), %d process runs retained - per-process network accounting UNAVAILABLE (bytes are unmeasured, not zero)",
 				p.Backend, runs,
 			)),
 			Details: details,
@@ -118,9 +141,9 @@ func checkProcessObservability(ctx context.Context, database *sql.DB, cfg config
 	// Enabled but no rows yet: not an error (the backend may be unsupported
 	// on this host, or simply nothing has spawned).
 	if runs == 0 {
-		msg := "enabled but no process runs captured yet — start the daemon (`observer start`) and check the backend line below"
+		msg := "enabled but no process runs captured yet - start the daemon (`observer start`) and check the backend line below"
 		if haveHealth {
-			msg = fmt.Sprintf("enabled but no process runs captured yet — daemon pid %d is running with the %s backend",
+			msg = fmt.Sprintf("enabled but no process runs captured yet - daemon pid %d is running with the %s backend",
 				health.PID, health.Backend)
 		}
 		return Check{
@@ -157,12 +180,17 @@ func processHealthDetails(h ProcessHealth, ok bool, now time.Time) []string {
 	age := h.Age(now).Round(time.Second)
 	stamp := fmt.Sprintf("reported %s ago", age)
 	if h.Stale(now) {
-		stamp = fmt.Sprintf("last reported %s ago — STALE, the daemon is alive but has stopped refreshing; the values below are its last report", age)
+		stamp = fmt.Sprintf("last reported %s ago - STALE, the daemon is alive but has stopped refreshing; the values below are its last report", age)
 	}
 	out := []string{
 		fmt.Sprintf("daemon health: pid %d, backend %s (%s), queue %d, %s",
 			h.PID, h.Backend, up, h.QueueDepth, stamp),
 		fmt.Sprintf("network bytes: %s", h.NetworkAccountingLine()),
+		// Always rendered, zeroes included — see ProcessHealth.CaptureLine.
+		// The row count above says what SURVIVED; this says what the running
+		// daemon resolved and discarded, which is the only way to tell an idle
+		// box from one whose every batch is being thrown away.
+		fmt.Sprintf("capture:       %s", h.CaptureLine()),
 	}
 	// Only rendered when a dial-in transport actually exists — an install
 	// without one must not grow a line about a capturer it never configured.

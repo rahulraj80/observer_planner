@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
@@ -34,6 +36,7 @@ func TestShouldEngageEphemeralDaemon(t *testing.T) {
 	tests := []struct {
 		name       string
 		flag       bool
+		ifNeeded   bool
 		configPath string
 		spec       benchmark.Spec
 		want       bool
@@ -44,11 +47,13 @@ func TestShouldEngageEphemeralDaemon(t *testing.T) {
 		{name: "claude-code but operator passed --config → no engage", spec: cc, configPath: "/tmp/my.toml", want: false},
 		{name: "flag forces engage even for codex", spec: codex, flag: true, want: true},
 		{name: "flag forces engage even with --config", spec: cc, flag: true, configPath: "/tmp/my.toml", want: true},
+		{name: "isolate-if-needed + claude-code + --config: engage (T-664)", spec: cc, ifNeeded: true, configPath: "/tmp/my.toml", want: true},
+		{name: "isolate-if-needed + codex only + --config: no engage", spec: codex, ifNeeded: true, configPath: "/tmp/my.toml", want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := shouldEngageEphemeralDaemon(tc.flag, tc.configPath, tc.spec, drivers); got != tc.want {
+			if got := shouldEngageEphemeralDaemon(tc.flag, tc.ifNeeded, tc.configPath, tc.spec, drivers); got != tc.want {
 				t.Errorf("shouldEngageEphemeralDaemon(flag=%v, cfg=%q) = %v, want %v", tc.flag, tc.configPath, got, tc.want)
 			}
 		})
@@ -94,6 +99,26 @@ func TestEphemeralDaemonLifecycle(t *testing.T) {
 	// Not parallel: binds a real (free) listener + opens SQLite files.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if proxyNotInBuild() {
+		// A build without capture.proxy (D-514) has no proxy for the
+		// isolated daemon to serve: startup must fail promptly, naming the
+		// build, instead of dialling a port nothing will bind until the
+		// readiness timeout and reporting "timeout".
+		start := time.Now()
+		eph, err := startEphemeralDaemon(ctx)
+		if err == nil {
+			eph.Close()
+			t.Fatal("startEphemeralDaemon succeeded in a build without capture.proxy")
+		}
+		if !strings.Contains(err.Error(), "not in this build") {
+			t.Fatalf("startEphemeralDaemon error = %v, want the not-in-this-build reason", err)
+		}
+		if took := time.Since(start); took > 10*time.Second {
+			t.Fatalf("startEphemeralDaemon took %s to fail, want a prompt failure, not the readiness timeout", took)
+		}
+		return
+	}
 
 	eph, err := startEphemeralDaemon(ctx)
 	if err != nil {
@@ -141,7 +166,7 @@ func TestEphemeralDaemonLifecycle(t *testing.T) {
 	// The listener is released — a fresh dial to the old addr must fail.
 	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
 		_ = c.Close()
-		t.Errorf("proxy port %s still accepting after Close — listener leaked", addr)
+		t.Errorf("proxy port %s still accepting after Close - listener leaked", addr)
 	}
 }
 

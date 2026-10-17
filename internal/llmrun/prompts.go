@@ -31,6 +31,7 @@ func evidenceProjection(b briefing.Briefing) string {
 	fmt.Fprintf(&sb, "error_turns: %d; active_hours: %.1f; fast_share: %.1f%%\n", g.ErrorTurns, g.ActiveHours, g.FastShare*100)
 
 	if tr := b.Trend; tr != nil && tr.WindowDays > 1 {
+		// no-bare-usd:allow (observer_planner fork; not yet masked under the token display, see CONTINUATION.md)
 		fmt.Fprintf(&sb, "trend_vs_prior_%d_days: spend $%.2f -> $%.2f (%.1f%%), turns %d -> %d (%.1f%%), sessions %d -> %d, cache_hit_rate %.0f pts, error_rate %.1f%% -> %.1f%%, ttft_p95 %dms -> %dms\n",
 			tr.WindowDays, tr.SpendPriorUSD, tr.SpendUSD, tr.SpendDeltaPct,
 			tr.TurnsPrior, tr.Turns, tr.TurnsDeltaPct, tr.SessionsPrior, tr.Sessions,
@@ -49,6 +50,7 @@ func evidenceProjection(b briefing.Briefing) string {
 			if len(s.Models) > 0 {
 				var models []string
 				for _, m := range s.Models {
+					// no-bare-usd:allow (observer_planner fork; not yet masked under the token display, see CONTINUATION.md)
 					models = append(models, fmt.Sprintf("%s(%dturns,$%.2f)", m.Name, m.Turns, m.CostUSD))
 				}
 				sort.Strings(models)

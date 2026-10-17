@@ -7,24 +7,59 @@
 
 import { markRemoteAuthLost } from "@/lib/authLoss";
 import { getRemoteCSRF, isRemoteView, setRemoteCSRF } from "@/lib/remote";
+import { errorMachineSuffix } from "@/lib/remoteIdentity";
+import type {
+  InstanceInfo,
+  InstanceTestResult,
+  LOCSummaryResponse,
+  SessionLOCResponse,
+  SessionQualityResponse,
+  SessionTagsRequest,
+  SessionTagsResponse,
+  TagManageRequest,
+  TagManageResponse,
+  TagRollupResponse,
+} from "@/lib/types";
 
-export type QueryParams = Record<string, string | number | boolean | undefined>;
+// QueryParams values may be a plain scalar (one `k=v`) or a string ARRAY,
+// which serializes as a REPEATED key (`k=a&k=b`) rather than a joined value.
+// The repeated form is what /api/sessions?tag=…&tag=… expects for its AND
+// semantics; an empty array contributes nothing at all.
+export type QueryParams = Record<
+  string,
+  string | number | boolean | string[] | undefined
+>;
 
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly path: string,
-    body: string,
+    // The full response body. The message keeps only a 200-char excerpt; a
+    // caller that must read a structured error (the re-price card's
+    // `409 {"error":"plan_changed","plan":{...}}`) parses this instead.
+    public readonly body: string,
   ) {
-    super(`api ${status} ${path}: ${body.slice(0, 200)}`);
+    // T-425: on a remote machine's dashboard (opened through the instance
+    // switcher) every error names that machine, so it is never read as a
+    // fault on the machine the operator came from. Empty locally.
+    super(`api ${status} ${path}: ${body.slice(0, 200)}${errorMachineSuffix()}`);
   }
 }
 
-function buildUrl(path: string, params?: QueryParams): string {
+export function buildUrl(path: string, params?: QueryParams): string {
   if (!params) return path;
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === "" || v === false) continue;
+    if (Array.isArray(v)) {
+      // Repeated key, one entry per element — `append`, never `set`, or the
+      // last element would silently win over the rest.
+      for (const item of v) {
+        if (item === "") continue;
+        qs.append(k, item);
+      }
+      continue;
+    }
     qs.set(k, String(v));
   }
   const s = qs.toString();
@@ -42,6 +77,47 @@ type WhoAmI = { authenticated?: boolean; csrf?: string };
 // secret and /whoami is the probe itself, so treating either as evidence of a
 // lost session would fight the pairing gate for the screen (or recurse).
 const AUTH_PATHS = ["/api/remote/pair", "/api/remote/whoami"];
+
+// The owner-local management routes use one readable double-submit cookie for
+// every privileged panel. Several panels can mount together (Terminals loads
+// launch policy + sandbox settings in parallel), and an older daemon may rotate
+// that cookie on each GET. A token copied from a sibling response can therefore
+// be stale by the time its Save button is clicked. The cookie is deliberately
+// readable so the SPA can echo it; always prefer its CURRENT value at mutation
+// time. Newer daemons also reuse a valid cookie, making both sides convergent.
+const LOCAL_CONFIRM_COOKIE = "sb_remote_confirm";
+
+function currentLocalConfirmToken(fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const prefix = `${LOCAL_CONFIRM_COOKIE}=`;
+  for (const part of document.cookie.split(";")) {
+    const item = part.trim();
+    if (!item.startsWith(prefix)) continue;
+    const value = item.slice(prefix.length).trim();
+    return value || fallback;
+  }
+  return fallback;
+}
+
+// localConfirmHeaders returns the JSON + owner-local confirm headers every
+// dashboard write carries (review M3-05: the server checks the double-submit
+// token, the two-click arm is UI state only). When this tab holds no confirm
+// cookie yet, the command-job list (GET /api/jobs, Local) mints one first.
+// fetchJSON re-reads the cookie right before sending, so a token rotated by a
+// sibling panel is still current.
+export async function localConfirmHeaders(): Promise<Record<string, string>> {
+  let token = currentLocalConfirmToken("");
+  if (!token) {
+    try {
+      const res = await fetch("/api/jobs?mode=confirm-mint", { headers: { Accept: "application/json" } });
+      const body = (await res.json().catch(() => null)) as { confirm_token?: string } | null;
+      token = currentLocalConfirmToken(body?.confirm_token ?? "");
+    } catch {
+      // The write then answers 403 with "reload the panel", which is honest.
+    }
+  }
+  return { "Content-Type": "application/json", "X-Observer-Confirm": token };
+}
 
 function isAuthEndpoint(path: string): boolean {
   return AUTH_PATHS.some((p) => path === p || path.startsWith(`${p}?`));
@@ -108,6 +184,14 @@ export async function fetchJSON<T>(
   const buildInit = (csrfValue: string): RequestInit => {
     const headers = new Headers(init?.headers);
     headers.set("Accept", "application/json");
+    // Replace a response-captured owner-local confirm token with the latest
+    // cookie value immediately before fetch. This closes cross-panel rotation
+    // races without weakening the server's constant-time double-submit check.
+    const suppliedConfirm = headers.get("X-Observer-Confirm");
+    if (suppliedConfirm !== null) {
+      const currentConfirm = currentLocalConfirmToken(suppliedConfirm);
+      if (currentConfirm) headers.set("X-Observer-Confirm", currentConfirm);
+    }
     if (needsRemoteCSRF && csrfValue) headers.set("X-Remote-CSRF", csrfValue);
     return { ...init, headers };
   };
@@ -128,4 +212,232 @@ export async function fetchJSON<T>(
     throw new ApiError(res.status, url, body);
   }
   return res.json() as Promise<T>;
+}
+
+// ---------- session classification (tags / favorites / notes) ----------
+//
+// Thin typed wrappers over fetchJSON so every caller inherits the remote
+// CSRF + auth-recovery handling above rather than reaching for bare fetch.
+// docs/plans/session-classification-tags-plan-2026-07-31.md §4.
+
+const jsonPost = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+// fetchTagRollup returns the tag vocabulary plus per-tag session/cost/token
+// rollup. Also the source of the TagEditor's suggestion list.
+export function fetchTagRollup(signal?: AbortSignal): Promise<TagRollupResponse> {
+  return fetchJSON<TagRollupResponse>("/api/sessions/tags", undefined, { signal });
+}
+
+// postSessionTags mutates one session's tags/favorite/note/rating/title and
+// returns the server's post-mutation truth. `favorite`/`note`/`rating`/
+// `title` default to null = "unchanged"; pass a value only when the mutation
+// actually touches them (an empty string clears the note/title).
+export function postSessionTags(
+  sessionId: string,
+  patch: Partial<SessionTagsRequest>,
+): Promise<SessionTagsResponse> {
+  const body: SessionTagsRequest = {
+    add: patch.add ?? [],
+    remove: patch.remove ?? [],
+    favorite: patch.favorite ?? null,
+    note: patch.note ?? null,
+    rating: patch.rating ?? null,
+    title: patch.title ?? null,
+  };
+  return fetchJSON<SessionTagsResponse>(
+    `/api/session/${encodeURIComponent(sessionId)}/tags`,
+    undefined,
+    jsonPost(body),
+  );
+}
+
+// manageTags renames or deletes a tag across every session that carries it.
+// The request is rename XOR delete — the union type enforces it at the call
+// site so a body carrying both can't be constructed.
+export function manageTags(req: TagManageRequest): Promise<TagManageResponse> {
+  return fetchJSON<TagManageResponse>(
+    "/api/sessions/tags/manage",
+    undefined,
+    jsonPost(req),
+  );
+}
+
+// ---------- custom tag definitions ----------
+
+export interface TagDefinitionEntry {
+  definition: string;
+  category?: string;
+}
+export interface TagDefinitionsResponse {
+  definitions: Record<string, TagDefinitionEntry>;
+}
+
+// fetchTagDefinitions returns the user's CUSTOM tag definitions. Standard tag
+// definitions live in the in-code taxonomy (shared/lib/tagTaxonomy.ts), not
+// here — this is only the glossary a user authored for their own tags.
+export function fetchTagDefinitions(
+  signal?: AbortSignal,
+): Promise<TagDefinitionsResponse> {
+  return fetchJSON<TagDefinitionsResponse>("/api/tags/definitions", undefined, {
+    signal,
+  });
+}
+
+// postTagDefinition upserts a custom tag's definition; an empty definition
+// clears the stored row.
+export function postTagDefinition(
+  tag: string,
+  definition: string,
+  category?: string,
+): Promise<{ ok: boolean }> {
+  return fetchJSON<{ ok: boolean }>(
+    "/api/tags/definitions",
+    undefined,
+    jsonPost({ tag, definition, category: category ?? "" }),
+  );
+}
+
+// ---------- instance switcher (remote Observer installs) ----------
+//
+// Thin typed wrappers over fetchJSON, matching the tag helpers above so every
+// caller inherits the remote CSRF + auth-recovery handling.
+//
+// Both verbs are NAME-ONLY: the profile name travels in the PATH and the body
+// is empty, because the daemon resolves the host, the key, the jump host and
+// the remote dashboard port from its own operator-authored config. There is
+// deliberately no shape here for a caller to pass a host or a port — see
+// docs/ssh-terminals.md "Instance switcher".
+
+// connectInstance opens (or re-uses) the SSH local port forward for a named
+// instance and returns the resulting row, including the loopback port to open.
+export function connectInstance(name: string): Promise<InstanceInfo> {
+  return fetchJSON<InstanceInfo>(
+    `/api/instances/${encodeURIComponent(name)}/connect`,
+    undefined,
+    { method: "POST" },
+  );
+}
+
+// disconnectInstance closes the forward. Idempotent server-side, so a stale UI
+// cannot produce a spurious failure.
+export function disconnectInstance(name: string): Promise<InstanceInfo> {
+  return fetchJSON<InstanceInfo>(
+    `/api/instances/${encodeURIComponent(name)}/disconnect`,
+    undefined,
+    { method: "POST" },
+  );
+}
+
+// testInstance runs the bounded, non-interactive connectivity probe
+// (known_hosts + auth) for a named instance without opening a forward. Same
+// name-only-in-path shape as connect/disconnect.
+export function testInstance(name: string): Promise<InstanceTestResult> {
+  return fetchJSON<InstanceTestResult>(
+    `/api/instances/${encodeURIComponent(name)}/test`,
+    undefined,
+    { method: "POST" },
+  );
+}
+
+// ---------- lines-of-code authorship ----------
+//
+// docs/plans/lines-of-code-tracking-plan-2026-09-07.md §3.2. Both endpoints
+// are plain reads over node-local `file_changes`; the components normally
+// reach them through useApi (which owns abort + polling), and these helpers
+// exist for the imperative call sites and to keep the paths in one place.
+
+// sessionLOCPath is the per-session authorship read. Exported so useApi
+// callers build the same URL the helper does.
+export function sessionLOCPath(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/loc`;
+}
+
+// sessionOrgIntelPath is the per-session org-served Cloud Intelligence read —
+// the result this node last pulled back from the org server, cached locally.
+export function sessionOrgIntelPath(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/org-intel`;
+}
+
+// sessionQualityPath is the per-session quality score read (GET) and
+// score-now (POST) route.
+export function sessionQualityPath(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/quality`;
+}
+
+// scoreSessionNow asks the daemon to score one session immediately and
+// persist it; it answers the same body a GET does.
+export function scoreSessionNow(sessionId: string): Promise<SessionQualityResponse> {
+  return fetchJSON<SessionQualityResponse>(sessionQualityPath(sessionId), undefined, {
+    method: "POST",
+  });
+}
+
+// fetchSessionLOC returns one session's line-authorship buckets.
+export function fetchSessionLOC(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionLOCResponse> {
+  return fetchJSON<SessionLOCResponse>(sessionLOCPath(sessionId), undefined, {
+    signal,
+  });
+}
+
+// LOC_SUMMARY_PATH is the window rollup. The endpoint takes `days` or the
+// closed since/until range (windowRange, T-550); `project` wants a NUMERIC
+// project id, which the dashboard's project filter (a root path) cannot
+// supply - so callers scope by window and say so rather than passing a
+// filter the server would silently drop.
+export const LOC_SUMMARY_PATH = "/api/loc/summary";
+
+// fetchLOCSummary returns the window rollup. `projectID` is optional and is
+// the numeric project id, never a project root path.
+export function fetchLOCSummary(
+  days: number,
+  projectID?: number,
+  signal?: AbortSignal,
+): Promise<LOCSummaryResponse> {
+  return fetchJSON<LOCSummaryResponse>(
+    LOC_SUMMARY_PATH,
+    { days, project: projectID },
+    { signal },
+  );
+}
+
+// apiReason extracts the SERVER's own message from an ApiError so the UI can
+// show the honest, actionable reason (notably the known_hosts guidance) rather
+// than a generic "request failed". Falls back to the raw error text.
+export function apiReason(e: unknown): string {
+  if (e instanceof ApiError) {
+    const marker = `${e.path}: `;
+    const at = e.message.indexOf(marker);
+    if (at >= 0) {
+      const body = e.message.slice(at + marker.length).trim();
+      if (body) return body;
+    }
+    return e.message;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+// sessionCommitsPath is the per-session "Commits" read: every git commit
+// this session's prompts reached, with the commit's owning session
+// (docs/projects-page.md "Commit ownership").
+export function sessionCommitsPath(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/commits`;
+}
+
+// fetchSessionCommits returns the commits one session contributed to.
+export function fetchSessionCommits(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<import("@/lib/types").SessionCommitsResponse> {
+  return fetchJSON<import("@/lib/types").SessionCommitsResponse>(
+    sessionCommitsPath(sessionId),
+    undefined,
+    { signal },
+  );
 }

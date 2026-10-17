@@ -73,6 +73,9 @@ func TestBudgetLookupTTLCache(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	g := newTestGuard(t, budgetCfg("observe", false), nil)
+	// The cache ages on the guard's clock, not the event's (T-413).
+	clock := newFakeBudgetClock(now)
+	g.budgetClock = clock.Now
 	calls := 0
 	g.SetBudgetLookup(func(string) (BudgetSnapshot, bool) { calls++; return BudgetSnapshot{SessionUSD: 1.0}, true })
 
@@ -83,6 +86,7 @@ func TestBudgetLookupTTLCache(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("calls within TTL = %d, want 1", calls)
 	}
+	clock.Advance(budgetCacheTTL + time.Second)
 	g.EvaluateActions([]ActionInput{budgetIn("s1", "echo c", now.Add(budgetCacheTTL+time.Second))})
 	if calls != 2 {
 		t.Fatalf("calls after TTL = %d, want 2", calls)
@@ -90,6 +94,100 @@ func TestBudgetLookupTTLCache(t *testing.T) {
 	g.EvaluateActions([]ActionInput{budgetIn("s9", "echo d", now)})
 	if calls != 3 {
 		t.Fatalf("calls for a second session = %d, want 3", calls)
+	}
+}
+
+func TestHardProxyAdmissionBypassesBudgetCache(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	cfg := guardCfg()
+	cfg.Mode = "enforce"
+	g := newTestGuard(t, cfg, nil)
+	eff := cfg.Budget
+	eff.DailyUSD = 10
+	eff.Hard = true
+	if err := g.ApplyOrgBudget(eff, nil, false, policy.BudgetProtection{DailyUSD: true}, ""); err != nil {
+		t.Fatalf("ApplyOrgBudget: %v", err)
+	}
+
+	// The second value represents spend committed by another session after
+	// this session's first admission lookup. A node-wide daily cap must see it
+	// on the very next request, even though this session's cache is still warm.
+	daily := 9.0
+	calls := 0
+	g.SetBudgetLookup(func(string) (BudgetSnapshot, bool) {
+		calls++
+		return BudgetSnapshot{DailyUSD: daily}, true
+	})
+	var first ProxyRequestResult
+	g.scanBudget(g.set.Load(), &first, "s1", "api.anthropic.com", now)
+	if first.Deny {
+		t.Fatalf("first request unexpectedly denied: %+v", first)
+	}
+	// Exactly exhausted is already unavailable for another managed request;
+	// the controller must not wait for one more request to exceed the cap.
+	daily = 10
+	var second ProxyRequestResult
+	g.scanBudget(g.set.Load(), &second, "s1", "api.anthropic.com", now.Add(time.Second))
+	if !second.Deny || second.DenyRuleID != "B-602" {
+		t.Fatalf("fresh daily total was not enforced: %+v", second)
+	}
+	if calls != 2 {
+		t.Errorf("hard admission lookup calls = %d, want 2", calls)
+	}
+}
+
+func TestUnprotectedProxyAdmissionKeepsBudgetCache(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	g := newTestGuard(t, budgetCfg("enforce", true), nil)
+	calls := 0
+	g.SetBudgetLookup(func(string) (BudgetSnapshot, bool) {
+		calls++
+		return BudgetSnapshot{SessionUSD: 1}, true
+	})
+	for i := 0; i < 2; i++ {
+		var res ProxyRequestResult
+		g.scanBudget(g.set.Load(), &res, "s1", "api.anthropic.com", now.Add(time.Duration(i)*time.Second))
+	}
+	if calls != 1 {
+		t.Errorf("unprotected admission lookup calls = %d, want cached 1", calls)
+	}
+}
+
+func TestBudgetOnlyEvaluationCannotBeMaskedByCustomAPIRequestRule(t *testing.T) {
+	t.Parallel()
+	userPolicy := `
+[[rule]]
+id = "U-API-CRITICAL"
+category = "destructive"
+severity = "critical"
+decision = "deny"
+applies_to = ["api_request"]
+match.session_cost_usd_gt = 0.5
+`
+	cfg := budgetCfg("enforce", true)
+	g := newTestGuard(t, cfg, map[string]string{
+		"/home/u/.observer/guard-policy.toml": userPolicy,
+	})
+	g.SetBudgetLookup(func(string) (BudgetSnapshot, bool) {
+		return BudgetSnapshot{SessionUSD: 6}, true
+	})
+
+	// The general engine still evaluates the complete table, where the
+	// critical custom row wins the normal severity tie-break.
+	ordinary, err := g.Evaluate(policy.Event{Kind: policy.KindAPIRequest, SessionCostUSD: 6})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if ordinary.RuleID != "U-API-CRITICAL" {
+		t.Fatalf("ordinary evaluation = %s, want custom rule", ordinary.RuleID)
+	}
+
+	var res ProxyRequestResult
+	g.scanBudget(g.set.Load(), &res, "s1", "api.anthropic.com", time.Now().UTC())
+	if !res.Deny || res.DenyRuleID != "B-601" {
+		t.Fatalf("budget admission was masked by custom rule: %+v", res)
 	}
 }
 

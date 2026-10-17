@@ -1,3 +1,5 @@
+//go:build !sbo_omit_adapter_codex && !sbo_omit_adapter_open_interpreter
+
 package hook
 
 import (

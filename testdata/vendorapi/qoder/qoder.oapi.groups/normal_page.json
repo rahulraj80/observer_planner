@@ -1,0 +1,18 @@
+{
+  "groups": [
+    {
+      "id": "1c8f3ee2-b970-4b61-93f9-f8be080ae945",
+      "organizationId": "org_xxx",
+      "displayName": "Platform Team",
+      "description": "Platform maintainers",
+      "source": "manual",
+      "isManaged": false,
+      "creatorId": "550e8400-e29b-41d4-a716-446655440000",
+      "createdAt": "2026-08-01T08:00:00Z",
+      "updatedAt": "2026-08-01T08:00:00Z",
+      "memberCount": 2
+    }
+  ],
+  "maxResults": 20,
+  "nextToken": "cursor_from_response"
+}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_adapter_cursor
+
 package hook
 
 import (
@@ -7,8 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
@@ -27,6 +27,14 @@ type CursorSink interface {
 	UpdateActionOutcome(ctx context.Context, sourceFile, sourceEventID string, success bool, errorMessage string, durationMs int64, toolOutput, toolName, target string) (int64, error)
 }
 
+// cursorHookBodyLimit (B2, final-fix review) bounds a single Cursor
+// hook payload read — raised from the original 2 MiB so a genuinely
+// large beforeSubmitPrompt prompt isn't truncated into a guard bypass
+// (see HandleCursorEventGuarded's own truncation detection). Every
+// other cursor event shares this same read/limit, so it is sized for
+// the largest one, not the common case.
+const cursorHookBodyLimit = 8 * 1024 * 1024
+
 // HandleCursorEvent reads a Cursor hook payload from stdin, replies on
 // stdout immediately so the host tool never waits, then synchronously
 // inserts the event into the observer DB with a strict deadline.
@@ -38,7 +46,19 @@ type CursorSink interface {
 // Spec P1: never break the host tool. All error paths log to stderr and
 // return without panicking.
 func HandleCursorEvent(eventName string, sink CursorSink, sc *scrub.Scrubber, stdin io.Reader, stdout, stderr io.Writer, deadline time.Duration) {
-	HandleCursorEventGuarded(eventName, nil, nil, sink, sc, stdin, stdout, stderr, deadline)
+	HandleCursorEventGuarded(eventName, nil, nil, sink, sc, stdin, false, stdout, stderr, deadline)
+}
+
+// CursorEvaluator is HandleCursorEventGuarded's view of the guard:
+// guard.Evaluator for the pre-execution shell/MCP/file channels, plus
+// PromptEvaluator + the ActionVerdictFromPrompt bridge for
+// beforeSubmitPrompt (Part B — the prompt-submit intervention hook
+// lane). *guard.Guard implements all three; a nil CursorEvaluator
+// degrades every channel to the unguarded receiver.
+type CursorEvaluator interface {
+	guard.Evaluator
+	PromptEvaluator
+	ActionVerdictFromPrompt(pv guard.PromptVerdict, em guard.Emission, input guard.ActionInput) guard.ActionVerdict
 }
 
 // HandleCursorEventGuarded is HandleCursorEvent with the guard seam
@@ -52,12 +72,46 @@ func HandleCursorEvent(eventName string, sink CursorSink, sc *scrub.Scrubber, st
 // goes out first per the §6.4 budget; the forensics JSONL row carries
 // the verdict either way).
 //
+// beforeSubmitPrompt (Part B) is special-cased to the shared
+// prompt-submit seam BEFORE any of the above: its reply shape is
+// {continue,user_message}, NOT the {permission,continue} shape every
+// other cursor channel here emits (contract §6.3's wire-shape trap —
+// HandleCursorEventGuarded used to encode ONE cursorReply struct for
+// every event, which is wrong for this one).
+//
 // gd nil (or a non-pre-execution event) degrades to exactly the
 // unguarded behavior. persist is the same nil-tolerant lazy-DB
 // callback shape HandleGuarded takes.
-func HandleCursorEventGuarded(eventName string, gd guard.Evaluator, persist func(guard.ActionVerdict), sink CursorSink, sc *scrub.Scrubber, stdin io.Reader, stdout, stderr io.Writer, deadline time.Duration) {
-	body, _ := io.ReadAll(io.LimitReader(stdin, 2*1024*1024))
-	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+//
+// callerBodyTruncated (B2, final-fix review) lets a caller that
+// already read+bounded stdin itself (cmd/observer/hook.go's
+// handleCursorHook reads once so the same bytes can also feed the
+// post-reply pidbridge seed) report that ITS OWN read already hit its
+// limit — this function's own internal read below can't rediscover
+// that fact once stdin has been re-wrapped as a fixed-size
+// bytes.Reader, since a length exactly at the limit is indistinguishable
+// from "the payload was exactly that long". A direct caller that hands
+// this function the raw, never-pre-truncated stdin (there are none in
+// this codebase today, but the exported signature doesn't forbid it)
+// passes false and relies entirely on this function's own detection
+// below; the two signals are OR'd together either way.
+func HandleCursorEventGuarded(eventName string, gd CursorEvaluator, persist func(guard.ActionVerdict), sink CursorSink, sc *scrub.Scrubber, stdin io.Reader, callerBodyTruncated bool, stdout, stderr io.Writer, deadline time.Duration) {
+	buf, _ := io.ReadAll(io.LimitReader(stdin, cursorHookBodyLimit+1))
+	truncated := callerBodyTruncated
+	if int64(len(buf)) > cursorHookBodyLimit {
+		buf = buf[:cursorHookBodyLimit]
+		truncated = true
+	}
+	body := bytes.TrimPrefix(buf, []byte{0xEF, 0xBB, 0xBF})
+
+	if eventName == cursor.EventBeforeSubmitPrompt {
+		handleCursorPromptSubmit(body, truncated, gd, persist, sink, sc, stdout, stderr, deadline)
+		return
+	}
+	if dialect, ok := cursorToolGateEvents[eventName]; ok {
+		handleCursorToolGate(eventName, dialect, body, truncated, gd, persist, sink, sc, stdout, stderr, deadline)
+		return
+	}
 
 	permission := "allow"
 	var verdict guard.ActionVerdict
@@ -110,10 +164,81 @@ func HandleCursorEventGuarded(eventName string, gd guard.Evaluator, persist func
 	}
 }
 
+// cursorToolGateEvents maps the Cursor events answered through the
+// tool-gate table (HandleToolGate) to their dialect: the universal
+// preToolUse, whose reply shape (permission + user/agent message) and
+// scope (the classes the per-tool before* events do not gate) differ from
+// the before* permission events below.
+var cursorToolGateEvents = map[string]string{
+	cursor.EventPreToolUse: ToolGateDialectCursor,
+}
+
+// handleCursorToolGate answers a tool-gate event through HandleToolGate,
+// then runs the SAME post-reply capture every other cursor channel gets (a
+// denied attempt is still an attempt worth recording). gd nil (guard off)
+// is the dialect's allow, byte-identical to the unguarded reply.
+func handleCursorToolGate(eventName, dialect string, body []byte, truncated bool, gd CursorEvaluator, persist func(guard.ActionVerdict), sink CursorSink, sc *scrub.Scrubber, stdout, stderr io.Writer, deadline time.Duration) {
+	var ev guard.Evaluator
+	if gd != nil {
+		ev = gd
+	}
+	res := HandleToolGate(ToolGateRequest{
+		Tool: models.ToolCursor, Dialect: dialect, NativeEvent: eventName,
+		Label: "cursor:" + eventName, Body: body, Truncated: truncated,
+	}, ev, persist, stdout, stderr)
+	if !res.Replied {
+		WriteToolGateAllow(dialect, stdout)
+	}
+	processCursorEvent(eventName, body, sink, sc, stderr, deadline)
+	if res.RecordAfterReply != nil {
+		res.RecordAfterReply()
+	}
+}
+
+// handleCursorPromptSubmit routes beforeSubmitPrompt through
+// HandlePromptSubmitGuarded (the shared dialect table), then runs the
+// SAME post-reply capture (processCursorEvent) every other cursor
+// channel gets — a denied prompt is still an attempt worth recording,
+// same posture as the shell/MCP/file channels above. gd nil degrades
+// to the unguarded reply ({"continue":true}), matching this event's
+// documented allow shape.
+func handleCursorPromptSubmit(body []byte, bodyTruncated bool, gd CursorEvaluator, persist func(guard.ActionVerdict), sink CursorSink, sc *scrub.Scrubber, stdout, stderr io.Writer, deadline time.Duration) {
+	promptPersist := func(pv guard.PromptVerdict, em guard.Emission, sessionID string) {
+		if gd == nil || persist == nil {
+			return
+		}
+		persist(gd.ActionVerdictFromPrompt(pv, em, guard.ActionInput{
+			SessionID: sessionID, Tool: models.ToolCursor,
+			ActionType: models.ActionUserPrompt, Timestamp: time.Now().UTC(),
+		}))
+	}
+	// Cursor's dialect always replies via JSON (blockExitCode is
+	// zero — see promptDialects[PromptDialectCursor]), so the
+	// returned exitCode is always 0 and there is nothing for this
+	// caller to act on; Cursor's own hook process always exits 0.
+	handled, after, _ := HandlePromptSubmitGuarded(models.ToolCursor, PromptDialectCursor, cursor.EventBeforeSubmitPrompt, body, bodyTruncated, gd, promptPersist, stdout, stderr)
+	if !handled {
+		_ = json.NewEncoder(stdout).Encode(promptCursorReply{Continue: true})
+	}
+	processCursorEvent(cursor.EventBeforeSubmitPrompt, body, sink, sc, stderr, deadline)
+	if after != nil {
+		after()
+	}
+}
+
+// CaptureCursorEvent is the post-reply capture half of the cursor hook,
+// for a caller that already replied (the tool-gate path answers preToolUse
+// before it opens the DB).
+func CaptureCursorEvent(eventName string, body []byte, sink CursorSink, sc *scrub.Scrubber, stderr io.Writer, deadline time.Duration) {
+	processCursorEvent(eventName, body, sink, sc, stderr, deadline)
+}
+
 // processCursorEvent is the post-reply capture half of the cursor
 // hook: stop-event token+transcript ingestion, after-event outcome
 // enrichment, and before-event row insertion.
 func processCursorEvent(eventName string, body []byte, sink CursorSink, sc *scrub.Scrubber, stderr io.Writer, deadline time.Duration) {
+	defer recordCursorAccounts(eventName, body, sink, stderr, deadline, time.Now().UTC())
+
 	if eventName == cursor.EventStop {
 		tk, ok, err := cursor.BuildStopTokenEvent(body)
 		if err != nil {
@@ -147,23 +272,29 @@ func processCursorEvent(eventName string, body []byte, sink CursorSink, sc *scru
 		// conversation's store.db turn blobs. Resolve it so token rows get
 		// the concrete model the cost engine can price. Gated on the
 		// sentinel, so explicit-model sessions pay no store.db I/O.
-		if tk.Model == "" || strings.EqualFold(tk.Model, "default") || strings.EqualFold(tk.Model, "auto") {
-			if home, err := os.UserHomeDir(); err == nil {
-				if m := cursor.ResolveModelFromStore(home, tk.SessionID); m != "" {
-					tk.Model = m
-				}
-			}
-		}
+		tk.Model = cursor.ResolvePlaceholderModelFor(tk.Model, tk.SessionID, tk.MessageID)
 		if deadline <= 0 {
 			deadline = 250 * time.Millisecond
 		}
+		// Tokens FIRST, alone, under their own budget. The billed usage
+		// is the one fact on this event that nothing else can recover
+		// live; bundling it into the transcript-row Ingest put it BEHIND
+		// InsertActions + FTS indexing (store.ingest inserts tokens
+		// last, in their own transaction), so a busy DB committed the
+		// actions and then lost the token row to the deadline — the
+		// 2026-09-19 8be96a3f drop (docs: S10-CURSOR diagnosis).
+		ingestCursorTokens(sink, eventName, []models.TokenEvent{tk}, deadline, stderr)
 		events, err := cursor.BuildStopTranscriptEvents(body, sc, tk.Timestamp)
 		if err != nil {
 			fmt.Fprintf(stderr, "observer-hook: cursor transcript %s: %v\n", eventName, err)
 		}
+		if len(events) == 0 {
+			return
+		}
+		resolveCursorRoots(sink, events, nil, deadline, stderr)
 		ctx, cancel := context.WithTimeout(context.Background(), deadline)
 		defer cancel()
-		if _, err := sink.Ingest(ctx, events, []models.TokenEvent{tk}, store.IngestOptions{}); err != nil {
+		if _, err := sink.Ingest(ctx, events, nil, store.IngestOptions{}); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				fmt.Fprintf(stderr, "observer-hook: cursor %s insert deadline exceeded\n", eventName)
 			} else {
@@ -187,11 +318,18 @@ func processCursorEvent(eventName string, body []byte, sink CursorSink, sc *scru
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), deadline)
 		defer cancel()
+		// The tool's output body is persisted (raw_tool_output + FTS) and
+		// store.UpdateActionOutcome has no scrub backstop — scrub it here,
+		// the same posture every other content field on this path has.
+		output := outcome.Output
+		if sc != nil {
+			output = sc.String(output)
+		}
 		n, err := sink.UpdateActionOutcome(
 			ctx,
 			outcome.SourceFile, outcome.SourceEventID,
 			outcome.Success, outcome.ErrorMessage, outcome.DurationMs,
-			outcome.Output, outcome.ToolName, outcome.Target,
+			output, outcome.ToolName, outcome.Target,
 		)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
@@ -209,6 +347,17 @@ func processCursorEvent(eventName string, body []byte, sink CursorSink, sc *scru
 		return
 	}
 
+	if deadline <= 0 {
+		deadline = 250 * time.Millisecond
+	}
+	// Cursor 3.4+ carries per-generation token usage on afterAgentResponse
+	// (identical to stop's; they dedup by generation id). Extract it FIRST,
+	// alone, and independently of the assistant-message row: an
+	// empty-text response mints no row but still carries billed usage.
+	if eventName == cursor.EventAfterAgentResponse {
+		ingestCursorTokens(sink, eventName, cursorResponseTokens(body, stderr), deadline, stderr)
+	}
+
 	ev, ok, err := cursor.BuildEvent(eventName, body, sc)
 	if err != nil {
 		fmt.Fprintf(stderr, "observer-hook: cursor build %s: %v\n", eventName, err)
@@ -217,32 +366,98 @@ func processCursorEvent(eventName string, body []byte, sink CursorSink, sc *scru
 	if !ok {
 		return
 	}
+	if sink == nil {
+		// The database-free reply path (an afterAgentThought that only
+		// stashes): a row the builder still produced (a Cloud Agent's
+		// thought, cursor.ThoughtMintsRow) is landed by the caller's own
+		// post-reply capture, never here.
+		return
+	}
 	if ev.ProjectRoot == "" || ev.SessionID == "" {
 		fmt.Fprintf(stderr, "observer-hook: cursor %s missing project_root or session_id\n", eventName)
 		return
 	}
+	evs := []models.ToolEvent{ev}
+	resolveCursorRoots(sink, evs, nil, deadline, stderr)
+	ev = evs[0]
 
-	// Cursor 3.4+ carries per-generation token usage on afterAgentResponse
-	// (it no longer fires the `stop` hook that the block above expects), so
-	// extract usage here alongside the assistant-message row — otherwise
-	// token_usage stays empty for every modern cursor session.
-	var toks []models.TokenEvent
-	if eventName == cursor.EventAfterAgentResponse {
-		toks = cursorResponseTokens(body, stderr)
-	}
-
-	if deadline <= 0 {
-		deadline = 250 * time.Millisecond
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	if _, err := sink.Ingest(ctx, []models.ToolEvent{ev}, toks, store.IngestOptions{}); err != nil {
+	if _, err := sink.Ingest(ctx, []models.ToolEvent{ev}, nil, store.IngestOptions{}); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			fmt.Fprintf(stderr, "observer-hook: cursor %s insert deadline exceeded\n", eventName)
 		} else {
 			fmt.Fprintf(stderr, "observer-hook: cursor %s insert: %v\n", eventName, err)
 		}
 		return
+	}
+}
+
+// cursorTokenDeadlineFloor is the minimum budget for the token-only
+// write. The stdout reply has already gone out before any DB work, and
+// Cursor's own per-hook timeout is 60s ("Running hook 1 with timeout
+// 60000ms" in its hooks output log), so a few seconds here cost the
+// agent loop nothing on a healthy DB and keep the billed row on a busy
+// one. Action rows keep the configured [observer.hooks] timeout_ms.
+const cursorTokenDeadlineFloor = 3 * time.Second
+
+// ingestCursorTokens writes cursor token events in a token-only
+// Ingest (no actions, no FTS, no outcome loop — one upsert
+// transaction) under max(deadline, cursorTokenDeadlineFloor). Failures
+// are reported on stderr, which Cursor records in its hooks output log;
+// the hooks-log replay reader (internal/adapter/cursor/hookslog.go)
+// recovers anything still lost.
+func ingestCursorTokens(sink CursorSink, eventName string, toks []models.TokenEvent, deadline time.Duration, stderr io.Writer) {
+	if len(toks) == 0 {
+		return
+	}
+	if deadline < cursorTokenDeadlineFloor {
+		deadline = cursorTokenDeadlineFloor
+	}
+	resolveCursorRoots(sink, nil, toks, deadline, stderr)
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	if _, err := sink.Ingest(ctx, nil, toks, store.IngestOptions{}); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Fprintf(stderr, "observer-hook: cursor %s token insert deadline exceeded\n", eventName)
+		} else {
+			fmt.Fprintf(stderr, "observer-hook: cursor %s token insert: %v\n", eventName, err)
+		}
+	}
+}
+
+// cursorRootResolver is the optional sink capability that resolves a
+// session's stored project root; *store.Store implements it
+// (ProjectRootForSession). A sink without it (test fakes) resolves
+// batch-locally only.
+type cursorRootResolver interface {
+	ProjectRootForSession(ctx context.Context, sessionID string) (string, error)
+}
+
+// resolveCursorRoots rewrites the "[cursor]" placeholder on root-less
+// events/tokens to the session's real root when the store knows one, so
+// a root-less payload never moves a folder session onto the placeholder
+// (store.UpsertSession overwrites project_id). It costs one indexed
+// lookup, and only when a placeholder is present.
+func resolveCursorRoots(sink CursorSink, events []models.ToolEvent, toks []models.TokenEvent, deadline time.Duration, stderr io.Writer) {
+	needs := false
+	for _, e := range events {
+		needs = needs || e.ProjectRoot == cursor.SyntheticProjectRoot
+	}
+	for _, t := range toks {
+		needs = needs || t.ProjectRoot == cursor.SyntheticProjectRoot
+	}
+	if !needs {
+		return
+	}
+	var lookup cursor.SessionRootLookup
+	if r, ok := sink.(cursorRootResolver); ok {
+		lookup = r.ProjectRootForSession
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	if err := cursor.ResolveSyntheticRoots(ctx, events, toks, lookup); err != nil {
+		fmt.Fprintf(stderr, "observer-hook: %v\n", err)
 	}
 }
 
@@ -270,22 +485,8 @@ func cursorResponseTokens(body []byte, stderr io.Writer) []models.TokenEvent {
 		dumpCursorStopReject(body, "afterAgentResponse missing_session_id")
 		return nil
 	}
-	if tk.Model == "" || strings.EqualFold(tk.Model, "default") || strings.EqualFold(tk.Model, "auto") {
-		if home, err := os.UserHomeDir(); err == nil {
-			if m := cursor.ResolveModelFromStore(home, tk.SessionID); m != "" {
-				tk.Model = m
-			}
-		}
-	}
+	tk.Model = cursor.ResolvePlaceholderModelFor(tk.Model, tk.SessionID, tk.MessageID)
 	return []models.TokenEvent{tk}
-}
-
-// cursorReply is the response shape we emit. Cursor accepts both
-// "permission" (for tool gating) and "continue" (for prompt gating); extra
-// keys are ignored, so a single reply works across all events.
-type cursorReply struct {
-	Permission string `json:"permission,omitempty"`
-	Continue   bool   `json:"continue,omitempty"`
 }
 
 // BuildCursorEvent extracts a policy.Event from a Cursor pre-execution
@@ -319,14 +520,51 @@ func BuildCursorEvent(eventName string, body []byte, sc *scrub.Scrubber) (policy
 	if !evaluable {
 		return policy.Event{}, false
 	}
+	caps.Sandboxed = sandboxedChild()
+	// cursor.SyntheticProjectRoot is a storage placeholder for a
+	// conversation with NO workspace folder, not a directory: the
+	// boundary rules (R-150/151, T-502) must see the honest "no project
+	// root" they saw before the placeholder existed, never evaluate
+	// paths against "[cursor]".
+	projectRoot := ev.ProjectRoot
+	if projectRoot == cursor.SyntheticProjectRoot {
+		projectRoot = ""
+	}
 	return policy.Event{
 		Kind:        kind,
 		ActionType:  ev.ActionType,
 		Tool:        models.ToolCursor,
 		Target:      ev.Target,
-		ProjectRoot: ev.ProjectRoot,
+		ProjectRoot: projectRoot,
 		SessionID:   ev.SessionID,
 		Caps:        caps,
 		Now:         time.Now().UTC(),
 	}, true
+}
+
+// recordCursorAccounts also runs for after-events and stops without usage.
+// The guard reply precedes this optional evidence write on every path.
+//
+// The same deferred, best-effort ingest also carries the payload's Cursor
+// build (cursor_version, T-784) through IngestOptions.SessionToolVersions,
+// the one tool-version seam. It runs AFTER the event's own rows landed, so
+// the session row usually exists; when it does not yet, the stamp is a
+// silent no-op and the next event (or the hooks-log replay) fills it.
+func recordCursorAccounts(eventName string, body []byte, sink CursorSink, stderr io.Writer, deadline time.Duration, at time.Time) {
+	observations := cursor.BuildAccountObservations(eventName, body, at)
+	var versions []models.SessionToolVersion
+	if tv, ok := cursor.SessionToolVersionFromHook(body); ok {
+		versions = []models.SessionToolVersion{tv}
+	}
+	if (len(observations) == 0 && len(versions) == 0) || sink == nil {
+		return
+	}
+	if deadline <= 0 {
+		deadline = 250 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	if _, err := sink.Ingest(ctx, nil, nil, store.IngestOptions{ToolAccounts: observations, SessionToolVersions: versions}); err != nil {
+		fmt.Fprintf(stderr, "observer-hook: cursor account capture: %v\n", err)
+	}
 }

@@ -1,0 +1,6 @@
+{
+  "title": "Unauthorized",
+  "detail": "Missing or invalid API key",
+  "status": 401,
+  "requestId": "req_synth0001"
+}

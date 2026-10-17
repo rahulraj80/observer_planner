@@ -21,13 +21,6 @@ func fixturePath(t *testing.T, rel string) string {
 	return abs
 }
 
-func TestName(t *testing.T) {
-	t.Parallel()
-	if got := New().Name(); got != models.ToolCowork {
-		t.Fatalf("Name=%q want %q", got, models.ToolCowork)
-	}
-}
-
 // TestIsSessionFile_RequiresAuditBasename pins the shape gate.
 // Only files named exactly audit.jsonl inside a local_<id>/ dir count.
 func TestIsSessionFile_RequiresAuditBasename(t *testing.T) {
@@ -235,6 +228,78 @@ func TestParseSessionFile_ModelUsageEmitsTokenEventPerModel(t *testing.T) {
 	// — the haiku invocations Cowork does internally never land in
 	// audit.jsonl as assistant rows. Token capture from modelUsage is
 	// what bridges that visibility gap.
+
+	// duration_api_ms is an UNDIVIDED total across every model in this
+	// 2-model result — observer has no way to split it, so neither
+	// model's TokenEvent gets a GenMs stamp.
+	if opus.GenMs != 0 || opus.GenBasis != "" || opus.GenTimingV != 0 {
+		t.Errorf("opus GenMs/GenBasis/GenTimingV = %d/%q/%d, want zero value (2-model result, undivided duration)", opus.GenMs, opus.GenBasis, opus.GenTimingV)
+	}
+	if haiku.GenMs != 0 || haiku.GenBasis != "" || haiku.GenTimingV != 0 {
+		t.Errorf("haiku GenMs/GenBasis/GenTimingV = %d/%q/%d, want zero value (2-model result, undivided duration)", haiku.GenMs, haiku.GenBasis, haiku.GenTimingV)
+	}
+}
+
+// writeSingleModelAuditFixture lays out a minimal local_<id>/audit.jsonl
+// with ONE `result` record carrying exactly one modelUsage entry, so
+// duration_api_ms unambiguously covers that one model's own generation.
+func writeSingleModelAuditFixture(t *testing.T, durationAPIMs string) (root, auditPath string) {
+	t.Helper()
+	root = t.TempDir()
+	instDir := filepath.Join(root, "cowork-single", "dev-x", "local_single-model-0001")
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	line := `{"type":"result","uuid":"ures-single","session_id":"22222222-3333-4444-5555-666666666666",` +
+		`"is_error":false,"duration_ms":9000,` + durationAPIMs +
+		`"result":"Done.","total_cost_usd":0.01,"stop_reason":"end_turn",` +
+		`"modelUsage":{"claude-opus-4-6":{"inputTokens":50,"outputTokens":20,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"webSearchRequests":0,"costUSD":0.01,"contextWindow":200000,"maxOutputTokens":32000}},` +
+		`"_audit_timestamp":"2026-05-15T10:00:10.000Z"}`
+	auditPath = filepath.Join(instDir, "audit.jsonl")
+	if err := os.WriteFile(auditPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	return root, auditPath
+}
+
+// TestParseSessionFile_SingleModelResultGenMs is table-driven over
+// rec.DurationAPIMs ("duration_api_ms", adapter.go ~L243) -> TokenEvent.
+// GenMs, for a result with exactly ONE model in modelUsage — the only
+// shape where the whole-batch duration unambiguously belongs to that one
+// model's own tokens.
+func TestParseSessionFile_SingleModelResultGenMs(t *testing.T) {
+	tests := []struct {
+		name          string
+		durationField string // e.g. `"duration_api_ms":7000,` or "" to omit
+		wantStamp     bool
+		wantGenMs     int64
+	}{
+		{"positive stamps verbatim (already ms)", `"duration_api_ms":7000,`, true, 7000},
+		{"field omitted leaves unset", "", false, 0},
+		{"zero leaves unset", `"duration_api_ms":0,`, false, 0},
+		{"negative leaves unset", `"duration_api_ms":-5,`, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, auditPath := writeSingleModelAuditFixture(t, tt.durationField)
+			a := NewWithOptions(nil, root)
+			res, err := a.ParseSessionFile(context.Background(), auditPath, 0)
+			if err != nil {
+				t.Fatalf("ParseSessionFile: %v", err)
+			}
+			if len(res.TokenEvents) != 1 {
+				t.Fatalf("TokenEvents: got %d want 1", len(res.TokenEvents))
+			}
+			ev := res.TokenEvents[0]
+			if tt.wantStamp {
+				if ev.GenMs != tt.wantGenMs || ev.GenBasis != models.GenBasisNative || ev.GenTimingV != 1 {
+					t.Errorf("GenMs/GenBasis/GenTimingV = %d/%q/%d, want %d/native/1", ev.GenMs, ev.GenBasis, ev.GenTimingV, tt.wantGenMs)
+				}
+			} else if ev.GenMs != 0 || ev.GenBasis != "" || ev.GenTimingV != 0 {
+				t.Errorf("GenMs/GenBasis/GenTimingV = %d/%q/%d, want zero value (no stamp)", ev.GenMs, ev.GenBasis, ev.GenTimingV)
+			}
+		})
+	}
 }
 
 // TestParseSessionFile_ModelUsageEmitsWebSearchRequests pins the Phase 2
@@ -433,19 +498,19 @@ func TestProjectRootResolution_PrefersUserSelectedFolders(t *testing.T) {
 	cases := []struct {
 		name      string
 		sc        sidecar
-		seedCache map[string]string
+		seedCache map[string]projectGitInfo
 		want      string
 	}{
 		{
 			name:      "selected-folders-wins",
 			sc:        sidecar{UserSelectedFolders: []string{"/synthetic/ws"}, Cwd: "/synthetic/cwd"},
-			seedCache: map[string]string{"/synthetic/ws": "/synthetic/ws"},
+			seedCache: map[string]projectGitInfo{"/synthetic/ws": {Root: "/synthetic/ws"}},
 			want:      "/synthetic/ws",
 		},
 		{
 			name:      "cwd-fallback",
 			sc:        sidecar{Cwd: "/synthetic/cwd"},
-			seedCache: map[string]string{"/synthetic/cwd": "/synthetic/cwd"},
+			seedCache: map[string]projectGitInfo{"/synthetic/cwd": {Root: "/synthetic/cwd"}},
 			want:      "/synthetic/cwd",
 		},
 		{
@@ -456,7 +521,7 @@ func TestProjectRootResolution_PrefersUserSelectedFolders(t *testing.T) {
 		{
 			name:      "empty-folders-fallback",
 			sc:        sidecar{UserSelectedFolders: []string{""}, Cwd: "/synthetic/cwd"},
-			seedCache: map[string]string{"/synthetic/cwd": "/synthetic/cwd"},
+			seedCache: map[string]projectGitInfo{"/synthetic/cwd": {Root: "/synthetic/cwd"}},
 			want:      "/synthetic/cwd",
 		},
 	}
@@ -464,9 +529,9 @@ func TestProjectRootResolution_PrefersUserSelectedFolders(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cache := tc.seedCache
 			if cache == nil {
-				cache = map[string]string{}
+				cache = map[string]projectGitInfo{}
 			}
-			got := resolveProjectRoot(tc.sc, cache)
+			got, _, _ := resolveProjectRoot(tc.sc, cache)
 			if got != tc.want {
 				t.Fatalf("resolveProjectRoot=%q want %q", got, tc.want)
 			}
@@ -491,15 +556,15 @@ func TestResolveProjectRoot_WindowsPathDoesNotLeakToCWD(t *testing.T) {
 	sc := sidecar{
 		UserSelectedFolders: []string{`Z:\nonexistent\someproject`},
 	}
-	cache := map[string]string{}
-	got := resolveProjectRoot(sc, cache)
+	cache := map[string]projectGitInfo{}
+	got, _, _ := resolveProjectRoot(sc, cache)
 	want := `Z:\nonexistent\someproject`
 	if got != want {
 		t.Fatalf("resolveProjectRoot(unreachable windows path)=%q, want %q (must NOT walk CWD's git tree)", got, want)
 	}
 	// Verify cache is sealed too, so a repeat call doesn't re-trigger
 	// the bad path.
-	got2 := resolveProjectRoot(sc, cache)
+	got2, _, _ := resolveProjectRoot(sc, cache)
 	if got2 != want {
 		t.Fatalf("repeat call resolved differently: %q vs %q", got2, want)
 	}
@@ -523,8 +588,8 @@ func TestResolveProjectRoot_CoworkInternalCwdSynthesisesSandbox(t *testing.T) {
 		UserSelectedFolders: []string{},
 		Cwd:                 `C:\Users\u\AppData\Roaming\Claude\local-agent-mode-sessions\sess\dev\local_aaaa\outputs`,
 	}
-	cache := map[string]string{}
-	got := resolveProjectRoot(sc, cache)
+	cache := map[string]projectGitInfo{}
+	got, _, _ := resolveProjectRoot(sc, cache)
 	want := "/sessions/gifted-kind-euler"
 	if got != want {
 		t.Fatalf("resolveProjectRoot(cowork-internal cwd, no workspace picked)=%q, want %q", got, want)
@@ -543,8 +608,8 @@ func TestResolveProjectRoot_CoworkInternalCwdRespectsUserChoice(t *testing.T) {
 		UserSelectedFolders: []string{`Z:\workspace`},
 		Cwd:                 `C:\Users\u\AppData\Roaming\Claude\local-agent-mode-sessions\sess\dev\local_aaaa\outputs`,
 	}
-	cache := map[string]string{}
-	got := resolveProjectRoot(sc, cache)
+	cache := map[string]projectGitInfo{}
+	got, _, _ := resolveProjectRoot(sc, cache)
 	want := `Z:\workspace`
 	if got != want {
 		t.Fatalf("got=%q, want %q (user's selection must override cwd-fallback synthesis)", got, want)
@@ -559,8 +624,8 @@ func TestResolveProjectRoot_CoworkInternalCwdRespectsUserChoice(t *testing.T) {
 func TestResolveProjectRoot_SandboxPathPreserved(t *testing.T) {
 	t.Parallel()
 	sc := sidecar{Cwd: "/sessions/clever-festive-mendel"}
-	cache := map[string]string{}
-	got := resolveProjectRoot(sc, cache)
+	cache := map[string]projectGitInfo{}
+	got, _, _ := resolveProjectRoot(sc, cache)
 	if got != "/sessions/clever-festive-mendel" {
 		t.Fatalf("resolveProjectRoot(sandbox path)=%q, want %q", got, "/sessions/clever-festive-mendel")
 	}
@@ -595,4 +660,49 @@ func summarizeEvents(evs []models.ToolEvent) []string {
 		out[i] = ev.ActionType + "/" + ev.RawToolName
 	}
 	return out
+}
+
+// TestParseSessionFile_ThinkingMintsNoRowAndFansOut pins the B3
+// convergence for cowork (2026-07-31). A `thinking` content block used
+// to emit its own `cowork.reasoning` task_complete row AND accumulate
+// into the per-message reasoning buffer. The row is gone; the FAN-OUT
+// accumulate semantics are untouched — one thinking block precedes two
+// tool_use blocks in the same message and BOTH carry it.
+func TestParseSessionFile_ThinkingMintsNoRowAndFansOut(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "cowork-zzzz", "dev-yyyy", "local_1111-2222-3333")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "audit.jsonl")
+	lines := []string{
+		`{"type":"system","subtype":"init","cwd":"/tmp/cowork-think","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","tools":["Read","Bash"],"_audit_timestamp":"2026-07-31T10:00:00.000Z"}`,
+		`{"type":"user","uuid":"u-1","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","message":{"role":"user","content":"do it"},"_audit_timestamp":"2026-07-31T10:00:01.000Z"}`,
+		`{"type":"assistant","uuid":"a-1","session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","message":{"id":"msg_think","role":"assistant","model":"claude-opus-4-6","content":[{"type":"thinking","thinking":"I should read the file, then list the dir."},{"type":"tool_use","id":"toolu_a","name":"Read","input":{"file_path":"/tmp/cowork-think/foo.go"}},{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"ls"}}]},"_audit_timestamp":"2026-07-31T10:00:02.000Z"}`,
+		"",
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := NewWithOptions(nil, root).ParseSessionFile(context.Background(), path, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	var threaded int
+	for _, ev := range res.ToolEvents {
+		if ev.RawToolName == "cowork.reasoning" {
+			t.Fatalf("cowork.reasoning row minted: %+v", ev)
+		}
+		if ev.SourceEventID == "toolu_a" || ev.SourceEventID == "toolu_b" {
+			if !strings.Contains(ev.PrecedingReasoning, "read the file, then list the dir") {
+				t.Errorf("%s PrecedingReasoning = %q, want the thinking text", ev.SourceEventID, ev.PrecedingReasoning)
+			}
+			threaded++
+		}
+	}
+	if threaded != 2 {
+		t.Fatalf("tool rows carrying the fanned-out reasoning = %d, want 2; events=%+v", threaded, res.ToolEvents)
+	}
 }

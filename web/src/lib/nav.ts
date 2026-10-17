@@ -1,34 +1,49 @@
-export type NavIcon =
-  | "briefing"
-  | "overview"
-  | "live"
-  | "search"
-  | "sessions"
-  | "actions"
-  | "security"
-  | "egress"
-  | "cost"
-  | "analysis"
-  | "tools"
-  | "compression"
-  | "cache"
-  | "suggestions"
-  | "benchmarks"
-  | "discovery"
-  | "patterns"
-  | "privacy"
-  | "remote"
-  | "settings"
-  | "modelfit"
-  | "apiexplorer"
-  | "licenses"
-  | "guide";
+import {
+  Newspaper,
+  Grid3x3,
+  Braces,
+  BookOpen,
+  BadgeCheck,
+  Activity,
+  ChartLine,
+  DatabaseZap,
+  DollarSign,
+  FileCog,
+  FolderKanban,
+  Gauge,
+  Hourglass,
+  Inbox,
+  LayoutDashboard,
+  Lightbulb,
+  Lock,
+  MessagesSquare,
+  Minimize2,
+  Radar,
+  Route,
+  SatelliteDish,
+  ScrollText,
+  Search,
+  Settings,
+  Shield,
+  Sparkles,
+  Split,
+  SquareTerminal,
+  Trophy,
+  Wrench,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import { costLabel, dollarsShown } from "../../../shared/lib/format.ts";
 
+// NavItem.icon is the lucide glyph itself, so the nav table below is the ONE
+// place a page's icon is decided. The Sidebar and the command palette both
+// render it through the shared <Icon> wrapper; nav.test.ts pins that every
+// item's glyph is distinct (no two pages share an icon).
 export type NavItem = {
   id: string;
   label: string;
   path: string;
-  icon: NavIcon;
+  icon: LucideIcon;
 };
 
 export type NavGroup = {
@@ -37,57 +52,90 @@ export type NavGroup = {
   items: NavItem[];
 };
 
+// The cost page's entry follows the org's developer cost display (format.ts
+// cost affordances): in token-usage mode it reads "Usage" with a non-dollar
+// glyph, on the same /cost route. Getters, not values: this table is built
+// at module load, before the boot-time gate sets the mode, and every reader
+// (sidebar, breadcrumb, command palette, page header) reads it at render.
+const costNavItem: NavItem = {
+  id: "cost",
+  get label() {
+    return costLabel("Cost", "Usage");
+  },
+  path: "/cost",
+  get icon() {
+    return dollarsShown() ? DollarSign : Gauge;
+  },
+};
+
 export const NAV_GROUPS: NavGroup[] = [
   {
     id: "monitor",
     label: "Monitor",
     items: [
-      { id: "overview", label: "Overview", path: "/", icon: "overview" },
-      { id: "live", label: "Live", path: "/live", icon: "live" },
-      { id: "sessions", label: "Sessions", path: "/sessions", icon: "sessions" },
-      { id: "actions", label: "Actions", path: "/actions", icon: "actions" },
-      { id: "security", label: "Security", path: "/security", icon: "security" },
-      { id: "egress", label: "Egress", path: "/egress", icon: "egress" },
-      { id: "search", label: "Search", path: "/search", icon: "search" },
+      { id: "overview", label: "Overview", path: "/", icon: LayoutDashboard },
+      { id: "live", label: "Live", path: "/live", icon: Activity },
+      { id: "sessions", label: "Sessions", path: "/sessions", icon: MessagesSquare },
+      { id: "actions", label: "Actions", path: "/actions", icon: Zap },
+      { id: "projects", label: "Projects", path: "/projects", icon: FolderKanban },
+      { id: "security", label: "Security", path: "/security", icon: Shield },
+      { id: "egress", label: "Egress", path: "/egress", icon: Route },
+      { id: "search", label: "Search", path: "/search", icon: Search },
     ],
   },
   {
     id: "analyze",
     label: "Analyze",
     items: [
-      { id: "cost", label: "Cost", path: "/cost", icon: "cost" },
-      { id: "analysis", label: "Analysis", path: "/analysis", icon: "analysis" },
-      { id: "briefing", label: "Briefing", path: "/briefing", icon: "briefing" },
-      { id: "guide", label: "Guide", path: "/guide", icon: "guide" },
-      { id: "tools", label: "Tools", path: "/tools", icon: "tools" },
-      { id: "modelfit", label: "Model Fit", path: "/modelfit", icon: "modelfit" },
-      { id: "apiexplorer", label: "API Explorer", path: "/apiexplorer", icon: "apiexplorer" },
+      costNavItem,
+      { id: "plans", label: "Plans & limits", path: "/plans", icon: Hourglass },
+      { id: "analysis", label: "Analysis", path: "/analysis", icon: ChartLine },
+      { id: "briefing", label: "Briefing", path: "/briefing", icon: Newspaper },
+      { id: "guide", label: "Guide", path: "/guide", icon: BookOpen },
+      { id: "tools", label: "Tools", path: "/tools", icon: Wrench },
+      { id: "modelfit", label: "Model Fit", path: "/modelfit", icon: Grid3x3 },
+      { id: "apiexplorer", label: "API Explorer", path: "/apiexplorer", icon: Braces },
     ],
   },
   {
     id: "optimize",
     label: "Optimize",
     items: [
-      { id: "compression", label: "Compression", path: "/compression", icon: "compression" },
-      { id: "cache", label: "Cache", path: "/cache", icon: "cache" },
-      { id: "suggestions", label: "Suggestions", path: "/suggestions", icon: "suggestions" },
-      { id: "routing", label: "Routing", path: "/routing", icon: "analysis" },
-      { id: "benchmarks", label: "Benchmarks", path: "/benchmarks", icon: "benchmarks" },
-      { id: "discovery", label: "Discovery", path: "/discovery", icon: "discovery" },
-      { id: "patterns", label: "Patterns", path: "/patterns", icon: "patterns" },
+      { id: "compression", label: "Compression", path: "/compression", icon: Minimize2 },
+      { id: "cache", label: "Cache", path: "/cache", icon: DatabaseZap },
+      { id: "suggestions", label: "Suggestions", path: "/suggestions", icon: Lightbulb },
+      { id: "routing", label: "Routing", path: "/routing", icon: Split },
+      { id: "benchmarks", label: "Benchmarks", path: "/benchmarks", icon: Trophy },
+      { id: "discovery", label: "Discovery", path: "/discovery", icon: Radar },
+      { id: "patterns", label: "Patterns", path: "/patterns", icon: Sparkles },
     ],
   },
   {
     id: "configure",
     label: "Configure",
     items: [
-      { id: "privacy", label: "Privacy", path: "/privacy", icon: "privacy" },
-      { id: "terminals", label: "Terminals", path: "/terminals", icon: "tools" },
-      { id: "remote", label: "Remote", path: "/remote", icon: "remote" },
-      { id: "licenses", label: "Licenses", path: "/licenses", icon: "licenses" },
-      { id: "settings", label: "Settings", path: "/settings", icon: "settings" },
+      { id: "policies", label: "Policies", path: "/policies", icon: ScrollText },
+      { id: "agent-config", label: "AI tool settings", path: "/agent-config", icon: FileCog },
+      { id: "privacy", label: "Privacy", path: "/privacy", icon: Lock },
+      { id: "terminals", label: "Terminals", path: "/terminals", icon: SquareTerminal },
+      { id: "remote", label: "Remote", path: "/remote", icon: SatelliteDish },
+      { id: "requests", label: "Requests", path: "/requests", icon: Inbox },
+      { id: "licenses", label: "Licenses", path: "/licenses", icon: BadgeCheck },
+      { id: "settings", label: "Settings", path: "/settings", icon: Settings },
     ],
   },
 ];
 
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
+
+const NAV_BY_ID = new Map(NAV_ITEMS.map((i) => [i.id, i]));
+
+/**
+ * navIcon returns the sidebar glyph of the nav item with this id. Every
+ * routed page passes `icon={navIcon("<id>")}` to its PageHeader, so a page
+ * header and its nav entry resolve the icon from this ONE table and cannot
+ * drift. An unknown id yields undefined (the header renders without a tile).
+ */
+export function navIcon(id: string): LucideIcon | undefined {
+  return NAV_BY_ID.get(id)?.icon;
+}

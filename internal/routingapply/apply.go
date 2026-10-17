@@ -87,7 +87,7 @@ func Plan(dirs []string, recs []routing.SubagentRecommendation) (changes []Chang
 		}
 		current, hasFM := frontmatterModel(string(body))
 		if !hasFM {
-			skipped = append(skipped, fmt.Sprintf("%s: %s has no frontmatter block — not edited (add one manually)", rec.Name, path))
+			skipped = append(skipped, fmt.Sprintf("%s: %s has no frontmatter block - not edited (add one manually)", rec.Name, path))
 			continue
 		}
 		if current == rec.SuggestedModel {
@@ -157,7 +157,7 @@ func Write(c Change, stamp string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(c.Path+BackupPrefix+stamp, body, 0o600); err != nil {
+	if err := os.WriteFile(c.Path+BackupPrefix+stamp, body, 0o600); err != nil { //nolint:gosec // G703: the agent file path the operator's apply plan resolved locally
 		return fmt.Errorf("backup: %w", err)
 	}
 	fm, rest, ok := splitFrontmatter(string(body))
@@ -177,7 +177,7 @@ func Write(c Change, stamp string) error {
 		lines = append(lines, "model: "+c.ToModel)
 	}
 	updated := "---\n" + strings.Join(lines, "\n") + "\n---\n" + rest
-	return os.WriteFile(c.Path, []byte(updated), 0o600)
+	return os.WriteFile(c.Path, []byte(updated), 0o600) //nolint:gosec // G703: the agent file path the operator's apply plan resolved locally
 }
 
 // Backup is one restorable observer backup: the NEWEST backup of an
@@ -258,7 +258,7 @@ func RevertFile(path string) (Restored, error) {
 	if err != nil {
 		return Restored{}, fmt.Errorf("routingapply.RevertFile: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil { //nolint:gosec // G703: restores the newest observer backup beside the same local file
 		return Restored{}, fmt.Errorf("routingapply.RevertFile: %w", err)
 	}
 	return Restored{Path: path, Backup: backupPath}, nil

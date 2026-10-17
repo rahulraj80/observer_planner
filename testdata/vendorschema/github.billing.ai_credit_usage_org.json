@@ -1,0 +1,104 @@
+{
+ "checked_on": "2026-10-07",
+ "name": "github.billing.ai_credit_usage_org",
+ "note": "Fully dereferenced response schema (descriptions and examples stripped) for schema-random property tests. Nothing here was observed from a vendor response.",
+ "pointer": "#/paths/~1organizations~1{org}~1settings~1billing~1ai_credit~1usage/get/responses/200",
+ "schema": {
+  "properties": {
+   "model": {
+    "type": "string"
+   },
+   "organization": {
+    "type": "string"
+   },
+   "product": {
+    "type": "string"
+   },
+   "timePeriod": {
+    "properties": {
+     "day": {
+      "type": "integer"
+     },
+     "month": {
+      "type": "integer"
+     },
+     "year": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "year"
+    ],
+    "type": "object"
+   },
+   "usageItems": {
+    "items": {
+     "properties": {
+      "discountAmount": {
+       "type": "number"
+      },
+      "discountQuantity": {
+       "type": "number"
+      },
+      "grossAmount": {
+       "type": "number"
+      },
+      "grossQuantity": {
+       "type": "number"
+      },
+      "model": {
+       "type": "string"
+      },
+      "netAmount": {
+       "type": "number"
+      },
+      "netQuantity": {
+       "type": "number"
+      },
+      "pricePerUnit": {
+       "type": "number"
+      },
+      "product": {
+       "type": "string"
+      },
+      "sku": {
+       "type": "string"
+      },
+      "unitType": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "product",
+      "sku",
+      "model",
+      "unitType",
+      "pricePerUnit",
+      "grossQuantity",
+      "grossAmount",
+      "discountQuantity",
+      "discountAmount",
+      "netQuantity",
+      "netAmount"
+     ],
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "user": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "timePeriod",
+   "organization",
+   "usageItems"
+  ],
+  "type": "object"
+ },
+ "sdk_or_spec_version_or_commit": "github/rest-api-description api.github.com.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+ "source_kind": "openapi_spec",
+ "source_sha256": "4d10d960b047176d1be58543dbdfb8ece46d77efcc2e57411770747259b1345f",
+ "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json",
+ "status": "synthetic, awaiting live validation"
+}

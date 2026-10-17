@@ -169,7 +169,7 @@ func detectCodexAuthMode() string {
 		}
 		root = filepath.Join(home, ".codex")
 	}
-	body, err := os.ReadFile(filepath.Join(root, "auth.json"))
+	body, err := os.ReadFile(filepath.Join(root, "auth.json")) //nolint:gosec // G703: reads the operator's own CODEX_HOME auth file for its mode only
 	if err != nil {
 		return ""
 	}

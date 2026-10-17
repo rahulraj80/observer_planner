@@ -1,0 +1,23 @@
+{
+  "value": [
+    {
+      "reportRefreshDate": "2025-08-20",
+      "userPrincipalName": "AdeleV@contoso.com",
+      "displayName": "Adele Vance",
+      "lastActivityDate": "2025-08-19",
+      "copilotChatLastActivityDate": "2025-08-19",
+      "microsoftTeamsCopilotLastActivityDate": "",
+      "wordCopilotLastActivityDate": "2025-08-18",
+      "excelCopilotLastActivityDate": "",
+      "powerPointCopilotLastActivityDate": "",
+      "outlookCopilotLastActivityDate": "2025-08-19",
+      "oneNoteCopilotLastActivityDate": "",
+      "loopCopilotLastActivityDate": "",
+      "copilotActivityUserDetailsByPeriod": [
+        {
+          "reportPeriod": 7
+        }
+      ]
+    }
+  ]
+}

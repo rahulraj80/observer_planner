@@ -1,210 +1,123 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/superbasedapp/observer/main/vscode/media/logo-light.png">
-    <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/vscode/media/logo-dark.png" alt="SuperBased" height="80">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-idle-dark-512.png">
+    <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-idle-light-512.png" alt="Obs, the SuperBased mascot: a small robot with a terminal prompt for a face and a cape" width="120">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/brand/superbased-lockup-dark.png">
+    <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/brand/superbased-lockup-light.png" alt="SuperBased" height="32">
   </picture>
 </p>
 
 <h1 align="center">SuperBased for VS Code</h1>
 
 <p align="center">
-  <strong>See what your AI coding tools are doing — locally, in your editor.</strong>
+  <strong>Track what every AI coding agent costs, inside your editor. See the limit coming.</strong><br>
+  See what Claude Code, Codex, Cursor and 37 more AI coding tools cost, per session and per model,
+  from the tokens your provider actually billed. No account, no telemetry.
 </p>
 
 <p align="center">
-  Claude Code cost tracking. Cursor token usage. Codex spend. Captures,
-  normalises, and analyses tool-call activity across
-  <a href="#supported-ai-tools">29 adapters</a> — Claude Code, Codex,
-  Cursor, Cline, Copilot, Gemini CLI, Aider, Goose, Devin, and more.
-  Zero telemetry. No data leaves your machine.
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cost-and-limits.png" alt="Session detail in the SuperBased dashboard: total cost, a low, typical and high cost for the next message, the 5-hour and weekly limit, and the cost of switching to a cheaper model" width="860">
 </p>
 
----
+## Why SuperBased
 
-## ⚡ 5-minute quick start
+- **Provider-exact cost.** A local proxy records the tokens your provider returned, including
+  5-minute vs 1-hour cache writes, reasoning tokens and long-context repricing.
+- **Every coding agent in one place.** 40 adapters: Claude Code, Codex, Cursor, GitHub Copilot,
+  Gemini CLI, Cline, Aider, Kiro, Devin, OpenCode, Junie and more, in one local database.
+- **Local-first.** Everything stays in `~/.observer/observer.db` on your workspace host.
+- **Know the next bill before it lands.** Prompt-cache expiry warnings and a cost band for your next
+  message.
 
-### 1. You just installed the extension. Now what?
+<p align="center">
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/overview-dashboard.png" alt="Overview page of the SuperBased dashboard: 30-day spend, sessions, actions and proxy-accurate API turns, cache efficiency, cost over time by billing bucket and actions over time by coding tool" width="860">
+</p>
 
-The extension wraps the `observer` binary — a small, local Go service
-that watches your AI tools' log files and exposes a dashboard. The
-binary either downloads automatically on first activation (~21 MB
-from GitHub Releases) or uses one you've installed elsewhere
-(`npm install -g @superbased/observer` works too).
+## Get started
 
-### 2. Verify your install
+<img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-celebrate-light-small.png" alt="" width="54" align="right">
 
-Open the command palette (`Ctrl+Shift+P` / `⌘⇧P`) and run:
+1. **Install the extension.** Each platform build bundles the `observer` binary, so there is nothing
+   else to install.
+2. **Nothing to start.** In the default `auto` mode the extension attaches to a running daemon or
+   starts one, and only ever stops a daemon it started.
+3. **Open the dashboard:** run **SuperBased: Open Dashboard**, or click the spend item in the status
+   bar.
+4. **Capture a session with exact tokens:** open a terminal with the **AI Coding Tool
+   (SuperBased-proxied)** profile (terminal panel, the arrow next to `+`), then run `claude`,
+   `codex` or another agent CLI. Or use **SuperBased: Launch Claude Code (proxied)** / **Launch Codex
+   (proxied)**.
 
-> **`SuperBased: Doctor`**
+If something looks off, run **SuperBased: Doctor**. The **Get Started with SuperBased** walkthrough
+(Help > Welcome) covers the rest.
 
-A terminal opens with a health-check. All four lines should show ✅.
-If anything fails, the error tells you what to fix.
+## What you get
 
-### 3. Start the daemon
-
-Two paths — pick whichever fits your workflow:
-
-**Option A — Let the extension manage it for you** (recommended for
-most users)
-
-1. Open Settings (`Ctrl+,` / `⌘,`)
-2. Search **"observer.daemon.mode"**
-3. Change it from `detect` to `auto`
-
-The daemon now starts automatically with VS Code and stops cleanly
-when you close it.
-
-**Option B — Start it yourself in a terminal**
-
-```bash
-observer start
-```
-
-Keep that terminal open. The extension attaches to it automatically.
-
-### 4. Open the dashboard
-
-> **`SuperBased: Open Dashboard`**
-
-Or **click the spend indicator in the bottom-right status bar**
-(`$(graph) $0.00` until your AI tools generate activity).
-
-The full React analytics dashboard renders inside a VS Code editor
-tab. **This is where you see your metrics.** Nine sections, all
-linked to your real captured activity:
-
-| Tab | Shows |
+| Surface | What it does |
 |---|---|
-| **Overview** | Today's spend, top model, burn rate, month projection. |
-| **Sessions** | Every AI coding session with cost, duration, tool — drill into action-by-action timelines. |
-| **Cost** | Per-day / per-tool / per-model rollup with cache efficacy + compression savings. |
-| **Discovery** | Cross-tool file overlap, stale re-reads, redundant command patterns. |
-| **Analysis** | High-context turns, prior-month comparisons, cache-savings trend. |
-| **Settings** | Schema-driven editor for every config knob in `~/.observer/config.toml`. |
+| **Status bar** | Today's spend at a glance, plus a prompt-cache status item. Click to open the dashboard. |
+| **Sidebar** | Today, Sessions, Discovery and Costs (7d) trees in the SuperBased activity bar view. |
+| **Dashboard tab** | The full local dashboard (sessions, cost, cache, security, live activity) in an editor tab. |
+| **File decorations** | A marker on files your agents touched recently, with who read or edited them. |
+| **Terminal profile** | Pre-sets the proxy environment so agent CLIs started from it route through SuperBased. |
+| **Instruction CodeLens** | Refresh or preview suggestions for your agent instruction files from captured patterns. |
 
-### 5. Capture an AI session
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/sessions.png" alt="Sessions page: one row per coding-agent session with tool, model, start time, elapsed time, actions and cost, plus tag totals" width="420"><br><sub><b>Sessions:</b> every session from every agent, with cost and tags.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/cache.png" alt="Cache page: live prompt caches with time left before they expire, cache ratio, reads and writes, and provider coverage" width="420"><br><sub><b>Cache:</b> which prompt caches are warm and when they go cold.</sub></td>
+  </tr>
+</table>
 
-Open a terminal in VS Code. **Click the down-arrow next to the
-`+`** in the terminal panel → choose **"AI Coding Tool
-(SuperBased-proxied)"**. The new terminal already has
-`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, and `ENABLE_TOOL_SEARCH=true`
-exported.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/terminals-workspace.png" alt="Terminals page: Claude Code, Codex, Antigravity CLI and Copilot CLI running side by side as live terminals in one dashboard" width="860">
+</p>
 
-Run your AI CLI from that terminal:
+## Inside a session
 
-```bash
-claude     # or: cursor-agent, codex, cline-cli, gh copilot, …
-```
+Click any session to open its detail view. Four of its tabs:
 
-Everything routes through the local proxy. Within ~30 seconds your
-session shows up in the dashboard with **accurate** token counts
-(not the ~3.4× over-bill you get from non-proxied JSONL adapters).
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png" alt="Session detail, Overview tab: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="420"><br><sub><b>Overview:</b> cost, tokens by billing tier and the models used.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-messages.png" alt="Session detail, Messages tab: every message in the session with time, role, model, tool calls and cost" width="420"><br><sub><b>Messages:</b> each message with its model, tool calls and cost.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cost-and-limits-tab.png" alt="Session detail, Cost and limits tab: low, typical and high cost for the next message and the 5-hour and weekly limit" width="420"><br><sub><b>Cost &amp; limits:</b> what the next message will cost and how much of your limit is left.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cache-tab.png" alt="Session detail, Cache tab: the session's live cache and when it expires, cache hits, writes, rewrites and the read to write ratio" width="420"><br><sub><b>Cache:</b> the session's live cache, hits, writes and rewrites.</sub></td>
+  </tr>
+</table>
 
----
-
-## 🎯 What you get
-
-| Surface | What it does | How to access |
-|---|---|---|
-| **Status bar** | Today's spend at a glance, polled every 60s. Hover for delta vs yesterday, top model, burn rate, month projection. | Bottom-right corner. Click → open dashboard. |
-| **Sidebar** | Four trees — **Today**, **Sessions**, **Discovery**, **Costs (7d)** — refreshed automatically. | Click the SuperBased icon in the activity bar (left rail). |
-| **Dashboard webview** | The full React analytics SPA in an editor tab. Same surface as `http://127.0.0.1:8081/`. | `SuperBased: Open Dashboard` or status-bar click. |
-| **File freshness** | Small dot in the file explorer next to files your AI tools touched in the last 24h. Hover shows last-read-by, edit count, stale re-reads flagged. | Just open a file — visible immediately. |
-| **Notifications** | Budget breach (80% of monthly cap) + watcher-lag warnings. Deduped so they don't nag. | Automatic. Tunable thresholds in settings. |
-| **Terminal profile** | "AI Coding Tool (SuperBased-proxied)" — pre-exports proxy env vars so AI CLIs launched from it route through observer. | Terminal panel → dropdown next to `+` → pick the profile. |
-| **Instruction-file CodeLens** | "Refresh from SuperBased learnings" + "Preview suggestions" on `CLAUDE.md` / `AGENTS.md` / `.cursorrules`. Auto-updates the file from your captured patterns. | Open one of those three files — appears at the top. |
-| **Get Started walkthrough** | 7-step interactive tour. | Help → Welcome → "Get Started with SuperBased". |
-
----
-
-## ⚙️ Settings
+## Settings
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `observer.daemon.mode` | `detect` | `detect` attaches only; `managed` spawns + kills with the editor; `auto` attaches if a daemon is running, otherwise spawns. |
-| `observer.binary.path` | empty | Absolute path to override binary auto-detection. |
-| `observer.dashboard.port` | `8081` | Where the dashboard listens. |
-| `observer.proxy.port` | `8820` | Where the API reverse proxy listens. |
-| `observer.statusBar.enabled` | `true` | Today-spend status bar item. |
+| `observer.daemon.mode` | `auto` | `auto` attaches or starts a daemon; `detect` only attaches. |
+| `observer.binary.path` | empty | Use a specific `observer` binary instead of the bundled one. |
+| `observer.binary.preferPathBinary` | `false` | Prefer an `observer` already on your `PATH`. |
+| `observer.dashboard.port` | `8081` | Dashboard port. |
+| `observer.proxy.port` | `8820` | Proxy port. |
+| `observer.statusBar.enabled` | `true` | Show today's spend in the status bar. |
+| `observer.cacheStatusBar.enabled` | `true` | Show the prompt-cache status item. |
 
----
+## Privacy
 
-## 🎛️ Common commands
+No telemetry and no account. After the binary is in place, the extension talks only to
+`127.0.0.1` on your workspace host; it contacts GitHub Releases only if it finds neither a bundled
+nor a local binary. Remote-SSH, WSL, Dev Containers and Codespaces keep the data on the remote host.
 
-Open the command palette (`Ctrl+Shift+P` / `⌘⇧P`) and type **SuperBased:**
+## Learn more
 
-| Command | Use it when |
-|---|---|
-| `SuperBased: Open Dashboard` | You want to see your metrics. |
-| `SuperBased: Doctor` | Something seems off — health-check the install. |
-| `SuperBased: Start Daemon` | You picked `managed` or `auto` mode and need to (re)start. |
-| `SuperBased: Copy Proxy Env Vars` | You want to set up proxy routing in an existing terminal. |
-| `SuperBased: Refresh All Trees` | The sidebar feels stale. |
+- [User guide](https://github.com/superbasedapp/observer/blob/main/docs/vscode-extension-user-guide.md)
+  and [command and settings reference](https://github.com/superbasedapp/observer/blob/main/docs/vscode-extension.md)
+- [SuperBased docs](https://superbased.app/docs) and [source on GitHub](https://github.com/superbasedapp/observer)
+- [Issues](https://github.com/superbasedapp/observer/issues) and
+  [Discussions](https://github.com/superbasedapp/observer/discussions). The **SuperBased** output
+  channel (View > Output) shows what the extension is doing; include it in bug reports.
 
----
-
-## 🤖 Supported AI tools
-
-- **Claude Code** (CLI + IDE) — via proxy + MCP server
-- **Cursor** (CLI + IDE) — via proxy + agent-transcripts
-- **Codex / Codex CLI** — via proxy
-- **Cline** (VS Code) + **Roo Code** + **Continue** — via proxy
-- **Cline CLI** (npm `cline` 3.0.20+) — via JSONL adapter (SQLite + per-session `<id>.messages.json`)
-- **GitHub Copilot CLI** — via JSONL adapter (no proxy hook available upstream)
-- **Cowork** + **Opencode** + **Openclaw** + **Pi** — via JSONL adapter
-- **Antigravity** (desktop + `agy` CLI) + **WindSurf** — via watcher
-- **Hermes Agent** (Nous Research) — via Python plugin hooks + SQLite backfill (`observer init --hermes`)
-- **Kilo Code** (legacy IDE extension `kilocode.kilo-code` — Cline + Roo fork) + **Kilo Code CLI** (`@kilocode/cli`, OpenCode fork) — via JSONL / SQLite adapters
-- **Aider**, **Goose**, **Devin**, **Qoder**, **Crush**, **Kimi Code**, **Grok**, **Kiro CLI**, **Qwen Code** — via JSONL / SQLite adapters
-- **Factory `droid`**, **Open Interpreter**, **Command Code** — via JSONL adapters
-
-29 adapters total. Five more (`chatgpt-web`, `claude-web`, `perplexity-web`,
-`gemini-web`, `copilot-web`) capture browser-based chat via an opt-in
-browser extension that today installs unpacked only — not yet in the
-Chrome Web Store.
-
-Full integration details in the [user guide](https://github.com/superbasedapp/observer/blob/main/docs/vscode-extension-user-guide.md#per-ai-tool-integration).
-
----
-
-## 🔒 Privacy + local-first
-
-- **Zero telemetry.** Respects `telemetry.telemetryLevel`. No usage
-  reporting, no crash analytics, no session beacons.
-- **No outbound network calls at runtime.** The only network traffic
-  the extension ever generates is the first-install binary download
-  from GitHub Releases when no `observer` is found locally. After
-  that, **all** communication is to `127.0.0.1:<dashboard.port>` on
-  your workspace host.
-- **No data leaves your machine.** Every byte captured stays in
-  `~/.observer/observer.db`.
-- **Codespaces / Remote-SSH / WSL2 / Dev Containers** all work via
-  `portMapping` — data still doesn't cross any wire that wasn't
-  already part of your VS Code remote-dev session.
-
----
-
-## 📖 Going deeper
-
-- **[User Guide](https://github.com/superbasedapp/observer/blob/main/docs/vscode-extension-user-guide.md)** —
-  long-form walkthrough: daily workflow, per-AI-tool integration,
-  customisation recipes, troubleshooting.
-- **[Reference Docs](https://github.com/superbasedapp/observer/blob/main/docs/vscode-extension.md)** —
-  full command + settings reference + compatibility matrix.
-- **[GitHub](https://github.com/superbasedapp/observer)** —
-  source, issues, releases.
-
----
-
-## 💬 Help
-
-- **Issues**: [github.com/superbasedapp/observer/issues](https://github.com/superbasedapp/observer/issues)
-- **Discussions**: [github.com/superbasedapp/observer/discussions](https://github.com/superbasedapp/observer/discussions)
-- **Output channel**: `View → Output → SuperBased` shows everything the
-  extension is doing — include the relevant excerpt when filing bugs.
-
----
-
-<p align="center">
-  <sub>Built with Go + TypeScript. Apache-2.0 licensed. Zero telemetry.</sub>
-</p>
+<p align="center"><sub>Apache 2.0. Also available on <a href="https://open-vsx.org/extension/superbased/superbased-observer">Open VSX</a> for Cursor, VSCodium and Windsurf.</sub></p>

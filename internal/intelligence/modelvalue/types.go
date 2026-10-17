@@ -3,7 +3,7 @@ package modelvalue
 import (
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // TurnRow is one observed model turn from the deduped proxy∪JSONL
@@ -56,7 +56,7 @@ type ActionRow struct {
 	SessionID    string
 	Timestamp    time.Time
 	Type         string
-	CommandClass routing.CommandClass
+	CommandClass routingcore.CommandClass
 	Success      bool
 	IsSidechain  bool
 	DurationMs   int64
@@ -80,9 +80,9 @@ type Facts struct {
 	Actions []ActionRow
 	// Price is the injected pricing seam (cost.ComputeBreakdown at the
 	// boundary). Nil degrades to StoredCostUSD per row.
-	Price routing.PriceFn
+	Price routingcore.PriceFn
 	// Tiers places models; nil uses the shipped seed table.
-	Tiers *routing.TierTable
+	Tiers *routingcore.TierTable
 }
 
 // LoadOptions scopes the store-seam loader (internal/store/
@@ -141,11 +141,11 @@ func (o Options) recentWindow() int {
 // Cell is one (model, turn-kind, project) aggregate. ProjectID 0 with
 // empty ProjectRoot is the global roll-up cell.
 type Cell struct {
-	Model       string           `json:"model"`
-	Tier        routing.Tier     `json:"tier"`
-	TurnKind    routing.TurnKind `json:"turn_kind"`
-	ProjectID   int64            `json:"project_id"`
-	ProjectRoot string           `json:"project_root,omitempty"`
+	Model       string               `json:"model"`
+	Tier        routingcore.Tier     `json:"tier"`
+	TurnKind    routingcore.TurnKind `json:"turn_kind"`
+	ProjectID   int64                `json:"project_id"`
+	ProjectRoot string               `json:"project_root,omitempty"`
 
 	Turns       int64   `json:"turns"`
 	CostUSD     float64 `json:"cost_usd"`
@@ -178,14 +178,14 @@ const (
 // error-rate difference and degrades to insufficient_evidence below the
 // sample floor (§R7.2).
 type Delta struct {
-	ProjectID   int64            `json:"project_id"`
-	ProjectRoot string           `json:"project_root,omitempty"`
-	TurnKind    routing.TurnKind `json:"turn_kind"`
+	ProjectID   int64                `json:"project_id"`
+	ProjectRoot string               `json:"project_root,omitempty"`
+	TurnKind    routingcore.TurnKind `json:"turn_kind"`
 
-	BaselineModel  string       `json:"baseline_model"`
-	BaselineTier   routing.Tier `json:"baseline_tier"`
-	CandidateModel string       `json:"candidate_model"`
-	CandidateTier  routing.Tier `json:"candidate_tier"`
+	BaselineModel  string           `json:"baseline_model"`
+	BaselineTier   routingcore.Tier `json:"baseline_tier"`
+	CandidateModel string           `json:"candidate_model"`
+	CandidateTier  routingcore.Tier `json:"candidate_tier"`
 
 	NBaseline  int64 `json:"n_baseline"`
 	NCandidate int64 `json:"n_candidate"`
@@ -236,7 +236,7 @@ type Report struct {
 	// Subagents carries the §R10.3 per-sub-agent recommendations from
 	// the sidechain emitter. Empty when no sidechain evidence exists in
 	// the window. Read-only in P0 — nothing writes agent config.
-	Subagents []routing.SubagentRecommendation `json:"subagents,omitempty"`
+	Subagents []routingcore.SubagentRecommendation `json:"subagents,omitempty"`
 }
 
 // GlobalDeltasFor returns the report's global-group (project_id 0)

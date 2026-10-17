@@ -25,6 +25,24 @@ type Decision struct {
 // event names the hook channel (pre-tool, post-tool, stop, pre-compact,
 // post-compact, cursor:beforeShellExecution, etc.) for diagnostic logging.
 func HandleApprove(event string, stdin io.Reader, stdout io.Writer, stderr io.Writer) {
+	handleAllow(event, stdin, stdout, stderr, Decision{Decision: "approve"})
+}
+
+// HandleNeutral is HandleApprove with an empty JSON object as the reply:
+// the "no opinion" answer every Claude-shaped host (Claude Code and its
+// clones, Codex) and Cursor parse as success without reading a decision
+// field, so it neither pre-empts the host's own approval on a permission
+// step nor is injected as text on a session-start step (plain stdout is).
+// The lifecycle handler and the foreign-replay neutral reply use it.
+func HandleNeutral(event string, stdin io.Reader, stdout io.Writer, stderr io.Writer) {
+	handleAllow(event, stdin, stdout, stderr, struct{}{})
+}
+
+// handleAllow is HandleApprove's body with the allow reply injected: the
+// same forensics (stderr line + hook-events.jsonl row), then reply encoded
+// as one JSON line. HandlePromptAllow passes a dialect's own allow shape,
+// or nil for a host whose allow is an EMPTY stdout (nothing is written).
+func handleAllow(event string, stdin io.Reader, stdout, stderr io.Writer, reply any) {
 	// Cap stdin reads: hook payloads should be small (<64KB), but we don't
 	// want to hang on a pathological writer.
 	body, _ := io.ReadAll(io.LimitReader(stdin, 2*1024*1024))
@@ -46,5 +64,7 @@ func HandleApprove(event string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		Action:    "approve",
 	})
 
-	_ = json.NewEncoder(stdout).Encode(Decision{Decision: "approve"})
+	if reply != nil {
+		_ = json.NewEncoder(stdout).Encode(reply)
+	}
 }

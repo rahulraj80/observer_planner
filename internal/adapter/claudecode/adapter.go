@@ -18,6 +18,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/tooltax"
 )
 
 // EffortLookup fetches the claudecode_effort sidecar map for a session.
@@ -126,71 +127,29 @@ var nativeTools = map[string]struct{}{
 	"AskUserQuestion": {},
 }
 
-// actionMap translates Claude Code tool names to the normalized taxonomy.
+// actionMap translates Claude Code tool names to the normalized
+// taxonomy. It is READ OUT of internal/tooltax, the one owner of the
+// cross-adapter tool vocabulary (WP-T3 of
+// docs/plans/tool-taxonomy-standardization-plan-2026-07-31.md). The
+// hand-maintained literal that used to live here is now the
+// claude-code rows of tooltax's ordered canonical table — add new
+// native tool names THERE, not here.
 //
 // Shell-variant coverage: Bash is the canonical Claude Code tool name on
 // Linux/macOS/WSL, but Windows-side Claude Code (and operator-installed
 // shell wrappers) also surface PowerShell, pwsh, cmd, and cmd.exe as
-// raw tool names. Without these mappings they fall through to
+// raw tool names. Without those rows they fall through to
 // ActionUnknown and silently drop out of the dashboard's
 // run_command-filtered views (see Issue #6 cross-adapter sweep).
-var actionMap = map[string]string{
-	"Read":         models.ActionReadFile,
-	"Write":        models.ActionWriteFile,
-	"Edit":         models.ActionEditFile,
-	"MultiEdit":    models.ActionEditFile,
-	"NotebookEdit": models.ActionEditFile,
-	"Bash":         models.ActionRunCommand,
-	"PowerShell":   models.ActionRunCommand,
-	"powershell":   models.ActionRunCommand,
-	"pwsh":         models.ActionRunCommand,
-	"cmd":          models.ActionRunCommand,
-	"cmd.exe":      models.ActionRunCommand,
-	"sh":           models.ActionRunCommand,
-	"Grep":         models.ActionSearchText,
-	"Glob":         models.ActionSearchFiles,
-	"WebSearch":    models.ActionWebSearch,
-	"WebFetch":     models.ActionWebFetch,
-	// Agent is Claude Code's sub-agent launcher. Each Agent call kicks
-	// off a sub-agent runtime; on current Claude Code 2.1.x that
-	// runtime's activity is written to its OWN JSONL file under
-	// <session-uuid>/subagents/agent-(acompact-)?XXX.jsonl, sharing the
-	// parent's sessionId but with isSidechain:true on every line. The
-	// adapter watches that subdirectory automatically (UnderAnyWatchRoot)
-	// so subagent rows ingest under the same session_id as the parent.
-	// Tagging the parent's tool_use as spawn_subagent lets users count
-	// fan-out distinctly from regular tool work. (Pre-2.1 the comment
-	// here claimed activity was inline in the parent file with
-	// isSidechain markers; that's no longer true. Updated by v1.6.10
-	// claude-code audit, doc DH1.)
-	"Agent": models.ActionSpawnSubagent,
-	// TaskCreate / TaskUpdate / TaskList / TaskGet / TaskOutput /
-	// TaskStop are the structured-todo-list tools (the local equivalent
-	// of an internal task tracker the agent uses to plan its own work).
-	// Map all six to ActionTodoUpdate so the Actions tab can filter
-	// the agent's planning chatter as a single bucket.
-	"TaskCreate": models.ActionTodoUpdate,
-	"TaskUpdate": models.ActionTodoUpdate,
-	"TaskList":   models.ActionTodoUpdate,
-	"TaskGet":    models.ActionTodoUpdate,
-	"TaskOutput": models.ActionTodoUpdate,
-	"TaskStop":   models.ActionTodoUpdate,
-	// TodoWrite is the older / pre-Task* todo tool name (Claude Code
-	// renamed the family in 2.0+ but legacy sessions still emit this).
-	// Same semantic bucket as Task*.
-	"TodoWrite": models.ActionTodoUpdate,
-	// AskUserQuestion is Claude Code's interactive prompt tool — maps
-	// to the existing ActionAskUser constant.
-	"AskUserQuestion": models.ActionAskUser,
-	// EnterPlanMode / ExitPlanMode are tool calls that toggle Claude
-	// Code's plan mode. Map to the same ActionPermissionMode constant
-	// that v1.6.10's B4 metadata-line handler uses for `permission-mode`
-	// JSONL lines (acceptEdits / plan entry/exit) — both surface the
-	// same dashboard dimension ("when did the agent enter/leave plan
-	// mode") and should aggregate together.
-	"EnterPlanMode": models.ActionPermissionMode,
-	"ExitPlanMode":  models.ActionPermissionMode,
-}
+//
+// tooltax.For returns LITERAL rows only, so the `mcp__*` glob is still
+// resolved by the models.IsMCPToolName fallback in toolUseEvent —
+// unchanged behaviour.
+//
+// TestActionMapPreservesPreTooltaxFixture pins every pre-conversion
+// pair as still present and unchanged; TestActionMapTooltaxAdditions
+// pins the intended additions so an unreviewed one is loud.
+var actionMap = tooltax.For(models.ToolClaudeCode)
 
 // rawLine is the shape of a single JSONL record we care about. Claude Code's
 // actual format is richer; we decode only the fields we need and let extras
@@ -218,7 +177,8 @@ type rawLine struct {
 	// gets this flag set true. Used to segment cross-thread
 	// redundancy on the Discovery tab and surface sub-agent volume
 	// on the Sessions tab.
-	IsSidechain bool `json:"isSidechain"`
+	IsSidechain bool   `json:"isSidechain"`
+	AgentID     string `json:"agentId"`
 	// V7d / audit B4 fields — populated for the four metadata line
 	// types Claude Code emits that the adapter previously dropped
 	// silently. ParentUuid links system events back to the assistant
@@ -248,6 +208,26 @@ type rawLine struct {
 	// Empirically the field carries values like "plan", "acceptEdits",
 	// "default" — Claude Code's permission-mode toggle states.
 	PermissionMode string `json:"permissionMode"`
+	// Entrypoint is present on every JSONL line (100% of a 60-file
+	// sample, 2026-09-02) and identifies the client surface that wrote
+	// the transcript: "cli", "claude-vscode", "claude-desktop",
+	// "sdk-*" (Agent SDK embeddings), possibly "claude-jetbrains"
+	// (unverified spelling). Resolved into the normalized
+	// models.Surface* vocabulary by resolveClaudeSurface (surface.go)
+	// — see docs/plans/ide-surface-capture-remediation-plan-2026-09-02.md
+	// §0/§3 (Part E).
+	Entrypoint string `json:"entrypoint"`
+	// Version is the Claude Code CLI version stamped at the head of the
+	// transcript (semver, e.g. "1.0.40"). Captured node-local for Issue 2
+	// (migration 125) and emitted as a models.SessionToolVersion —
+	// first-wins handles the head-of-transcript stamp. Observer's own
+	// test fixtures strip it; it is proven present by the qoder adapter,
+	// which decodes the same field from the identical Claude-Code JSONL.
+	Version string `json:"version"`
+	// Attachment is set on `type:"attachment"` records; only its type is
+	// decoded (gentiming.go classifies the kinds written with the
+	// response, which are never a request start).
+	Attachment *rawAttachment `json:"attachment"`
 }
 
 type rawMessage struct {
@@ -328,6 +308,11 @@ type rawContentBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
+	// Source is the attachment envelope on an `image` / `document` content
+	// block ({"type":"base64","media_type":"image/png","data":...}). Only
+	// the media_type is read (Issue 1 user-attachment capture) — the
+	// base64 `data` is NEVER decoded or stored. Empty for text/tool blocks.
+	Source json.RawMessage `json:"source"`
 }
 
 type rawUsage struct {
@@ -388,6 +373,8 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 
 	res := adapter.ParseResult{NewOffset: fromOffset}
+	_, fileAgent := subagentFileIdentity(path)
+	agentIdentityValid := true
 	// Tier-2 cache observation accumulator (spec §9 / C7). Walks
 	// the running message-block list across this parse call; emits
 	// one CacheTurnObservation per assistant-with-usage turn.
@@ -405,8 +392,11 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	// TokenEvent rather than emitting N rows that the cost engine would
 	// then sum up.
 	msgIDToIdx := map[string]int{}
+	// timingLines is every record of this window projected for the
+	// generation-timing span rule (gentiming.go), in file order.
+	var timingLines []ccTimingLine
 	// Cache of project root per cwd.
-	rootCache := map[string]string{}
+	rootCache := map[string]projectGitInfo{}
 	reasoningByTurn := []string{}
 	// V7d / audit B4 — track the last seen line context for the four
 	// metadata line types Claude Code emits without their own
@@ -416,6 +406,18 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	var lastTs time.Time
 	lastCwd := ""
 	lastBranch := ""
+	// surfaceStamped gates Part E capture-surface attribution: stamp
+	// at most once per ParseSessionFile call, from the first line in
+	// THIS parse pass that carries a non-empty entrypoint + sessionId.
+	// A later chunk (watcher resume) re-stamps the same value on its
+	// own first entrypoint-bearing line — harmless, the store write is
+	// first-wins-unless-empty (models.SessionSurface doc).
+	surfaceStamped := false
+	// versionStamped gates Issue 2 tool-version capture the same way:
+	// stamp at most once per ParseSessionFile call, from the first line
+	// carrying a non-empty `version` + sessionId. first-wins-unless-empty
+	// makes a later chunk's re-stamp harmless.
+	versionStamped := false
 	// Per-file dedup for noisy state-assertion lines:
 	//   • agent-name re-emits the same persona name per assistant turn
 	//   • permission-mode re-emits the same mode per user prompt
@@ -438,16 +440,21 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	// outputs). ReadString grows its return string dynamically when a
 	// line spans buffers, so there's no maxLine cap — at the cost of
 	// larger transient allocations on giant lines.
-	reader := bufio.NewReaderSize(f, 64*1024)
+	// A watcher catching up on an over-cap tail bounds this parse to one
+	// window (adapter.LimitTail, T-413); a line cut by the window is
+	// deferred exactly like a partial trailing line.
+	reader := bufio.NewReaderSize(adapter.LimitTail(ctx, f), 64*1024)
 
 	bytesRead := fromOffset
 	lineNum := 0
 	for {
 		if ctx.Err() != nil {
+			adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot(rootCache))
 			return res, ctx.Err()
 		}
 		lineStr, readErr := reader.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
+			adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot(rootCache))
 			return res, fmt.Errorf("claudecode.ParseSessionFile: read: %w", readErr)
 		}
 		// ReadString includes the terminating '\n' when present. When
@@ -509,6 +516,10 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				// if some future helper change weakens that guarantee.
 				continue
 			}
+			if fileAgent != "" && line.AgentID != "" && fileAgent != line.AgentID {
+				agentIdentityValid = false
+			}
+			timingLines = append(timingLines, classifyRecord(line, true))
 			// NewOffset already committed for the underlying physical line
 			// above; the inner loop processes recovered sub-records that
 			// share that same line.
@@ -522,7 +533,8 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			if line.Type == "system" && line.Subtype == "api_error" && len(line.Error) > 0 {
 				ts := parseTimestamp(line.Timestamp)
 				projectRoot := a.resolveProjectRoot(line.Cwd, rootCache)
-				ev := buildAPIErrorEvent(path, line, ts, projectRoot)
+				projectRemote := a.resolveProjectRemote(line.Cwd, rootCache)
+				ev := buildAPIErrorEvent(path, line, ts, projectRoot, projectRemote)
 				if ev != nil {
 					res.ToolEvents = append(res.ToolEvents, *ev)
 				}
@@ -548,6 +560,32 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				lastBranch = line.GitBranch
 			}
 
+			// Part E: capture-surface attribution (IDE-15 provenance
+			// half) — stamp once per parse from the first line that
+			// carries both an entrypoint and a session id.
+			if !surfaceStamped && line.Entrypoint != "" && line.SessionID != "" {
+				if kind, host, ok := resolveClaudeSurface(line.Entrypoint); ok {
+					res.SessionSurfaces = append(res.SessionSurfaces, models.SessionSurface{
+						SessionID:   line.SessionID,
+						Surface:     kind,
+						SurfaceHost: host,
+					})
+				}
+				surfaceStamped = true
+			}
+
+			// Issue 2: captured Claude Code CLI version from the
+			// transcript's top-level `version`. Stamp once per parse; the
+			// store write is first-wins-unless-empty + bounded-token
+			// validated, so a re-stamp or absent field is harmless.
+			if !versionStamped && line.Version != "" && line.SessionID != "" {
+				res.SessionToolVersions = append(res.SessionToolVersions, models.SessionToolVersion{
+					SessionID: line.SessionID,
+					Version:   line.Version,
+				})
+				versionStamped = true
+			}
+
 			// compact_boundary — `system / compact_boundary` lines carry
 			// compactMetadata.{trigger, preTokens, preCompactDiscoveredTools}.
 			// Mirrors codex's buildCompactedEvent shape:
@@ -559,6 +597,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 					ts = lastTs
 				}
 				projectRoot := a.resolveProjectRoot(firstNonEmpty(line.Cwd, lastCwd), rootCache)
+				projectRemote := a.resolveProjectRemote(firstNonEmpty(line.Cwd, lastCwd), rootCache)
 				target := fmt.Sprintf("%s: ~%d tokens reclaimed", line.CompactMetadata.Trigger, line.CompactMetadata.PreTokens)
 				rawIn, _ := json.Marshal(line.CompactMetadata)
 				res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
@@ -567,6 +606,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 					SessionID:     line.SessionID,
 					ProjectRoot:   projectRoot,
 					GitBranch:     firstNonEmpty(line.GitBranch, lastBranch),
+					GitRemote:     projectRemote,
 					Timestamp:     ts,
 					Tool:          models.ToolClaudeCode,
 					ActionType:    models.ActionContextCompacted,
@@ -601,6 +641,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 					ts = lastTs
 				}
 				projectRoot := a.resolveProjectRoot(firstNonEmpty(line.Cwd, lastCwd), rootCache)
+				projectRemote := a.resolveProjectRemote(firstNonEmpty(line.Cwd, lastCwd), rootCache)
 				target := fmt.Sprintf("%dms wallclock / %d msgs", line.DurationMs, line.MessageCount)
 				res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
 					SourceFile:    path,
@@ -608,6 +649,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 					SessionID:     line.SessionID,
 					ProjectRoot:   projectRoot,
 					GitBranch:     firstNonEmpty(line.GitBranch, lastBranch),
+					GitRemote:     projectRemote,
 					Timestamp:     ts,
 					Tool:          models.ToolClaudeCode,
 					ActionType:    models.ActionPostToolBatch,
@@ -633,12 +675,14 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				}
 				lastAgentName = line.AgentName
 				projectRoot := a.resolveProjectRoot(lastCwd, rootCache)
+				projectRemote := a.resolveProjectRemote(lastCwd, rootCache)
 				res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
 					SourceFile:    path,
 					SourceEventID: "agent-name:" + line.AgentName,
 					SessionID:     line.SessionID,
 					ProjectRoot:   projectRoot,
 					GitBranch:     lastBranch,
+					GitRemote:     projectRemote,
 					Timestamp:     lastTs,
 					Tool:          models.ToolClaudeCode,
 					ActionType:    models.ActionSubagentStart,
@@ -646,7 +690,11 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 					Success:       true,
 					RawToolName:   "agent-name",
 					RawToolInput:  fmt.Sprintf(`{"agentName":%q}`, line.AgentName),
-					IsSidechain:   line.IsSidechain,
+					// Structured sub-agent identity so the /subagents read
+					// model can label transcript-derived windows without
+					// raw-field scraping (mirrors the hook path).
+					Metadata:    &models.ActionMetadata{AgentID: line.AgentName},
+					IsSidechain: line.IsSidechain,
 				})
 				continue
 			}
@@ -662,12 +710,14 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				}
 				lastPermissionMode = line.PermissionMode
 				projectRoot := a.resolveProjectRoot(lastCwd, rootCache)
+				projectRemote := a.resolveProjectRemote(lastCwd, rootCache)
 				res.ToolEvents = append(res.ToolEvents, models.ToolEvent{
 					SourceFile:    path,
 					SourceEventID: "permission-mode:" + line.PermissionMode,
 					SessionID:     line.SessionID,
 					ProjectRoot:   projectRoot,
 					GitBranch:     lastBranch,
+					GitRemote:     projectRemote,
 					Timestamp:     lastTs,
 					Tool:          models.ToolClaudeCode,
 					ActionType:    models.ActionPermissionMode,
@@ -691,6 +741,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 
 			ts := parseTimestamp(line.Timestamp)
 			projectRoot := a.resolveProjectRoot(line.Cwd, rootCache)
+			projectRemote := a.resolveProjectRemote(line.Cwd, rootCache)
 
 			if msg.Usage != nil {
 				// Drop Claude Code's synthetic placeholder rows. The CLI emits
@@ -702,48 +753,8 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				if msg.Model == "<synthetic>" {
 					continue
 				}
-				// Prefer message.id as the dedup key — one API call shares it
-				// across N content-block records — and fall back to the
-				// per-record UUID when the JSONL line predates the id field
-				// or is a non-API-call assistant entry.
-				eventID := msg.ID
-				if eventID == "" {
-					eventID = line.UUID
-				}
-				cacheCreation := msg.Usage.CacheCreationInputTokens
-				if cacheCreation == 0 {
-					cacheCreation = msg.Usage.CacheCreation.Ephemeral5mInputTokens +
-						msg.Usage.CacheCreation.Ephemeral1hInputTokens
-				}
-				ev := models.TokenEvent{
-					SourceFile:            path,
-					SourceEventID:         eventID,
-					SessionID:             line.SessionID,
-					ProjectRoot:           projectRoot,
-					GitBranch:             line.GitBranch,
-					Timestamp:             ts,
-					Tool:                  models.ToolClaudeCode,
-					Model:                 msg.Model,
-					InputTokens:           msg.Usage.InputTokens,
-					OutputTokens:          msg.Usage.OutputTokens,
-					CacheReadTokens:       msg.Usage.CacheReadInputTokens,
-					CacheCreationTokens:   cacheCreation,
-					CacheCreation1hTokens: msg.Usage.CacheCreation.Ephemeral1hInputTokens,
-					// Server-side tool fees (audit B3, v1.6.10): per-message
-					// count of Anthropic web_search invocations billed at
-					// $0.01/call. web_fetch_requests is captured too but
-					// currently not column-mapped (no column on token_usage
-					// and unclear pricing — see audit doc §B3 / X-followup).
-					WebSearchRequests: msg.Usage.ServerToolUse.WebSearchRequests,
-					// Fast-tier capture (Opus 4.8 `/fast`): the usage block
-					// echoes back the request's speed selector. Stamping it
-					// here lets the cost engine apply Pricing.FastMultiplier
-					// on the JSONL path, matching the proxy's api_turns path.
-					Fast:        msg.Usage.Speed == "fast",
-					Source:      models.TokenSourceJSONL,
-					Reliability: models.ReliabilityUnreliable,
-					MessageID:   msg.ID,
-				}
+				ev := tokenEventFromLine(path, line, msg, ts, projectRoot, projectRemote)
+				cacheCreation := ev.CacheCreationTokens
 				if msg.ID != "" {
 					if idx, ok := msgIDToIdx[msg.ID]; ok {
 						// Streaming usage progresses monotonically — keep the
@@ -818,8 +829,23 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			// model) don't trigger this — their content is tool_result blocks,
 			// not text — so the existing block loop below handles them
 			// unchanged.
-			if msg.Role == "user" {
-				if text := userPromptText(blocks); text != "" {
+			// A user turn is either a role=user message OR a
+			// type:"attachment" line (Claude Code injects @-mentioned /
+			// dragged file bodies as their own user-side line — R1).
+			if msg.Role == "user" || line.Type == "attachment" {
+				// User-attachment capture (Issue 1): the image/document
+				// blocks the user attached, plus a synthetic "file" for a
+				// type:"attachment" line. Metadata only (kind + optional
+				// media_type) — never a filename or bytes.
+				atts := collectUserAttachments(blocks)
+				if line.Type == "attachment" {
+					atts = append(atts, models.UserAttachment{Kind: "file"})
+				}
+				text := userPromptText(blocks)
+				// Emit the user_prompt row when there is prompt text OR the
+				// turn carried attachments — an image-only user turn used to
+				// produce no row at all (Issue 1 fix).
+				if text != "" || len(atts) > 0 {
 					truncated := text
 					if len(truncated) > 200 {
 						truncated = truncated[:200]
@@ -831,6 +857,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 						ProjectRoot:        projectRoot,
 						Timestamp:          ts,
 						GitBranch:          line.GitBranch,
+						GitRemote:          projectRemote,
 						Tool:               models.ToolClaudeCode,
 						ActionType:         models.ActionUserPrompt,
 						Target:             truncated,
@@ -840,6 +867,7 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 						RawToolInput:       a.scrubber.String(text),
 						IsSidechain:        line.IsSidechain,
 						MessageID:          "user:" + line.UUID,
+						UserAttachments:    atts,
 					})
 				}
 			}
@@ -849,12 +877,12 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 				case "text":
 					if msg.Role == "assistant" && strings.TrimSpace(block.Text) != "" {
 						reasoningByTurn = appendCapped(reasoningByTurn, block.Text, 20)
-						ev := a.assistantTextEvent(path, line, msg.ID, projectRoot, ts, blockIdx, block.Text)
+						ev := a.assistantTextEvent(path, line, msg.ID, projectRoot, projectRemote, ts, blockIdx, block.Text)
 						stampTurnMeta(&ev, msg)
 						res.ToolEvents = append(res.ToolEvents, ev)
 					}
 				case "tool_use":
-					evt := a.toolUseEvent(path, line, block, projectRoot, ts, msg.ID)
+					evt := a.toolUseEvent(path, line, block, projectRoot, projectRemote, ts, msg.ID)
 					evt.PrecedingReasoning = truncateReasoning(lastReasoning(reasoningByTurn))
 					stampTurnMeta(&evt, msg)
 					idx := len(res.ToolEvents)
@@ -863,53 +891,93 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 						pending[block.ID] = idx
 					}
 				case "tool_result":
-					if idx, ok := pending[block.ToolUseID]; ok {
-						body := decodeResultContent(block.Content)
-						scrubbed := a.scrubber.String(body)
-						res.ToolEvents[idx].ToolOutput = scrubbed
-						if block.IsError {
-							res.ToolEvents[idx].Success = false
-							res.ToolEvents[idx].ErrorMessage = truncateResult(scrubbed)
-						}
-						// Wall-clock duration: gap between the tool_use's
-						// assistant-message timestamp and the tool_result's
-						// user-message timestamp. Anthropic's JSONL doesn't
-						// emit a structured per-tool elapsed field, so the
-						// successor-timestamp delta is the only signal we
-						// have. Skip when either timestamp is zero (legacy
-						// rows) or the gap is negative (clock skew).
-						//
-						// V7e / audit B5 — cap inferred durations at 30
-						// minutes (1,800,000ms). Claude Code's Bash tool
-						// has a documented hard ceiling of 30min; native
-						// tools (Read/Write/Edit/Grep/Glob) run in
-						// sub-second wallclock. ANY computed duration
-						// above the cap is a capture artifact — typically
-						// auto-compact stitching the original tool_use
-						// timestamp to a tool_result that landed hours
-						// later, or session-idle resume re-attributing a
-						// pending tool_use to a much-later result. Prior
-						// audit (docs/claudecode-bash-duration-audit-
-						// 2026-05-15.md) measured 246.4 false hours
-						// across 62 rows on the maintainer corpus.
-						const maxInferredDurationMs int64 = 30 * 60 * 1000
-						call := &res.ToolEvents[idx]
-						if call.DurationMs == 0 && !call.Timestamp.IsZero() && !ts.IsZero() {
-							if d := ts.Sub(call.Timestamp).Milliseconds(); d > 0 {
-								if d > maxInferredDurationMs {
-									d = 0
-								}
-								call.DurationMs = d
-							}
-						}
-						delete(pending, block.ToolUseID)
+					// Cap BEFORE scrubbing (qwencode's order): the
+					// 1 MiB ToolOutput contract in models.ToolEvent is
+					// the store's, so a multi-megabyte result body must
+					// never leave the adapter uncapped — in-window or
+					// cross-tick.
+					scrubbed := a.scrubber.String(
+						contentcap.Cap(decodeResultContent(block.Content), contentcap.DefaultMaxBytes),
+					)
+					var resultErr string
+					if block.IsError {
+						resultErr = truncateResult(scrubbed)
 					}
+					idx, ok := pending[block.ToolUseID]
+					if !ok {
+						// Cross-tick: the tool_use lives in a PREVIOUS
+						// parse window, so its row is already persisted
+						// optimistically successful and the correlation
+						// map is empty. Hand the outcome to the store
+						// keyed by the same (source_file, block id) pair
+						// toolUseEvent used as SourceEventID. DurationMs
+						// stays 0 — the call's timestamp is in the prior
+						// window; UpdateActionOutcome no-ops a zero.
+						if block.ToolUseID != "" {
+							res.OutcomeUpdates = append(res.OutcomeUpdates, models.ActionOutcomeUpdate{
+								SourceFile:    path,
+								SourceEventID: block.ToolUseID,
+								SuccessKnown:  true, // is_error is always a verdict
+								Success:       !block.IsError,
+								ErrorMessage:  resultErr,
+								ToolOutput:    scrubbed,
+							})
+						}
+						continue
+					}
+					res.ToolEvents[idx].ToolOutput = scrubbed
+					if block.IsError {
+						res.ToolEvents[idx].Success = false
+						res.ToolEvents[idx].ErrorMessage = resultErr
+					}
+					// Wall-clock duration: gap between the tool_use's
+					// assistant-message timestamp and the tool_result's
+					// user-message timestamp. Anthropic's JSONL doesn't
+					// emit a structured per-tool elapsed field, so the
+					// successor-timestamp delta is the only signal we
+					// have. Skip when either timestamp is zero (legacy
+					// rows) or the gap is negative (clock skew).
+					//
+					// V7e / audit B5 — cap inferred durations at 30
+					// minutes (1,800,000ms). Claude Code's Bash tool
+					// has a documented hard ceiling of 30min; native
+					// tools (Read/Write/Edit/Grep/Glob) run in
+					// sub-second wallclock. ANY computed duration
+					// above the cap is a capture artifact — typically
+					// auto-compact stitching the original tool_use
+					// timestamp to a tool_result that landed hours
+					// later, or session-idle resume re-attributing a
+					// pending tool_use to a much-later result. Prior
+					// audit (docs/claudecode-bash-duration-audit-
+					// 2026-05-15.md) measured 246.4 false hours
+					// across 62 rows on the maintainer corpus.
+					const maxInferredDurationMs int64 = 30 * 60 * 1000
+					call := &res.ToolEvents[idx]
+					if call.DurationMs == 0 && !call.Timestamp.IsZero() && !ts.IsZero() {
+						if d := ts.Sub(call.Timestamp).Milliseconds(); d > 0 {
+							if d > maxInferredDurationMs {
+								d = 0
+							}
+							call.DurationMs = d
+						}
+					}
+					delete(pending, block.ToolUseID)
 				}
 			}
 		}
 
 		if readErr == io.EOF {
 			break
+		}
+	}
+
+	// Whatever is still in `pending` at EOF is a tool_use whose result
+	// this window never saw. Its Success=true is a placeholder, so flag
+	// it: the store holds failure-context bookkeeping for these rows
+	// until the matching ActionOutcomeUpdate reports the real outcome.
+	for _, idx := range pending {
+		if idx < len(res.ToolEvents) {
+			res.ToolEvents[idx].OutcomePending = true
 		}
 	}
 
@@ -928,7 +996,18 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	// just-inserted action row in the same transaction as the sidecar
 	// upsert. Either path lands the same final state.
 	a.stampEffortFromSidecar(ctx, &res)
+	// Generation timing (S10-SPEED): stamp each PROVEN request span onto its
+	// message's TokenEvent - see gentiming.go. Runs before subagent
+	// attribution so a re-emitted look-back row is attributed like the rest.
+	res.TokenEvents = applyGenTiming(path, fromOffset, timingLines, res.TokenEvents, msgIDToIdx,
+		func(cwd string) (string, string) {
+			return a.resolveProjectRoot(cwd, rootCache), a.resolveProjectRemote(cwd, rootCache)
+		})
+	if agentIdentityValid {
+		a.attributeSubagent(path, &res)
+	}
 
+	adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot(rootCache))
 	return res, nil
 }
 
@@ -1239,6 +1318,7 @@ func (a *Adapter) assistantTextEvent(
 	line rawLine,
 	messageID string,
 	projectRoot string,
+	projectRemote string,
 	ts time.Time,
 	blockIdx int,
 	text string,
@@ -1250,14 +1330,20 @@ func (a *Adapter) assistantTextEvent(
 		resolvedMsgID = "asst:" + line.UUID
 	}
 	return models.ToolEvent{
-		SourceFile:         sourceFile,
-		SourceEventID:      fmt.Sprintf("%s:text:%d", line.UUID, blockIdx),
-		SessionID:          line.SessionID,
-		ProjectRoot:        projectRoot,
-		Timestamp:          ts,
-		GitBranch:          line.GitBranch,
-		Tool:               models.ToolClaudeCode,
-		ActionType:         models.ActionTaskComplete,
+		SourceFile:    sourceFile,
+		SourceEventID: fmt.Sprintf("%s:text:%d", line.UUID, blockIdx),
+		SessionID:     line.SessionID,
+		ProjectRoot:   projectRoot,
+		Timestamp:     ts,
+		GitBranch:     line.GitBranch,
+		GitRemote:     projectRemote,
+		Tool:          models.ToolClaudeCode,
+		// Per-text-block row: one per `text` content block of EVERY
+		// assistant message, mid-turn included (85% of claude-code turns
+		// carry more than one). assistant_message, not task_complete —
+		// the turn-terminal row is the Stop hook's, which keeps
+		// task_complete (cmd/observer/hook.go::buildClaudeStopEvent).
+		ActionType:         models.ActionAssistantMessage,
 		Target:             preview,
 		Success:            true,
 		PrecedingReasoning: preview,
@@ -1284,6 +1370,7 @@ func (a *Adapter) toolUseEvent(
 	line rawLine,
 	block rawContentBlock,
 	projectRoot string,
+	projectRemote string,
 	ts time.Time,
 	messageID string,
 ) models.ToolEvent {
@@ -1309,6 +1396,7 @@ func (a *Adapter) toolUseEvent(
 		ProjectRoot:   projectRoot,
 		Timestamp:     ts,
 		GitBranch:     line.GitBranch,
+		GitRemote:     projectRemote,
 		Tool:          models.ToolClaudeCode,
 		ActionType:    actionType,
 		Target:        target,
@@ -1407,14 +1495,34 @@ func (a *Adapter) extractTarget(toolName string, rawInput []byte, projectRoot st
 		return pick("query")
 	case "WebFetch":
 		return pick("url")
+	case "Skill":
+		// The Skill tool's input is {"skill":"<name>","args":"…"}. The
+		// NAME is the whole point: it is the token guidance.SkillKey
+		// joins a scanned `.claude/skills/<name>/SKILL.md` row on, and
+		// without it a skill_invoke action carries an empty target and
+		// the name survives only inside raw_tool_input. `args` is free
+		// user text and deliberately stays out of the target.
+		return strings.TrimSpace(pick("skill"))
 	}
 	return ""
 }
 
-// resolveProjectRoot is cached per cwd because git.Resolve walks the
-// filesystem — Claude Code sessions often contain hundreds of events sharing
-// one cwd.
-func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]string) string {
+// projectGitInfo is the per-cwd cache entry for resolveProjectRoot /
+// resolveProjectRemote: the resolved project root and its normalized
+// "origin" remote, captured together from a single git.ResolveIdentity
+// call so the two never drift and the filesystem walk never happens
+// twice for the same cwd. Identity carries the fuller Project Identity
+// Resolver v2 bundle from the same call.
+type projectGitInfo struct {
+	Root     string
+	Remote   string
+	Identity git.Identity
+}
+
+// resolveProjectRoot is cached per cwd because git.ResolveIdentity
+// walks the filesystem — Claude Code sessions often contain hundreds
+// of events sharing one cwd.
+func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]projectGitInfo) string {
 	if cwd == "" {
 		return ""
 	}
@@ -1432,16 +1540,51 @@ func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]string) string
 	// already look like native paths. Mirrors codex adapter.go:2494
 	// (#54, [[feedback-foreign-path-git-resolve]]).
 	cwd = crossmount.TranslateForeignPath(cwd)
-	if root, ok := cache[cwd]; ok {
-		return root
+	if entry, ok := cache[cwd]; ok {
+		return entry.Root
 	}
-	info, err := git.Resolve(cwd)
+	// RootCommit is left nil: the lazy, cached root-commit exec belongs
+	// only in the store-side path (Store.maybeRunLazyRootCommit), never
+	// on a per-line adapter hot path.
+	info, err := git.ResolveIdentity(cwd, git.IdentityOptions{})
 	if err != nil {
-		cache[cwd] = cwd
+		cache[cwd] = projectGitInfo{Root: cwd}
 		return cwd
 	}
-	cache[cwd] = info.Root
+	// info.Remote is already NormalizeRemote'd by ResolveIdentity.
+	cache[cwd] = projectGitInfo{Root: info.Root, Remote: info.Remote, Identity: info}
 	return info.Root
+}
+
+// resolveProjectRemote returns the normalized git remote for cwd, cached
+// alongside the project root by resolveProjectRoot. Claude Code's own
+// JSONL session lines never carry a remote (unlike GitBranch, which is
+// sourced from line.GitBranch), so this is the adapter's only remote
+// source. Callers must invoke resolveProjectRoot for the same cwd first
+// so the cache entry exists — this never triggers its own git.Resolve
+// call, to avoid resolving the same cwd twice.
+func (a *Adapter) resolveProjectRemote(cwd string, cache map[string]projectGitInfo) string {
+	if cwd == "" {
+		return ""
+	}
+	cwd = crossmount.TranslateForeignPath(cwd)
+	return cache[cwd].Remote
+}
+
+// identitiesByRoot flattens a per-cwd projectGitInfo cache into a
+// per-root git.Identity map suitable for
+// adapter.ApplyProjectIdentityByRoot. Multiple cwds resolving to the
+// same repo root collapse to one entry (they carry identical
+// identity, since ResolveIdentity is keyed off the discovered root).
+func identitiesByRoot(cache map[string]projectGitInfo) map[string]git.Identity {
+	out := make(map[string]git.Identity, len(cache))
+	for _, entry := range cache {
+		if entry.Root == "" {
+			continue
+		}
+		out[entry.Root] = entry.Identity
+	}
+	return out
 }
 
 // buildAPIErrorEvent decodes a Claude Code system/api_error JSONL
@@ -1472,7 +1615,7 @@ func (a *Adapter) resolveProjectRoot(cwd string, cache map[string]string) string
 // Returns nil when the line lacks the minimum fields the row needs
 // (request id + non-empty message); these are recorded as a warning
 // so silent ingest gaps surface in `observer status`.
-func buildAPIErrorEvent(path string, line rawLine, ts time.Time, projectRoot string) *models.ToolEvent {
+func buildAPIErrorEvent(path string, line rawLine, ts time.Time, projectRoot, projectRemote string) *models.ToolEvent {
 	var env struct {
 		Status    int             `json:"status"`
 		RequestID string          `json:"requestID"`
@@ -1508,6 +1651,7 @@ func buildAPIErrorEvent(path string, line rawLine, ts time.Time, projectRoot str
 		SessionID:     line.SessionID,
 		ProjectRoot:   projectRoot,
 		GitBranch:     line.GitBranch,
+		GitRemote:     projectRemote,
 		Timestamp:     ts,
 		Tool:          models.ToolClaudeCode,
 		ActionType:    models.ActionAPIError,
@@ -1630,6 +1774,41 @@ func userPromptText(blocks []rawContentBlock) string {
 	return strings.TrimSpace(b.String())
 }
 
+// collectUserAttachments scans a user turn's content blocks for the
+// files/images the user attached (Issue 1). It records PRESENCE + KIND
+// (+ optional MediaType) only — an `image` block becomes kind "image",
+// a `document` block kind "file" — and NEVER reads the base64 `data` or
+// any filename. Returns nil when the turn carried no attachment blocks.
+func collectUserAttachments(blocks []rawContentBlock) []models.UserAttachment {
+	var atts []models.UserAttachment
+	for _, block := range blocks {
+		switch block.Type {
+		case "image":
+			atts = append(atts, models.UserAttachment{Kind: "image", MediaType: attachmentMediaType(block)})
+		case "document":
+			atts = append(atts, models.UserAttachment{Kind: "file", MediaType: attachmentMediaType(block)})
+		}
+	}
+	return atts
+}
+
+// attachmentMediaType pulls the IANA media_type off an attachment
+// block's `source` envelope ("image/png", "application/pdf"), or the
+// block's own top-level media_type as a fallback. Returns "" when the
+// source exposes no type. It decodes ONLY the media_type field — never
+// the base64 `data`.
+func attachmentMediaType(block rawContentBlock) string {
+	if len(block.Source) > 0 {
+		var src struct {
+			MediaType string `json:"media_type"`
+		}
+		if err := json.Unmarshal(block.Source, &src); err == nil && src.MediaType != "" {
+			return src.MediaType
+		}
+	}
+	return ""
+}
+
 // appendCapped appends v to xs, keeping at most n elements (oldest dropped).
 func appendCapped(xs []string, v string, n int) []string {
 	xs = append(xs, v)
@@ -1737,3 +1916,7 @@ func recoverConcatenatedJSONLines(raw []byte) [][]byte {
 	}
 	return out
 }
+
+// IsNativeTool implements adapter.NativeToolClassifier (the package-level
+// IsNativeTool).
+func (*Adapter) IsNativeTool(name string) bool { return IsNativeTool(name) }

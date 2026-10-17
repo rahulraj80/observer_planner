@@ -1,0 +1,17 @@
+{
+  "antigravity-cli": "closure",
+  "claude-code": "handleClaudeCodeHook",
+  "codex": "handleCodexHook",
+  "command-code": "closure",
+  "cursor": "handleCursorHook",
+  "devin": "closure",
+  "droid": "closure",
+  "gemini-cli": "closure",
+  "hermes": "handleHermesHook",
+  "kimi-code": "closure",
+  "muse": "closure",
+  "poolside": "closure",
+  "qoder": "closure",
+  "qwen-code": "closure",
+  "zcode": "closure"
+}

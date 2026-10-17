@@ -1,0 +1,40 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "value": "Inferred",
+    "value[]": "Inferred",
+    "value[].copilotActivityUserDetailsByPeriod": "Inferred",
+    "value[].copilotActivityUserDetailsByPeriod[]": "Inferred",
+    "value[].copilotActivityUserDetailsByPeriod[].reportPeriod": "Inferred",
+    "value[].copilotChatLastActivityDate": "Inferred",
+    "value[].displayName": "Inferred",
+    "value[].excelCopilotLastActivityDate": "Inferred",
+    "value[].lastActivityDate": "Inferred",
+    "value[].loopCopilotLastActivityDate": "Inferred",
+    "value[].microsoftTeamsCopilotLastActivityDate": "Inferred",
+    "value[].oneNoteCopilotLastActivityDate": "Inferred",
+    "value[].outlookCopilotLastActivityDate": "Inferred",
+    "value[].powerPointCopilotLastActivityDate": "Inferred",
+    "value[].reportRefreshDate": "Inferred",
+    "value[].userPrincipalName": "Inferred",
+    "value[].wordCopilotLastActivityDate": "Inferred"
+  },
+  "fixture_sha256": "a5cd3ce0574ec5112e4e879335c9faaa0ffa131d7b22c758daceca674c2fe62f",
+  "http": {
+    "method": "GET",
+    "path": "/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D7')",
+    "query": {
+      "$format": "application/json"
+    },
+    "status": 200
+  },
+  "notes": "Terminal page (no @odata.nextLink) with the documented members and an unconcealed user principal name in Microsoft's documentation sample tenant form (contoso.com); values synthesized. Every ledger grade is Inferred.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "MicrosoftDocs/m365copilot-docs main, copilotReportRoot: getMicrosoft365CopilotUsageUserDetail (ms.date 07/30/2026), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b80bce2c403e0afc381ce76c743467123ca88639146dea964b6f2cbcd398488d",
+  "source_url": "https://raw.githubusercontent.com/MicrosoftDocs/m365copilot-docs/main/docs/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusageuserdetail.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "microsoft.m365.reports_usage_user_detail"
+}

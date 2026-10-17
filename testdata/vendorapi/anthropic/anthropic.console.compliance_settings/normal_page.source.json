@@ -1,0 +1,23 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "state": "VerifiedOfficial",
+    "state.type": "VerifiedOfficial",
+    "type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "547f8a76c9ed05a61c194c5fb29145e5e6d5afe2de74959fc1b3c484d002269f",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/compliance_settings",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/organizations/compliance_settings.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.compliance_settings"
+}

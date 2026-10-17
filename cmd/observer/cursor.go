@@ -9,6 +9,8 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
 // cursorSubcommands are the cursor-agent argv tokens that are subcommands
@@ -16,24 +18,67 @@ import (
 // two-prompt collision check does not misread `cursor-agent status` (and
 // friends) as a forwarded positional prompt.
 var cursorSubcommands = map[string]bool{
+	"acp":                         true,
+	"automations":                 true,
+	"bedrock":                     true,
+	"cleanup-install-versions":    true,
+	"cloud":                       true,
+	"dev":                         true,
+	"dev-login":                   true,
+	"env":                         true,
+	"get-channel":                 true,
 	"install-shell-integration":   true,
+	"install":                     true,
+	"local-worker":                true,
 	"uninstall-shell-integration": true,
 	"login":                       true,
 	"logout":                      true,
 	"mcp":                         true,
+	"plugin":                      true,
+	"record":                      true,
+	"repaint-debug":               true,
+	"repo":                        true,
+	"sandbox":                     true,
+	"set-channel":                 true,
+	"shell-integration":           true,
 	"worker":                      true,
+	"worker-server":               true,
 	"status":                      true,
 	"whoami":                      true,
 	"models":                      true,
 	"about":                       true,
 	"update":                      true,
+	"upgrade":                     true,
 	"create-chat":                 true,
 	"generate-rule":               true,
 	"rule":                        true,
 	"agent":                       true,
+	"gpt-5":                       true,
+	"gpt5":                        true,
+	"opus":                        true,
+	"sonnet":                      true,
 	"ls":                          true,
 	"resume":                      true,
 	"help":                        true,
+}
+
+// cursorBudgetMaintenanceSubcommands and cursorBudgetMaintenanceFlags are the
+// grounded cursor-agent verbs and flags that do not submit a model request.
+// They are DERIVED from the cursor intervention registry row
+// (integration.NonBillableLeadingArguments) so this launch gate and the node
+// process controller classify one invocation identically. Chat execution,
+// resume, worker, rule generation, and agent verbs remain controlled because
+// their selected backend cannot pass through Observer's proxy.
+var cursorBudgetMaintenanceSubcommands, cursorBudgetMaintenanceFlags = registryMaintenanceVocabulary("cursor")
+
+func cursorBudgetLaunchEvidence(args []string) budgetLaunchEvidence {
+	if len(args) == 1 && cursorBudgetMaintenanceFlags[args[0]] {
+		return budgetLaunchEvidence{Route: budgetLaunchRouteMaintenance}
+	}
+	if len(args) > 0 && cursorBudgetMaintenanceSubcommands[args[0]] {
+		return budgetLaunchEvidence{Route: budgetLaunchRouteMaintenance}
+	}
+	return budgetLaunchEvidence{Route: budgetLaunchRouteDirect}
 }
 
 // newCursorCmd implements `observer cursor` — a PURE SEEDING wrapper around
@@ -67,7 +112,7 @@ func newCursorCmd() *cobra.Command {
 		Use:   "cursor [-- cursor-agent-args...]",
 		Short: "Launch cursor-agent, optionally seeded with a distilled handover",
 		Long: "Wraps the `cursor-agent` CLI as a pure SEEDING launcher. NO proxy\n" +
-			"routing — cursor talks to its own backend, so the child inherits\n" +
+			"routing - cursor talks to its own backend, so the child inherits\n" +
 			"your environment unchanged. Token capture for cursor is via the\n" +
 			"cursor hook + the chats/store.db watcher adapter (registered by\n" +
 			"`observer init --cursor`), not the proxy.\n\n" +
@@ -78,8 +123,13 @@ func newCursorCmd() *cobra.Command {
 			"never emitted. See docs/session-handoff.md.\n\n" +
 			"All arguments after the subcommand are forwarded to cursor-agent.\n" +
 			"Use `--` to separate observer flags from cursor-agent flags.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach-by-default (attach-all-launchers): hand the PTY to the
 			// daemon when attach resolves. cursor is a PURE SEEDING wrapper with
 			// NO proxy routing, so proxyFlag is "" (no proxy override forwarded),
@@ -149,17 +199,65 @@ func newCursorCmd() *cobra.Command {
 				args = seeded
 				continueDir = cwd
 			}
+			// The maintenance classification above decides WHETHER the gate
+			// runs; the executable and argv decide whether a controlled
+			// launch can be recovered when it does. cursor-agent has no
+			// provable proxy route, so the daemon's attested cutoff over this
+			// exact installed surface is its only admission path.
+			cursorEvidence := cursorBudgetLaunchEvidence(args)
+			cursorEvidence.Executable, cursorEvidence.Arguments = bin, args
+			if err := enforceBudgetControlledLaunch(cmd.Context(), configPath, "cursor",
+				cursorEvidence); err != nil {
+				return err
+			}
+
+			allocatedSessionID := ""
+			if !continueFamilyEngaged(continueFrom, carry, fromMessage, fromTime) {
+				var allocationErr error
+				args, allocatedSessionID, allocationErr = allocateCursorFreshSession(
+					cmd.Context(), bin, continueDir, args,
+				)
+				if allocationErr != nil {
+					return fmt.Errorf("observer cursor: %w", allocationErr)
+				}
+			}
 
 			child := exec.Command(bin, args...)
 			// PURE SEEDING WRAPPER: no proxy env injection. cursor uses its
 			// own backend, so the child inherits the ambient environment
 			// unchanged.
-			child.Env = os.Environ()
-			child.Dir = continueDir // "" inherits the caller's cwd; set by --continue-from to the source project root
+			child.Env = scrubOOBEnv(os.Environ()) // strip the trusted OOB channel env
+			child.Dir = continueDir               // "" inherits the caller's cwd; set by --continue-from to the source project root
 			child.Stdin = os.Stdin
 			child.Stdout = os.Stdout
 			child.Stderr = os.Stderr
-			if runErr := child.Run(); runErr != nil {
+			discovery := prepareGenericDiscovery(cmd.Context(), "cursor", continueDir)
+			if startErr := child.Start(); startErr != nil {
+				return fmt.Errorf("exec cursor-agent: %w", startErr)
+			}
+			if allocatedSessionID != "" {
+				announceOOBSession(allocatedSessionID)
+			}
+			// Direct process attribution (migration 086): record the child pid
+			// now that Start has made it knowable; retract the seed when the
+			// child is reaped. Best-effort both ways — a seeding failure never
+			// affects the launch (see cmd/observer/launchseed.go).
+			dbPath := ""
+			if cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath}); cErr == nil {
+				dbPath = cfg.Observer.DBPath
+			}
+			recordLaunchSeed(dbPath, "cursor", continueDir, child.Process.Pid, cmd.ErrOrStderr())
+			// Best-effort generic post-launch session discovery (WS-DISCOVERY):
+			// a no-op unless the trusted OOB channel is active AND "cursor"
+			// resolves to an adapter that declares session-file watch roots.
+			// Cancel the instant the child exits so a window cut short by exit
+			// never announces a candidate that only looked unique because the
+			// scan stopped early.
+			discoverCancel := discovery.start()
+			if discoverCancel != nil {
+				defer discoverCancel()
+			}
+			if runErr := child.Wait(); runErr != nil {
 				var ee *exec.ExitError
 				if errors.As(runErr, &ee) {
 					return exitErr(ee.ExitCode())
@@ -177,7 +275,6 @@ func newCursorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "cursor")
 	resume = registerResumeFlag(cmd, "cursor")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 

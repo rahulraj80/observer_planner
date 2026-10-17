@@ -1,7 +1,9 @@
 package cost
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 )
@@ -63,14 +65,43 @@ func TestTable_Anthropic2026Q2Pricing(t *testing.T) {
 		// tier). Cache: read $1, 5m-write $12.50, 1h-write $20. Corrected
 		// 2026-07-12 from a stale $5/$25 Opus-anchor placeholder.
 		{"fable-5 explicit", "claude-fable-5", 10, 50, 1, 12.50, 20},
-		// claude-fable family prefix carries the same current-gen rates, so
-		// a hypothetical future SKU resolves to $10/$50, not MISS → $0.
-		{"future fable-6 inherits current", "claude-fable-6", 10, 50, 1, 12.50, 20},
-		// Sonnet 5 — introductory list price $2/$10 (cache 0.20/2.50/4) in
-		// effect through 2026-08-31 per the published card (re-verified
-		// 2026-07-12). NOT $3/$15: that is the standard rate that takes
-		// effect 2026-09-01 (and what the Claude Agent SDK's own estimator
-		// reports today by not applying the intro discount — see pricing.go).
+		// Fable 5.1 — same base $10/$50/$12.50/$20 card as Fable 5, but a
+		// 0.025x (not the universal 0.10x) cache-read multiplier: $0.25,
+		// not $1. Verified against platform.claude.com/docs/en/
+		// about-claude/pricing, fetched 2026-09-07.
+		{"fable-5-1 explicit (0.025x cache read)", "claude-fable-5-1", 10, 50, 0.25, 12.50, 20},
+		{"mythos-5-1 explicit (mirrors fable-5-1)", "claude-mythos-5-1", 10, 50, 0.25, 12.50, 20},
+		// Dot-form aliases — some surfaces spell the minor version with a
+		// dot ("5.1") instead of a dash ("5-1"). Without an explicit alias
+		// these fall through to the SHORTER "claude-fable-5" / "claude-
+		// mythos-5" family match (dots and dashes never normalize against
+		// each other in the lookup ladder), landing on the wrong
+		// generation's $1 cache-read instead of $0.25 — same precedent as
+		// the "gpt-5-6" / "gpt-5.6" dual keys.
+		{"fable-5.1 dot-form alias", "claude-fable-5.1", 10, 50, 0.25, 12.50, 20},
+		{"mythos-5.1 dot-form alias", "claude-mythos-5.1", 10, 50, 0.25, 12.50, 20},
+		// Dated 5.1 SKUs resolve via the claude-fable-5-1 prefix (longer
+		// than claude-fable-5, so it wins the longest-first sort) and keep
+		// the $0.25 read rate.
+		{"fable-5-1 dated → 5.1 prefix", "claude-fable-5-1-20260901", 10, 50, 0.25, 12.50, 20},
+		// Fable 5 legacy SKUs must KEEP the standard $1 read rate — a
+		// dated Fable-5 id lands on the claude-fable-5 key, not 5.1.
+		{"fable-5 dated keeps $1 reads", "claude-fable-5-20260601", 10, 50, 1, 12.50, 20},
+		// claude-fable family prefix stays at the UNIVERSAL 0.10x cache-read
+		// ($1), NOT the 0.025x rate — Anthropic's footnote scopes the
+		// discount to two NAMED models ("Cache hits and refreshes on Claude
+		// Fable 5.1 and Claude Mythos 5.1 are priced at 0.025x the base
+		// input price. All other models use the standard 0.1x multiplier.").
+		// A family row prices an UNKNOWN future SKU, which is an "other
+		// model" per that footnote until it earns its own explicit row, so
+		// bumping the family prefix to 0.025x would silently UNDER-bill it
+		// 4x the moment it ships. Base input/output/cache-write are
+		// unchanged from Fable 5/5.1.
+		{"future fable-6 inherits current (universal cache-read, not the named-SKU discount)", "claude-fable-6", 10, 50, 1, 12.50, 20},
+		// Sonnet 5 — $2/$10 (cache 0.20/2.50/4), launched as introductory
+		// pricing and made PERMANENT: the scheduled 2026-09-01 rise to
+		// $3/$15 was canceled per the pricing-page note (re-verified
+		// 2026-09-07). NOT $3/$15 — see pricing.go.
 		{"sonnet-5 intro", "claude-sonnet-5", 2, 10, 0.20, 2.50, 4},
 		// Dated Sonnet-5 SKU resolves via the bare-name family prefix.
 		{"sonnet-5 dated → family", "claude-sonnet-5-20260601", 2, 10, 0.20, 2.50, 4},
@@ -125,12 +156,20 @@ func TestTable_OpenAI2026Q2Pricing(t *testing.T) {
 		// GPT-5 family — current frontier (rates per
 		// docs/pricing-reference.md, OpenAI snapshot 2026-04-29).
 		{"gpt-5", "gpt-5", 1.07, 0.107, 8.50},
-		// GPT-5.6 family (limited preview, 2026-06-25). CacheRead is the
+		// GPT-5.6 family (released 2026-07-09). CacheRead is the
 		// explicit 90%-discount read rate; the 1.25×-input cache-WRITE
 		// tier is asserted separately in TestTable_GPT56CacheWriteTier.
-		{"gpt-5.6-sol", "gpt-5.6-sol", 5, 0.50, 30},
-		{"gpt-5.6-terra", "gpt-5.6-terra", 2.50, 0.25, 15},
-		{"gpt-5.6-luna", "gpt-5.6-luna", 1, 0.10, 6},
+		// Terra/Luna are the CURRENT (post-2026-07-30-cut) rates — the
+		// PRE-cut rates are pinned separately in
+		// TestDated_GPT56TerraLunaPriceCut (dated_test.go). Sol is
+		// unaffected by the cut.
+		// REPRICED 2026-09-23 (developers.openai.com/api/docs/models/gpt-5.6-sol):
+		// $4 / $0.40 / $20, flagged promotional through 2026-11-21. The bare
+		// "gpt-5.6" family row below deliberately stays on the last known
+		// NON-promotional $5/$30 — see the seed comment for why.
+		{"gpt-5.6-sol", "gpt-5.6-sol", 4, 0.40, 20},
+		{"gpt-5.6-terra", "gpt-5.6-terra", 2.00, 0.20, 12.00},
+		{"gpt-5.6-luna", "gpt-5.6-luna", 0.20, 0.02, 1.20},
 		// Family fallback: a hypothetical future variant resolves via the
 		// longest-prefix "gpt-5.6" family row → Sol (flagship) rates.
 		{"gpt-5.6-nova → gpt-5.6 family (Sol rates)", "gpt-5.6-nova", 5, 0.50, 30},
@@ -193,9 +232,9 @@ func TestTable_GPT56CacheWriteTier(t *testing.T) {
 		name, model string
 		wantInput   float64
 	}{
-		{"sol", "gpt-5.6-sol", 5},
-		{"terra", "gpt-5.6-terra", 2.50},
-		{"luna", "gpt-5.6-luna", 1},
+		{"sol", "gpt-5.6-sol", 4}, // repriced 2026-09-23; the 1.25x write ratio is unchanged ($5 = 1.25 x $4)
+		{"terra", "gpt-5.6-terra", 2.00},
+		{"luna", "gpt-5.6-luna", 0.20},
 		{"family → sol", "gpt-5.6", 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -260,35 +299,49 @@ func TestTable_ChatGPTWebDashedGPT56Slugs(t *testing.T) {
 // we pin the lower tier — see docs/pricing-reference.md.
 func TestTable_GeminiPricing(t *testing.T) {
 	tb := NewTable()
+	floor := newLiteralTableAt(time.Now().UTC())
 	for _, tc := range []struct {
 		name, model     string
 		in, cacheR, out float64
+		// literalFloor pins the defaultPricing floor instead of the composed
+		// seed: the row's price-database value is an OPEN question (lane
+		// R2-RECONCILE, 2026-09-28), so the test states only what the literal
+		// holds and asserts nothing about the database's answer.
+		literalFloor bool
 	}{
-		{"gemini-3.1-pro-preview", "gemini-3.1-pro-preview", 2, 0.20, 12},
-		{"gemini-3-flash-preview", "gemini-3-flash-preview", 0.50, 0.05, 3},
+		{"gemini-3.1-pro-preview", "gemini-3.1-pro-preview", 2, 0.20, 12, false},
+		{"gemini-3-flash-preview", "gemini-3-flash-preview", 0.50, 0.05, 3, false},
 		// Gemini 3.5 Flash — Standard tier per Google's Developer API
 		// pricing card (2026-05-19). No 3.5 Pro on the official page.
-		{"gemini-3.5-flash", "gemini-3.5-flash", 1.50, 0.15, 9},
+		{"gemini-3.5-flash", "gemini-3.5-flash", 1.50, 0.15, 9, false},
 		// 3.5 Flash family fallback: gemini-3.5-flash is a longest-prefix
 		// match for any future flash-suffix SKU (e.g. -experimental),
 		// since familyKeys promotes every exact entry without a date
 		// suffix into a family candidate.
-		{"gemini-3.5-flash-experimental fallback", "gemini-3.5-flash-experimental", 1.50, 0.15, 9},
-		{"gemini-2.5-pro", "gemini-2.5-pro", 1.25, 0.125, 10},
-		{"gemini-2.5-flash", "gemini-2.5-flash", 0.30, 0.03, 2.50},
-		{"gemini-2.5-flash-lite", "gemini-2.5-flash-lite", 0.10, 0.01, 0.40},
-		{"gemini-2.0-flash deprecated", "gemini-2.0-flash", 0.10, 0.025, 0.40},
+		{"gemini-3.5-flash-experimental fallback", "gemini-3.5-flash-experimental", 1.50, 0.15, 9, false},
+		{"gemini-2.5-pro", "gemini-2.5-pro", 1.25, 0.125, 10, false},
+		{"gemini-2.5-flash", "gemini-2.5-flash", 0.30, 0.03, 2.50, false},
+		{"gemini-2.5-flash-lite", "gemini-2.5-flash-lite", 0.10, 0.01, 0.40, false},
+		// OPEN (R2-RECONCILE D1): gemini-2.0-flash was shut down 2026-06-01 and
+		// ai.google.dev/gemini-api/docs/pricing no longer lists it; the price
+		// database publishes 0.15/0.60, which is Vertex AI's rate, not the
+		// Gemini API's. Unresolved, so only the literal floor is pinned.
+		{"gemini-2.0-flash deprecated", "gemini-2.0-flash", 0.10, 0.025, 0.40, true},
 		// Family fallback: future SKU "gemini-3.1-something" inherits
 		// gemini-3.1 family prefix (same as 3.1-pro-preview rates).
-		{"gemini-3.1 family fallback", "gemini-3.1-something-new", 2, 0.20, 12},
+		{"gemini-3.1 family fallback", "gemini-3.1-something-new", 2, 0.20, 12, false},
 		// Unknown 3.5 SKU (e.g. hypothetical "gemini-3.5-pro" not on
 		// the official pricing page as of 2026-05-19) falls through
 		// gemini-3.5-flash (doesn't match) to gemini-3 family → Pro
 		// rates ($2/$12/$0.20). Conservative default.
-		{"unknown 3.5 SKU falls to gemini-3 family (Pro rates)", "gemini-3.5-pro-hypothetical", 2, 0.20, 12},
+		{"unknown 3.5 SKU falls to gemini-3 family (Pro rates)", "gemini-3.5-pro-hypothetical", 2, 0.20, 12, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, ok := tb.Lookup(tc.model)
+			lookup := tb
+			if tc.literalFloor {
+				lookup = floor
+			}
+			p, ok := lookup.Lookup(tc.model)
 			if !ok {
 				t.Fatalf("Lookup(%q) returned ok=false", tc.model)
 			}
@@ -390,57 +443,79 @@ func TestTable_Gemini3FlashFamilyResilience(t *testing.T) {
 // TestTable_OtherProviderPricing covers xAI / Moonshot / Cursor own.
 func TestTable_OtherProviderPricing(t *testing.T) {
 	tb := NewTable()
+	floor := newLiteralTableAt(time.Now().UTC())
 	for _, tc := range []struct {
 		name, model     string
 		in, cacheR, out float64
+		// literalFloor: see TestTable_GeminiPricing.
+		literalFloor bool
 	}{
 		// xAI moved to a unified $1.25/$2.50 rate card for the
 		// grok-4.x line on 2026-05-15 (concurrent with grok-code-fast-1
-		// retirement). CacheRead falls back to 10% × Input via
-		// fillDefaults = $0.125.
-		{"grok-4.3", "grok-4.3", 1.25, 0.125, 2.50},
-		{"grok-4-20 historical alias", "grok-4-20", 1.25, 0.125, 2.50},
-		{"grok-code-fast-1 redirects to grok-4.3", "grok-code-fast-1", 1.25, 0.125, 2.50},
-		// grok-4.5 flagship (2026-07, 500k ctx) + grok-build-0.1 agentic
-		// coder (early access, 256k ctx). No published cached-input rate →
-		// CacheRead defaults to 10% × Input ($0.20 / $0.10).
-		{"grok-4.5 flagship", "grok-4.5", 2, 0.20, 6},
-		{"grok-build-0.1", "grok-build-0.1", 1, 0.10, 2},
-		{"grok-build family", "grok-build-0.2", 1, 0.10, 2},
-		// Family fallback follows the current flagship (grok-4.5 $2/$6),
-		// bumped from the legacy grok-4.3 $1.25/$2.50 — same precedent as
-		// the kimi-k2-6 family bump.
-		{"grok family fallback → flagship", "grok-5", 2, 0.20, 6},
-		{"kimi-k2-5", "kimi-k2-5", 0.60, 0.10, 3},
-		// Kimi K2.6 — added 2026-06-07; family prefix bumped to K2.6 rates.
-		{"kimi-k2-6", "kimi-k2-6", 0.684, 0.144, 3.42},
+		// retirement). CacheRead was a fillDefaults 10%-of-input guess
+		// ($0.125) until 2026-09-23, when docs.x.ai/developers/pricing was
+		// re-read and found to publish a REAL $0.20 cached-input rate for
+		// this line. The guess was a 1.6x under-bill on every cached read.
+		{"grok-4.3", "grok-4.3", 1.25, 0.20, 2.50, false},
+		{"grok-4-20 historical alias", "grok-4-20", 1.25, 0.20, 2.50, false},
+		// grok-code-fast-1 was RETIRED 2026-05-15 and xAI now bills the id
+		// at its auto-route target grok-build-0.1's card, so the CURRENT
+		// (undated) rate is Build 0.1's. Its own historical $0.20/$1.50 card
+		// is the price database's history (migration 0028; dated.go's copy was
+		// retired 2026-09-28) and pinned by
+		// TestFrontierRefresh_GrokCodeFast1Retirement (review finding 6). The
+		// previous $1.25/$2.50 here was grok-4.3's card, which matched
+		// neither side of the retirement.
+		{"retired grok-code-fast-1 bills the replacement", "grok-code-fast-1", 1, 0.20, 2, false},
+		// grok-4.5 (2026-07 flagship, 500k ctx) + grok-build-0.1 agentic
+		// coder (256k ctx). Both now carry PUBLISHED cached-input rates
+		// ($0.30 / $0.20), re-grounded 2026-09-23; the previous blanks let
+		// fillDefaults answer $0.20 / $0.10 — a 1.5x and 2x under-bill.
+		{"grok-4.5 flagship", "grok-4.5", 2, 0.30, 6, false},
+		{"grok-build-0.1", "grok-build-0.1", 1, 0.20, 2, false},
+		{"grok-build family", "grok-build-0.2", 1, 0.20, 2, false},
+		// Family fallback follows the current flagship's base (<200K) tier
+		// — grok-4.6 ($2/$6, real $0.50 cached-input rate), bumped from
+		// grok-4.5's fillDefault-only $2/$6/$0.20 (2026-08). Same precedent
+		// as the kimi-k2-6 family bump.
+		{"grok family fallback → flagship", "grok-5", 2, 0.50, 6, false},
+		// OPEN (R2-RECONCILE D2): Kimi K2.5 was discontinued 2026-08-31 and
+		// Moonshot publishes no page for it; the price database carries a
+		// reseller card (Venice AI, 0.56/3.50/0.22). Only the floor is pinned.
+		{"kimi-k2-5", "kimi-k2-5", 0.60, 0.10, 3, true},
+		// Kimi K2.6 — Moonshot's own card, platform.kimi.ai/docs/pricing/chat
+		// (fetched 2026-09-27): $0.95 input / $4.00 output / $0.16
+		// cache hit. The price database is curated to it by migration 0029
+		// (it published a Venice AI reseller card, 0.75/3.50); the literal's
+		// 0.684/3.42/0.144 was an unsourced figure. Family prefix = K2.6.
+		{"kimi-k2-6", "kimi-k2-6", 0.95, 0.16, 4, false},
 		// Kimi K3 flagship — first-party platform.kimi.ai/docs/pricing/chat-k3
 		// (2026-07-17): $3 input / $15 output / $0.30 cached-input.
-		{"kimi-k3", "kimi-k3", 3, 0.30, 15},
+		{"kimi-k3", "kimi-k3", 3, 0.30, 15, false},
 		// K3-family fallback: a K3 SKU variant lands on the explicit
 		// "kimi-k3" prefix (longest-first beats bare "kimi"), so it gets K3
 		// rates — NOT the K2.6 family rate it used to fall to before the
 		// exact row existed.
-		{"kimi-k3-1 → kimi-k3 family", "kimi-k3-1", 3, 0.30, 15},
+		{"kimi-k3-1 → kimi-k3 family", "kimi-k3-1", 3, 0.30, 15, false},
 		// Bare "kimi" family fallback deliberately stays at K2.6 (the
 		// mainstream generation), so an unknown K2.x SKU does NOT inherit
 		// the 4.4× K3 rate.
-		{"kimi-k2-7 → kimi family (K2.6)", "kimi-k2-7", 0.684, 0.144, 3.42},
-		{"composer-1", "composer-1", 1.25, 0.125, 10},
-		{"composer-1.5", "composer-1.5", 3.50, 0.35, 17.50},
-		{"composer-2", "composer-2", 0.50, 0.20, 2.50},
-		{"composer-2.5", "composer-2.5", 0.50, 0.20, 2.50},
-		{"composer-2.5-fast", "composer-2.5-fast", 3, 0.30, 15},
-		// Cursor sends model="default" when the user picks Auto in
-		// the model picker; Composer 2.5 Fast is the underlying
-		// default backbone per cursor.com/blog/composer-2-5.
-		{"default (cursor Auto)", "default", 3, 0.30, 15},
+		{"kimi-k2-7 → kimi family (K2.6)", "kimi-k2-7", 0.95, 0.16, 4, false},
+		{"composer-1", "composer-1", 1.25, 0.125, 10, false},
+		{"composer-1.5", "composer-1.5", 3.50, 0.35, 17.50, false},
+		{"composer-2", "composer-2", 0.50, 0.20, 2.50, false},
+		{"composer-2.5", "composer-2.5", 0.50, 0.20, 2.50, false},
+		{"composer-2.5-fast", "composer-2.5-fast", 3, 0.50, 15, false}, // cache read per cursor.com/docs/models (2026-09-27), was the 10% default
 		// Family-prefix wins over miss: "composer-future-x" → composer
 		// family rates ($0.50/$2.50).
-		{"composer family fallback", "composer-future-x", 0.50, 0.20, 2.50},
+		{"composer family fallback", "composer-future-x", 0.50, 0.20, 2.50, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, ok := tb.Lookup(tc.model)
+			lookup := tb
+			if tc.literalFloor {
+				lookup = floor
+			}
+			p, ok := lookup.Lookup(tc.model)
 			if !ok {
 				t.Fatalf("Lookup(%q) returned ok=false", tc.model)
 			}
@@ -615,9 +690,9 @@ func TestTable_BareAnthropicFamilyRowsAndLegacyAlias(t *testing.T) {
 		// Sonnet 5 keeps the introductory $2/$10 through 2026-08-31.
 		{"guard: sonnet-5 keeps INTRO 2/10", "claude-sonnet-5", PricingSourceExact, 2, 10, 0.20, 2.50, 4, 0, 0},
 		{"guard: sonnet-4-6 exact", "claude-sonnet-4-6", PricingSourceExact, 3, 15, 0.30, 3.75, 6, 0, 0},
-		// Sonnet 4.5 keeps its per-SKU 200K long-context tier — the bare
-		// family row carries none and must not have displaced it.
-		{"guard: sonnet-4-5 keeps its LC tier", "claude-sonnet-4-5", PricingSourceExact, 3, 15, 0.30, 3.75, 6, 0, 200_000},
+		// Sonnet 4.5 is FLAT (Anthropic states no premium; the feed
+		// publishes it flat) and still resolves to its own exact row.
+		{"guard: sonnet-4-5 exact and flat", "claude-sonnet-4-5", PricingSourceExact, 3, 15, 0.30, 3.75, 6, 0, 0},
 		{"guard: sonnet-3-7 deprecated exact", "claude-sonnet-3-7", PricingSourceExact, 3, 15, 0.30, 3.75, 6, 0, 0},
 		{"guard: haiku-4-5 exact", "claude-haiku-4-5", PricingSourceExact, 1, 5, 0.10, 1.25, 2, 0, 0},
 		{"guard: haiku-4.5 dot variant exact", "claude-haiku-4.5", PricingSourceExact, 1, 5, 0.10, 1.25, 2, 0, 0},
@@ -724,6 +799,9 @@ func TestTable_LastResortNormalization(t *testing.T) {
 		{"curated host-rate key stays exact", "deepseek/deepseek-v4-flash", true, PricingSourceExact, 0.098, 0.197},
 		// Router sentinels / empty name no model — still MISS.
 		{"auto sentinel still miss", "auto", false, PricingSourceMiss, 0, 0},
+		// Cursor's Auto placeholder: bills at the ROUTED model's price, so
+		// no flat row (retired 2026-09-27); the adapter resolves the id.
+		{"cursor default placeholder is a miss", "default", false, PricingSourceMiss, 0, 0},
 		{"empty still miss", "", false, PricingSourceMiss, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -739,6 +817,110 @@ func TestTable_LastResortNormalization(t *testing.T) {
 					tc.model, p.Input, p.Output, tc.wantInput, tc.wantOutput)
 			}
 		})
+	}
+}
+
+// TestTable_CursorGrokPricing pins Cursor's own Grok catalog rows. Cursor's
+// effort-labelled ids have explicit entries, keeping them on Cursor's card
+// rather than inheriting direct xAI's long-context surcharge or Grok 4.5's
+// lower direct-provider cache rate.
+func TestTable_CursorGrokPricing(t *testing.T) {
+	tb := NewTable()
+	for _, tc := range []struct {
+		name, model string
+		wantSource  PricingSource
+		input       float64
+		cacheRead   float64
+		output      float64
+	}{
+		{"grok 4.6 base exact", "cursor-grok-4.6", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.6 low exact", "cursor-grok-4.6-low", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.6 medium exact", "cursor-grok-4.6-medium", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.6 high exact", "cursor-grok-4.6-high", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.6 xhigh exact", "cursor-grok-4.6-xhigh", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.6 low fast exact", "cursor-grok-4.6-low-fast", PricingSourceExact, 4, 1.00, 12},
+		{"grok 4.6 medium fast exact", "cursor-grok-4.6-medium-fast", PricingSourceExact, 4, 1.00, 12},
+		{"grok 4.6 high fast exact", "cursor-grok-4.6-high-fast", PricingSourceExact, 4, 1.00, 12},
+		{"grok 4.6 xhigh fast exact", "cursor-grok-4.6-xhigh-fast", PricingSourceExact, 4, 1.00, 12},
+		{"grok 4.5 base exact", "cursor-grok-4.5", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.5 low exact", "cursor-grok-4.5-low", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.5 medium exact", "cursor-grok-4.5-medium", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.5 high exact", "cursor-grok-4.5-high", PricingSourceExact, 2, 0.50, 6},
+		{"grok 4.5 low fast exact", "cursor-grok-4.5-low-fast", PricingSourceExact, 4, 1.00, 18},
+		{"grok 4.5 medium fast exact", "cursor-grok-4.5-medium-fast", PricingSourceExact, 4, 1.00, 18},
+		{"grok 4.5 high fast exact", "cursor-grok-4.5-high-fast", PricingSourceExact, 4, 1.00, 18},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, src, ok := tb.LookupWithSource(tc.model)
+			if !ok {
+				t.Fatalf("LookupWithSource(%q) ok=false", tc.model)
+			}
+			if src != tc.wantSource {
+				t.Fatalf("source=%q want %q", src, tc.wantSource)
+			}
+			if p.Input != tc.input || p.CacheRead != tc.cacheRead || p.Output != tc.output {
+				t.Fatalf("rates=%+v want input=%v cacheRead=%v output=%v", p, tc.input, tc.cacheRead, tc.output)
+			}
+			if p.LongContextThreshold != 0 {
+				t.Fatalf("Cursor row unexpectedly carries direct-xAI long-context threshold: %+v", p)
+			}
+		})
+	}
+
+	// A Cursor model outside the known families must remain a miss rather than
+	// inheriting direct xAI pricing. (4.7 joined the known families 2026-09-27
+	// with Cursor's own published card, so the probe moved to 4.8.)
+	if _, src, ok := tb.LookupWithSource("cursor-grok-4.8-medium"); ok || src != PricingSourceMiss {
+		t.Fatalf("unknown Cursor id resolved as (%q, %v), want miss", src, ok)
+	}
+
+	// Direct xAI Grok keeps its own >=200K tier; Cursor rows above must not
+	// mutate or inherit these fields.
+	xai, src, ok := tb.LookupWithSource("grok-4.6")
+	if !ok || src != PricingSourceExact {
+		t.Fatalf("direct xAI grok-4.6 = (%+v, %q, %v), want exact", xai, src, ok)
+	}
+	if xai.LongContextThreshold != 199_999 || xai.LongContextInput != 4 ||
+		xai.LongContextOutput != 12 || xai.LongContextCacheRead != 1.00 {
+		t.Fatalf("direct xAI long-context tier changed: %+v", xai)
+	}
+
+	// Fast is encoded in the Cursor SKU itself. TokenBundle.Fast must not
+	// apply another multiplier to the already-fast card.
+	fast, src, ok := tb.LookupWithSource("cursor-grok-4.6-medium-fast")
+	if !ok || src != PricingSourceExact {
+		t.Fatalf("Cursor fast lookup = (%+v, %q, %v), want exact", fast, src, ok)
+	}
+	standardCost := ComputeBreakdown(fast, TokenBundle{Input: 100_000}).Total
+	flaggedCost := ComputeBreakdown(fast, TokenBundle{Input: 100_000, Fast: true}).Total
+	if flaggedCost != standardCost {
+		t.Fatalf("Cursor fast SKU changed with TokenBundle.Fast: standard=%v flagged=%v", standardCost, flaggedCost)
+	}
+
+	// The free guard still wins before any explicit paid Cursor family row.
+	free, src, ok := tb.LookupWithSource("cursor-grok-4.6-medium:free")
+	if !ok || src != PricingSourceExact || free.Input != 0 || free.Output != 0 {
+		t.Fatalf("free Cursor id = (%+v, %q, %v), want known-$0 exact", free, src, ok)
+	}
+}
+
+// TestTable_CursorExactOverrideWins pins the normal precedence rule: an
+// operator override for a captured Cursor id wins as an exact row.
+func TestTable_CursorExactOverrideWins(t *testing.T) {
+	tb := NewTable()
+	override := Pricing{Input: 99, Output: 111, CacheRead: 7}
+	tb.Merge(map[string]Pricing{"cursor-grok-4.6-medium": override})
+
+	p, src, ok := tb.LookupWithSource("cursor-grok-4.6-medium")
+	if !ok {
+		t.Fatal("LookupWithSource(cursor-grok-4.6-medium) ok=false")
+	}
+	if src != PricingSourceExact {
+		t.Fatalf("source=%q want %q", src, PricingSourceExact)
+	}
+	want := fillDefaults(override)
+	if p != want {
+		t.Fatalf("override result = %+v, want %+v", p, want)
 	}
 }
 
@@ -806,45 +988,79 @@ func TestTable_CodexFastModeMultiplier(t *testing.T) {
 // TestTable_OpenRouterServedOpenWeightPricing once the §A6 commit lands.
 func TestTable_OpenWeightFamilies2026Q2Pricing(t *testing.T) {
 	tb := NewTable()
+	floor := newLiteralTableAt(time.Now().UTC())
+	// explicitCacheWrite: models whose MAKER card quotes a cache-write rate
+	// (everything else here is the auto-cache shape, 0).
+	explicitCacheWrite := map[string]float64{
+		"minimax-m2.7": 0.375,
+		"minimax-m2.5": 0.375,
+	}
 	for _, tc := range []struct {
 		name, model     string
 		in, cacheR, out float64
 		wantSource      PricingSource
+		// literalFloor: see TestTable_GeminiPricing.
+		literalFloor bool
 	}{
-		// OpenAI GPT-OSS (open weight).
-		{"gpt-oss-120b", "gpt-oss-120b", 0.039, 0.0039, 0.18, PricingSourceExact},
-		{"gpt-oss-20b", "gpt-oss-20b", 0.03, 0.003, 0.14, PricingSourceExact},
-		{"gpt-oss family", "gpt-oss-unknown-sku", 0.039, 0.0039, 0.18, PricingSourceFamily},
+		// OpenAI GPT-OSS (open weight). OPEN (R2-RECONCILE D3): OpenAI
+		// publishes no price for either model (openai.com/index/introducing-
+		// gpt-oss, fetched 2026-09-27 - weights only), so every rate is some
+		// host's. The price database carries reseller cards (0.15/0.60 and
+		// 0.04/0.18); OpenRouter's headline is 0.15/0.60 and 0.018/0.09.
+		// Which host is "the" price is unresolved, so only the floor is pinned.
+		{"gpt-oss-120b", "gpt-oss-120b", 0.039, 0.0039, 0.18, PricingSourceExact, true},
+		{"gpt-oss-20b", "gpt-oss-20b", 0.03, 0.003, 0.14, PricingSourceExact, true},
+		{"gpt-oss family", "gpt-oss-unknown-sku", 0.039, 0.0039, 0.18, PricingSourceFamily, false},
 		// Nvidia Nemotron 3 (canonical OpenRouter ids).
-		{"nemotron-3-ultra-550b-a55b", "nemotron-3-ultra-550b-a55b", 0.50, 0.05, 2.50, PricingSourceExact},
-		{"nemotron-3-super-120b-a12b", "nemotron-3-super-120b-a12b", 0.09, 0.009, 0.45, PricingSourceExact},
-		{"nemotron-3-nano-30b-a3b", "nemotron-3-nano-30b-a3b", 0.04, 0.004, 0.15, PricingSourceExact},
-		{"nemotron-3-ultra shorthand", "nemotron-3-ultra", 0.50, 0.05, 2.50, PricingSourceExact},
-		{"nemotron family → super representative", "nemotron-unknown", 0.09, 0.009, 0.45, PricingSourceFamily},
+		{"nemotron-3-ultra-550b-a55b", "nemotron-3-ultra-550b-a55b", 0.50, 0.05, 2.50, PricingSourceExact, false},
+		{"nemotron-3-super-120b-a12b", "nemotron-3-super-120b-a12b", 0.09, 0.009, 0.45, PricingSourceExact, false},
+		{"nemotron-3-nano-30b-a3b", "nemotron-3-nano-30b-a3b", 0.04, 0.004, 0.15, PricingSourceExact, false},
+		{"nemotron-3-ultra shorthand", "nemotron-3-ultra", 0.50, 0.05, 2.50, PricingSourceExact, false},
+		{"nemotron family → super representative", "nemotron-unknown", 0.09, 0.009, 0.45, PricingSourceFamily, false},
 		// Nous Hermes — flat in/out. hermes-4 rates are placeholder (= Hermes 3).
-		{"hermes-3-llama-3.1-405b", "hermes-3-llama-3.1-405b", 1.00, 0.10, 1.00, PricingSourceExact},
-		{"hermes-4-405b placeholder", "hermes-4-405b", 1.00, 0.10, 1.00, PricingSourceExact},
-		{"hermes family", "hermes-future-sku", 1.00, 0.10, 1.00, PricingSourceFamily},
+		// OPEN (R2-RECONCILE D4): Nous Research does not list Hermes 3 405B on
+		// its own portal; the price database carries Venice AI's 1.10/3.00,
+		// OpenRouter lists $1/$1. Only the floor is pinned.
+		{"hermes-3-llama-3.1-405b", "hermes-3-llama-3.1-405b", 1.00, 0.10, 1.00, PricingSourceExact, true},
+		{"hermes-4-405b placeholder", "hermes-4-405b", 1.00, 0.10, 1.00, PricingSourceExact, false},
+		{"hermes family", "hermes-future-sku", 1.00, 0.10, 1.00, PricingSourceFamily, false},
 		// Alibaba Qwen — implicit cache = 20% of input on first-party.
-		{"qwen3-max", "qwen3-max", 0.78, 0.156, 3.90, PricingSourceExact},
-		{"qwen3-coder", "qwen3-coder", 1.50, 0.30, 7.50, PricingSourceExact},
-		{"qwen family → qwen3-max", "qwen-unknown", 0.78, 0.156, 3.90, PricingSourceFamily},
-		// Zhipu GLM — 5.1 latest; family prefix points at 5.1.
-		{"glm-5", "glm-5", 1.00, 0.20, 3.20, PricingSourceExact},
-		{"glm-5.1", "glm-5.1", 0.98, 0.182, 3.08, PricingSourceExact},
-		{"glm family → 5.1", "glm-future", 0.98, 0.182, 3.08, PricingSourceFamily},
+		// qwen3-max: Alibaba Cloud Model Studio's international card
+		// (alibabacloud.com/help/en/model-studio/model-pricing, fetched
+		// 2026-09-27): $1.20 / $6.00 for 0-32K input (cache 20% = $0.24). The
+		// price database is curated to it by migration 0029 (it published
+		// OpenModel.ai's 0.96/4.80); the literal's 0.78/3.90 was unsourced.
+		{"qwen3-max", "qwen3-max", 1.20, 0.24, 6.00, PricingSourceExact, false},
+		{"qwen3-coder", "qwen3-coder", 1.50, 0.30, 7.50, PricingSourceExact, false},
+		// The qwen family row keeps its older qwen3-max anchor (not
+		// re-verified in R2-RECONCILE; an open follow-up).
+		{"qwen family (older qwen3-max anchor)", "qwen-unknown", 0.78, 0.156, 3.90, PricingSourceFamily, false},
+		// Zhipu GLM — 5.3 latest (bumped 2026-09-07); family prefix points
+		// at 5.3, which happens to be numerically identical to 5.2.
+		{"glm-5", "glm-5", 1.00, 0.20, 3.20, PricingSourceExact, false},
+		{"glm-5.1", "glm-5.1", 0.98, 0.182, 3.08, PricingSourceExact, false},
+		{"glm-5.3", "glm-5.3", 1.40, 0.26, 4.40, PricingSourceExact, false},
+		{"glm family → 5.3", "glm-future", 1.40, 0.26, 4.40, PricingSourceFamily, false},
 		// Mistral — batch 50% off known-unmodelled.
-		{"mistral-large", "mistral-large", 2.00, 0.20, 6.00, PricingSourceExact},
-		{"mistral-medium-3", "mistral-medium-3", 1.00, 0.10, 3.00, PricingSourceExact},
-		{"mistral-small", "mistral-small", 0.15, 0.015, 0.60, PricingSourceExact},
-		{"mistral family → medium-3", "mistral-future", 1.00, 0.10, 3.00, PricingSourceFamily},
-		// MiniMax — family → m2.7 latest.
-		{"minimax-m2.7", "minimax-m2.7", 0.279, 0.0279, 1.20, PricingSourceExact},
-		{"minimax-m2.5", "minimax-m2.5", 0.15, 0.015, 1.15, PricingSourceExact},
-		{"minimax family → m2.7", "minimax-future", 0.279, 0.0279, 1.20, PricingSourceFamily},
+		{"mistral-large", "mistral-large", 2.00, 0.20, 6.00, PricingSourceExact, false},
+		{"mistral-medium-3", "mistral-medium-3", 1.00, 0.10, 3.00, PricingSourceExact, false},
+		{"mistral-small", "mistral-small", 0.15, 0.015, 0.60, PricingSourceExact, false},
+		{"mistral family → medium-3", "mistral-future", 1.00, 0.10, 3.00, PricingSourceFamily, false},
+		// MiniMax — family → m2.7 latest. MiniMax's own pay-as-you-go card
+		// (platform.minimax.io/docs/guides/pricing-paygo.md, fetched
+		// 2026-09-27): M2.7 $0.30 / $1.20, cache read $0.06; M2.5 $0.30 /
+		// $1.20, cache read $0.03. The price database already published these
+		// (feed v2+); the literal's 0.279 and 0.15/1.15 were stale.
+		{"minimax-m2.7", "minimax-m2.7", 0.30, 0.06, 1.20, PricingSourceExact, false},
+		{"minimax-m2.5", "minimax-m2.5", 0.30, 0.03, 1.20, PricingSourceExact, false},
+		{"minimax family → m2.7", "minimax-future", 0.30, 0.06, 1.20, PricingSourceFamily, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, src, ok := tb.LookupWithSource(tc.model)
+			lookup := tb
+			if tc.literalFloor {
+				lookup = floor
+			}
+			p, src, ok := lookup.LookupWithSource(tc.model)
 			if !ok {
 				t.Fatalf("Lookup(%q) ok=false", tc.model)
 			}
@@ -863,10 +1079,11 @@ func TestTable_OpenWeightFamilies2026Q2Pricing(t *testing.T) {
 			if diff := p.CacheRead - tc.cacheR; diff > 1e-9 || diff < -1e-9 {
 				t.Errorf("Lookup(%q) cache_read=%v want %v", tc.model, p.CacheRead, tc.cacheR)
 			}
-			// Auto-cache shape — no separate cache-write charge.
-			if p.CacheCreation != 0 {
-				t.Errorf("Lookup(%q) CacheCreation=%v want 0 (auto-cache shape)",
-					tc.model, p.CacheCreation)
+			// Auto-cache shape — no separate cache-write charge — unless the
+			// maker's own card quotes one (feed v6, migration 0031: MiniMax
+			// charges $0.375/M for a cache write on M2.5 and M2.7).
+			if want := explicitCacheWrite[tc.model]; math.Abs(p.CacheCreation-want) > 1e-9 {
+				t.Errorf("Lookup(%q) CacheCreation=%v want %v", tc.model, p.CacheCreation, want)
 			}
 		})
 	}
@@ -912,9 +1129,11 @@ func TestTable_OpenRouterServedOpenWeightPricing(t *testing.T) {
 		{"x-ai/grok-build-0.1", "x-ai/grok-build-0.1", 1.00, 0.20, 2.00},
 		// Moonshot via OpenRouter.
 		{"moonshotai/kimi-k2.6", "moonshotai/kimi-k2.6", 0.684, 0.144, 3.42},
-		// Kimi K3 via OpenRouter — first-party rates; CacheRead mirrors
-		// Moonshot's own $0.30 cache-hit (OpenRouter lists no exact rate).
-		{"moonshotai/kimi-k3", "moonshotai/kimi-k3", 3, 0.30, 15},
+		// Kimi K3 via OpenRouter — OpenRouter's own listing ($2.80/$14,
+		// re-verified 2026-08-15), deliberately DIFFERENT from Moonshot's
+		// first-party $3/$15 card; CacheRead mirrors Moonshot's own $0.30
+		// cache-hit (OpenRouter lists no exact rate).
+		{"moonshotai/kimi-k3", "moonshotai/kimi-k3", 2.80, 0.30, 14},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, src, ok := tb.LookupWithSource(tc.model)
@@ -992,28 +1211,38 @@ func emptyIntelConfigForTest() config.IntelligenceConfig {
 	return config.IntelligenceConfig{}
 }
 
-// TestTable_DeepSeek2026Q2Pricing pins the v1.8.2 DeepSeek V4 rates
-// (api-docs.deepseek.com snapshot 2026-06-06). Cache hit → CacheRead;
-// no separate cache-write charge (auto-cache, OpenAI-shape). V4-Pro's
-// $0.435 input is the 75%-off rate made permanent 2026-05-22.
+// TestTable_DeepSeek2026Q2Pricing pins the CURRENT (post 2026-09-10T16:00Z
+// V4.1-Flash rename + price reduction) DeepSeek V4 rates
+// (api-docs.deepseek.com, confirmed live 2026-09-21). These are the
+// OFF-PEAK rates — the flat table's representative choice; the peak variant
+// (2× every dimension, 01:00-04:00 + 06:00-10:00 UTC Mon-Fri) rides on the
+// Pricing.Peak field and is exercised by the date-aware / peak tests.
+// The flash base dropped to $0.15/$0.60/$0.003 on 2026-09-10 (was
+// $0.22/$0.66/$0.007 from 2026-08-16, itself preserved as history in
+// dated.go — see TestDated_DeepSeekPeakOffPeakOverhaul). Cache hit →
+// CacheRead; no separate cache-write charge (auto-cache, OpenAI-shape).
 //
 // Pins BOTH the first-party rate (bare model id) AND the OpenRouter-
 // served rate (provider-qualified key) so the host-variance is
 // captured cleanly. The two must NOT collapse — that would silently
-// drop the 30% OpenRouter delta on v4-flash.
+// drop the OpenRouter delta on v4-flash (unaffected by DeepSeek's own
+// peak/off-peak overhaul — OpenRouter runs its own flat rate).
 func TestTable_DeepSeek2026Q2Pricing(t *testing.T) {
 	tb := NewTable()
 	for _, tc := range []struct {
 		name, model     string
 		in, cacheR, out float64
 	}{
-		// First-party (bare ids).
-		{"v4-flash", "deepseek-v4-flash", 0.14, 0.0028, 0.28},
-		{"v4-pro", "deepseek-v4-pro", 0.435, 0.003625, 0.87},
-		{"chat alias → v4-flash", "deepseek-chat", 0.14, 0.0028, 0.28},
-		{"reasoner alias → v4-flash", "deepseek-reasoner", 0.14, 0.0028, 0.28},
-		{"v4 family → flash", "deepseek-v4", 0.14, 0.0028, 0.28},
-		{"deepseek family → flash", "deepseek", 0.14, 0.0028, 0.28},
+		// First-party (bare ids) — current off-peak rate.
+		{"v4-flash (legacy name)", "deepseek-v4-flash", 0.15, 0.003, 0.60},
+		{"flash (new canonical)", "deepseek-flash", 0.15, 0.003, 0.60},
+		{"v4.1-flash (repo alias)", "deepseek-v4.1-flash", 0.15, 0.003, 0.60},
+		{"v4-flash-vision-exp", "deepseek-v4-flash-vision-exp", 0.15, 0.003, 0.60},
+		{"v4-pro", "deepseek-v4-pro", 0.66, 0.022, 1.98},
+		{"chat alias → flash", "deepseek-chat", 0.15, 0.003, 0.60},
+		{"reasoner alias → flash", "deepseek-reasoner", 0.15, 0.003, 0.60},
+		{"v4 family → flash", "deepseek-v4", 0.15, 0.003, 0.60},
+		{"deepseek family → flash", "deepseek", 0.15, 0.003, 0.60},
 		// OpenRouter-served (provider-qualified) — different rates,
 		// must NOT collapse to the bare rate via prefix strip.
 		{"OR v4-flash 30% off", "deepseek/deepseek-v4-flash", 0.098, 0.0197, 0.197},
@@ -1322,23 +1551,46 @@ func TestTable_2026Q3ResearchBatch(t *testing.T) {
 		in, out, cacheR float64
 	}{
 		{"claude-mythos-5", "claude-mythos-5", 10, 50, 1},
-		{"claude-mythos (family)", "claude-mythos", 10, 50, 1},
+		// claude-mythos family prefix stays at the UNIVERSAL 0.10x cache-read
+		// ($1) — the 0.025x discount is scoped by Anthropic's own footnote
+		// to the two NAMED Mythos 5.1 / Fable 5.1 SKUs, not to a family row
+		// pricing an unknown future SKU (see the pricing.go comment next to
+		// the claude-mythos row, and the fable-6 case in
+		// TestTable_Anthropic2026Q2Pricing). Identical to claude-mythos-5.
+		{"claude-mythos (family, universal cache-read)", "claude-mythos", 10, 50, 1},
 		{"qwen3.5-plus", "qwen3.5-plus", 0.40, 2.40, 0.04},
 		{"qwen3.5-flash", "qwen3.5-flash", 0.10, 0.40, 0.01},
 		{"qwen3.5-omni-plus", "qwen3.5-omni-plus", 1.40, 8.30, skipCache},
 		{"qwen3.5-omni-flash", "qwen3.5-omni-flash", 0.40, 2.20, skipCache},
-		{"qwen3.7-plus", "qwen3.7-plus", 0.40, 1.60, 0.04},
+		// qwen3.7-plus cache read: Alibaba's card states an implicit-cache
+		// hit at 20% of input = $0.08 (alibabacloud.com/help/en/model-studio/
+		// model-pricing, fetched 2026-09-27); the price database already
+		// published it (feed v2+). The literal's $0.04 was a 10% guess.
+		{"qwen3.7-plus", "qwen3.7-plus", 0.40, 1.60, 0.08},
 		{"qwen/qwen3.7-plus", "qwen/qwen3.7-plus", 0.40, 1.60, 0.04},
 		{"qwen3.8-max-preview", "qwen3.8-max-preview", 1.25, 3.75, 0.25},
-		// qwen/qwen3.5-plus alias uses the REAL OpenRouter rate, which
-		// deliberately differs from the bare DashScope key above (P1-2 fix).
-		{"qwen/qwen3.5-plus", "qwen/qwen3.5-plus", 0.30, 1.80, skipCache},
+		// qwen/qwen3.5-plus carries the MAKER's card (Alibaba, the same as the
+		// bare key; migration 0029, "maker first", lane R2-RECONCILE).
+		{"qwen/qwen3.5-plus", "qwen/qwen3.5-plus", 0.40, 2.40, 0.04},
+		// OpenRouter's earlier-snapshot id is pinned EXACTLY to Alibaba's
+		// qwen3.5-plus-2026-02-15 card (same page, same rates) rather than
+		// resolving silently through the qwen/qwen3.5-plus family prefix.
+		{"qwen/qwen3.5-plus-02-15", "qwen/qwen3.5-plus-02-15", 0.40, 2.40, 0.04},
 		{"qwen/qwen3.5-flash", "qwen/qwen3.5-flash", 0.10, 0.40, 0.01},
 		{"glm-5.2", "glm-5.2", 1.40, 4.40, 0.26},
 		{"z-ai/glm-5.2", "z-ai/glm-5.2", 1.40, 4.40, 0.26},
+		// minimax-m3 bills MiniMax's "Permanent 50% off" card ($0.30/$1.20/
+		// $0.06, platform.minimax.io/docs/guides/pricing-paygo.md, fetched
+		// 2026-09-27), which is what the price database publishes (feed v2+).
+		// The literal held the struck-through LIST rate until R2-RECONCILE;
+		// the OpenRouter route id below is not re-verified and keeps it.
 		{"minimax-m3", "minimax-m3", 0.30, 1.20, 0.06},
-		{"minimax/minimax-m3", "minimax/minimax-m3", 0.30, 1.20, 0.06},
-		{"hy3", "hy3", 0.15, 0.59, 0.037},
+		{"minimax/minimax-m3", "minimax/minimax-m3", 0.60, 2.40, 0.12},
+		// hy3: Tencent Cloud's USD TokenHub card (fetched 2026-09-27):
+		// $0.132 / $0.528, cache hit $0.033 - labelled "Promo pricing synced
+		// with official docs"; the price database published it (feed v2+).
+		// The OpenRouter route id below is not re-verified.
+		{"hy3", "hy3", 0.132, 0.528, 0.033},
 		{"tencent/hy3", "tencent/hy3", 0.15, 0.59, 0.037},
 		{"step-3.5-flash", "step-3.5-flash", 0.10, 0.30, skipCache},
 		{"stepfun/step-3.5-flash", "stepfun/step-3.5-flash", 0.10, 0.30, skipCache},
@@ -1352,6 +1604,9 @@ func TestTable_2026Q3ResearchBatch(t *testing.T) {
 		{"doubao-seed-2-0-lite", "doubao-seed-2-0-lite", 0.088, 0.53, 0.018},
 		{"doubao-seed-2-0-mini", "doubao-seed-2-0-mini", 0.029, 0.29, 0.006},
 		{"muse-spark-1.1", "muse-spark-1.1", 1.25, 4.25, 0.15},
+		{"muse-spark-1.2", "muse-spark-1.2", 1.25, 4.25, 0.15},
+		{"muse-spark-1.2-contributor", "muse-spark-1.2-contributor", 0.10, 0.20, 0.002},
+		{"muse-spark (family) → standard rate", "muse-spark-1.3", 1.25, 4.25, 0.15},
 		{"north-mini-code-1-0 (free)", "north-mini-code-1-0", 0, 0, skipCache},
 		{"cohere/north-mini-code (free)", "cohere/north-mini-code", 0, 0, skipCache},
 		{"fugu-ultra", "fugu-ultra", 5, 30, 0.50},
@@ -1388,6 +1643,55 @@ func TestTable_2026Q3ResearchBatch(t *testing.T) {
 	}
 	if p.Input != 0 || p.Output != 0 {
 		t.Errorf("north-mini-code-1-0 should be exactly free: %+v", p)
+	}
+}
+
+// TestTable_MuseSpark1_2Wave pins the 2026-08-05 Muse Spark 1.2 release
+// (ai.developer.meta.com/docs/pricing-rate-limits): 1.2 launches at the
+// SAME standard rate as 1.1, plus the discounted "contributor" (opt-in
+// data-sharing) tier and the "muse-spark" family fallback. Also pins
+// WebSearchPerRequest ($2.50/1,000 queries flattened to $0.0025/call)
+// and that CacheCreation stays 0 across every Muse Spark row (Meta's
+// pricing page states no cache-write rate — unstated, never invented).
+func TestTable_MuseSpark1_2Wave(t *testing.T) {
+	tb := NewTable()
+	for _, tc := range []struct {
+		name, model                string
+		in, out, cacheR, webSearch float64
+		wantSource                 PricingSource
+	}{
+		{"1.1 standard", "muse-spark-1.1", 1.25, 4.25, 0.15, 0.0025, PricingSourceExact},
+		{"1.2 standard, same rate as 1.1", "muse-spark-1.2", 1.25, 4.25, 0.15, 0.0025, PricingSourceExact},
+		{"1.2 contributor tier: NOT swallowed by the family row", "muse-spark-1.2-contributor", 0.10, 0.20, 0.002, 0.0025, PricingSourceExact},
+		{"unrecognized future version falls to the family row", "muse-spark-1.3", 1.25, 4.25, 0.15, 0.0025, PricingSourceFamily},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, src, ok := tb.LookupWithSource(tc.model)
+			if !ok {
+				t.Fatalf("Lookup(%q) ok=false", tc.model)
+			}
+			if src != tc.wantSource {
+				t.Errorf("source: got %q want %q", src, tc.wantSource)
+			}
+			if p.Input != tc.in {
+				t.Errorf("input: got %v want %v", p.Input, tc.in)
+			}
+			if p.Output != tc.out {
+				t.Errorf("output: got %v want %v", p.Output, tc.out)
+			}
+			if p.CacheRead != tc.cacheR {
+				t.Errorf("cache_read: got %v want %v", p.CacheRead, tc.cacheR)
+			}
+			if p.WebSearchPerRequest != tc.webSearch {
+				t.Errorf("web_search_per_request: got %v want %v", p.WebSearchPerRequest, tc.webSearch)
+			}
+			if p.CacheCreation != 0 {
+				t.Errorf("cache_creation: got %v want 0 (Meta publishes no cache-write rate)", p.CacheCreation)
+			}
+			if p.LongContextThreshold != 0 {
+				t.Errorf("long_context_threshold: got %v want 0 (Meta: no premium for long context)", p.LongContextThreshold)
+			}
+		})
 	}
 }
 
@@ -1438,6 +1742,9 @@ func TestTable_2026Q3LongestPrefixShadowing(t *testing.T) {
 		shadowedFamily string // the shorter pre-existing family it must beat
 	}{
 		{"glm-5.2 over glm-5/glm", "glm-5.2-turbo", "glm-5.2", "glm-5"},
+		// minimax-m3 and the minimax family (= M2.7) now price identically
+		// ($0.30/$1.20/$0.06 on MiniMax's own card), so the rate sanity check
+		// below cannot tell them apart; ResolveModelKey is the discriminator.
 		{"minimax-m3 over minimax", "minimax-m3-turbo", "minimax-m3", "minimax"},
 		{"qwen3.5-plus over qwen3", "qwen3.5-plus-turbo", "qwen3.5-plus", "qwen3"},
 		{"qwen3.8-max-preview over qwen3", "qwen3.8-max-preview-turbo", "qwen3.8-max-preview", "qwen3"},
@@ -1451,11 +1758,11 @@ func TestTable_2026Q3LongestPrefixShadowing(t *testing.T) {
 			if !ok {
 				t.Fatalf("Lookup(%q) (shadowed family) ok=false", tc.shadowedFamily)
 			}
-			// Sanity: the two families must actually price differently,
-			// otherwise this test can't distinguish a win from a collision.
-			if newRates.Input == shadowedRates.Input && newRates.Output == shadowedRates.Output {
-				t.Fatalf("new key %q and shadowed family %q price identically (%+v) — test can't discriminate",
-					tc.newKey, tc.shadowedFamily, newRates)
+			// The resolved KEY is the discriminator: it names the row that
+			// priced the probe even when two families happen to share a rate.
+			if key, ok := tb.ResolveModelKey(tc.probe); !ok || key != tc.newKey {
+				t.Errorf("ResolveModelKey(%q) = %q, %v; want %q (not the shorter %q)",
+					tc.probe, key, ok, tc.newKey, tc.shadowedFamily)
 			}
 
 			probe, src, ok := tb.LookupWithSource(tc.probe)
@@ -1474,12 +1781,8 @@ func TestTable_2026Q3LongestPrefixShadowing(t *testing.T) {
 }
 
 // TestTable_2026Q3ClaudeMythosOverFamily pins "claude-mythos-5" beating
-// "claude-mythos" in the longest-prefix ladder specifically. Unlike the
-// cases in TestTable_2026Q3LongestPrefixShadowing, the baked-in table
-// prices claude-mythos-5 and claude-mythos IDENTICALLY by design (Mythos
-// mirrors Fable's family/SKU pair, which is also same-rate) — so a
-// rate-based discrimination check against the real table can't prove
-// which key actually matched. Instead this uses a synthetic table (same
+// "claude-mythos" in the longest-prefix ladder specifically. This uses a
+// synthetic table (same
 // technique as TestTable_LookupPrefix) with deliberately different rates
 // on the two keys, to mechanically prove the sorted-longest-first
 // familyKeys() ladder picks "claude-mythos-5" over "claude-mythos" when a
@@ -1625,9 +1928,11 @@ func TestTable_2026Q3FreeSuffixGuardCoversCohere(t *testing.T) {
 // that (`-\d{8}$`) yields "qwen/qwen3.5-plus", which was ABSENT from the
 // table before the fix and fell through to the generic "qwen3" family
 // row ($0.78/$3.90) — the wrong tier entirely. This test resolves the
-// exact dated ID end-to-end and asserts it lands on the new
-// "qwen/qwen3.5-plus" alias's real OpenRouter rate via
-// PricingSourceDateStripped, not the qwen3 family fallback.
+// exact dated ID end-to-end and asserts it lands on the
+// "qwen/qwen3.5-plus" alias via PricingSourceDateStripped, not the qwen3
+// family fallback. Since lane R2-RECONCILE (2026-09-28, "maker first") that
+// alias carries Alibaba's own qwen3.5-plus-2026-04-20 card ($0.40/$2.40,
+// >256K $0.50/$3.00), not OpenRouter's discounted $0.30/$1.80.
 func TestTable_2026Q3QwenDatedProviderQualifiedPinsP1Fix(t *testing.T) {
 	tb := NewTable()
 
@@ -1643,17 +1948,17 @@ func TestTable_2026Q3QwenDatedProviderQualifiedPinsP1Fix(t *testing.T) {
 	if src != PricingSourceDateStripped {
 		t.Errorf("qwen/qwen3.5-plus-20260420 source=%q want date-stripped", src)
 	}
-	if p.Input != 0.30 || p.Output != 1.80 {
-		t.Errorf("qwen/qwen3.5-plus-20260420 rates %+v, want the real OpenRouter rate {0.30 1.80}", p)
+	if p.Input != 0.40 || p.Output != 2.40 || p.LongContextThreshold != 256_000 ||
+		p.LongContextInput != 0.50 || p.LongContextOutput != 3.00 {
+		t.Errorf("qwen/qwen3.5-plus-20260420 rates %+v, want Alibaba's 0.40/2.40, >256K 0.50/3.00", p)
 	}
 	if p.Input == genericFamily.Input && p.Output == genericFamily.Output {
 		t.Errorf("P1-2 REGRESSION: qwen/qwen3.5-plus-20260420 resolved to the generic qwen3 family rate %+v "+
 			"instead of its own alias rate", genericFamily)
 	}
 
-	// Bare-key alias sanity: "qwen/qwen3.5-plus" resolves exact, and
-	// deliberately differs from the first-party bare "qwen3.5-plus" rate
-	// (0.40/2.40) — it's real OpenRouter data, not a literal mirror.
+	// Bare-key alias sanity: "qwen/qwen3.5-plus" resolves exact, and prices
+	// like the first-party bare "qwen3.5-plus" (both are Alibaba's card).
 	exact, srcExact, ok := tb.LookupWithSource("qwen/qwen3.5-plus")
 	if !ok {
 		t.Fatalf("Lookup(qwen/qwen3.5-plus) ok=false")
@@ -1668,9 +1973,18 @@ func TestTable_2026Q3QwenDatedProviderQualifiedPinsP1Fix(t *testing.T) {
 	if !ok {
 		t.Fatalf("Lookup(qwen3.5-plus) ok=false")
 	}
-	if exact.Input == bare.Input && exact.Output == bare.Output {
-		t.Errorf("qwen/qwen3.5-plus (%+v) unexpectedly equals bare qwen3.5-plus (%+v) — "+
-			"expected the real OpenRouter rate to differ from the first-party mirror", exact, bare)
+	if exact.Input != bare.Input || exact.Output != bare.Output || exact.CacheRead != bare.CacheRead {
+		t.Errorf("qwen/qwen3.5-plus (%+v) differs from bare qwen3.5-plus (%+v); both carry Alibaba's card", exact, bare)
+	}
+
+	// OpenRouter's earlier snapshot id "qwen/qwen3.5-plus-02-15" is not a
+	// -YYYYMMDD suffix, so without its own row it would resolve SILENTLY
+	// through the "qwen/qwen3.5-plus" family prefix. It is an exact row.
+	if key, ok := tb.ResolveModelKey("qwen/qwen3.5-plus-02-15"); !ok || key != "qwen/qwen3.5-plus-02-15" {
+		t.Errorf("ResolveModelKey(qwen/qwen3.5-plus-02-15) = %q, %v; want its own exact row", key, ok)
+	}
+	if _, src, _ := tb.LookupWithSource("qwen/qwen3.5-plus-02-15"); src != PricingSourceExact {
+		t.Errorf("qwen/qwen3.5-plus-02-15 source=%q want exact", src)
 	}
 }
 
@@ -1698,6 +2012,27 @@ func TestTable_2026Q3MythosMatchesFableFull(t *testing.T) {
 	}
 	if mythos5 != fable5 {
 		t.Errorf("claude-mythos-5 full struct %+v != claude-fable-5 full struct %+v", mythos5, fable5)
+	}
+
+	// 5.1 generation (2026-09-01): Mythos 5.1 mirrors Fable 5.1 exactly,
+	// and the 5.1 pair differs from the 5 pair in EXACTLY one field —
+	// CacheRead $0.25 vs $1 (the 0.025x-vs-0.1x multiplier split on the
+	// pricing card, verified 2026-09-02).
+	mythos51, ok := tb.Lookup("claude-mythos-5-1")
+	if !ok {
+		t.Fatalf("Lookup(claude-mythos-5-1) ok=false")
+	}
+	fable51, ok := tb.Lookup("claude-fable-5-1")
+	if !ok {
+		t.Fatalf("Lookup(claude-fable-5-1) ok=false")
+	}
+	if mythos51 != fable51 {
+		t.Errorf("claude-mythos-5-1 full struct %+v != claude-fable-5-1 full struct %+v", mythos51, fable51)
+	}
+	wantFable51 := fable5
+	wantFable51.CacheRead = 0.25
+	if fable51 != wantFable51 {
+		t.Errorf("claude-fable-5-1 %+v must equal claude-fable-5 with only CacheRead swapped to 0.25 (%+v)", fable51, wantFable51)
 	}
 
 	mythosFamily, ok := tb.Lookup("claude-mythos")
@@ -1774,5 +2109,415 @@ func TestTable_2026Q3UnboundedPrefixKnownLimitation(t *testing.T) {
 	}
 	if inklingCollision != inklingBase {
 		t.Errorf("inklinglabs-x rates %+v != inkling base rates %+v", inklingCollision, inklingBase)
+	}
+}
+
+// TestTable_20260816Sweep pins the 2026-08-16 price-sweep additions that
+// had no dedicated exact-row test yet: grok-4.6 (base tier + its 200K
+// long-context tier fields) and gemini-3.6-flash (the flash-class row
+// that must NOT fall through to the Pro-class bare "gemini-3" family,
+// per the family-shadow note on that row). Both rows already existed in
+// defaultPricing before this sweep; this test is the mutation-proof
+// harness the sweep was missing.
+func TestTable_20260816Sweep(t *testing.T) {
+	tb := NewTable()
+
+	t.Run("grok-4.6 base tier (<200K)", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("grok-4.6")
+		if !ok {
+			t.Fatalf("Lookup(grok-4.6) ok=false")
+		}
+		if src != PricingSourceExact {
+			t.Errorf("source=%q want exact", src)
+		}
+		if p.Input != 2 || p.Output != 6 || p.CacheRead != 0.50 {
+			t.Errorf("base rates: %+v want input=2 output=6 cacheRead=0.50", p)
+		}
+		if p.LongContextThreshold != 199_999 || p.LongContextInput != 4 ||
+			p.LongContextOutput != 12 || p.LongContextCacheRead != 1.00 {
+			t.Errorf("long-context fields: %+v want threshold=199999 input=4 output=12 cacheRead=1.00", p)
+		}
+	})
+
+	t.Run("gemini-3.6-flash exact, not shadowed by bare gemini-3", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("gemini-3.6-flash")
+		if !ok {
+			t.Fatalf("Lookup(gemini-3.6-flash) ok=false")
+		}
+		if src != PricingSourceExact {
+			t.Errorf("source=%q want exact", src)
+		}
+		if p.Input != 0.75 || p.Output != 3.75 || p.CacheRead != 0.075 {
+			t.Errorf("rates: %+v want input=0.75 output=3.75 cacheRead=0.075 (flash, not the Pro-class bare gemini-3 family)", p)
+		}
+	})
+}
+
+// TestTable_OrgObserverUnpricedIDs2026Q3 pins the four high-volume model ids
+// that resolved to PricingSourceMiss → $0.00 on the org estate (F-COST1 /
+// F-MODELS3, org-observer UI review 2026-09-02). Each must now price non-zero
+// (or known-$0 for the cloaked stealth alias) rather than silently drop spend.
+func TestTable_OrgObserverUnpricedIDs2026Q3(t *testing.T) {
+	tb := NewTable()
+
+	// Cursor Grok routing — API-list-equivalent to the underlying xAI SKU.
+	// Every observed catalog effort variant is now an explicit pin (see the
+	// cursorGrok4{5,6}Standard/Fast catalog in pricing.go); Cursor publishes
+	// no xAI-style >=200K surcharge, so no long-context tier is modelled
+	// (verified 2026-09-09, see TestTable_CursorGrok + engine_test.go).
+	for _, tc := range []struct {
+		model        string
+		wantInput    float64
+		wantOutput   float64
+		wantLCThresh int64
+		wantExactSrc bool
+	}{
+		{"cursor-grok-4.6-high", 2, 6, 0, true},
+		{"cursor-grok-4.5-high", 2, 6, 0, true},
+		// Effort variants are pinned explicitly (exact), no LC surcharge.
+		{"cursor-grok-4.6-medium", 2, 6, 0, true},
+		{"cursor-grok-4.5-low", 2, 6, 0, true},
+		// codex cloud auto-review → Codex-codex line rate.
+		{"codex-auto-review", 1.75, 14, 0, true},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			p, src, ok := tb.LookupWithSource(tc.model)
+			if !ok {
+				t.Fatalf("LookupWithSource(%q) ok=false; want priced (was a $0 MISS)", tc.model)
+			}
+			if p.Input != tc.wantInput || p.Output != tc.wantOutput {
+				t.Errorf("LookupWithSource(%q) = input %v output %v; want %v/%v",
+					tc.model, p.Input, p.Output, tc.wantInput, tc.wantOutput)
+			}
+			if p.LongContextThreshold != tc.wantLCThresh {
+				t.Errorf("LookupWithSource(%q) LC threshold = %d; want %d",
+					tc.model, p.LongContextThreshold, tc.wantLCThresh)
+			}
+			if tc.wantExactSrc && src != PricingSourceExact {
+				t.Errorf("LookupWithSource(%q) source=%q; want exact", tc.model, src)
+			}
+			// Non-zero spend must now be produced.
+			cost := Compute(p, TokenBundle{Input: 1_000_000, Output: 1_000_000})
+			if cost <= 0 {
+				t.Errorf("Compute(%q) = %v; want > 0", tc.model, cost)
+			}
+		})
+	}
+
+	// Stealth / cloaked preview — known-$0 (exact/family), NOT a silent MISS.
+	for _, model := range []string{"stealth/ox-alpha", "stealth/ox-beta"} {
+		t.Run(model, func(t *testing.T) {
+			p, src, ok := tb.LookupWithSource(model)
+			if !ok {
+				t.Fatalf("LookupWithSource(%q) ok=false; want known-$0 (not a MISS)", model)
+			}
+			if src == PricingSourceMiss {
+				t.Errorf("LookupWithSource(%q) source=miss; want exact/family known-$0", model)
+			}
+			if p.Input != 0 || p.Output != 0 {
+				t.Errorf("LookupWithSource(%q) rates non-zero: %+v (cloaked window is $0)", model, p)
+			}
+		})
+	}
+}
+
+// TestTable_20260907Sweep pins the 2026-09-07 pricing-refresh wave: the
+// Anthropic Fable 5.1 / Mythos 5.1 cache-read discount (covered by
+// TestTable_Anthropic2026Q2Pricing above), OpenAI's new gpt-6-astra
+// flagship (base + 272K long-context tier + Fast mode), Gemini 3.8 Flash
+// (its own family-shadow note, mirrored here), the Qwen3.8 Flash /
+// Max-0902 additions, GLM-5.3 / GLM-5.3-Flash, the DeepSeek V4
+// peak/off-peak repricing (covered by TestTable_DeepSeek2026Q2Pricing and
+// TestTable_DeepSeekPeakOffPeakOverhaul in dated_test.go), and the new
+// Mistral Large 3 / Medium 3.5 / Ministral 3 rows.
+func TestTable_20260907Sweep(t *testing.T) {
+	tb := NewTable()
+
+	t.Run("gpt-6-astra base tier", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("gpt-6-astra")
+		if !ok {
+			t.Fatalf("Lookup(gpt-6-astra) ok=false")
+		}
+		if src != PricingSourceExact {
+			t.Errorf("source=%q want exact", src)
+		}
+		if p.Input != 10 || p.Output != 50 || p.CacheRead != 1 || p.CacheCreation != 12.50 || p.CacheCreation1h != 12.50 {
+			t.Errorf("base rates: %+v want input=10 output=50 cacheRead=1 cacheWrite=12.50/12.50", p)
+		}
+		if p.FastMultiplier != 2 {
+			t.Errorf("FastMultiplier=%v want 2", p.FastMultiplier)
+		}
+		if p.LongContextThreshold != 272_000 || p.LongContextInput != 20 || p.LongContextOutput != 75 ||
+			p.LongContextCacheRead != 2 || p.LongContextCacheCreation != 25 || p.LongContextCacheCreation1h != 25 {
+			t.Errorf("long-context fields: %+v want threshold=272000 input=20 output=75 (1.5x) cacheRead=2 cacheWrite=25/25", p)
+		}
+	})
+
+	t.Run("gpt-6 family prefix mirrors Astra", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("gpt-6-hypothetical-future-sku")
+		if !ok {
+			t.Fatalf("Lookup(gpt-6-hypothetical-future-sku) ok=false")
+		}
+		if src != PricingSourceFamily {
+			t.Errorf("source=%q want family", src)
+		}
+		if p.Input != 10 || p.Output != 50 {
+			t.Errorf("family rates: %+v want the Astra flagship shape (10/50)", p)
+		}
+	})
+
+	t.Run("gemini-3.8-flash exact, not shadowed by bare gemini-3", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("gemini-3.8-flash")
+		if !ok {
+			t.Fatalf("Lookup(gemini-3.8-flash) ok=false")
+		}
+		if src != PricingSourceExact {
+			t.Errorf("source=%q want exact", src)
+		}
+		if p.Input != 0.75 || p.Output != 3.75 || p.CacheRead != 0.075 {
+			t.Errorf("rates: %+v want input=0.75 output=3.75 cacheRead=0.075 (flash, not the Pro-class bare gemini-3 family)", p)
+		}
+	})
+
+	t.Run("qwen3.8-flash", func(t *testing.T) {
+		p, ok := tb.Lookup("qwen3.8-flash")
+		if !ok {
+			t.Fatalf("Lookup(qwen3.8-flash) ok=false")
+		}
+		if p.Input != 0.15 || p.Output != 0.47 {
+			t.Errorf("rates: %+v want input=0.15 output=0.47 (first-party DashScope rate)", p)
+		}
+	})
+
+	t.Run("qwen3.8-max-0902 matches qwen3.8-max", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("qwen3.8-max-0902")
+		if !ok {
+			t.Fatalf("Lookup(qwen3.8-max-0902) ok=false")
+		}
+		if src != PricingSourceExact {
+			t.Errorf("source=%q want exact", src)
+		}
+		want, _ := tb.Lookup("qwen3.8-max")
+		if p != want {
+			t.Errorf("qwen3.8-max-0902 %+v != qwen3.8-max %+v (same-price post-training refresh)", p, want)
+		}
+	})
+
+	t.Run("glm-5.3 matches glm-5.2", func(t *testing.T) {
+		p, ok := tb.Lookup("glm-5.3")
+		if !ok {
+			t.Fatalf("Lookup(glm-5.3) ok=false")
+		}
+		if p.Input != 1.40 || p.Output != 4.40 || p.CacheRead != 0.26 {
+			t.Errorf("rates: %+v want input=1.40 output=4.40 cacheRead=0.26 (same as glm-5.2)", p)
+		}
+	})
+
+	t.Run("glm-5.3-flash list rate (not the temporary 50%-off promo)", func(t *testing.T) {
+		p, ok := tb.Lookup("glm-5.3-flash")
+		if !ok {
+			t.Fatalf("Lookup(glm-5.3-flash) ok=false")
+		}
+		if p.Input != 0.15 || p.Output != 0.50 {
+			t.Errorf("rates: %+v want input=0.15 output=0.50 (list, not the promo 0.075/0.25)", p)
+		}
+		// CacheRead must be the LIST cached-input rate ($0.03), set
+		// EXPLICITLY — if this were left 0, fillDefaults' 10%-of-input
+		// floor would derive $0.015, which is the PROMO cache-read figure,
+		// not list, silently smuggling the promo back in through the one
+		// field this row didn't otherwise set.
+		if p.CacheRead != 0.03 {
+			t.Errorf("cacheRead: %+v want 0.03 (list), not the fillDefaults-derived 0.015 (promo)", p)
+		}
+	})
+
+	t.Run("glm family prefix bumped to 5.3", func(t *testing.T) {
+		p, src, ok := tb.LookupWithSource("glm-hypothetical-future-sku")
+		if !ok {
+			t.Fatalf("Lookup(glm-hypothetical-future-sku) ok=false")
+		}
+		if src != PricingSourceFamily {
+			t.Errorf("source=%q want family", src)
+		}
+		if p.Input != 1.40 || p.Output != 4.40 {
+			t.Errorf("family rates: %+v want the glm-5.3 shape (1.40/4.40), not the stale glm-5.1 anchor (0.98/3.08)", p)
+		}
+	})
+
+	t.Run("mistral-large-3", func(t *testing.T) {
+		p, ok := tb.Lookup("mistral-large-3")
+		if !ok {
+			t.Fatalf("Lookup(mistral-large-3) ok=false")
+		}
+		if p.Input != 0.5 || p.Output != 1.5 {
+			t.Errorf("rates: %+v want input=0.5 output=1.5", p)
+		}
+	})
+
+	t.Run("mistral-medium-3-5 first-party matches OpenRouter", func(t *testing.T) {
+		p, ok := tb.Lookup("mistral-medium-3-5")
+		if !ok {
+			t.Fatalf("Lookup(mistral-medium-3-5) ok=false")
+		}
+		or, ok := tb.Lookup("mistralai/mistral-medium-3-5")
+		if !ok {
+			t.Fatalf("Lookup(mistralai/mistral-medium-3-5) ok=false")
+		}
+		if p != or {
+			t.Errorf("bare mistral-medium-3-5 %+v != OpenRouter mistralai/mistral-medium-3-5 %+v (same upstream)", p, or)
+		}
+	})
+
+	t.Run("mistral-medium-latest alias matches mistral-medium-3-5", func(t *testing.T) {
+		// mistral-medium-latest is the literal API alias for Mistral Medium
+		// 3.5. Without its own row it falls through to the bare "mistral"
+		// family prefix ($1.00/$3.00, the medium-3 anchor) instead of the
+		// real 3.5 rate ($1.50/$7.50).
+		p, ok := tb.Lookup("mistral-medium-latest")
+		if !ok {
+			t.Fatalf("Lookup(mistral-medium-latest) ok=false")
+		}
+		medium35, ok := tb.Lookup("mistral-medium-3-5")
+		if !ok {
+			t.Fatalf("Lookup(mistral-medium-3-5) ok=false")
+		}
+		if p != medium35 {
+			t.Errorf("mistral-medium-latest %+v != mistral-medium-3-5 %+v", p, medium35)
+		}
+		familyOnly, ok := tb.Lookup("mistral")
+		if !ok {
+			t.Fatalf("Lookup(mistral) ok=false")
+		}
+		if p.Input == familyOnly.Input && p.Output == familyOnly.Output {
+			t.Errorf("mistral-medium-latest (%+v) unexpectedly equals the bare mistral family fallback (%+v) — "+
+				"the alias should resolve to its own explicit row", p, familyOnly)
+		}
+	})
+
+	t.Run("ministral 3 tiers", func(t *testing.T) {
+		for _, tc := range []struct {
+			model   string
+			in, out float64
+		}{
+			{"ministral-3b", 0.1, 0.1},
+			{"ministral-8b", 0.15, 0.15},
+			{"ministral-14b", 0.2, 0.2},
+		} {
+			p, ok := tb.Lookup(tc.model)
+			if !ok {
+				t.Fatalf("Lookup(%q) ok=false", tc.model)
+			}
+			if p.Input != tc.in || p.Output != tc.out {
+				t.Errorf("%s: %+v want input=%v output=%v", tc.model, p, tc.in, tc.out)
+			}
+		}
+	})
+}
+
+// TestResolveModelKey pins the ladder ResolveModelKey shares with
+// LookupWithSourceAt — it is the product's only answer to "are these two model
+// strings the same model?", which the per-model BUDGET caps depend on.
+func TestResolveModelKey(t *testing.T) {
+	tbl := NewTable()
+	cases := []struct {
+		name  string
+		model string
+		want  string
+		ok    bool
+	}{
+		{name: "empty resolves to nothing", model: ""},
+		{name: "an exact key is itself", model: "claude-sonnet-4-5", want: "claude-sonnet-4-5", ok: true},
+		{
+			name:  "a dated id folds onto the same key as its family",
+			model: "claude-sonnet-4-5-20250929", want: "claude-sonnet-4-5", ok: true,
+		},
+		{name: "a free tier is one $0 subject", model: "Some-Model:Free", want: "some-model:free", ok: true},
+		// An id no key in the table (literal OR generated snapshot) is a
+		// prefix of. It used to be "big-pickle-9000", until the price
+		// database started publishing OpenCode Zen's free `big-pickle`
+		// (Tokenomics migration 0027): like every exact key, that row is also
+		// a family prefix (familyKeys; the documented unbounded-prefix
+		// property, TestTable_2026Q3UnboundedPrefixKnownLimitation), so the id
+		// stopped being unknown.
+		{name: "an unknown model keeps no key", model: "zz-no-such-model-9000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tbl.ResolveModelKey(tc.model)
+			if ok != tc.ok || (tc.ok && got != tc.want) {
+				t.Fatalf("ResolveModelKey(%q) = (%q, %v), want (%q, %v)", tc.model, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+	// THE PROPERTY THAT MATTERS: the family id and its dated sibling resolve to
+	// ONE key, which is what makes an org cap on either spelling bite on both.
+	family, fok := tbl.ResolveModelKey("claude-sonnet-4-5")
+	dated, dok := tbl.ResolveModelKey("claude-sonnet-4-5-20250929")
+	if !fok || !dok || family != dated {
+		t.Fatalf("alias pair resolved to %q / %q", family, dated)
+	}
+	// A nil table never invents a key.
+	if _, ok := (*Table)(nil).ResolveModelKey("claude-sonnet-4-5"); ok {
+		t.Errorf("a nil table resolved a key")
+	}
+}
+
+// TestTable_ClineFreeGatewayTier pins the Cline free gateway tier fix: a
+// captured Cline desktop session with model `cline-free/deepseek-v4.1-flash`
+// reports vendor cost 0, but before this fix there was no `cline-free/*`
+// pricing row, so LookupWithSourceAt fell through to
+// normalizeUnpricedModel's last-resort router-prefix strip
+// (`cline-free/deepseek-v4.1-flash` -> `deepseek-v4.1-flash`), which then
+// resolved a PAID flash rate (a `deepseek-v4` family match at the time; a
+// paid exact `deepseek-v4.1-flash` row exists as of 2026-09-10) and
+// silently repriced a free session. Mirrors the kilo-auto/free
+// precedent: an explicit known-$0 row with a real (non-miss) reliability
+// tag, so the free tier reads as known-priced rather than unknown.
+func TestTable_ClineFreeGatewayTier(t *testing.T) {
+	tb := NewTable()
+
+	for _, tc := range []struct {
+		name  string
+		model string
+	}{
+		{name: "the exact captured model", model: "cline-free/deepseek-v4.1-flash"},
+		{name: "another model under the same free family", model: "cline-free/qwen3-coder-flash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, src, ok := tb.LookupWithSource(tc.model)
+			if !ok {
+				t.Fatalf("LookupWithSource(%q) ok=false; want known-$0 (not a MISS)", tc.model)
+			}
+			if src == PricingSourceMiss {
+				t.Errorf("LookupWithSource(%q) source=miss; want exact/family known-$0", tc.model)
+			}
+			if p.Input != 0 || p.Output != 0 || p.CacheRead != 0 {
+				t.Errorf("LookupWithSource(%q) rates non-zero: %+v (Cline free tier is vendor-reported $0)", tc.model, p)
+			}
+		})
+	}
+
+	// Reliability tag pin: the exact captured model resolves via the exact
+	// rung, not the family rung, because it has its own explicit row.
+	if _, src, ok := tb.LookupWithSource("cline-free/deepseek-v4.1-flash"); !ok || src != PricingSourceExact {
+		t.Errorf("LookupWithSource(cline-free/deepseek-v4.1-flash) source=%q ok=%v; want exact/true", src, ok)
+	}
+	// A sibling model under the same free family resolves via the family
+	// rung (its own row doesn't exist, only the `cline-free` prefix does).
+	if _, src, ok := tb.LookupWithSource("cline-free/qwen3-coder-flash"); !ok || src != PricingSourceFamily {
+		t.Errorf("LookupWithSource(cline-free/qwen3-coder-flash) source=%q ok=%v; want family/true", src, ok)
+	}
+
+	// NO REGRESSION: a bare (non-free) deepseek-v4 model must still resolve
+	// to its paid family rate — this fix must not touch the paid ladder.
+	paid, paidSrc, paidOK := tb.LookupWithSource("deepseek-v4-flash")
+	if !paidOK {
+		t.Fatalf("LookupWithSource(deepseek-v4-flash) ok=false; want paid rate")
+	}
+	if paid.Input != 0.15 || paid.Output != 0.60 {
+		t.Errorf("LookupWithSource(deepseek-v4-flash) = input %v output %v; want 0.15/0.60 (paid, unaffected by the cline-free fix)", paid.Input, paid.Output)
+	}
+	if paidSrc != PricingSourceExact {
+		t.Errorf("LookupWithSource(deepseek-v4-flash) source=%q; want exact", paidSrc)
 	}
 }

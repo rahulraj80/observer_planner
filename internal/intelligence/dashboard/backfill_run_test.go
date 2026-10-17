@@ -50,7 +50,7 @@ func newFakeExec(r *fakeExecResult) backfillExecFn {
 func newServerWithFakeExec(t *testing.T, fake backfillExecFn) *Server {
 	t.Helper()
 	tdir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestBackfillRun_ScanModesDerivedFromRegistry(t *testing.T) {
 	for _, c := range integration.Capabilities() {
 		argv, ok := allowlistedBackfillModes["scan-"+c.Tool]
 		if !ok {
-			t.Errorf("adapter %q has no scan-%s allowlist entry — the init() derivation drifted", c.Tool, c.Tool)
+			t.Errorf("adapter %q has no scan-%s allowlist entry - the init() derivation drifted", c.Tool, c.Tool)
 			continue
 		}
 		want := []string{"scan", "--force", "--adapter", c.Tool}

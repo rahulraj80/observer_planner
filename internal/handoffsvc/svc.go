@@ -293,7 +293,7 @@ func Build(ctx context.Context, deps Deps, req Request) (Result, error) {
 	}
 
 	targetModel := resolveTargetModel(req, deps, ex.Model)
-	estimate := buildEstimate(ex, forkRes, opts, targetModel, deps.Price)
+	estimate := buildEstimate(ex, forkRes, opts, targetModel, deps.Price, sourceHasFullReader(deps.Adapters, sub.Session.Tool))
 	if deps.Stay != nil {
 		if st, ok := deps.Stay(ctx, req.SessionID); ok {
 			estimate.Stay = &st
@@ -340,7 +340,7 @@ func resolveCarry(ctx context.Context, deps Deps, sub store.HandoffSubstrate, ca
 	// aren't available whole, but the whole conversation flow still crosses.
 	if carry == handoff.CarryFullCache && !usedFull {
 		carry = handoff.CarryFull
-		degradeReason = fmt.Sprintf("%s has no un-excerpted (full-body) reader — full_cache degraded to full (excerpts)", sub.Session.Tool)
+		degradeReason = fmt.Sprintf("%s has no un-excerpted (full-body) reader - full_cache degraded to full (excerpts)", sub.Session.Tool)
 	}
 	return carry, transcript, degradeReason
 }
@@ -446,7 +446,7 @@ func readTranscript(ctx context.Context, deps Deps, sub store.HandoffSubstrate, 
 func readSessionTranscript(ctx context.Context, adapters []adapter.Adapter, sess models.Session, sourceHints []string, preferFull bool) (msgs []models.TranscriptMessage, usedFull bool, note string) {
 	cap, _ := integration.For(sess.Tool)
 	if cap.Handoff.Transcript == integration.TranscriptActionsOnly {
-		return nil, false, fmt.Sprintf("%s has no readable transcript capability — metadata carry", sess.Tool)
+		return nil, false, fmt.Sprintf("%s has no readable transcript capability - metadata carry", sess.Tool)
 	}
 	var reader TranscriptReader
 	var fullReader FullTranscriptReader
@@ -465,22 +465,22 @@ func readSessionTranscript(ctx context.Context, adapters []adapter.Adapter, sess
 	if preferFull && fullReader != nil {
 		full, err := fullReader.ReadTranscriptFull(ctx, sess, sourceHints)
 		if err != nil {
-			return nil, false, fmt.Sprintf("transcript unreadable (%v) — metadata carry", err)
+			return nil, false, fmt.Sprintf("transcript unreadable (%v) - metadata carry", err)
 		}
 		if len(full) == 0 {
-			return nil, false, "transcript on disk holds no messages — metadata carry"
+			return nil, false, "transcript on disk holds no messages - metadata carry"
 		}
 		return full, true, ""
 	}
 	if reader == nil {
-		return nil, false, fmt.Sprintf("%s transcript reader not implemented yet (classified %s) — metadata carry", sess.Tool, cap.Handoff.Transcript)
+		return nil, false, fmt.Sprintf("%s transcript reader not implemented yet (classified %s) - metadata carry", sess.Tool, cap.Handoff.Transcript)
 	}
 	capped, err := reader.ReadTranscript(ctx, sess, sourceHints)
 	if err != nil {
-		return nil, false, fmt.Sprintf("transcript unreadable (%v) — metadata carry", err)
+		return nil, false, fmt.Sprintf("transcript unreadable (%v) - metadata carry", err)
 	}
 	if len(capped) == 0 {
-		return nil, false, "transcript on disk holds no messages — metadata carry"
+		return nil, false, "transcript on disk holds no messages - metadata carry"
 	}
 	return capped, false, ""
 }
@@ -505,7 +505,7 @@ func resolveTargetModel(req Request, deps Deps, sourceModel string) string {
 
 // buildEstimate renders the carry variants to weigh them (plan §9: the
 // boundary measures, the pure layer prices).
-func buildEstimate(ex handoff.Extract, res handoff.ForkResolution, opts handoff.Options, targetModel string, price handoff.PriceFunc) handoff.EstimateResult {
+func buildEstimate(ex handoff.Extract, res handoff.ForkResolution, opts handoff.Options, targetModel string, price handoff.PriceFunc, hasFullReader bool) handoff.EstimateResult {
 	render := func(carry handoff.CarryMode) int64 {
 		o := opts
 		o.Carry = carry
@@ -518,14 +518,30 @@ func buildEstimate(ex handoff.Extract, res handoff.ForkResolution, opts handoff.
 		tailTok = 0
 	}
 	return handoff.Estimate(handoff.EstimateInput{
-		TargetModel:     targetModel,
-		MetadataTokens:  metaTok,
-		DistilledTokens: distTok,
-		TailTokens:      tailTok,
-		ContextTokens:   ex.ContextTokens,
-		ForkShare:       handoff.ForkShare(ex.Transcript, res),
-		Price:           price,
+		TargetModel:         targetModel,
+		MetadataTokens:      metaTok,
+		DistilledTokens:     distTok,
+		TailTokens:          tailTok,
+		ContextTokens:       ex.ContextTokens,
+		ForkShare:           handoff.ForkShare(ex.Transcript, res),
+		SourceHasFullReader: hasFullReader,
+		Price:               price,
 	})
+}
+
+// sourceHasFullReader reports whether the source tool's adapter implements the
+// un-excerpted FullTranscriptReader that the full_cache carry needs. It is the
+// same capability probe readSessionTranscript uses to pick the reader, hoisted
+// so the estimate can price full_cache honestly (= full when absent).
+func sourceHasFullReader(adapters []adapter.Adapter, tool string) bool {
+	for _, a := range adapters {
+		if a.Name() != tool {
+			continue
+		}
+		_, ok := a.(FullTranscriptReader)
+		return ok
+	}
+	return false
 }
 
 // fullCacheBudget resolves the doc-byte budget for the full_cache carry:
@@ -549,7 +565,7 @@ func capCacheDoc(rendered string, maxBytes int) (string, string) {
 	for cut > 0 && !utf8.RuneStart(rendered[cut]) {
 		cut--
 	}
-	note := fmt.Sprintf("full_cache doc truncated at %d bytes ([handoff].max_cache_bytes) — the source read content exceeded the cap", maxBytes)
+	note := fmt.Sprintf("full_cache doc truncated at %d bytes ([handoff].max_cache_bytes) - the source read content exceeded the cap", maxBytes)
 	return rendered[:cut] + "\n\n[…full_cache truncated at the byte cap…]\n", note
 }
 

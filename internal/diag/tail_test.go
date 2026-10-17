@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -35,7 +37,7 @@ func (s *safeBuffer) String() string {
 
 func TestTail_StreamsNewActions(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}

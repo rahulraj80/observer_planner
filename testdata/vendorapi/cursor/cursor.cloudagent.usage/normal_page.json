@@ -1,0 +1,33 @@
+{
+  "totalUsage": {
+    "inputTokens": 12480,
+    "outputTokens": 3110,
+    "cacheWriteTokens": 18200,
+    "cacheReadTokens": 42600,
+    "totalTokens": 76390
+  },
+  "runs": [
+    {
+      "id": "run-00000000-0000-0000-0000-000000000002",
+      "usageUuid": "00000000-0000-0000-0000-000000000002",
+      "usage": {
+        "inputTokens": 6320,
+        "outputTokens": 1450,
+        "cacheWriteTokens": 7100,
+        "cacheReadTokens": 21300,
+        "totalTokens": 36170
+      }
+    },
+    {
+      "id": "run-00000000-0000-0000-0000-000000000001",
+      "usageUuid": "00000000-0000-0000-0000-000000000001",
+      "usage": {
+        "inputTokens": 6160,
+        "outputTokens": 1660,
+        "cacheWriteTokens": 11100,
+        "cacheReadTokens": 21300,
+        "totalTokens": 40220
+      }
+    }
+  ]
+}

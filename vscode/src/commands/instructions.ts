@@ -120,7 +120,7 @@ function baseName(p: string): string {
 function surfaceError(err: unknown, what: string): void {
   const message = err instanceof Error ? err.message : String(err);
   output.appendLine(`Failed to ${what}: ${message}`);
-  void vscode.window.showErrorMessage(`SuperBased: failed to ${what} — ${shortError(message)}`);
+  void vscode.window.showErrorMessage(`SuperBased: failed to ${what} - ${shortError(message)}`);
 }
 
 function shortError(message: string): string {

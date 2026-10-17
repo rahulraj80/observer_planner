@@ -1,0 +1,79 @@
+{
+  "data": [
+    {
+      "id": "user_01SYNTH0000",
+      "added_at": "2026-01-01T00:00:00Z",
+      "email": "member0@example.com",
+      "name": "Member 0",
+      "role": "admin",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0001",
+      "added_at": "2026-01-02T00:00:00Z",
+      "email": "member1@example.com",
+      "name": "Member 1",
+      "role": "billing",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0002",
+      "added_at": "2026-01-03T00:00:00Z",
+      "email": "member2@example.com",
+      "name": "Member 2",
+      "role": "claude_code_user",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0003",
+      "added_at": "2026-01-04T00:00:00Z",
+      "email": "member3@example.com",
+      "name": "Member 3",
+      "role": "developer",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0004",
+      "added_at": "2026-01-05T00:00:00Z",
+      "email": "member4@example.com",
+      "name": "Member 4",
+      "role": "managed",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0005",
+      "added_at": "2026-01-06T00:00:00Z",
+      "email": "member5@example.com",
+      "name": "Member 5",
+      "role": "membership_admin",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0006",
+      "added_at": "2026-01-07T00:00:00Z",
+      "email": "member6@example.com",
+      "name": "Member 6",
+      "role": "owner",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0007",
+      "added_at": "2026-01-08T00:00:00Z",
+      "email": "member7@example.com",
+      "name": "Member 7",
+      "role": "primary_owner",
+      "type": "user"
+    },
+    {
+      "id": "user_01SYNTH0008",
+      "added_at": "2026-01-09T00:00:00Z",
+      "email": "member8@example.com",
+      "name": "Member 8",
+      "role": "user",
+      "type": "user"
+    }
+  ],
+  "first_id": "user_01SYNTH0000",
+  "has_more": false,
+  "last_id": "user_01SYNTH0008"
+}

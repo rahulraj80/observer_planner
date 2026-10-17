@@ -1,0 +1,11 @@
+{
+  "teamRule": {
+    "id": "rule_PDSPmvukpYgZEDXsoNirw3CFhy",
+    "name": "Ask before publishing",
+    "content": "Never publish a release without an explicit go from the requester.",
+    "enabled": true,
+    "scope": "grokBot",
+    "createdAt": "2024-01-15T10:30:00.000Z",
+    "updatedAt": "2024-01-15T10:30:00.000Z"
+  }
+}

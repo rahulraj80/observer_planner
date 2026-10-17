@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "cse_01A0000000000000000000000",
+      "organization_uuid": "00000000-0000-0000-0000-000000000000",
+      "user": {
+        "id": "user_01A0000000000000000000000",
+        "email_address": "user@example.com"
+      },
+      "status": "active",
+      "created_at": "2026-01-02T03:04:05.000000Z",
+      "updated_at": "2026-01-02T03:04:05.000000Z",
+      "product_surface": "cowork_remote",
+      "claude_project_id": "claude_proj_01Nm7PqRsTuVwXyZaBcDeFgH"
+    }
+  ],
+  "next_page": "page_AAE..."
+}

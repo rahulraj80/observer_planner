@@ -109,7 +109,7 @@ func TestTerminalBridgeStillReapsPermanentlyDeadPeer(t *testing.T) {
 			continue // a frame from a live server says nothing either way
 		}
 		if errors.Is(rerr, context.DeadlineExceeded) && rctx.Err() != nil {
-			t.Fatalf("a permanently dead peer was NOT torn down within the read window — "+
+			t.Fatalf("a permanently dead peer was NOT torn down within the read window - "+
 				"the grace budget must not disable the check (read err: %v)", rerr)
 		}
 		return // server-originated failure: the dead peer was reaped
@@ -210,7 +210,7 @@ func TestLeaseExpiryDemotesRemoteBridgeWhileRevokeCloses(t *testing.T) {
 			// on-open standing auto-present never re-fires on a socket that
 			// deliberately stayed open.
 			if revoked.Expiry != tc.expiry {
-				t.Fatalf("control_revoked expiry = %v, want %v — an expiry demote and a real revoke must be distinguishable on the wire",
+				t.Fatalf("control_revoked expiry = %v, want %v - an expiry demote and a real revoke must be distinguishable on the wire",
 					revoked.Expiry, tc.expiry)
 			}
 

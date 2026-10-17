@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "__type": "Inferred",
+    "message": "Inferred"
+  },
+  "fixture_sha256": "f589bcec574b9f2a39cede66a4403a5b3c45a24de900d8df966e30ea16a93dcd",
+  "http": {
+    "method": "POST",
+    "path": "/",
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/x-amz-json-1.1"
+    }
+  },
+  "notes": "UnrecognizedClientException with HTTP 403 is a documented common error; the AWS JSON error envelope (__type, message) and the message text are Inferred.",
+  "scenario": "error_403",
+  "sdk_or_spec_version_or_commit": "AWS CloudTrail API Reference LookupEvents (API version 2013-11-01), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b7da5fc7933b70dc55f4deba772209ecd865dce41fcd1a22c2195530d95faa01",
+  "source_url": "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/CommonErrors.html",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "aws.cloudtrail.q_developer_events"
+}

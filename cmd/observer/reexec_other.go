@@ -14,5 +14,5 @@ func reexecSupported() bool { return false }
 // restartRequested is set, which the restart hook refuses to set unless
 // reexecSupported() — so this is defence-in-depth.
 func execSelf() error {
-	return errors.New("in-process restart is not supported on this OS — relaunch the daemon manually")
+	return errors.New("in-process restart is not supported on this OS - relaunch the daemon manually")
 }

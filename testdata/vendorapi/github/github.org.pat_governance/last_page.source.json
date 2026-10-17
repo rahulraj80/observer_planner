@@ -1,0 +1,61 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].created_at": "VerifiedOfficial",
+    "[].id": "VerifiedOfficial",
+    "[].owner": "VerifiedOfficial",
+    "[].owner.avatar_url": "VerifiedOfficial",
+    "[].owner.events_url": "VerifiedOfficial",
+    "[].owner.followers_url": "VerifiedOfficial",
+    "[].owner.following_url": "VerifiedOfficial",
+    "[].owner.gists_url": "VerifiedOfficial",
+    "[].owner.gravatar_id": "VerifiedOfficial",
+    "[].owner.html_url": "VerifiedOfficial",
+    "[].owner.id": "VerifiedOfficial",
+    "[].owner.login": "VerifiedOfficial",
+    "[].owner.node_id": "VerifiedOfficial",
+    "[].owner.organizations_url": "VerifiedOfficial",
+    "[].owner.received_events_url": "VerifiedOfficial",
+    "[].owner.repos_url": "VerifiedOfficial",
+    "[].owner.site_admin": "VerifiedOfficial",
+    "[].owner.starred_url": "VerifiedOfficial",
+    "[].owner.subscriptions_url": "VerifiedOfficial",
+    "[].owner.type": "VerifiedOfficial",
+    "[].owner.url": "VerifiedOfficial",
+    "[].permissions": "VerifiedOfficial",
+    "[].permissions.organization": "VerifiedOfficial",
+    "[].permissions.organization.members": "VerifiedOfficial",
+    "[].permissions.repository": "VerifiedOfficial",
+    "[].permissions.repository.metadata": "VerifiedOfficial",
+    "[].reason": "VerifiedOfficial",
+    "[].repositories_url": "VerifiedOfficial",
+    "[].repository_selection": "VerifiedOfficial",
+    "[].token_expired": "VerifiedOfficial",
+    "[].token_expires_at": "VerifiedOfficial",
+    "[].token_id": "VerifiedOfficial",
+    "[].token_last_used_at": "VerifiedOfficial",
+    "[].token_name": "VerifiedOfficial"
+  },
+  "fixture_sha256": "041c0903e8e202b3a2c5331ec7764dc9c93cfc8e2aa6a4636cf04f30e36a1fd9",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/orgs/{org}/personal-access-token-requests",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /orgs/{org}/personal-access-token-requests (operationId orgs/list-pat-grant-requests). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.org.pat_governance"
+}

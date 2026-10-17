@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "user_id": "user_synth0001",
+      "email": "admin@example.com",
+      "name": "Ada Admin",
+      "role_assignments": [
+        {
+          "org_id": null,
+          "role": {
+            "role_id": "role_synth_enterprise_admin",
+            "role_name": "Enterprise Admin",
+            "role_type": "enterprise"
+          }
+        }
+      ],
+      "enterprise_joined_at": 1767225600
+    },
+    {
+      "user_id": "user_synth0002",
+      "email": "dev@example.com",
+      "name": "Dev One",
+      "role_assignments": [
+        {
+          "org_id": "org_synth01",
+          "role": {
+            "role_id": "role_synth_org_member",
+            "role_name": "Member",
+            "role_type": "org"
+          }
+        }
+      ],
+      "enterprise_joined_at": null
+    }
+  ],
+  "has_next_page": true,
+  "end_cursor": "synthcursor0002",
+  "total": 3
+}

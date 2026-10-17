@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package dashboard
 
 import (
@@ -193,79 +195,73 @@ func (s *Server) handleProcessEnableCapture(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no file to save to", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no file to save to", http.StatusConflict)
 		return
 	}
 
-	// Serialize the whole load→decide→validate→write against every other
-	// in-process config-file writer (Fix 1 lock domain). See Server.configWriteMu.
-	s.configWriteMu.Lock()
-	defer s.configWriteMu.Unlock()
-
-	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
-	if err != nil {
-		writeErr(w, fmt.Errorf("load current config: %w", err))
-		return
-	}
-	prevBackend := cfg.Observer.Process.Backend
-
-	// Platform-honest refusal: if NOTHING can capture on this host, do not flip
-	// config we can never satisfy — report unsupported_platform and leave the
-	// file untouched (no write, no restart banner). Proven no-write by the
-	// handler test's mtime/.bak assertion.
-	pcap := s.processCapabilityFn(cfg.Observer.Process)
-	if !pcap.anyRunnable() {
-		writeJSON(w, enableCaptureResponse{
-			Enabled:         false,
-			SwitchedBackend: false,
-			RestartRequired: false,
-			Reason:          "unsupported_platform",
-			Detail:          fmt.Sprintf("process capture has no runnable backend on %s yet", pcap.GOOS),
-		})
-		return
-	}
-
-	// Idempotent short-circuit: capture already on AND the configured backend
-	// actually captures here → respond without touching the file.
-	if cfg.Observer.Process.Enabled && pcap.backendRunsHere(prevBackend) {
-		writeJSON(w, enableCaptureResponse{
-			Enabled:         true,
-			Backend:         prevBackend,
-			SwitchedBackend: false,
-			RestartRequired: false,
-		})
-		return
-	}
-
-	cfg.Observer.Process.Enabled = true
+	// The ONE save pipeline (T-572): the load, decide, validate and write run
+	// under the config write locks, `?dry_run=1` previews the masked diff and
+	// writes nothing, `?base_etag=` refuses a file changed since that preview,
+	// and the write is read back and audited like every section save. The
+	// validate-before-write is the SAME semantic check config.Load runs at
+	// daemon start, so this verb can never persist a config the next start
+	// would reject.
+	prevBackend := ""
 	switched := false
-	if !pcap.backendRunsHere(prevBackend) {
-		cfg.Observer.Process.Backend = "auto"
-		switched = true
-	}
+	s.commitConfigEdit(w, r, configEdit{
+		section: "observer.process",
+		edit: func(cfg *config.Config) (any, error) {
+			prevBackend = cfg.Observer.Process.Backend
 
-	// Validate-before-write: the SAME semantic check config.Load runs at daemon
-	// start, so this verb can never persist a config the next start would reject.
-	if err := config.Validate(cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := writeConfigToml(s.opts.ConfigPath, cfg); err != nil {
-		writeErr(w, err)
-		return
-	}
-	s.notifyConfigSaved()
+			// Platform-honest refusal: if NOTHING can capture on this host, do
+			// not flip config we can never satisfy; report unsupported_platform
+			// and leave the file untouched (no write, no restart banner).
+			pcap := s.processCapabilityFn(cfg.Observer.Process)
+			if !pcap.anyRunnable() {
+				return enableCaptureResponse{
+					Enabled:         false,
+					SwitchedBackend: false,
+					RestartRequired: false,
+					Reason:          "unsupported_platform",
+					Detail:          fmt.Sprintf("process capture has no runnable backend on %s yet", pcap.GOOS),
+				}, nil
+			}
 
-	resp := enableCaptureResponse{
-		Enabled:         true,
-		Backend:         cfg.Observer.Process.Backend,
-		SwitchedBackend: switched,
-		RestartRequired: true, // the process section binds at daemon start
-	}
-	if switched {
-		// Fix 3: always carry the prior value when we switched, even when it was
-		// empty ("" → the frontend names it "unset").
-		resp.PreviousBackend = prevBackend
-	}
-	writeJSON(w, resp)
+			// Idempotent short-circuit: capture already on AND the configured
+			// backend actually captures here, so respond without touching the file.
+			if cfg.Observer.Process.Enabled && pcap.backendRunsHere(prevBackend) {
+				return enableCaptureResponse{
+					Enabled:         true,
+					Backend:         prevBackend,
+					SwitchedBackend: false,
+					RestartRequired: false,
+				}, nil
+			}
+
+			cfg.Observer.Process.Enabled = true
+			if !pcap.backendRunsHere(prevBackend) {
+				cfg.Observer.Process.Backend = "auto"
+				switched = true
+			}
+			return nil, nil
+		},
+		auditAction: "process_enable_capture",
+		auditDetailFor: func(cfg config.Config) string {
+			return fmt.Sprintf("backend=%s switched=%v", cfg.Observer.Process.Backend, switched)
+		},
+		extra: func(cfg config.Config) map[string]any {
+			resp := enableCaptureResponse{
+				Enabled:         true,
+				Backend:         cfg.Observer.Process.Backend,
+				SwitchedBackend: switched,
+				RestartRequired: true, // the process section binds at daemon start
+			}
+			if switched {
+				// Fix 3: always carry the prior value when we switched, even
+				// when it was empty ("" is named "unset" by the frontend).
+				resp.PreviousBackend = prevBackend
+			}
+			return responseFields(resp)
+		},
+	})
 }

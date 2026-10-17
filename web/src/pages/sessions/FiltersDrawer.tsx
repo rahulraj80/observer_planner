@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { SegmentedControl, SlideOver, Toggle, Tooltip } from "@/components/primitives";
+import { ModelMark, SegmentedControl, SlideOver, Toggle, Tooltip } from "@/components/primitives";
 import { shortModel } from "@/lib/models";
+import { dollarsShown } from "@/lib/format";
 import type { Reliability, SessionRow } from "@/lib/types";
 
 // SessionFilters — drawer-managed filter state. Applied locally to
@@ -170,7 +171,7 @@ export function SessionsFiltersDrawer({
       onClose={onClose}
       width={520}
       title="Filter sessions"
-      subtitle="Narrows the loaded page below — widen Window for more results"
+      subtitle="Narrows the loaded page below - widen Window for more results"
     >
       <div className="flex h-full flex-col">
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-[12px]">
@@ -178,7 +179,7 @@ export function SessionsFiltersDrawer({
             {availableModels.length === 0 ? (
               <p className="text-[11px] text-fg-3">
                 No model strings in the loaded page. Sessions captured before
-                the proxy / JSONL model field landed render as Models = —.
+                the proxy / JSONL model field landed render as Models = -.
               </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
@@ -194,12 +195,13 @@ export function SessionsFiltersDrawer({
                         type="button"
                         onClick={() => toggleModel(m)}
                         className={clsx(
-                          "rounded-pill border px-2 py-0.5 font-mono text-[10.5px] transition-colors",
+                          "inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 font-mono text-[10.5px] transition-colors",
                           on
                             ? "border-accent bg-accent-soft text-accent"
                             : "border-line-2 bg-bg-2 text-fg-2 hover:bg-bg-3",
                         )}
                       >
+                        <ModelMark model={m} size={11} tooltip={false} />
                         {shortModel(m)}
                       </button>
                     </Tooltip>
@@ -209,21 +211,25 @@ export function SessionsFiltersDrawer({
             )}
           </Group>
 
-          <Group label="Total cost (USD)">
-            <div className="flex items-center gap-2">
-              <RangeInput
-                value={draft.minCostUsd}
-                onChange={(v) => set("minCostUsd", v)}
-                placeholder="min"
-              />
-              <span className="text-fg-4">—</span>
-              <RangeInput
-                value={draft.maxCostUsd}
-                onChange={(v) => set("maxCostUsd", v)}
-                placeholder="max"
-              />
-            </div>
-          </Group>
+          {/* A dollar range filter is not offered in the org's token-usage
+              view (format.ts cost affordances). */}
+          {dollarsShown() && (
+            <Group label="Total cost (USD)">
+              <div className="flex items-center gap-2">
+                <RangeInput
+                  value={draft.minCostUsd}
+                  onChange={(v) => set("minCostUsd", v)}
+                  placeholder="min"
+                />
+                <span className="text-fg-4">-</span>
+                <RangeInput
+                  value={draft.maxCostUsd}
+                  onChange={(v) => set("maxCostUsd", v)}
+                  placeholder="max"
+                />
+              </div>
+            </Group>
+          )}
 
           <Group label="Actions per session">
             <div className="flex items-center gap-2">
@@ -232,7 +238,7 @@ export function SessionsFiltersDrawer({
                 onChange={(v) => set("minActions", v)}
                 placeholder="min"
               />
-              <span className="text-fg-4">—</span>
+              <span className="text-fg-4">-</span>
               <RangeInput
                 value={draft.maxActions}
                 onChange={(v) => set("maxActions", v)}
@@ -246,8 +252,8 @@ export function SessionsFiltersDrawer({
               options={[
                 { value: "any", label: "Any" },
                 { value: "short", label: "<5m" },
-                { value: "medium", label: "5–30m" },
-                { value: "long", label: "30m–2h" },
+                { value: "medium", label: "5-30m" },
+                { value: "long", label: "30m-2h" },
                 { value: "xlong", label: ">2h" },
               ]}
               value={draft.duration}

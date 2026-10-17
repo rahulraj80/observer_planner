@@ -1,0 +1,40 @@
+{
+  "members": [
+    {
+      "id": 12345,
+      "email": "developer@company.com",
+      "name": "Alex",
+      "organizationRole": "member",
+      "teams": [
+        {
+          "teamId": 7,
+          "teamRole": "member"
+        },
+        {
+          "teamId": 8,
+          "teamRole": "owner"
+        }
+      ]
+    },
+    {
+      "id": 12346,
+      "email": "admin@company.com",
+      "name": "Sam",
+      "organizationRole": "admin",
+      "teams": [
+        {
+          "teamId": 7,
+          "teamRole": "owner"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "pageSize": 50,
+    "totalCount": 2,
+    "totalPages": 1,
+    "hasNextPage": true,
+    "hasPreviousPage": false
+  }
+}

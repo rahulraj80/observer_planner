@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "end_cursor": "VerifiedOfficial",
+    "has_next_page": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].email": "VerifiedOfficial",
+    "items[].enterprise_joined_at": "Inferred",
+    "items[].name": "VerifiedOfficial",
+    "items[].role_assignments": "VerifiedOfficial",
+    "items[].role_assignments[]": "VerifiedOfficial",
+    "items[].role_assignments[].org_id": "VerifiedOfficial",
+    "items[].role_assignments[].role": "VerifiedOfficial",
+    "items[].role_assignments[].role.role_id": "VerifiedOfficial",
+    "items[].role_assignments[].role.role_name": "VerifiedOfficial",
+    "items[].role_assignments[].role.role_type": "VerifiedOfficial",
+    "items[].user_id": "VerifiedOfficial",
+    "total": "VerifiedOfficial"
+  },
+  "fixture_sha256": "2d141aa2ec3d2c2438d22cff27faa1f29b19d042031600d3bb516c29a5c3ff60",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/members/users",
+    "query": {
+      "first": "200"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from PaginatedResponse[EnterpriseUser] / EnterpriseUser / RoleAssignment / Role. enterprise_joined_at is an integer in the schema; Unix seconds is Inferred.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.ent_users"
+}

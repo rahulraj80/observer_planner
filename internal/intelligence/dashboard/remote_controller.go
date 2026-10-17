@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -5,93 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/termcore"
+
 	"github.com/marmutapp/superbased-observer/internal/remoteauth"
-	"github.com/marmutapp/superbased-observer/internal/termlease"
 )
 
-// Cookie + header names for the remote auth flow (plan §4.3/§4.5).
-const (
-	remoteSessionCookie = "sb_remote_session"
-	remoteCSRFHeader    = "X-Remote-CSRF"    //nolint:gosec // header name, not a credential
-	remoteExecuteHeader = "X-Remote-Execute" //nolint:gosec // header name, not a credential
-)
+// isStandingSecret recognises a standing terminal-control credential by its
+// shape (the seam remote_seams.go names; remote_omit.go answers false).
+func isStandingSecret(cred string) bool { return remoteauth.IsStandingSecret(cred) }
 
-// RemoteOptions configures a concrete RemoteController (plan §4). Built by cmd
-// from [remote] once exposure is wired (Phase 2); assembled here so the HTTP
-// glue (cookies, CSRF, pairing) lives with the mux, not in the pure
-// internal/remoteauth primitives it injects.
-type RemoteOptions struct {
-	// HashedSecret is the argon2id hash of the pairing secret at rest. Empty ⇒
-	// not ready (Ready() is false).
-	HashedSecret string
-	// AllowedHosts is the Host allow-list (configured bind + trusted_hosts).
-	AllowedHosts []string
-	// RateLimitPerMin throttles pairing attempts (0 disables).
-	RateLimitPerMin int
-	// AllowTerminal mirrors [remote].allow_terminal for remote fresh terminal
-	// launch gating. Writer control is still authorized separately by
-	// termlease.Authorize.
-	AllowTerminal bool
-	// AllowRemoteTerminalTakeover mirrors
-	// [remote].allow_remote_terminal_takeover. It is consulted only after the
-	// credential conjunction succeeds and defaults true through config.Default.
-	// Hot-swapped by ReloadAllowRemoteTerminalTakeover.
-	AllowRemoteTerminalTakeover bool
-	// AllowTerminalView mirrors [remote].allow_terminal_view — the independent
-	// READ opt-in that relaxes the remote-sensitive (attach/resume) deny-by-
-	// default (session-attach design §3.2). It ONLY relaxes the VIEW gate
-	// (snapshot row + read-only subscribe); the writer path stays governed by
-	// AllowTerminal + the execute-tier conjunction. Default TRUE (seeded in
-	// config.Default, mirroring AllowRemoteTerminalTakeover) — an explicit
-	// allow_terminal_view = false restores the deny-read posture. Hot-swapped
-	// by ReloadAllowTerminalView.
-	AllowTerminalView bool
-	// StandingTerminalSecretHash is the argon2id hash-at-rest of the OPT-IN
-	// standing terminal-control secret (standing-terminal-access §B), read from
-	// remotecfg.StandingTerminalSecretPath at construction. Empty ⇒ no standing
-	// secret provisioned (the standing path denies). Hot-swapped by
-	// ReloadStandingTerminalSecret on a dashboard mint/revoke.
-	StandingTerminalSecretHash string
-	// StandingTerminalEnabled mirrors [remote].allow_standing_terminal_control:
-	// the master gate the standing verification leg checks BEFORE the hash
-	// compare. Default false. Hot-swapped alongside the hash.
-	StandingTerminalEnabled bool
-	// StandingSecretAtRest answers, at verify time, whether a standing
-	// terminal-control secret still EXISTS at rest on this node. It is the ONE
-	// piece of evidence that separates a genuine REVOKE from a temporary
-	// DISABLE, which are otherwise byte-identical on the live controller: both
-	// arrive as ReloadStandingTerminalSecret("", false).
-	//
-	//	revoke  → remotecfg.StandingTerminalDisable DELETES the hash file
-	//	          ⇒ probe false ⇒ no secret any device holds can ever be
-	//	          accepted again (a re-mint issues a DIFFERENT one), so the
-	//	          denial is PERMANENT and the device may discard its copy
-	//	disable → allow_terminal→false / remote-disable / a config toggle only
-	//	          flip the gate and LEAVE the hash file ⇒ probe true ⇒ the
-	//	          refusal is TRANSIENT and the device must keep its secret
-	//
-	// It is deliberately a live probe rather than a reload-time snapshot: the
-	// disk is the durable truth, and no hot-reload plumbing can then drift out
-	// of sync with it. It MUST fail safe — return true whenever the answer is
-	// unknown (stat error, no probe wired) — because a wrong "false" destroys a
-	// user's saved secret irreversibly, while a wrong "true" costs one more
-	// denied attempt. Nil ⇒ every such denial stays transient (the pre-A2
-	// behaviour). Wired by cmd/observer from
-	// remotecfg.StandingTerminalSecretPath.
-	StandingSecretAtRest func() bool
-	// Session tunes the device-session lifecycle.
-	Session remoteauth.SessionParams
-	// CapabilityTTL is the execute-capability lifetime (0 ⇒ default).
-	CapabilityTTL time.Duration
-	// Audit receives metadata-only pairing/logout records (never secrets).
-	Audit func(RemoteAuditRecord)
-	// Now is the clock (test hook). Nil defaults to time.Now.UTC.
-	Now func() time.Time
-}
+// hashSessionID is the session store's key for a raw device-session id (the
+// seam remote_seams.go names).
+func hashSessionID(raw string) string { return remoteauth.HashSessionID(raw) }
 
 // remoteController is the concrete RemoteController: it authenticates requests
 // against a device-session store, mints/consumes single-use execute
@@ -369,7 +299,17 @@ func (c *remoteController) Routes() []ExtraRoute {
 // Sessions lists the live device sessions as metadata-only fingerprints
 // (dashboard-management-surface plan §2F). The full session id never leaves the
 // controller — SessionInfo.ID is carried for server-side revoke targeting only.
-func (c *remoteController) Sessions() []remoteauth.SessionInfo { return c.sessions.List() }
+func (c *remoteController) Sessions() []RemoteSessionInfo {
+	list := c.sessions.List()
+	out := make([]RemoteSessionInfo, 0, len(list))
+	for _, s := range list {
+		out = append(out, RemoteSessionInfo{
+			Fingerprint: s.Fingerprint, ID: s.ID,
+			CreatedAt: s.CreatedAt, LastSeen: s.LastSeen, AgeSeconds: s.AgeSeconds,
+		})
+	}
+	return out
+}
 
 // RevokeSession revokes ONE live session by its full id and tears down its
 // capabilities + CSRF token. Instant, no restart (§C). Returns whether a live
@@ -405,102 +345,6 @@ func (c *remoteController) MintExecute(sessionID, action string) (string, error)
 	// Capabilities are keyed by the session HASH (matching Principal's Consume),
 	// so callers may pass the RAW cookie value and it hashes consistently.
 	return c.caps.Mint(remoteauth.HashSessionID(sessionID), action)
-}
-
-// TerminalControlAuthorizer is the subset of the remote substrate the cmd launch
-// adapter needs to run the §4.δ terminal-control conjunction (via
-// termlease.Authorize) and to mint at the LOCAL approve-execute step (§4.γ). It
-// is exposed via a type assertion on RemoteController so the seam stays minimal
-// and the fakes are unaffected. The concrete *remoteController implements it.
-//
-// Validate + ConsumeTerminalControl deliberately match termlease.SessionValidator
-// and termlease.CapabilityConsumer so the same value can be passed as both to
-// termlease.Authorize without a further adapter.
-type TerminalControlAuthorizer interface {
-	// Validate reports whether a raw device-session id is a live session
-	// (termlease.SessionValidator).
-	Validate(deviceSessionID string) error
-	// ConsumeTerminalControl consumes a single-use terminal-control capability +
-	// bound confirm for a raw device-session id + terminal handle
-	// (termlease.CapabilityConsumer). A failed confirm consumes nothing.
-	ConsumeTerminalControl(token, confirm, deviceSessionID, handle string) bool
-	// MintTerminalControl mints a single-use terminal-control capability + bound
-	// confirm for a device-session HASH (the id surfaced by Sessions()) + handle.
-	// Returned only to the LOCAL approve-execute surface (§4.γ / §6).
-	MintTerminalControl(deviceSessionHash, handle string) (token, confirm string, err error)
-}
-
-// StandingTerminalVerifier is the subset of the remote substrate the cmd launch
-// adapter needs to run the OPT-IN standing terminal-control leg via
-// termlease.AuthorizeStanding (standing-terminal-access §B). It is separate from
-// TerminalControlAuthorizer so a fake that only exercises the single-use path is
-// unaffected (additive, CLAUDE.md #6); the concrete *remoteController satisfies
-// both. VerifyStandingTerminalControl deliberately matches
-// termlease.StandingVerifier so the same value passes straight through.
-type StandingTerminalVerifier interface {
-	VerifyStandingTerminalControl(secret, deviceSessionID, handle string) bool
-	// StandingTerminalGeneration returns a counter that advances on EVERY
-	// standing-secret swap (mint/rotate/revoke/disable). The acquire adapter
-	// captures it before verifying and re-checks it after the lease install,
-	// so a verify that raced a revoke can never leave a surviving writer.
-	StandingTerminalGeneration() uint64
-}
-
-// standingTerminalReloader is the hot-swap seam the dashboard management
-// handlers use to make a standing mint/revoke take effect on the LIVE
-// controller without a daemon restart. Type-asserted off the RemoteController so
-// nil/fake controllers stay valid.
-type standingTerminalReloader interface {
-	ReloadStandingTerminalSecret(hashed string, enabled bool)
-}
-
-// allowTerminalReloader is the hot-swap seam for the LIVE allow_terminal gate
-// (finding 3 residual). Type-asserted off the RemoteController so nil/fake
-// controllers stay valid.
-type allowTerminalReloader interface {
-	ReloadAllowTerminal(allow bool)
-}
-
-// allowRemoteTerminalTakeoverReloader is the additive hot-swap seam for the
-// live authenticated-remote takeover policy. Nil/fake controllers remain valid.
-type allowRemoteTerminalTakeoverReloader interface {
-	ReloadAllowRemoteTerminalTakeover(allow bool)
-}
-
-// allowTerminalViewer is the READ seam for the LIVE allow_terminal_view gate
-// (session-attach design §3.2, Phase 4). It is type-asserted off the
-// RemoteController — rather than added to the base interface — so nil/fake
-// controllers (which deny by omission) stay valid, additive per CLAUDE.md #6.
-// The concrete *remoteController satisfies it.
-type allowTerminalViewer interface {
-	AllowTerminalView() bool
-}
-
-// allowTerminalViewReloader is the hot-swap seam for the LIVE allow_terminal_view
-// gate, mirroring allowTerminalReloader. Type-asserted off the RemoteController
-// so nil/fake controllers stay valid.
-type allowTerminalViewReloader interface {
-	ReloadAllowTerminalView(allow bool)
-}
-
-// sessionRevokeHooker is the wiring seam (F2) letting the Server register a
-// callback the controller fires on a device self-logout, so the device's open
-// read-only sensitive viewers are torn down. Type-asserted off the
-// RemoteController so nil/fake controllers stay valid (additive, CLAUDE.md #6).
-type sessionRevokeHooker interface {
-	SetSessionRevokeHook(func(sessionKey string))
-}
-
-// deviceSessionLifetimer is the READ seam (session-attach F1a/F1b) binding a
-// privileged read-only viewer to its device session's lifetime. SessionLifetime
-// returns the session's revocation channel (closed on revoke/rotate/eviction),
-// the duration until its next TTL/idle expiry, and whether it is currently live
-// — used BOTH to re-validate after registration (F1a: the drain-then-register
-// race) AND to cancel the viewer on a later session-end (F1b). Type-asserted off
-// the RemoteController so nil/fake controllers (loopback, which never expose a
-// remote-sensitive viewer) stay valid, additive per CLAUDE.md #6.
-type deviceSessionLifetimer interface {
-	SessionLifetime(raw string) (revoked <-chan struct{}, until time.Duration, live bool)
 }
 
 // Validate reports whether a raw device-session id is currently valid — the
@@ -612,7 +456,7 @@ func (c *remoteController) VerifyStandingTerminalControl(secret, deviceSessionID
 // attempt.
 //
 // The authorization outcome is unchanged in every case — this only classifies.
-func (c *remoteController) VerifyStandingTerminalControlReason(secret, deviceSessionID, handle string) (ok bool, denial termlease.StandingDenial) {
+func (c *remoteController) VerifyStandingTerminalControlReason(secret, deviceSessionID, handle string) (ok bool, denial termcore.StandingDenial) {
 	c.standingMu.RLock()
 	enabled := c.standingEnabled
 	hash := c.standingHash
@@ -624,10 +468,10 @@ func (c *remoteController) VerifyStandingTerminalControlReason(secret, deviceSes
 		// standing secret still exists at rest (see StandingSecretAtRest).
 		if c.standingSecretRevoked() {
 			c.auditStanding(fp, handle, "deny", "standing_revoked")
-			return false, termlease.StandingDenialRevoked
+			return false, termcore.StandingDenialRevoked
 		}
 		c.auditStanding(fp, handle, "deny", "standing_disabled")
-		return false, termlease.StandingDenialUnavailable // never compared the secret
+		return false, termcore.StandingDenialUnavailable // never compared the secret
 	}
 	// Rate-limit standing attempts on ONE GLOBAL bucket, deliberately NOT the
 	// device-session identity: a session id is freely rotatable (logout +
@@ -639,19 +483,19 @@ func (c *remoteController) VerifyStandingTerminalControlReason(secret, deviceSes
 	// device fingerprint — identity churn shows up as fingerprint churn there.
 	if c.standingLimiter != nil && !c.standingLimiter.Allow("standing") {
 		c.auditStanding(fp, handle, "deny", "rate_limited")
-		return false, termlease.StandingDenialUnavailable // never compared the secret
+		return false, termcore.StandingDenialUnavailable // never compared the secret
 	}
 	raw, err := remoteauth.DecodeStandingSecret(secret)
 	if err != nil {
 		c.auditStanding(fp, handle, "deny", "malformed")
-		return false, termlease.StandingDenialBadSecret // the presented value itself is unusable
+		return false, termcore.StandingDenialBadSecret // the presented value itself is unusable
 	}
 	if !remoteauth.VerifySecret(hash, raw) {
 		c.auditStanding(fp, handle, "deny", "bad_secret")
-		return false, termlease.StandingDenialBadSecret // judged and rejected
+		return false, termcore.StandingDenialBadSecret // judged and rejected
 	}
 	c.auditStanding(fp, handle, "ok", "standing")
-	return true, termlease.StandingDenialNone
+	return true, termcore.StandingDenialNone
 }
 
 // standingSecretRevoked reports whether this node can PROVE that no standing
@@ -777,7 +621,7 @@ func (c *remoteController) handlePair(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(pairErrorResponse{
 				OK:    false,
 				Code:  pairCodeTooManyDevices,
-				Error: "the maximum number of devices are already paired — revoke one on the host dashboard (Remote → Paired devices), then pair again",
+				Error: "the maximum number of devices are already paired - revoke one on the host dashboard (Remote → Paired devices), then pair again",
 			})
 			return
 		}
@@ -923,52 +767,4 @@ func (c *remoteController) auditSession(r *http.Request, id, kind, decision, det
 		Kind: kind, SessionID: id, RemoteAddr: hostnameOnly(r.RemoteAddr),
 		Route: r.URL.Path, Decision: decision, Detail: detail,
 	})
-}
-
-// deviceFingerprint derives the short, non-reversible device identity used in
-// the execute-tier audit rows from a RAW device-session id: the first 8 hex
-// chars of its sha256 hash — byte-identical to remoteauth's SessionInfo
-// fingerprint (and the value the local approve-execute step records), so the
-// capability-lifecycle events correlate on ONE device token. Never the raw
-// bearer. Empty in ⇒ empty out.
-func deviceFingerprint(rawSession string) string {
-	if rawSession == "" {
-		return ""
-	}
-	h := remoteauth.HashSessionID(rawSession)
-	if len(h) <= 8 {
-		return h
-	}
-	return h[:8]
-}
-
-// deviceSessionKey derives the FULL, non-reversible device-session key from a
-// RAW cookie: its sha256 hash (HashSessionID) — the SAME identity the session
-// store keys on. It is the registry key for read-only sensitive viewers (F2b),
-// distinct from deviceFingerprint (the 32-bit display prefix used only in audit
-// rows / the management surface). Keying the viewer registry on the full hash —
-// never the display prefix — closes the collision hole where a device whose
-// fingerprint prefix matches another's could disconnect that other's viewer.
-// Empty in ⇒ empty out (the owner-local path, never registered per-device).
-func deviceSessionKey(rawSession string) string {
-	if rawSession == "" {
-		return ""
-	}
-	return remoteauth.HashSessionID(rawSession)
-}
-
-func sessionCookie(r *http.Request) string {
-	ck, err := r.Cookie(remoteSessionCookie)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(ck.Value)
-}
-
-func isUnsafeMethod(m string) bool {
-	switch m {
-	case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
-		return true
-	}
-	return false
 }

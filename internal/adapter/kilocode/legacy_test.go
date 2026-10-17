@@ -63,6 +63,51 @@ func TestLegacy_RetagsClineFormatAsKiloCode(t *testing.T) {
 	}
 }
 
+// TestLegacy_PassesThroughCacheObservations pins that LegacyAdapter's
+// ParseSessionFile does NOT drop the cline delegate's
+// CacheObservations. Unlike ToolEvents/TokenEvents,
+// models.CacheTurnObservation carries no Tool field to re-tag — see
+// internal/adapter/cacheobs and models.CacheTurnObservation — so
+// wiring cline's Tier-2 cache observer (internal/adapter/cline/
+// cachetrack.go) automatically covers the legacy Kilo Code IDE
+// extension for free, with zero LegacyAdapter-side code. This test
+// is the load-bearing proof of that "for free" claim.
+func TestLegacy_PassesThroughCacheObservations(t *testing.T) {
+	root := t.TempDir()
+	tasksRoot := filepath.Join(root, "kilocode.kilo-code", "tasks")
+	taskID := "task-002"
+	taskDir := filepath.Join(tasksRoot, taskID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwdInJSON := filepath.ToSlash(root)
+	body := `[
+		{"role":"user","ts":1700000000000,"content":[{"type":"text","text":"<environment_details>\n# Current Working Directory (` + cwdInJSON + `) Files\nREADME.md\n</environment_details>"}]},
+		{"role":"assistant","ts":1700000010000,"model":"claude-haiku-4-5","content":[{"type":"text","text":"done"}],
+		 "usage":{"input_tokens":25,"output_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":1500}}
+	]`
+	apiPath := filepath.Join(taskDir, "api_conversation_history.json")
+	if err := os.WriteFile(apiPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewLegacyWithOptions(nil, []string{tasksRoot})
+	res, err := a.ParseSessionFile(context.Background(), apiPath, 0)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	if len(res.CacheObservations) != 1 {
+		t.Fatalf("CacheObservations = %d, want 1", len(res.CacheObservations))
+	}
+	obs := res.CacheObservations[0]
+	if obs.Usage.CacheReadTokens != 1500 {
+		t.Errorf("obs.Usage.CacheReadTokens = %d, want 1500", obs.Usage.CacheReadTokens)
+	}
+	if obs.SourceFile != apiPath {
+		t.Errorf("obs.SourceFile = %q, want %q", obs.SourceFile, apiPath)
+	}
+}
+
 // TestLegacy_IsSessionFileRejectsForeignAPIHistory pins the v1.4.51
 // dispatch contract — a same-basename path outside our watch roots
 // MUST be rejected. Without the under-WatchPaths constraint a
@@ -77,13 +122,6 @@ func TestLegacy_IsSessionFileRejectsForeignAPIHistory(t *testing.T) {
 	}
 }
 
-// TestLegacy_NameReturnsKiloCode pins the public adapter identity.
-func TestLegacy_NameReturnsKiloCode(t *testing.T) {
-	if got := (&LegacyAdapter{}).Name(); got != models.ToolKiloCode {
-		t.Errorf("Name = %q, want %q", got, models.ToolKiloCode)
-	}
-}
-
 // TestLegacy_DefaultRootsIncludesVSCodeServer pins that we glob BOTH
 // the VS Code desktop globalStorage AND the VS Code Server location
 // (the latter is where Remote-WSL captured sessions live). On a host
@@ -95,14 +133,20 @@ func TestLegacy_DefaultRootsIncludesVSCodeServer(t *testing.T) {
 	hasDesktop := false
 	hasServer := false
 	for _, r := range a.WatchPaths() {
-		// Crude substring checks — sufficient because the two paths
-		// disambiguate cleanly on their parent dir name.
-		if filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(r)))) == "Code" ||
-			filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(r)))) == "Code - Insiders" {
+		// A root is `<product>/User/globalStorage/<extId>/tasks` for a
+		// desktop product and `<serverDir>/data/User/globalStorage/
+		// <extId>/tasks` for a remote one, so the PRODUCT segment is
+		// four Dir() hops up from `tasks`. (This was three hops before
+		// the vscodehost switch, which silently made the check
+		// vacuous — it compared against `User`.)
+		product := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(r)))))
+		switch product {
+		case "Code", "Code - Insiders":
 			hasDesktop = true
-		}
-		if filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(r)))) == ".vscode-server" {
-			hasServer = true
+		case "data": // <serverDir>/data/User/globalStorage/<extId>/tasks
+			if filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(r)))))) == ".vscode-server" {
+				hasServer = true
+			}
 		}
 	}
 	// Only assert when we actually got roots back; on a sandboxed

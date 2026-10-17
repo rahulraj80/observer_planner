@@ -44,10 +44,18 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 	if len(m.To) == 0 {
 		return errors.New("email: no recipients")
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.timeoutSeconds())*time.Second)
+	// Render BEFORE the SMTP conversation: a message whose headers are
+	// refused (a control character in a recipient or a subject, see
+	// writeHeader) must never open a connection, let alone reach RCPT TO with
+	// a half-trusted address.
+	body, err := m.render(cfg.From, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.EffectiveTimeoutSeconds())*time.Second)
 	defer cancel()
 
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.port()))
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.EffectivePort()))
 	conn, err := s.dialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("email: dial %s: %w", addr, err)
@@ -58,7 +66,7 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 
 	tlsCfg := &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}
 	secured := false
-	if cfg.tlsMode() == TLSImplicit {
+	if cfg.EffectiveTLSMode() == TLSImplicit {
 		tconn := tls.Client(conn, tlsCfg)
 		if herr := tconn.HandshakeContext(ctx); herr != nil {
 			_ = conn.Close()
@@ -75,7 +83,7 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	if cfg.tlsMode() == TLSStartTLS {
+	if cfg.EffectiveTLSMode() == TLSStartTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			return errors.New("email: server does not advertise STARTTLS (set tls_mode=none to allow plaintext, or tls for implicit TLS)")
 		}
@@ -109,7 +117,7 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 	if err != nil {
 		return fmt.Errorf("email: DATA: %w", err)
 	}
-	if _, err := w.Write(m.render(cfg.From, time.Now().UTC())); err != nil {
+	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
 		return fmt.Errorf("email: write body: %w", err)
 	}

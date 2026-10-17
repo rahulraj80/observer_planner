@@ -9,6 +9,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/cachetrack"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 )
 
 // openCacheHealthTestDB opens a fresh observer DB so the cache
@@ -16,7 +17,7 @@ import (
 func openCacheHealthTestDB(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ch.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -194,10 +195,10 @@ func TestComputeCacheHealth_DiagnosticBreakdown(t *testing.T) {
 			t.Errorf("ev.Kind = %q, want mispredict", ev.Kind)
 		}
 		if ev.Cause == "" {
-			t.Errorf("ev.Cause empty — diagnosability lost: %+v", ev)
+			t.Errorf("ev.Cause empty - diagnosability lost: %+v", ev)
 		}
 		if ev.PredictedKind == "" {
-			t.Errorf("ev.PredictedKind empty — diagnosability lost: %+v", ev)
+			t.Errorf("ev.PredictedKind empty - diagnosability lost: %+v", ev)
 		}
 	}
 
@@ -351,7 +352,7 @@ func TestComputeCacheHealth_HealthyDistributionNoDominantCause(t *testing.T) {
 		t.Fatalf("computeCacheHealth: %v", err)
 	}
 	if report.DominantCause != nil {
-		t.Errorf("DominantCause = %+v; want nil — suffix_growth dominance is healthy and excluded", report.DominantCause)
+		t.Errorf("DominantCause = %+v; want nil - suffix_growth dominance is healthy and excluded", report.DominantCause)
 	}
 }
 
@@ -383,7 +384,7 @@ func TestComputeCacheHealth_HandoffRehydrationNotDominant(t *testing.T) {
 		t.Fatalf("computeCacheHealth: %v", err)
 	}
 	if report.DominantCause != nil {
-		t.Errorf("DominantCause = %+v; want nil — handoff_rehydration is a by-design baseline cause, excluded", report.DominantCause)
+		t.Errorf("DominantCause = %+v; want nil - handoff_rehydration is a by-design baseline cause, excluded", report.DominantCause)
 	}
 }
 
@@ -450,7 +451,7 @@ func TestPrintCacheHealth_WithWarnings(t *testing.T) {
 	printCacheHealth(&buf, r)
 	out := buf.String()
 	for _, want := range []string{
-		"read:write consistency: WARN — 1 event(s)",
+		"read:write consistency: WARN - 1 event(s)",
 		"ratio=121.1x",
 		"cause concentration: WARN",
 		"system_changed at 198/201 graded (98.5%)",

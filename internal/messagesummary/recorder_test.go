@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -22,7 +24,7 @@ func (stubPricing) Lookup(model string) (Pricing, bool) {
 // one row in summary_calls with cost_usd computed from the pricing
 // lookup.
 func TestDBRecorder_RecordsRow(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "r.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "r.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -80,7 +82,7 @@ func TestDBRecorder_NilSafe(t *testing.T) {
 // pricing lookup misses, cost_usd lands 0 rather than panicking or
 // erroring (the dashboard surfaces this as "missing pricing").
 func TestDBRecorder_UnknownModelZeroCost(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "r.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "r.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

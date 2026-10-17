@@ -79,6 +79,16 @@ func (a *Adapter) WithSessionHookChecker(check SessionHookChecker) *Adapter {
 	return a
 }
 
+// ConfigureHookDedup implements adapter.HookDedupConfigurer: the watcher
+// builder hands the store's source-file probe and the adapter binds it to
+// its own hook marker (hookSourceFile), the same gate WithSessionHookChecker
+// installs.
+func (a *Adapter) ConfigureHookDedup(hasRows func(ctx context.Context, sessionID, sourceFile string) (bool, error)) {
+	a.WithSessionHookChecker(func(ctx context.Context, sessionID string) (bool, error) {
+		return hasRows(ctx, sessionID, hookSourceFile)
+	})
+}
+
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolClineCLI }
 
@@ -112,26 +122,28 @@ func (a *Adapter) WatchPaths() []string { return a.roots }
 // claim the dispatch. The under-root check is the v1.4.51 invariant
 // every adapter must enforce.
 func (a *Adapter) IsSessionFile(path string) bool {
-	base := filepath.Base(path)
-	switch base {
+	var relative string
+	switch filepath.Base(path) {
 	case "sessions.db", "sessions.db-wal", "sessions.db-shm":
-		// SQLite trio. Belt-and-braces against unrelated sessions.db
-		// files elsewhere on disk: the parent dir must look like a
-		// Cline data dir (`.../.cline/data/db/`).
-		norm := strings.ToLower(strings.ReplaceAll(path, `\`, "/"))
-		if !strings.Contains(norm, "/.cline/data/db/") {
-			return false
-		}
-		return adapter.UnderAnyWatchRoot(path, a.WatchPaths())
+		relative = filepath.Join("data", "db", filepath.Base(path))
 	case "hooks.jsonl":
-		norm := strings.ToLower(strings.ReplaceAll(path, `\`, "/"))
-		if !strings.Contains(norm, "/.cline/data/logs/") {
-			return false
-		}
-		return adapter.UnderAnyWatchRoot(path, a.WatchPaths())
+		relative = filepath.Join("data", "logs", "hooks.jsonl")
 	default:
 		return false
 	}
+	// Preserve the historical .cline subtree layout beneath an explicitly
+	// watched parent, while accepting CLINE_DIR itself without that basename.
+	normalized := filepath.ToSlash(filepath.Clean(path))
+	legacySuffix := "/.cline/" + filepath.ToSlash(relative)
+	if strings.HasSuffix(normalized, legacySuffix) && adapter.UnderAnyWatchRoot(path, a.WatchPaths()) {
+		return true
+	}
+	for _, root := range a.WatchPaths() {
+		if filepath.Clean(path) == filepath.Join(root, relative) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildProcessSeeds emits a candidate (OS pid → session) attribution
@@ -214,8 +226,14 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 			TokenEvents:         tokenEvents,
 			CacheObservations:   cacheObservations,
 			SessionProcessSeeds: buildProcessSeeds(sessions, dbPath),
-			NewOffset:           newOffset,
-			Warnings:            warnings,
+			// Capture-surface attribution resolved from Cline's own
+			// sessions.source column through surfaceBySource
+			// (surface.go). Cline `next` routes VS Code / JetBrains /
+			// Neovim sessions through this same sessions.db, so the
+			// tool id stays cline-cli and these columns are the split.
+			SessionSurfaces: buildSessionSurfaces(sessions),
+			NewOffset:       newOffset,
+			Warnings:        warnings,
 		}, nil
 	case "hooks.jsonl":
 		// hooks.jsonl tailer. The cursor (fromOffset) is a byte

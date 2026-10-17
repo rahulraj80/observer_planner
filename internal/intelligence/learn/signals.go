@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 )
 
 // SignalType categorises one row of retrieval_signals (K43 — Tier 3).
@@ -171,7 +173,21 @@ type ReportOptions struct {
 	// session was for this project (project root_path). Empty → no
 	// project filter.
 	Project string
+	// Model restricts to rows whose backing session used this model
+	// (internal/modelfilter.SessionsUsing; session grain, like Tool).
+	// Empty → no model filter.
+	Model string
+	// Since, when non-zero, is the window's lower bound and overrides
+	// Days (the dashboard's global window, REVIEW-3 P3-19).
+	Since time.Time
+	// Until, when non-zero, closes the window: no signal at or after it
+	// is counted. Zero leaves the window open-ended (until now).
+	Until time.Time
 }
+
+// openUntil is the upper bound of an open-ended window: later than any
+// RFC3339 timestamp, so "< openUntil" admits every row.
+const openUntil = "9999-12-31T23:59:59Z"
 
 // Report builds the K43 retrieval-rate aggregate over the last
 // opts.Days days. Default 7 when opts.Days <= 0; cap 90. Tool +
@@ -186,6 +202,13 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 		days = 90
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339Nano)
+	if !opts.Since.IsZero() {
+		cutoff = opts.Since.UTC().Format(time.RFC3339Nano)
+	}
+	upper := openUntil
+	if !opts.Until.IsZero() {
+		upper = opts.Until.UTC().Format(time.RFC3339Nano)
+	}
 	out := RetrievalRateReport{SinceDays: days}
 
 	// retrieval_signals filter — joins through action_id → actions →
@@ -193,13 +216,13 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 	// the v1.6.3 corpus have action_id populated (session_id is
 	// nullable and historically left empty), so action-based joins are
 	// the load-bearing path.
-	rsJoin, rsWhere, rsArgs := signalsFilter(opts.Tool, opts.Project)
+	rsJoin, rsWhere, rsArgs := signalsFilter(opts.Tool, opts.Project, opts.Model)
 
 	if err := m.db.QueryRowContext(
 		ctx,
 		`SELECT COUNT(*) FROM retrieval_signals rs`+rsJoin+
-			` WHERE rs.signal_type = ? AND rs.signal_at >= ?`+rsWhere,
-		append([]any{string(SignalRetrieveStashed), cutoff}, rsArgs...)...,
+			` WHERE rs.signal_type = ? AND rs.signal_at >= ? AND rs.signal_at < ?`+rsWhere,
+		append([]any{string(SignalRetrieveStashed), cutoff, upper}, rsArgs...)...,
 	).Scan(&out.StashRetrievals); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return out, fmt.Errorf("learn.PatternMiner.Report: count stashes: %w", err)
@@ -208,8 +231,8 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 	if err := m.db.QueryRowContext(
 		ctx,
 		`SELECT COUNT(*) FROM retrieval_signals rs`+rsJoin+
-			` WHERE rs.signal_type = ? AND rs.signal_at >= ?`+rsWhere,
-		append([]any{string(SignalSearchHit), cutoff}, rsArgs...)...,
+			` WHERE rs.signal_type = ? AND rs.signal_at >= ? AND rs.signal_at < ?`+rsWhere,
+		append([]any{string(SignalSearchHit), cutoff, upper}, rsArgs...)...,
 	).Scan(&out.SearchHits); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return out, fmt.Errorf("learn.PatternMiner.Report: count search hits: %w", err)
@@ -221,12 +244,12 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 	// install before any compression has fired) so the K43 surface
 	// works on day-zero installs without erroring. Tool/project join
 	// goes through api_turns → sessions → projects.
-	ceJoin, ceWhere, ceArgs := compressionEventsFilter(opts.Tool, opts.Project)
+	ceJoin, ceWhere, ceArgs := compressionEventsFilter(opts.Tool, opts.Project, opts.Model)
 	if err := m.db.QueryRowContext(
 		ctx,
 		`SELECT COUNT(*) FROM compression_events ce`+ceJoin+
-			` WHERE ce.mechanism = 'stash' AND ce.timestamp >= ?`+ceWhere,
-		append([]any{cutoff}, ceArgs...)...,
+			` WHERE ce.mechanism = 'stash' AND ce.timestamp >= ? AND ce.timestamp < ?`+ceWhere,
+		append([]any{cutoff, upper}, ceArgs...)...,
 	).Scan(&out.TotalStashes); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			// compression_events missing → leave TotalStashes = 0
@@ -241,9 +264,9 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 	//nolint:gosec // G202: SQL structure and rsJoin/rsWhere are code-constant scope fragments; all values are bound via ? args.
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT rs.payload, COUNT(*) FROM retrieval_signals rs`+rsJoin+
-			` WHERE rs.signal_type = ? AND rs.signal_at >= ? AND rs.payload != ''`+rsWhere+`
+			` WHERE rs.signal_type = ? AND rs.signal_at >= ? AND rs.signal_at < ? AND rs.payload != ''`+rsWhere+`
 		 GROUP BY rs.payload ORDER BY COUNT(*) DESC LIMIT 10`,
-		append([]any{string(SignalRetrieveStashed), cutoff}, rsArgs...)...)
+		append([]any{string(SignalRetrieveStashed), cutoff, upper}, rsArgs...)...)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -258,9 +281,9 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 	//nolint:gosec // G202: SQL structure and rsJoin/rsWhere are code-constant scope fragments; all values are bound via ? args.
 	arows, err := m.db.QueryContext(ctx,
 		`SELECT rs.action_id, COUNT(*) FROM retrieval_signals rs`+rsJoin+
-			` WHERE rs.signal_type = ? AND rs.signal_at >= ? AND rs.action_id IS NOT NULL`+rsWhere+`
+			` WHERE rs.signal_type = ? AND rs.signal_at >= ? AND rs.signal_at < ? AND rs.action_id IS NOT NULL`+rsWhere+`
 		 GROUP BY rs.action_id ORDER BY COUNT(*) DESC LIMIT 10`,
-		append([]any{string(SignalSearchHit), cutoff}, rsArgs...)...)
+		append([]any{string(SignalSearchHit), cutoff, upper}, rsArgs...)...)
 	if err == nil {
 		defer arows.Close()
 		for arows.Next() {
@@ -279,8 +302,8 @@ func (m *PatternMiner) Report(ctx context.Context, opts ReportOptions) (Retrieva
 // signalsFilter builds the optional JOIN + WHERE clauses for filtering
 // retrieval_signals by tool/project, going through action_id →
 // actions → projects. Returns ("", "", nil) when both filters are empty.
-func signalsFilter(tool, project string) (joinSQL, whereSQL string, args []any) {
-	if tool == "" && project == "" {
+func signalsFilter(tool, project, model string) (joinSQL, whereSQL string, args []any) {
+	if tool == "" && project == "" && model == "" {
 		return "", "", nil
 	}
 	joinSQL = ` LEFT JOIN actions a ON a.id = rs.action_id
@@ -293,14 +316,15 @@ func signalsFilter(tool, project string) (joinSQL, whereSQL string, args []any) 
 		whereSQL += " AND p.root_path = ?"
 		args = append(args, project)
 	}
-	return joinSQL, whereSQL, args
+	mWhere, mArgs := modelfilter.AndSessionsUsing("a.session_id", model)
+	return joinSQL, whereSQL + mWhere, append(args, mArgs...)
 }
 
 // compressionEventsFilter builds the optional JOIN + WHERE clauses
 // for filtering compression_events by tool/project, going through
 // api_turn_id → api_turns → sessions → projects.
-func compressionEventsFilter(tool, project string) (joinSQL, whereSQL string, args []any) {
-	if tool == "" && project == "" {
+func compressionEventsFilter(tool, project, model string) (joinSQL, whereSQL string, args []any) {
+	if tool == "" && project == "" && model == "" {
 		return "", "", nil
 	}
 	joinSQL = ` LEFT JOIN api_turns at ON at.id = ce.api_turn_id
@@ -314,7 +338,8 @@ func compressionEventsFilter(tool, project string) (joinSQL, whereSQL string, ar
 		whereSQL += " AND p.root_path = ?"
 		args = append(args, project)
 	}
-	return joinSQL, whereSQL, args
+	mWhere, mArgs := modelfilter.AndSessionsUsing("at.session_id", model)
+	return joinSQL, whereSQL + mWhere, append(args, mArgs...)
 }
 
 // deriveThresholdHints produces tuning recommendations from the
@@ -353,7 +378,7 @@ func deriveThresholdHints(r RetrievalRateReport) []ThresholdHint {
 			Kind:     "stash-retrieve-rate",
 			Severity: "info",
 			Message: fmt.Sprintf(
-				"%d stashes / 0 retrieves — current threshold catches bodies the model never returns to. Raising compression.conversation.stash.threshold_bytes (default 8192) would shrink the stash dir without hurting safety.",
+				"%d stashes / 0 retrieves - current threshold catches bodies the model never returns to. Raising compression.conversation.stash.threshold_bytes (default 8192) would shrink the stash dir without hurting safety.",
 				r.TotalStashes,
 			),
 			Metric: rate,
@@ -363,7 +388,7 @@ func deriveThresholdHints(r RetrievalRateReport) []ThresholdHint {
 			Kind:     "stash-retrieve-rate",
 			Severity: "consider",
 			Message: fmt.Sprintf(
-				"retrieve rate %.1f%% on %d stashes — model returns to stashed content often. Lowering compression.conversation.stash.threshold_bytes captures smaller bodies the model is asking about.",
+				"retrieve rate %.1f%% on %d stashes - model returns to stashed content often. Lowering compression.conversation.stash.threshold_bytes captures smaller bodies the model is asking about.",
 				rate*100, r.TotalStashes,
 			),
 			Metric: rate,
@@ -373,7 +398,7 @@ func deriveThresholdHints(r RetrievalRateReport) []ThresholdHint {
 			Kind:     "stash-retrieve-rate",
 			Severity: "info",
 			Message: fmt.Sprintf(
-				"retrieve rate %.2f%% on %d stashes — within expected baseline. CCR is doing its safety-net job; no threshold change recommended.",
+				"retrieve rate %.2f%% on %d stashes - within expected baseline. CCR is doing its safety-net job; no threshold change recommended.",
 				rate*100, r.TotalStashes,
 			),
 			Metric: rate,

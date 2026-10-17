@@ -149,7 +149,7 @@ func TestRenderText(t *testing.T) {
 	})
 	text := RenderText(r)
 	for _, want := range []string{
-		"Guard evidence pack — period 720h",
+		"Guard evidence pack - period 720h",
 		"observer 1.8.3 · guard on mode enforce",
 		"== Effective policy at period start ==",
 		"== Effective policy at period end ==",
@@ -159,7 +159,7 @@ func TestRenderText(t *testing.T) {
 		"by decision:",
 		"deny=3 flag=9",
 		"== Audit-chain verification ==",
-		"OK — 40 row(s) verified",
+		"OK - 40 row(s) verified",
 		"== Coverage matrix (§6.5) ==",
 		"pre-exec+block+ask",
 		"observe-only",

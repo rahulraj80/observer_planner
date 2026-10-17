@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "dry_run": "VerifiedOfficial",
+    "message": "VerifiedOfficial",
+    "outcome": "VerifiedOfficial",
+    "request_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "fd13a05a6b07e5bfcc8ee7363f03d441c0d24003bf77461b09dc31a68d71c75a",
+  "http": {
+    "method": "POST",
+    "path": "/bugbot/review",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Trigger a review\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Bugbot docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "330a99003b45cf37dacb5bd3986ed88ecf87baea60569ad1b33a8e1686567310",
+  "source_url": "https://cursor.com/docs/bugbot.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.bugbot.review_trigger"
+}

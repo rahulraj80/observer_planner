@@ -1,0 +1,2045 @@
+{
+ "group": "hermes",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/hermes-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "hermes.node.api_server",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API_SERVER_KEY bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local",
+   "per_user_doc": "per install",
+   "mechanism_doc": "OpenAI-compatible API server: POST /v1/chat/completions, /v1/responses, /v1/runs (Idempotency-Key, 24h), GET /api/sessions/{id}/messages, /api/jobs, /health/detailed; usage on responses",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Content, Usage",
+   "grain_doc": "PerCall / PerSession",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/api-server.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.cli_usage",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "local",
+   "per_user_doc": "per profile",
+   "mechanism_doc": "`hermes insights --days N --source`, `/usage`, `hermes -z ... --usage-file report.json` (estimated_cost_usd, token splits, auxiliary.by_task), `hermes usage --json` (provider limit windows: openai-codex, anthropic, openrouter; not Nous)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, RateLimits",
+   "grain_doc": "PerSession / UserDay",
+   "build": "buildable",
+   "build_doc": "Driverable (node CLI JSON)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_session",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/reference/cli-commands.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.config",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file / dashboard REST"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "mtime-keyed live reload",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per profile",
+   "mechanism_doc": "~/.hermes/config.yaml: approvals.mode / deny / timeout / unattended_mode, command_allowlist, mcp_servers (tools include/exclude), website blocklist, plugins.enabled, delegation.max_concurrent_children, telemetry.*; no org MDM layer for Hermes config (Relay plugins.toml has a system layer)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/security.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.dashboard_rest",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "basic",
+    "doc": "loopback none; non-loopback requires basic auth, Nous OAuth, or self-hosted OIDC session cookie"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local state",
+   "per_user_doc": "per install / profile",
+   "mechanism_doc": "Self-hosted `hermes dashboard` REST: GET /api/analytics/usage?days=N (daily + per-model tokens, cache hit, cost), GET /api/sessions, /api/sessions/{id}, /messages, /export, /search, /stats, GET /api/logs, GET/PUT /api/config, GET/PUT/DELETE /api/env, GET/POST/DELETE /api/credentials/pool, /api/mcp/servers (+ enabled), /api/mcp/catalog, /api/pairing (approve/revoke), /api/webhooks, /api/skills/toggle, /api/portal (read-only), POST /api/sessions/prune, ?profile= scoping",
+   "read_write_doc": "R/W",
+   "class_doc": "Usage, Cost, Sessions, Content, Credentials, Policy, Telemetry",
+   "grain_doc": "UserDay (analytics) / PerSession",
+   "build": "buildable",
+   "build_doc": "Driverable (node, operator-owned)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "user_day",
+     "unit": "text",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/web-dashboard.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: basic"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.gateway_monitoring_otlp",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "collector headers via env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "export interval",
+   "lookback_doc": "collector",
+   "per_user_doc": "per instance",
+   "mechanism_doc": "OTLP/HTTP to operator collector: hermes.gateway.up/state/active_agents/background_work, hermes.platform.up, cron gauges and hermes.cron_execution spans; content-free, hashed install id; `hermes monitoring status`",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry",
+   "grain_doc": "Event / gauge",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/gateway-monitoring.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.langfuse_plugin",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "Langfuse keys (HERMES_LANGFUSE_*)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "sample rate"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "Langfuse side",
+   "per_user_doc": "per session",
+   "mechanism_doc": "Bundled opt-in plugin observability/langfuse: span per turn, generation per API call (usage_details, cost_details from agent.usage_pricing), tool observation; session = Hermes session id",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry, Usage, Cost, Content",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (via customer Langfuse API)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/built-in-plugins.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/issues/42306",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.nemo_relay_exporters",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "span close",
+   "lookback_doc": "exporter side",
+   "per_user_doc": "per session",
+   "mechanism_doc": "NVIDIA NeMo Relay 0.9 in-process; ATOF / ATIF / OTEL exporters configured in plugins.toml (user ~/.config/nemo-relay, system /etc/nemo-relay or %ProgramData%\\nemo-relay); session spans carry session_id, data.cwd",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry, Sessions, Content",
+   "grain_doc": "PerCall / PerSession",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/relay-shared-metrics.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.observer_hooks",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local plugin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per session",
+   "mechanism_doc": "Python plugin contract `hermes.observer.v1`: on_session_*, pre/post_llm_call, pre/post_api_request (usage, model, provider, sanitized request/response), pre/post_tool_call, pre/post_auxiliary_call, pre_approval_request / post_approval_response, on_human_input_*, subagent_start/stop; ids session_id, task_id, turn_id, api_request_id, tool_call_id, parent/child session ids",
+   "read_write_doc": "R (pre_tool_call can block)",
+   "class_doc": "Telemetry, Sessions, Usage, Content, Audit (approvals)",
+   "grain_doc": "PerCall / Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node; Observer already uses it)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/observer-hooks.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.shared_metrics_packages",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file access"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "local history copy",
+   "per_user_doc": "per profile",
+   "mechanism_doc": "Local immutable JSON delta packages and SQLite counters under $HERMES_HOME/telemetry/shared_metrics/ (written when enabled, even with send off)",
+   "read_write_doc": "R",
+   "class_doc": "Adoption, Usage",
+   "grain_doc": "UserDay",
+   "build": "buildable",
+   "build_doc": "Driverable (node file; versioned package schema v4)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/relay-shared-metrics.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "hermes.node.state_db",
+   "vendor_group": "hermes",
+   "vendor": "hermes",
+   "plane": "hermes.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file access"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local",
+   "per_user_doc": "per profile",
+   "mechanism_doc": "~/.hermes state.db (SQLite; Observer's existing backfill path)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Usage, Cost, Content",
+   "grain_doc": "PerCall / PerSession",
+   "build": "buildable",
+   "build_doc": "Driverable (node, Observer adapter)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "repo_path": "docs/hermes-adapter.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "observer_repo_doc",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.business.org_billing_switch",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.business",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner / admin / finance admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org and per terminal",
+   "mechanism_doc": "UI portal \"Hermes Agent page\": org-level \"Remote spending\" on/off (cli_billing_enabled); admin can stop remote spending for one terminal (remote_spending_revoked); daily plan-change limit 5 per org",
+   "read_write_doc": "W via UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/billing-lifecycle.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.business.skills_library",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.business",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "members"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "unknown",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: member-created skills published to the team library, available to every member's agent",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://portal.nousresearch.com/business",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.business.team_ui",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.business",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner / admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Hermes Business (self-serve, launched 2026-09-08..15)"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "unknown",
+   "per_user_doc": "per member caps; spend view per member not specified",
+   "mechanism_doc": "UI Team page: invite by email; owners and admins manage roles, caps, API keys; one central balance; per-member spend caps; \"you see every dollar in the portal\"",
+   "read_write_doc": "R/W via UI",
+   "class_doc": "Identity, Roles, Credentials, Limits, Cost",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://portal.nousresearch.com/business",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.tao.media/nous-research-launches-hermes-business-for-team-based-ai-agent-workflows/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.enterprise",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.enterprise",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "customer-owned",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Contract; self-hosted on customer infra, SSO, SLAs (enterprise@nousresearch.com)",
+   "read_write_doc": "n/a",
+   "class_doc": "Identity (SSO), Retention",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no docs)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://portal.nousresearch.com/business",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.nas.billing_state",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.nas",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "user Nous OAuth bearer; billing:manage scope for charges"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429 rate_limited codes; plan change 5/org/day"
+   },
+   "tier": {
+    "doc": "paid plans"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per caller org",
+   "mechanism_doc": "Internal: Hermes gateway RPC `billing.state` / subscription RPCs served from NAS; fields: balance (USD, legacy *_credits names), card, auto_reload, monthly_cap {spent, limit_usd, is_default_ceiling}, is_admin, cli_billing_enabled, org_id, tiers[]; top-up charges with idempotency key, poll 2s / 5 min cap",
+   "read_write_doc": "R (state), W (top-up, plan change)",
+   "class_doc": "Cost, Limits, Roles",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (no public contract; only client copy and error codes documented; NAS paths not published)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/billing-lifecycle.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/agent/billing_usage.py",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/issues/73752",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.portal.inference_api",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.portal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Portal API key (bearer) or Hermes OAuth short-lived JWT; x402 Solana USDC (beta, no account)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per key: Ultra 1,600 RPM / 16M TPM; Free 50 RPM / 500k TPM (search snippet of api-docs)"
+   },
+   "tier": {
+    "doc": "Free / Plus / Super / Ultra subscriptions (tier names from third-party review)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "none (response only)",
+   "per_user_doc": "per key",
+   "mechanism_doc": "REST POST https://inference-api.nousresearch.com/v1/chat/completions (OpenAI-compatible); `usage` object on each response",
+   "read_write_doc": "R",
+   "class_doc": "Usage, RateLimits",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (proxy or node capture only; no usage query endpoint)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://portal.nousresearch.com/api-docs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://hermes-agent.nousresearch.com/docs/integrations/nous-portal",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.portal.local_dashboards",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.portal",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Nous login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per account",
+   "mechanism_doc": "UI portal.nousresearch.com/local-dashboards (register, name, revoke self-hosted dashboard OAuth clients agent:{id}); CLI `hermes dashboard register`",
+   "read_write_doc": "R/W via UI/CLI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/web-dashboard.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.portal.mcp",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.portal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OAuth 2.1 + PKCE, RFC 7591 dynamic client registration, RFC 9728/8414 discovery; org bound at consent; membership re-checked per call"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "Hermes Cloud access"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org-scoped instance list; per instance cost estimate",
+   "mechanism_doc": "MCP server https://portal.nousresearch.com/mcp ; tools `agents` (list, get / status, cost_estimate) and `agent` (create, start, stop, restart, destroy, update_env, update_image)",
+   "read_write_doc": "R/W",
+   "class_doc": "Cost, Sessions (hosted instances), ctl AgentCapability",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (MCP contract; tool schemas discoverable at runtime, not published)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/guides/manage-hermes-cloud-with-mcp.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: vendor MCP server over HTTP",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.portal.subscription_ui",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.portal",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Nous login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "unknown",
+   "per_user_doc": "per account",
+   "mechanism_doc": "UI portal.nousresearch.com/manage-subscription (plans, usage, upgrade, cancel); `hermes portal open`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "UserDay (UI)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://hermes-agent.nousresearch.com/docs/integrations/nous-portal",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "nous.shared_metrics_service",
+   "vendor_group": "hermes",
+   "vendor": "nous",
+   "plane": "nous.shared_metrics_service",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "Nous side unknown",
+   "per_user_doc": "per install (random UUID)",
+   "mechanism_doc": "Opt-in daily JSON delta packages sent to the Nous telemetry service (telemetry.shared_metrics.enabled + send); metrics hermes.model_tokens.sum, hermes.session.count, hermes.feature_adoption.count, hermes.task_cost.count etc.; aggregated by Nous, not exposed to customers",
+   "read_write_doc": "vendor-side not readable",
+   "class_doc": "Adoption, Usage",
+   "grain_doc": "UserDay (install)",
+   "build": "catalog_only",
+   "build_doc": "Nothing (customer read)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/relay-shared-metrics.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

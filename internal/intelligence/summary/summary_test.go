@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -17,7 +19,7 @@ import (
 func seedDB(t *testing.T) (*Summarizer, *httptest.Server) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "s.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +122,7 @@ func TestSummarizeAll_SkipsAlreadySummarized(t *testing.T) {
 
 func TestSummarizeAll_APIError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,7 @@ func TestSummarizeAll_APIError(t *testing.T) {
 
 func TestSummarizeAll_NoAPIKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: path})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	defer database.Close()
 	s, _ := New(Options{DB: database, APIKey: ""})
 	// Unset the env var for this test

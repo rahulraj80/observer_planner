@@ -1,0 +1,40 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "members": "VerifiedOfficial",
+    "members[]": "VerifiedOfficial",
+    "members[].email": "VerifiedOfficial",
+    "members[].id": "VerifiedOfficial",
+    "members[].name": "VerifiedOfficial",
+    "members[].organizationRole": "VerifiedOfficial",
+    "members[].teams": "VerifiedOfficial",
+    "members[].teams[]": "VerifiedOfficial",
+    "members[].teams[].teamId": "VerifiedOfficial",
+    "members[].teams[].teamRole": "VerifiedOfficial",
+    "pagination": "VerifiedOfficial",
+    "pagination.hasNextPage": "VerifiedOfficial",
+    "pagination.hasPreviousPage": "VerifiedOfficial",
+    "pagination.page": "VerifiedOfficial",
+    "pagination.pageSize": "VerifiedOfficial",
+    "pagination.totalCount": "VerifiedOfficial",
+    "pagination.totalPages": "VerifiedOfficial"
+  },
+  "fixture_sha256": "4a1a9bf7973af3a008868d233048e8561184b688be531eaa1335aef199d95e76",
+  "http": {
+    "method": "GET",
+    "path": "/organizations/members",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Organization Members\" section. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Cursor Organization API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "afeeece4ca452a084d847ce76824665e6f720b39acdad55c2233e4ad51b7c5b1",
+  "source_url": "https://cursor.com/docs/account/organizations/organization-admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.org.members"
+}

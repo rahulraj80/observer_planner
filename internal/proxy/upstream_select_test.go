@@ -55,7 +55,7 @@ func TestStripUpstreamPrefix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, tc.path, nil)
-			up := p.stripUpstreamPrefix(r)
+			up, _ := p.stripUpstreamPrefix(r)
 			if (up != nil) != tc.wantHit {
 				t.Fatalf("stripUpstreamPrefix hit=%v, want %v", up != nil, tc.wantHit)
 			}
@@ -69,13 +69,14 @@ func TestStripUpstreamPrefix(t *testing.T) {
 	}
 }
 
-// TestStripUpstreamPrefix_NoUpstreamsConfigured pins the fail-open default:
-// with no [proxy.upstreams], a /up/ path is left completely untouched.
+// TestStripUpstreamPrefix_NoUpstreamsConfigured: with no [proxy.upstreams], a
+// /up/ path resolves nothing and is left untouched; serve() then REFUSES it
+// instead of forwarding it to a fixed upstream (Sol A5-02).
 func TestStripUpstreamPrefix_NoUpstreamsConfigured(t *testing.T) {
 	p, _, cleanup := newTestProxy(t, http.NotFoundHandler(), http.NotFoundHandler())
 	defer cleanup()
 	r := httptest.NewRequest(http.MethodPost, "/up/openrouter/v1/chat/completions", nil)
-	if up := p.stripUpstreamPrefix(r); up != nil {
+	if up, _ := p.stripUpstreamPrefix(r); up != nil {
 		t.Errorf("expected nil upstream with no config, got %v", up)
 	}
 	if r.URL.Path != "/up/openrouter/v1/chat/completions" {

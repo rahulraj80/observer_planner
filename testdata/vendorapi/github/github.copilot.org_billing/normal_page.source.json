@@ -1,0 +1,36 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "cli": "VerifiedOfficial",
+    "ide_chat": "VerifiedOfficial",
+    "plan_type": "VerifiedOfficial",
+    "platform_chat": "VerifiedOfficial",
+    "public_code_suggestions": "VerifiedOfficial",
+    "seat_breakdown": "VerifiedOfficial",
+    "seat_breakdown.active_this_cycle": "VerifiedOfficial",
+    "seat_breakdown.added_this_cycle": "VerifiedOfficial",
+    "seat_breakdown.inactive_this_cycle": "VerifiedOfficial",
+    "seat_breakdown.pending_cancellation": "VerifiedOfficial",
+    "seat_breakdown.pending_invitation": "VerifiedOfficial",
+    "seat_breakdown.total": "VerifiedOfficial",
+    "seat_management_setting": "VerifiedOfficial"
+  },
+  "fixture_sha256": "253ce2d73fbff6ac20c0229c91dbc38f6ab2f756ad6a6c918d8d0f6fb5436b6a",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/orgs/{org}/copilot/billing",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /orgs/{org}/copilot/billing (operationId copilot/get-copilot-organization-details).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.org_billing"
+}

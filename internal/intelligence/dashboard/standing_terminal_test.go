@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -175,7 +177,7 @@ func TestStandingLimiterSharedAcrossDevices(t *testing.T) {
 		t.Fatal("device A attempt 2 refused")
 	}
 	if mc.VerifyStandingTerminalControl(enc, "device-B", "h") {
-		t.Fatal("a 'fresh' device identity bypassed the standing rate limit — the bucket must be global, not per-session")
+		t.Fatal("a 'fresh' device identity bypassed the standing rate limit - the bucket must be global, not per-session")
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -198,7 +200,7 @@ func TestStandingLimiterZeroRateStillThrottles(t *testing.T) {
 		}
 	}
 	if allowed == 20 {
-		t.Fatal("rate_limit_per_min=0 left the standing verifier UNLIMITED — it must clamp to the default")
+		t.Fatal("rate_limit_per_min=0 left the standing verifier UNLIMITED - it must clamp to the default")
 	}
 	if allowed != 6 {
 		t.Errorf("allowed = %d, want the clamped default burst of 6", allowed)
@@ -224,7 +226,7 @@ func newStandingManageServer(t *testing.T) (*Server, http.Handler, *revokeRecord
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "observer.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -438,17 +440,17 @@ func TestStandingRevokePersistFailureStillKillsLiveAccess(t *testing.T) {
 
 	rec := postConfirm(t, h, "/api/remote/standing-terminal/revoke", `{}`, ck, token)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("revoke with a failing (best-effort) unlink = %d, want 200 — durably off via the config gate", rec.Code)
+		t.Fatalf("revoke with a failing (best-effort) unlink = %d, want 200 - durably off via the config gate", rec.Code)
 	}
 	// The SECURITY half must have happened: verifier dead + writers killed.
 	if mc.VerifyStandingTerminalControl(secret, "dev", "h") {
-		t.Fatal("standing secret STILL verifies after revoke — fail-open")
+		t.Fatal("standing secret STILL verifies after revoke - fail-open")
 	}
 	// Durable gate: the persisted config has standing disabled, so a restart that
 	// reloads the orphan hash still refuses (StandingTerminalEnabled=false).
 	reloaded, _ := loadConfigForDashboard(s.opts.ConfigPath)
 	if reloaded.Remote.AllowStandingTerminalControl {
-		t.Fatal("config still enables standing access after revoke — a restart would resurrect the orphan hash")
+		t.Fatal("config still enables standing access after revoke - a restart would resurrect the orphan hash")
 	}
 	killed := false
 	for _, reason := range lm.revokeReasons() {
@@ -477,7 +479,7 @@ func TestAllowTerminalFlipGatesStandingVerifier(t *testing.T) {
 		t.Fatalf("allow-terminal false = %d: %s", rec.Code, rec.Body.String())
 	}
 	if mc.VerifyStandingTerminalControl(secret, "dev", "h") {
-		t.Fatal("standing secret still verifies after allow_terminal→false — reacquire window open until restart")
+		t.Fatal("standing secret still verifies after allow_terminal→false - reacquire window open until restart")
 	}
 	if rec := postConfirm(t, h, "/api/remote/allow-terminal", `{"allow_terminal":true}`, ck, token); rec.Code != http.StatusOK {
 		t.Fatalf("allow-terminal true = %d: %s", rec.Code, rec.Body.String())
@@ -528,7 +530,7 @@ func TestTerminalPolicyPutSerializedWithManageMutex(t *testing.T) {
 	select {
 	case code := <-done:
 		remoteManageMu.Unlock()
-		t.Fatalf("terminal-policy PUT completed (%d) while remoteManageMu was held — the config RMW must serialize with the manage verbs", code)
+		t.Fatalf("terminal-policy PUT completed (%d) while remoteManageMu was held - the config RMW must serialize with the manage verbs", code)
 	case <-time.After(200 * time.Millisecond):
 		// Blocked, as required.
 	}
@@ -610,15 +612,18 @@ func TestRemoteDisablePersistFailureStillKillsLiveAccess(t *testing.T) {
 	if !mc.VerifyStandingTerminalControl(secret, "dev", "h") || !mc.AllowTerminal() {
 		t.Fatal("preconditions: standing secret + allow_terminal should be live")
 	}
-	// Sabotage the durable WRITE (not the read): make the config's parent dir
-	// read-only so WriteToml's temp-create/rename fails, while the existing config
-	// file stays READABLE (loadConfigForManage must still succeed so the handler
-	// reaches the kill-first code). Restored in cleanup for TempDir teardown.
-	dir := filepath.Dir(s.opts.ConfigPath)
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatalf("chmod dir read-only: %v", err)
+	// Sabotage the durable WRITE (not the read): occupy the config's ".bak"
+	// path with a non-empty DIRECTORY so WriteToml's backup step fails, while
+	// the existing config file stays READABLE (loadConfigForManage must still
+	// succeed so the handler reaches the kill-first code). Not a chmod: a
+	// root-mapped test namespace ignores a read-only dir, and this fails for
+	// any uid. Setup's own config writes may already have left a .bak file.
+	if err := os.Remove(s.opts.ConfigPath + ".bak"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove config .bak: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := os.MkdirAll(filepath.Join(s.opts.ConfigPath+".bak", "occupied"), 0o700); err != nil {
+		t.Fatalf("occupy config .bak: %v", err)
+	}
 	rec := postConfirm(t, h, "/api/remote/disable", `{}`, ck, token)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("disable with an unwritable config = %d, want 500", rec.Code)
@@ -626,10 +631,10 @@ func TestRemoteDisablePersistFailureStillKillsLiveAccess(t *testing.T) {
 	// The SECURITY half must have happened FIRST regardless: verifier + gate dead,
 	// writers killed.
 	if mc.VerifyStandingTerminalControl(secret, "dev", "h") {
-		t.Fatal("standing secret still verifies after a failed-persist disable — fail-open")
+		t.Fatal("standing secret still verifies after a failed-persist disable - fail-open")
 	}
 	if mc.AllowTerminal() {
-		t.Fatal("live allow_terminal still ON after a failed-persist disable — single-use path still open")
+		t.Fatal("live allow_terminal still ON after a failed-persist disable - single-use path still open")
 	}
 	killed := false
 	for _, reason := range lm.revokeReasons() {

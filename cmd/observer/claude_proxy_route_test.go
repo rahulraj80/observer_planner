@@ -289,17 +289,34 @@ func TestNeutralizeBypassEnv(t *testing.T) {
 // `observer start`.
 func TestClaudeNeutralizeNotice(t *testing.T) {
 	sp := "/home/u/.claude/settings.json"
+	overNPR := claudeNeutralizeNotice(reasonNoProxyRouteClean, claudeTestProxyURL, sp, true, false)
+	for _, want := range []string{"--settings override", sp, "--no-proxy-route", "NOT captured"} {
+		if !strings.Contains(overNPR, want) {
+			t.Errorf("overriding no-proxy-route notice missing %q:\n%s", want, overNPR)
+		}
+	}
+	if proxyNotInBuild() {
+		// A build without capture.proxy (D-514): every proxy-down variant names
+		// the build instead of telling the operator to start a daemon that has
+		// no proxy, and the override-file mention still tracks overridingRoute.
+		for _, tc := range []struct{ overriding, attachNoticed bool }{
+			{true, false}, {false, false}, {true, true}, {false, true},
+		} {
+			got := claudeNeutralizeNotice(reasonProxyDownClean, claudeTestProxyURL, sp, tc.overriding, tc.attachNoticed)
+			if !strings.Contains(got, "not in this build") || strings.Contains(got, "observer start") {
+				t.Errorf("%+v: proxy-down notice in a build without the proxy must name the build, not `observer start`:\n%s", tc, got)
+			}
+			if tc.overriding != strings.Contains(got, "--settings override") {
+				t.Errorf("%+v: override-file mention wrong:\n%s", tc, got)
+			}
+		}
+		return
+	}
 	// Overriding a baked-in route.
 	over := claudeNeutralizeNotice(reasonProxyDownClean, claudeTestProxyURL, sp, true, false)
 	for _, want := range []string{"--settings override", sp, "NOT captured", "observer start", "unreachable"} {
 		if !strings.Contains(over, want) {
 			t.Errorf("overriding proxy-down notice missing %q:\n%s", want, over)
-		}
-	}
-	overNPR := claudeNeutralizeNotice(reasonNoProxyRouteClean, claudeTestProxyURL, sp, true, false)
-	for _, want := range []string{"--settings override", sp, "--no-proxy-route", "NOT captured"} {
-		if !strings.Contains(overNPR, want) {
-			t.Errorf("overriding no-proxy-route notice missing %q:\n%s", want, overNPR)
 		}
 	}
 	// Clean bypass (no route being overridden) must NOT mention the override file.
@@ -571,6 +588,51 @@ func TestReadClaudeSettingsBaseURL_BestEffort(t *testing.T) {
 	}
 }
 
+// TestClaudeProxyBackendProven pins the budget-admission guard around Claude
+// Code's native cloud providers. ANTHROPIC_BASE_URL can remain present while
+// Bedrock, Vertex, or Foundry is selected through process env or settings, so
+// those launches must not receive positive proxy evidence.
+func TestClaudeProxyBackendProven(t *testing.T) {
+	proxyEnv := func() []string { return []string{"HOME=" + t.TempDir()} }
+	cases := []struct {
+		name       string
+		env        func() []string
+		settings   string
+		cliSetting string
+		want       bool
+	}{
+		{name: "no native backend selector", env: proxyEnv, want: true},
+		{name: "bedrock process selector", env: func() []string { return []string{"HOME=" + t.TempDir(), "CLAUDE_CODE_USE_BEDROCK=1"} }, want: false},
+		{name: "vertex process selector", env: func() []string { return []string{"HOME=" + t.TempDir(), "CLAUDE_CODE_USE_VERTEX=true"} }, want: false},
+		{name: "foundry process selector", env: func() []string { return []string{"HOME=" + t.TempDir(), "CLAUDE_CODE_USE_FOUNDRY=1"} }, want: false},
+		{name: "explicit false process selector", env: func() []string { return []string{"HOME=" + t.TempDir(), "CLAUDE_CODE_USE_VERTEX=false"} }, want: true},
+		{name: "bedrock user setting", env: proxyEnv, settings: `{"env":{"CLAUDE_CODE_USE_BEDROCK":"true"}}`, want: false},
+		{name: "disabled vertex user setting", env: proxyEnv, settings: `{"env":{"CLAUDE_CODE_USE_VERTEX":"0"}}`, want: true},
+		{name: "bedrock inline cli setting", env: proxyEnv, cliSetting: `{"env":{"CLAUDE_CODE_USE_BEDROCK":"on"}}`, want: false},
+		{name: "malformed user settings", env: proxyEnv, settings: `{not-json`, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfgDir := t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+			t.Setenv("ANTHROPIC_CONFIG_DIR", "")
+			if tc.settings != "" {
+				if err := os.WriteFile(filepath.Join(cfgDir, "settings.json"), []byte(tc.settings), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string(nil)
+			if tc.cliSetting != "" {
+				args = []string{"--settings", tc.cliSetting}
+			}
+			got := claudeProxyBackendProven(tc.env(), t.TempDir(), args)
+			if got != tc.want {
+				t.Fatalf("claudeProxyBackendProven()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestReadClaudeCLISettingsBaseURL pins finding N1: claude's `--settings` accepts
 // EITHER a file path OR an inline JSON literal, and an unreadable/unparseable
 // value must be flagged (never silently absent).
@@ -786,7 +848,12 @@ func TestClaudeEmptyUnsetNotice(t *testing.T) {
 		}
 	}
 	down := claudeEmptyUnsetNotice(emptyUnsetDirectSatisfied, reasonProxyDownClean, claudeTestProxyURL, sf)
-	if !strings.Contains(down, "observer start") || !strings.Contains(down, "NOT captured") {
+	if proxyNotInBuild() {
+		// D-514: a build without capture.proxy names the build, never `observer start`.
+		if !strings.Contains(down, "not in this build") || strings.Contains(down, "observer start") {
+			t.Errorf("proxy-down direct notice in a build without the proxy must name the build:\n%s", down)
+		}
+	} else if !strings.Contains(down, "observer start") || !strings.Contains(down, "NOT captured") {
 		t.Errorf("proxy-down direct notice missing observer start / NOT captured:\n%s", down)
 	}
 	npr := claudeEmptyUnsetNotice(emptyUnsetDirectSatisfied, reasonNoProxyRouteClean, claudeTestProxyURL, sf)
@@ -850,10 +917,11 @@ func TestRunClaudeEmptyUnset_DaemonDownSingleNotice(t *testing.T) {
 	bin, _ := writeRecordingClaudeBin(t)
 	proxyURL := closedProxyURL(t) // proxy DOWN → proxyReachable=false → direct-satisfied
 	route := claudeRouteResolution{class: claudeRouteEmptyUnset, scope: claudeScopeUser, file: "user settings"}
+	cfgPath, _ := writeGuardTestConfig(t)
 
 	t.Run("attach already noticed → one condensed notice", func(t *testing.T) {
 		var stderr bytes.Buffer
-		opts := claudeLauncherOptions{stderr: &stderr, claudeArgs: []string{"--model", "opus"}}
+		opts := claudeLauncherOptions{configPath: cfgPath, stderr: &stderr, claudeArgs: []string{"--model", "opus"}}
 		if err := runClaudeEmptyUnset(opts, bin, proxyURL, route, opts.claudeArgs, "", true); err != nil {
 			t.Fatalf("runClaudeEmptyUnset: %v", err)
 		}
@@ -864,6 +932,14 @@ func TestRunClaudeEmptyUnset_DaemonDownSingleNotice(t *testing.T) {
 		if strings.Contains(lines[0], "unreachable") || strings.Contains(lines[0], proxyURL) {
 			t.Fatalf("condensed notice restates unreachability:\n%s", lines[0])
 		}
+		if proxyNotInBuild() {
+			// D-514: no proxy in this build, so the line names the build and
+			// never sends the operator to `observer start`.
+			if !strings.Contains(lines[0], "not in this build") || strings.Contains(lines[0], "observer start") {
+				t.Fatalf("notice in a build without the proxy must name the build:\n%s", lines[0])
+			}
+			return
+		}
 		if !strings.Contains(lines[0], "NOT captured") || !strings.Contains(lines[0], "observer start") {
 			t.Fatalf("condensed notice lost capture-loss half or `observer start` remedy:\n%s", lines[0])
 		}
@@ -871,11 +947,17 @@ func TestRunClaudeEmptyUnset_DaemonDownSingleNotice(t *testing.T) {
 
 	t.Run("attach NOT noticed → exactly one notice", func(t *testing.T) {
 		var stderr bytes.Buffer
-		opts := claudeLauncherOptions{stderr: &stderr, claudeArgs: []string{"--model", "opus"}}
+		opts := claudeLauncherOptions{configPath: cfgPath, stderr: &stderr, claudeArgs: []string{"--model", "opus"}}
 		if err := runClaudeEmptyUnset(opts, bin, proxyURL, route, opts.claudeArgs, "", false); err != nil {
 			t.Fatalf("runClaudeEmptyUnset: %v", err)
 		}
 		lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+		if proxyNotInBuild() {
+			if len(lines) != 1 || !strings.Contains(lines[0], "not in this build") || strings.Contains(lines[0], "observer start") {
+				t.Fatalf("expected exactly one build-naming notice, got %d line(s):\n%s", len(lines), stderr.String())
+			}
+			return
+		}
 		if len(lines) != 1 || !strings.Contains(lines[0], "NOT captured") {
 			t.Fatalf("expected exactly one NOT-captured notice, got %d line(s):\n%s", len(lines), stderr.String())
 		}
@@ -890,6 +972,7 @@ func TestRunClaudeEmptyUnset_DaemonDownSingleNotice(t *testing.T) {
 func TestRunClaudeEmptyUnset_PinWriteFailNoCapturedClaim(t *testing.T) {
 	bin, _ := writeRecordingClaudeBin(t) // captured under a valid TMPDIR first
 	proxyURL := reachableProxyURL(t)     // proxy UP → pin-proxy action
+	cfgPath, _ := writeGuardTestConfig(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("ANTHROPIC_CONFIG_DIR", "")
 	// Point TMPDIR at a non-existent dir so os.CreateTemp (and thus the pin write)
@@ -898,7 +981,7 @@ func TestRunClaudeEmptyUnset_PinWriteFailNoCapturedClaim(t *testing.T) {
 
 	route := claudeRouteResolution{class: claudeRouteEmptyUnset, scope: claudeScopeUser, file: "user settings"}
 	var stderr bytes.Buffer
-	opts := claudeLauncherOptions{stderr: &stderr, claudeArgs: []string{"--model", "opus"}}
+	opts := claudeLauncherOptions{configPath: cfgPath, stderr: &stderr, claudeArgs: []string{"--model", "opus"}}
 	if err := runClaudeEmptyUnset(opts, bin, proxyURL, route, opts.claudeArgs, "", false); err != nil {
 		t.Fatalf("runClaudeEmptyUnset: %v", err)
 	}
@@ -942,7 +1025,7 @@ func TestWriteClaudeSettingsPin_HolderSetBeforeWrite(t *testing.T) {
 		t.Fatalf("callback path %q != returned path %q", cbPath, path)
 	}
 	if cbSize != 0 {
-		t.Fatalf("holder published AFTER content write (size=%d at callback), want 0 — F4 window not closed", cbSize)
+		t.Fatalf("holder published AFTER content write (size=%d at callback), want 0 - F4 window not closed", cbSize)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

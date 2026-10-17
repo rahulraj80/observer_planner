@@ -34,10 +34,10 @@ func detectGuardObserveIdle(f *Facts, t Thresholds) []Suggestion {
 		Category: CategoryHygiene,
 		Scope:    ScopeGlobal,
 		Severity: SeverityAdvice,
-		Title:    fmt.Sprintf("Guard logged %d high-severity verdicts — nothing tuned yet", f.GuardHighSevEvents),
+		Title:    fmt.Sprintf("Guard logged %d high-severity verdicts - nothing tuned yet", f.GuardHighSevEvents),
 		Nudge: fmt.Sprintf(
 			"The guard has been observing: %d high/critical verdicts landed in the last %d days with zero approvals granted. "+
-				"Worth a look at the Security page — tune the loudest rule (or approve the legitimate cases), and the enforce-readiness card shows what blocking mode would have done.",
+				"Worth a look at the Security page - tune the loudest rule (or approve the legitimate cases), and the enforce-readiness card shows what blocking mode would have done.",
 			f.GuardHighSevEvents, f.WindowDays,
 		),
 		Confidence: 0.7,
@@ -69,15 +69,16 @@ func detectRoutingEvidenceReady(f *Facts, _ Thresholds) []Suggestion {
 		return nil // already promoted — nothing to nudge
 	}
 	return []Suggestion{{
+		// no-bare-usd:allow (advisor prose; masked on every surface under the token display)
 		DedupKey: "routing_evidence_ready|window",
 		Detector: "routing_evidence_ready",
 		Category: CategoryCost,
 		Scope:    ScopeGlobal,
 		Severity: SeverityAdvice,
-		Title:    fmt.Sprintf("Routing's shadow evidence is in — $%.2f would have been saved", sh.WouldSaveUSD),
+		Title:    fmt.Sprintf("Routing's shadow evidence is in - $%.2f would have been saved", sh.WouldSaveUSD),
 		Nudge: fmt.Sprintf(
 			"The advise shadow met the §R22 gate: %d advise decisions (floor %d), %d would-have reroutes saving $%.2f net of cache forfeits, zero quality flags. "+
-				"Routing is still %s — review the Shadow card's readiness ladder and promote when YOU are ready; the gate is evidence, not the decision.",
+				"Routing is still %s - review the Shadow card's readiness ladder and promote when YOU are ready; the gate is evidence, not the decision.",
 			sh.AdviseDecisions, sh.MinDecisions, sh.WouldReroute, sh.WouldSaveUSD, f.RoutingMode,
 		),
 		SavingsUSD: round2(sh.WouldSaveUSD),

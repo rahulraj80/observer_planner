@@ -11,8 +11,10 @@
 //     loads the deduped proxy∪JSONL substrate into Facts and hands it
 //     over. imports_test.go pins this.
 //   - Turn-kind classification and tier placement come from
-//     internal/routing (pure → pure import); pricing arrives through the
-//     injected routing.PriceFn (backed by cost.Engine.ComputeBreakdown
+//     internal/routingcore (pure → pure import; the always-linked half of
+//     routing since lane MP-L1I, so the report works in a build without
+//     proxy.routing); pricing arrives through the
+//     injected routingcore.PriceFn (backed by cost.Engine.ComputeBreakdown
 //     at the boundary — never re-derived here).
 //   - Attribution honesty (§R7.2): everything here is correlational —
 //     hard tasks are routed to big models. Every Report carries the

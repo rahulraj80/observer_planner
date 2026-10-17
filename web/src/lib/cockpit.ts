@@ -92,20 +92,14 @@ export function secondsUntil(iso?: string | null, nowMs: number = Date.now()): n
 }
 
 /** Compact elapsed: "45s" · "3m 20s" · "4h 12m". */
-export function fmtElapsed(secs: number | null | undefined): string {
-  if (secs == null || !Number.isFinite(secs) || secs < 0) return "—";
-  if (secs < 60) return `${secs}s`;
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return rm ? `${h}h ${rm}m` : `${h}h`;
-}
+// fmtElapsed was promoted into the shared design system (shared/lib/format.ts)
+// so the shared session-detail components can render elapsed times; re-exported
+// here so existing @/lib/cockpit importers are unchanged.
+export { fmtElapsed } from "@shared/lib/format";
 
 /** Short relative age: "4s ago" · "3m ago" · "2h ago" · "5d ago". */
 export function fmtAgo(secs: number | null | undefined): string {
-  if (secs == null || !Number.isFinite(secs) || secs < 0) return "—";
+  if (secs == null || !Number.isFinite(secs) || secs < 0) return "-";
   if (secs < 60) return `${secs}s ago`;
   const m = Math.floor(secs / 60);
   if (m < 60) return `${m}m ago`;
@@ -136,33 +130,10 @@ export function isLive(lastActivityIso?: string | null, nowMs: number = Date.now
   return s != null && s <= LIVE_THRESHOLD_SECS;
 }
 
-// tokensPerSec — OUTPUT tokens per second for a turn. Ported verbatim from
-// SessionDetailPanel.tokensPerSec: only output tokens count (input/cache
-// tokens aren't generated), and tps_ms is the best server-chosen timing
-// source (see tps_basis). null when there's no output or no/zero timing.
-export function tokensPerSec(m: MessageRow): number | null {
-  if (m.output <= 0 || m.tps_ms == null || m.tps_ms <= 0) return null;
-  return m.output / (m.tps_ms / 1000);
-}
-
-/** One-decimal under 10 tok/s, whole above, "/s" suffixed. */
-export function fmtTps(tps: number): string {
-  return `${tps >= 10 ? Math.round(tps).toString() : tps.toFixed(1)}/s`;
-}
-
-/** Human label for the timing basis behind a tok/s value. */
-export function tpsBasisLabel(basis: MessageRow["tps_basis"]): string {
-  switch (basis) {
-    case "measured":
-      return "measured response time (proxy)";
-    case "intra-turn":
-      return "intra-turn generation span";
-    case "elapsed":
-      return "elapsed (to next message)";
-    default:
-      return "estimated";
-  }
-}
+// Tok/s: re-exported from the ONE client owner (@shared/lib/speed), which
+// renders the figure internal/sessionmsg computed server-side. Kept as a
+// re-export shim so CockpitContent's imports stay unchanged.
+export { fmtTps, tokensPerSec, tpsBasisLabel, tpsBasisShort, tpsSuppressedLabel, tpsTooltip } from "@shared/lib/speed";
 
 // newestMessage returns the latest MessageRow by timestamp. The tail endpoint
 // may hand rows back oldest-first, so we don't assume slice order.
@@ -174,15 +145,101 @@ export function newestMessage(rows: MessageRow[]): MessageRow | null {
   return best;
 }
 
-// newestAssistantWithOutput returns the latest assistant turn that actually
-// generated output — the turn whose tok/s is worth showing in the Now strip.
-export function newestAssistantWithOutput(rows: MessageRow[]): MessageRow | null {
+// newestTimedAssistant returns the latest assistant turn that carries a
+// throughput figure (a rate, or a suppression reason from a timed call) -
+// what the cockpit's Now strip shows, labelled with its age. (It replaced
+// newestAssistantWithOutput: the newest turn with output shows a permanent
+// "-" on a transcript-only session and flickers on a live proxied one,
+// where the transcript row can land before its api_turns twin.)
+export function newestTimedAssistant(rows: MessageRow[]): MessageRow | null {
   let best: MessageRow | null = null;
   for (const m of rows) {
-    if (m.role !== "assistant" || m.output <= 0) continue;
+    if (m.role !== "assistant" || m.tps_ms == null || m.tps_ms <= 0) continue;
     if (!best || Date.parse(m.timestamp) >= Date.parse(best.timestamp)) best = m;
   }
   return best;
+}
+
+export type BurnRate = {
+  usdPerHour: number;
+  /** How the rate was derived, so the UI can label it instead of implying
+   *  a precision it doesn't have. */
+  basis: "recent" | "session";
+  /** Seconds the rate was measured over. */
+  spanSecs: number;
+  /** Turns in the numerator (0 for the session-average basis). */
+  turns: number;
+};
+
+/** Burn rate in USD/hour for a running session — the number that answers
+ *  "should I stop this?", which a running total never does.
+ *
+ *  Preferred basis is the turns the cockpit already polls (a tail, not the
+ *  whole session), so the rate reflects what the session is costing NOW
+ *  rather than being diluted by earlier idle time. The oldest fetched turn
+ *  is the window BOUNDARY, not a sample: its cost was incurred before the
+ *  window opened, so it sets the denominator but is excluded from the
+ *  numerator. Counting it would inflate the rate by N/(N-1) — ~20% at the
+ *  cockpit's tail of six.
+ *
+ *  Falls back to the session average over the same elapsed value the header
+ *  displays, so the two can never disagree. Returns null when neither basis
+ *  is available, rather than a confident "$0.00/h" on no evidence — a rate
+ *  needs an interval, and that is the failure mode this codebase keeps
+ *  fixing. Note the precise claim: null means NO BASIS. A basis that really
+ *  measures zero dollars still returns 0, which is an observation, not a
+ *  guess — and it agrees with the session total rendered beside it.
+ */
+export function burnRate(
+  rows: MessageRow[],
+  costUsd?: number | null,
+  elapsedSecs?: number | null,
+): BurnRate | null {
+  if (rows.length >= 2) {
+    const sorted = [...rows].sort(
+      (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+    );
+    const startMs = Date.parse(sorted[0].timestamp);
+    const spanSecs =
+      (Date.parse(sorted[sorted.length - 1].timestamp) - startMs) / 1000;
+    if (Number.isFinite(spanSecs) && spanSecs > 0) {
+      // Exclude EVERY row at the boundary instant, not just index 0. A user
+      // turn and the assistant turn answering it routinely share a
+      // timestamp, and skipping only the first would count the other's cost
+      // against a window it contributed no time to.
+      let usd = 0;
+      let turns = 0;
+      for (const m of sorted) {
+        if (Date.parse(m.timestamp) === startMs) continue;
+        usd += Number.isFinite(m.cost_usd) ? m.cost_usd : 0;
+        turns++;
+      }
+      // usd > 0, not turns > 0: the backend synthesizes user rows with a
+      // zero cost, so a tail like [user $0, assistant $1, user $0] leaves a
+      // costless row after boundary exclusion and would report a "recent"
+      // $0/h — a basis label claiming we measured current spend when we
+      // measured none. Fall through to the session average instead.
+      const usdPerHour = usd / (spanSecs / 3600);
+      if (usd > 0 && Number.isFinite(usdPerHour)) {
+        return { usdPerHour, basis: "recent", spanSecs, turns };
+      }
+    }
+  }
+  if (
+    costUsd != null &&
+    Number.isFinite(costUsd) &&
+    costUsd >= 0 &&
+    elapsedSecs != null &&
+    elapsedSecs > 0
+  ) {
+    return {
+      usdPerHour: costUsd / (elapsedSecs / 3600),
+      basis: "session",
+      spanSecs: elapsedSecs,
+      turns: 0,
+    };
+  }
+  return null;
 }
 
 /** A short "what just happened" label for the newest message row. */

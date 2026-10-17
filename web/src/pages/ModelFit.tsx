@@ -7,6 +7,7 @@ import {
 import { useFilters, windowParams, windowLabel } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
 import { fmtCompact, fmtInt, fmtPct, fmtUSD } from "@/lib/format";
+import { navIcon } from "@/lib/nav";
 
 interface EvidenceMatrixCell {
   kind: string;
@@ -89,9 +90,9 @@ function ModelFitContent({
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
+      <PageHeader icon={navIcon("modelfit")}
         title="Model Fit"
-        sub="Best model per requirement kind — evidence from your history. Cells show cost/turn, error rate, latency; greener = better fit."
+        sub="Best model per requirement kind - evidence from your history. Cells show cost/turn, error rate, latency; greener = better fit."
         right={
           <div className="flex items-center gap-2">
             <Pill>
@@ -185,7 +186,7 @@ function ModelFitContent({
                     <td className="px-3 py-2 text-fg-2">{c.provider || "unknown"}</td>
                     <td className="px-3 py-2 text-right text-fg-2">{fmtInt(c.turns)}</td>
                     <td className="px-3 py-2 text-right text-fg-1">
-                      {c.turns > 0 ? fmtUSD(c.cost_usd / c.turns) : "—"}
+                      {c.turns > 0 ? fmtUSD(c.cost_usd / c.turns) : " - "}
                     </td>
                     <td className="px-3 py-2 text-right text-fg-1">{fmtUSD(c.cost_usd)}</td>
                     <td className="px-3 py-2 text-right">
@@ -196,10 +197,10 @@ function ModelFitContent({
                       )}
                     </td>
                     <td className="px-3 py-2 text-right text-fg-2">
-                      {c.avg_ttft_ms > 0 ? fmtInt(Math.round(c.avg_ttft_ms)) + "ms" : "—"}
+                      {c.avg_ttft_ms > 0 ? fmtInt(Math.round(c.avg_ttft_ms)) + "ms" : " - "}
                     </td>
                     <td className="px-3 py-2 text-right text-fg-2">
-                      {c.avg_total_ms > 0 ? fmtInt(Math.round(c.avg_total_ms)) + "ms" : "—"}
+                      {c.avg_total_ms > 0 ? fmtInt(Math.round(c.avg_total_ms)) + "ms" : " - "}
                     </td>
                     <td className="px-3 py-2 text-right text-fg-2">{fmtCompact(c.cache_read_tokens)}</td>
                     <td className="px-3 py-2 text-right text-fg-2">{fmtCompact(c.cache_creation_tokens)}</td>
@@ -228,7 +229,7 @@ function ModelFitContent({
           </li>
           <li>
             The "Best model per kind" cards above pick the model/provider with the lowest cost/turn for each
-            requirement kind (minimum 1 turn). This is a starting point — combine with your quality requirements.
+            requirement kind (minimum 1 turn). This is a starting point - combine with your quality requirements.
           </li>
         </ul>
       </section>
@@ -252,9 +253,9 @@ export function ModelFitPage() {
   if (evidence.error) {
     return (
       <div className="p-6">
-        <PageHeader
+        <PageHeader icon={navIcon("modelfit")}
           title="Model Fit"
-          sub="Best model per requirement kind — evidence from your history."
+          sub="Best model per requirement kind - evidence from your history."
         />
         <div className="mt-4 rounded-3 border border-warn/30 bg-warn/5 px-4 py-3 text-[12px] text-warn">
           Evidence unavailable: {evidence.error.message}
@@ -266,9 +267,9 @@ export function ModelFitPage() {
   if (!evidence.data) {
     return (
       <div className="p-6">
-        <PageHeader
+        <PageHeader icon={navIcon("modelfit")}
           title="Model Fit"
-          sub="Best model per requirement kind — evidence from your history."
+          sub="Best model per requirement kind - evidence from your history."
         />
         <div className="mt-4 text-[12px] text-fg-3">Loading…</div>
       </div>

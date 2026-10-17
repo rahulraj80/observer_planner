@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // TestRenderAdapterMatrixCoversEveryAdapter pins that the generated matrix
@@ -14,7 +15,7 @@ import (
 // representative tools — so the support grid stays generated, not hand-kept.
 func TestRenderAdapterMatrixCoversEveryAdapter(t *testing.T) {
 	var buf bytes.Buffer
-	renderAdapterMatrix(&buf, integration.Capabilities())
+	renderAdapterMatrix(&buf, integration.Capabilities(), nil)
 	out := buf.String()
 
 	for _, c := range integration.Capabilities() {
@@ -24,25 +25,65 @@ func TestRenderAdapterMatrixCoversEveryAdapter(t *testing.T) {
 	}
 	// Representative cells (capability shapes, not tool identity).
 	for _, want := range []string{
-		"env:ANTHROPIC_BASE_URL",       // claude-code RouteEnvSettings
-		"config-file",                  // codex RouteConfigFile
-		"launcher",                     // opencode RouteLauncher
-		"cline_cli_hooks_jsonl+manual", // cline-cli not-auto-wired
-		"claude_settings_json+bridge",  // claude-code cross-OS bridge
-		"A/B/C",                        // native rails
-		"(gap)",                        // a token gap marker
-		"SURFACE",                      // routability column header
-		"routable",                     // RouteStatusRoutableNow render
-		"after-upstream",               // hermes RouteStatusAfterUpstream
-		"after-bridge",                 // gemini-cli RouteStatusAfterBridge
-		"probe",                        // RouteStatusProbeRequired render
-		"native-exempt",                // RouteStatusNativeExempt render
-		"HANDOFF",                      // handoff column header
-		"full+seeded",                  // full transcript + seeded launcher (claude-code/codex)
-		"full+doc-assisted",            // hermes DocAssisted launch
+		"env:ANTHROPIC_BASE_URL",      // claude-code RouteEnvSettings
+		"config-file",                 // codex RouteConfigFile
+		"launcher",                    // opencode RouteLauncher
+		"plugin_shim_ts+manual",       // openclaw / deepseek: not auto-wired (cline-cli is, since T-342)
+		"claude_settings_json+bridge", // claude-code cross-OS bridge
+		"A/B/C",                       // native rails
+		"(gap)",                       // a token gap marker
+		"SURFACE",                     // routability column header
+		"routable",                    // RouteStatusRoutableNow render
+		"after-upstream",              // hermes RouteStatusAfterUpstream
+		"after-bridge",                // gemini-cli RouteStatusAfterBridge
+		"probe",                       // RouteStatusProbeRequired render
+		"native-exempt",               // RouteStatusNativeExempt render
+		"HANDOFF",                     // handoff column header
+		"full+seeded",                 // full transcript + seeded launcher (claude-code/codex)
+		"full+doc-assisted",           // hermes DocAssisted launch
+		"VOCAB",                       // native-tool-vocabulary column header
+		"internal/tooltax",            // VOCAB legend names the taxonomy package
+		"PROMPT",                      // prompt-submit intervention lane column header
+		"hook",                        // PromptLaneHook + AutoWired render (claude-code, codex, cursor, gemini-cli, qwen-code, droid, qoder, poolside, command-code, devin, ...)
+		"proxy-only",                  // PromptLaneProxyOnly render (opencode, hermes, pi, grok, ...)
+		"probe",                       // PromptLaneProbeRequired render (kimi-code, kiro-cli, cline, ...)
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("matrix missing expected cell %q", want)
+		}
+	}
+}
+
+// TestPromptCellDistinguishesManualHookWiring pins promptCell's
+// autoWired branch: a PromptLaneHook row whose Hook.AutoWired is
+// false (a built, tested dialect with no registration writer in the
+// auto-register loop; zcode was one until hook-parity Lane A4 gave it
+// a writer) must render distinctly from a
+// fully auto-wired PromptLaneHook row like claude-code. Before this
+// fix both rendered the identical "hook" cell, which misleadingly
+// implied zcode gets auto-registered like every other row.
+func TestPromptCellDistinguishesManualHookWiring(t *testing.T) {
+	autoWired := promptCell(integration.PromptLaneHook, true)
+	manual := promptCell(integration.PromptLaneHook, false)
+	if autoWired == manual {
+		t.Fatalf("promptCell(PromptLaneHook, true)=%q must differ from promptCell(PromptLaneHook, false)=%q", autoWired, manual)
+	}
+	if autoWired != "hook" {
+		t.Errorf("promptCell(PromptLaneHook, true) = %q, want %q", autoWired, "hook")
+	}
+	if manual != "hook (manual)" {
+		t.Errorf("promptCell(PromptLaneHook, false) = %q, want %q", manual, "hook (manual)")
+	}
+
+	// Since hook-parity Lane A4 (2026-10-03) zcode has a registration
+	// writer (`observer init`), so no registry row renders the manual
+	// cell today; the branch stays pinned above for the next built,
+	// writer-less PromptLaneHook row, which the matrix must then show.
+	var buf bytes.Buffer
+	renderAdapterMatrix(&buf, integration.Capabilities(), nil)
+	for _, c := range integration.Capabilities() {
+		if c.PromptLane == integration.PromptLaneHook && !c.Hook.AutoWired && !strings.Contains(buf.String(), "hook (manual)") {
+			t.Errorf("%s is a writer-less PromptLaneHook row but the matrix shows no \"hook (manual)\" cell", c.Tool)
 		}
 	}
 }
@@ -142,6 +183,130 @@ func TestHandoffCell(t *testing.T) {
 		if got := handoffCell(tc.in); got != tc.want {
 			t.Errorf("%s: handoffCell() = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestVocabCell pins the VOCAB cell rendering (WP-T7): the taxonomy-covered
+// row reads "yes"; every other shape reads the honest-zero dash the rest of
+// the table uses. An honest-zero row's grounded Note is NOT squeezed into
+// the grid cell — `observer doctor <tool>` is where it prints verbatim.
+func TestVocabCell(t *testing.T) {
+	cases := []struct {
+		name string
+		in   integration.Vocabulary
+		want string
+	}{
+		{"in taxonomy", integration.Vocabulary{InTaxonomy: true}, "yes"},
+		{"in taxonomy with caveat", integration.Vocabulary{InTaxonomy: true, Note: "partial"}, "yes"},
+		{"honest zero with note", integration.Vocabulary{Note: "no native tool vocabulary: chat turns only"}, "—"},
+		{"undeclared zero value", integration.Vocabulary{}, "—"},
+	}
+	for _, tc := range cases {
+		if got := vocabCell(tc.in); got != tc.want {
+			t.Errorf("%s: vocabCell() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestRenderAdapterMatrixVocabColumn pins that the VOCAB column lands in the
+// header right after TOKEN and that each row's VOCAB cell is rendered at
+// that column position. Driven by synthetic rows so it never depends on the
+// registry's row set (which other work-packages add to).
+func TestRenderAdapterMatrixVocabColumn(t *testing.T) {
+	caps := []integration.Capability{
+		{Tool: "vocab-yes-fixture", Vocabulary: integration.Vocabulary{InTaxonomy: true}},
+		{Tool: "vocab-zero-fixture", Vocabulary: integration.Vocabulary{Note: "no native tool vocabulary: chat turns only"}},
+	}
+	var buf bytes.Buffer
+	renderAdapterMatrix(&buf, caps, nil)
+	lines := strings.Split(buf.String(), "\n")
+	if len(lines) == 0 {
+		t.Fatal("no output")
+	}
+	header := strings.Fields(lines[0])
+	vocabIdx, tokenIdx := -1, -1
+	for i, h := range header {
+		switch h {
+		case "VOCAB":
+			vocabIdx = i
+		case "TOKEN":
+			tokenIdx = i
+		}
+	}
+	if vocabIdx < 0 || tokenIdx < 0 {
+		t.Fatalf("header missing TOKEN/VOCAB: %v", header)
+	}
+	if vocabIdx != tokenIdx+1 {
+		t.Errorf("VOCAB at index %d, want directly after TOKEN (%d): %v", vocabIdx, tokenIdx, header)
+	}
+
+	want := map[string]string{"vocab-yes-fixture": "yes", "vocab-zero-fixture": "—"}
+	seen := 0
+	for _, line := range lines[1:] {
+		f := strings.Fields(line)
+		if len(f) <= vocabIdx {
+			continue
+		}
+		w, ok := want[f[0]]
+		if !ok {
+			continue
+		}
+		seen++
+		if f[vocabIdx] != w {
+			t.Errorf("%s: VOCAB cell = %q, want %q (line: %q)", f[0], f[vocabIdx], w, line)
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("matched %d fixture rows, want %d", seen, len(want))
+	}
+
+	// The honest-zero row's grounded Note never leaks into the grid.
+	if strings.Contains(buf.String(), "chat turns only") {
+		t.Error("honest-zero Note should not be rendered in the matrix cell")
+	}
+}
+
+// TestRenderSurfaceSplit pins the observed capture-surface section
+// `observer adapters` appends when a local DB is reachable: one row per
+// (tool, surface, host), an explicit "(unstamped)" bucket for sessions
+// no adapter attributed, a dash for a missing host token, and the
+// empty-DB / nothing-stamped-yet notes.
+func TestRenderSurfaceSplit(t *testing.T) {
+	var buf bytes.Buffer
+	renderSurfaceSplit(&buf, []store.SurfaceCount{
+		{Tool: "claude-code", Surface: "ide", SurfaceHost: "vscode", Sessions: 3, CostUSD: 1.5},
+		{Tool: "codex", Surface: "cli", Sessions: 2, CostUSD: 0.25},
+		{Tool: "codex", Sessions: 7},
+	})
+	out := buf.String()
+	for _, want := range []string{
+		"SURFACE-KIND", "claude-code", "vscode", "1.50",
+		"(unstamped)", "—", "node-local and never pushed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("surface split missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "no session carries a capture surface yet") {
+		t.Errorf("stamped rows present but the nothing-stamped note fired:\n%s", out)
+	}
+
+	// Empty DB: one honest line, no table.
+	buf.Reset()
+	renderSurfaceSplit(&buf, nil)
+	if !strings.Contains(buf.String(), "no sessions in the local DB yet") {
+		t.Errorf("empty rollup = %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "SURFACE-KIND") {
+		t.Errorf("empty rollup should not render a table header:\n%s", buf.String())
+	}
+
+	// Sessions exist but nothing is stamped: the table renders and the
+	// coverage note fires.
+	buf.Reset()
+	renderSurfaceSplit(&buf, []store.SurfaceCount{{Tool: "cursor", Sessions: 4}})
+	if !strings.Contains(buf.String(), "no session carries a capture surface yet") {
+		t.Errorf("unstamped-only rollup missing the coverage note:\n%s", buf.String())
 	}
 }
 

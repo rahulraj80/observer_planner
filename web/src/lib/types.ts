@@ -1,3 +1,6 @@
+import type { DoctorRemediation } from "./remediation";
+import type { RequestClassSplitWire } from "./requestClassSplit";
+import type { ContextGaugeWire } from "./sessionContextGauge";
 // TypeScript shapes for the Go dashboard's /api/* responses.
 // Field names mirror the Go JSON tags exactly so renaming on the
 // backend doesn't silently break the frontend.
@@ -58,6 +61,29 @@ export type StatusSnapshot = {
   // key bar labels its modifier keys from it (lib/keyPlatform).
   // Optional on the wire: an older daemon omits it entirely.
   host_os?: string;
+  // host_name is the DAEMON's own hostname (T-425): the top bar names the
+  // machine when this dashboard is a remote one opened through the instance
+  // switcher. Optional: an older daemon omits it.
+  host_name?: string;
+  // integrity is the persisted verdict of the daemon's background
+  // `PRAGMA quick_check` (RES-3, codebase audit 2026-09-16). Absent
+  // means the probe has NOT run on this database yet (a fresh install,
+  // or one where [observer.db].integrity_check_max_gb size-gated it
+  // off) — that is NOT a failure and must never render as one.
+  integrity?: IntegrityStatus;
+};
+
+// IntegrityStatus mirrors internal/diag/status.go's IntegrityStatus — the
+// status-surface projection of db.IntegrityVerdict.
+export type IntegrityStatus = {
+  // checked_at is when the probe finished (UTC, RFC3339).
+  checked_at: string;
+  // status is a closed vocabulary: "ok" | "corrupt" | "error". "error"
+  // means the probe could not COMPLETE (timeout, locked file) — it says
+  // nothing about the data, and must not be rendered as corruption.
+  status: "ok" | "corrupt" | "error";
+  // message is the pragma's own text, or the error's. Empty when ok.
+  message?: string;
 };
 
 // ---------- /api/health/watcher ----------
@@ -85,6 +111,9 @@ export type WatcherHealth = {
   behind_total_bytes: number;
   orphan_count: number;
   suspected_misrouted_count: number;
+  // True when this daemon runs the file watcher (`observer start`); false
+  // for a standalone dashboard. Absent on an older daemon.
+  watcher_running?: boolean;
   checked_at: string;
 };
 
@@ -103,10 +132,32 @@ export type StatusScoped = {
   actions: number;
 };
 
+// ---------- time-series bucket metadata ----------
+// Every time-series endpoint echoes how it bucketed (internal/timebucket
+// Spec.Meta; docs/plans/chart-time-granularity-plan-2026-09-29.md): the
+// granularity token, its width, the viewer zone it bucketed in (UTC when the
+// requested zone was unknown - tz_fallback), whether Auto chose it, and the
+// resolved window.
+export type BucketGranularity = "5m" | "1h" | "1d" | "1w";
+
+export type BucketMeta = {
+  bucket: BucketGranularity;
+  bucket_ms: number;
+  tz: string;
+  tz_fallback?: boolean;
+  gran_auto: boolean;
+  since: string;
+  until: string;
+};
+
+/** GridPoint is one entry of a multi-key response's zero-fill `grid`. */
+export type GridPoint = { bucket: string; t: number };
+
 // ---------- /api/timeseries/cost ----------
 
 export type CostPoint = {
   bucket: string;
+  t: number;
   input: number;
   output: number;
   cache_read: number;
@@ -119,9 +170,8 @@ export type CostPoint = {
   compression_turns: number;
 };
 
-export type CostTimeseries = {
+export type CostTimeseries = BucketMeta & {
   metric: "cost";
-  bucket: "day" | "hour";
   days: number;
   series: CostPoint[];
 };
@@ -130,14 +180,14 @@ export type CostTimeseries = {
 
 export type ActionsPoint = {
   bucket: string;
+  t: number;
   total: number;
   failures: number;
   by_tool: Record<string, number>;
 };
 
-export type ActionsTimeseries = {
+export type ActionsTimeseries = BucketMeta & {
   metric: "actions";
-  bucket: "day" | "hour";
   days: number;
   series: ActionsPoint[];
 };
@@ -161,15 +211,637 @@ export type ToolsResponse = {
 };
 
 // ---------- /api/projects ----------
+// docs/plans/projects-page-roi-and-commit-alignment-plan-2026-09-21.md §3.4.
+// The composite fields below are all `omitempty` on the wire (R7): an
+// installation predating this feature, or a project the commit scanner has
+// never touched, simply omits them. `id` absent means this row cannot be
+// opened as a detail panel (fall back to the legacy `?root=` guidance
+// SlideOver).
+
+export type ProjectCaptureInfo = {
+  // "no_git": the project root isn't a git repository (or git isn't on
+  // PATH). "never_scanned": git is available but the scanner hasn't run a
+  // pass yet. "error": the last scan failed (timeout / unreadable root) and none has
+  // succeeded since. "ok": commit capture is live for this project.
+  commits: "ok" | "no_git" | "never_scanned" | "error";
+  // "none": no editor-reported human LOC capture for this project (never
+  // render an AI share against it). "vscode": the SuperBased VS Code
+  // extension has reported saves for it.
+  human_loc: "none" | "vscode";
+};
 
 export type ProjectRow = {
   root_path: string;
   session_count: number;
   action_count: number;
   last_seen?: string;
+  /**
+   * REQUIRED (2026-09-22 rework finding #15): the Go wire always emits
+   * `id` (dashboard.go's projectRow struct has no omitempty on it) — an
+   * optional type here let `/api/project/${row.id}` compile against
+   * `undefined` and fail only at request time. A project row without a
+   * real id is a server-side contract violation, not a case this type
+   * should model as valid.
+   */
+  id: number;
+  /**
+   * null/absent = no priced-turn activity for this project in the 30d
+   * window (render "-"); a present 0 = every turn in the window priced,
+   * genuinely to $0.00 (a known-free model — render "$0.00"). See
+   * dashboard.go's projectRow.SpendUSD30d doc comment (finding #13).
+   */
+  spend_usd_30d?: number | null;
+  /** Turns in the 30d window with no recorded cost and no pricing entry; absent when zero. */
+  spend_unpriced_turns_30d?: number;
+  // AI-authored CODE lines (added + modified, code-category files only
+  // since 2026-09-28; docs/config lines used to be counted in).
+  ai_code_lines_30d?: number;
+  // Code-vs-comment split of the same lines (Go internal/loc.SplitAuthored);
+  // absent when the window has no AI-authored lines. Needs no human
+  // measurement, so it is honest even where capture.human_loc is "none".
+  ai_split_30d?: ProjectAuthoredSplit;
+  commits_30d?: number;
+  last_commit_at?: string;
+  capture?: ProjectCaptureInfo;
 };
 
-export type ProjectsResponse = { rows: ProjectRow[] };
+// ProjectAuthoredSplit is the code-vs-comment split every Projects surface
+// carries beside an AI line count, rendered ONLY through
+// @shared/primitives/CodeCommentSplit (no share arithmetic in the UI).
+export type ProjectAuthoredSplit =
+  import("@shared/primitives/CodeCommentSplit").AuthoredSplit;
+
+// window is present when the request carried the global window: the
+// spend / code / commit fields (named *_30d for compatibility) then cover it.
+export type ProjectsResponse = { rows: ProjectRow[]; window?: { since: string; until?: string } };
+
+// ---------- /api/project/<id> (Projects ROI + commit-alignment detail) ----------
+// §3.4 of the plan above. Everything under here is `secProjects` (detail
+// endpoints), unlike the list above.
+
+// ProjectCostBucketRow is the shared per-row shape for every grouping this
+// arc renders: spend.by_tool / spend.by_model and the `/cost?by=` rows.
+// `label` is a friendlier display string than `key` when the server has
+// one (e.g. a model's short name); `turns` / `count` are grouping-specific
+// and both optional.
+export type ProjectCostBucketRow = {
+  key: string;
+  label?: string;
+  cost_usd: number;
+  turns?: number;
+  count?: number;
+  // turns in this bucket with no price (no recorded cost, no pricing entry):
+  // cost_usd is a floor whenever this is > 0. Absent when every turn priced.
+  unpriced_turns?: number;
+  // /cost?by=session rows only: the session's AI code-vs-comment split
+  // (code-category files only); absent with no AI-authored lines.
+  ai_split?: ProjectAuthoredSplit;
+};
+
+export type ProjectSpendByDay = {
+  day: string;
+  cost_usd: number;
+  // 2026-09-22 rework finding S5: turns this day with no recorded cost
+  // and no pricing entry for their model; cost_usd is a floor whenever
+  // this is > 0. Absent when every turn that day priced.
+  unpriced_turns?: number;
+};
+
+export type ProjectSpendBySession = {
+  id: string;
+  tool: string;
+  started_at: string;
+  cost_usd: number;
+  turns: number;
+  prompts: number;
+  // AI-authored CODE lines (code-category files only).
+  ai_lines: number;
+  ai_split: ProjectAuthoredSplit;
+  commits_linked: number;
+  // 2026-09-22 rework finding S5: same honesty contract as
+  // ProjectSpendByDay.unpriced_turns, scoped to this session.
+  unpriced_turns?: number;
+};
+
+export type ProjectDetailSpend = {
+  total_usd: number;
+  /** Turns with no recorded cost and no pricing entry for their model; absent when zero. */
+  unpriced_turns?: number;
+  by_tool: ProjectCostBucketRow[];
+  by_model: ProjectCostBucketRow[];
+  by_day: ProjectSpendByDay[];
+  by_session: ProjectSpendBySession[];
+};
+
+// ProjectRoiTile is one row of the `roi[]` array — one proxy metric, always
+// carrying its own formula and (when applicable) a caveat naming what it
+// can't see. `available=false` means the tile has nothing to compute yet
+// (e.g. no commit capture) — render the caveat, not a fabricated zero.
+export type ProjectRoiTile = {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  formula: string;
+  caveat?: string;
+  available: boolean;
+};
+
+export type ProjectDetail = {
+  project: {
+    id: number;
+    root_path: string;
+    git_remote?: string;
+    name?: string;
+    tools: string[];
+    first_seen?: string;
+    last_seen?: string;
+  };
+  spend: ProjectDetailSpend;
+  loc: {
+    // AI-authored CODE lines (code-category files only since 2026-09-28).
+    ai_added: number;
+    ai_modified: number;
+    // AI-added comment lines over the same rows, and the split of the two.
+    ai_comment: number;
+    ai_split: ProjectAuthoredSplit;
+    // See ProjectCaptureInfo.human_loc — "none" means unmeasured, never
+    // zero; no AI share may be derived when this is "none".
+    human_capture: "none" | "vscode";
+  };
+  commits: {
+    count: number;
+    ai_touched: number;
+    with_spend_usd: number;
+  };
+  tasks: {
+    total: number;
+    done: number;
+    cost_usd: number;
+    // false = the lifecycle task rollup could not be loaded; total/done
+    // are a degraded fallback and cost_usd is 0. Render "unavailable",
+    // never "0 tasks" (SOL-F11).
+    available: boolean;
+  };
+  roi: ProjectRoiTile[];
+  capture: ProjectCaptureInfo;
+  window_days: number;
+  // truncated=true when a composed list (prompts/commits) hit its request-
+  // time cap (R11: last 500) — render "showing the last N" rather than
+  // implying the corpus is smaller than it is.
+  truncated?: boolean;
+};
+
+// ProjectTruncationMeta is the additive truncation signal the three
+// secondary Projects-page endpoints (/commits, /prompts, /cost?by=commit)
+// carry on their `{rows: ...}` payload when one of their capped loaders
+// (promptLinkCap/editLinkCap/commitLinkCap server-side) actually hit its
+// cap — SOL-F10 of the 2026-09-22 rework: these endpoints used to return
+// only `rows`, so a tab could present partial prompt-to-commit linkage
+// (commits linked, AI-touched files/lines, attributed spend, status) as
+// complete with no signal at all. Every field is absent (never a
+// fabricated `false`/`[]`) on an untruncated response — check `truncated`
+// before reading the other two.
+export type ProjectTruncationMeta = {
+  truncated?: boolean;
+  // Which capped input(s) actually hit their cap, e.g. ["prompts","edits"].
+  truncated_inputs?: string[];
+  // Which OUTPUT fields on this response's rows are a known undercount/
+  // partial view as a result, e.g. ["ai_lines","spend_usd"].
+  affects?: string[];
+};
+
+// ---------- /api/project/<id>/commits ----------
+
+export type ProjectCommitPrompt = {
+  action_id: number;
+  session_id: string;
+  at: string;
+  preview: string;
+};
+
+export type ProjectCommitRow = {
+  id: number;
+  sha: string;
+  subject: string;
+  committed_at: string;
+  author_hash: string;
+  is_merge: boolean;
+  // reachable=false means this sha fell out of `git rev-list HEAD` on a
+  // later reachability revalidation pass (R2) — the row is kept (never
+  // deleted) and still carries its attribution, but is flagged so the page
+  // can say so rather than imply every listed commit is on the current
+  // branch.
+  reachable: boolean;
+  files: number;
+  added: number;
+  deleted: number;
+  ai_files: number;
+  // AI-authored CODE lines (added + modified, code files only) this commit
+  // carried, the added comment lines over the same pairs, and their split.
+  ai_lines: number;
+  ai_comment_lines: number;
+  ai_split: ProjectAuthoredSplit;
+  spend_usd: number;
+  prompts: ProjectCommitPrompt[];
+  // Which session owned this commit (docs/projects-page.md "Commit
+  // ownership"). Always present; session_id is absent when nobody does.
+  owner: ProjectCommitOwner;
+};
+
+// ProjectCommitOwnerReason mirrors internal/projectroi's reason constants
+// verbatim. The first four mean "no owner" and are never a guess.
+export type ProjectCommitOwnerReason =
+  | "merge"
+  | "unreachable"
+  | "foreign_author"
+  | "no_ai_edits"
+  | "sole_contributor"
+  | "most_code_lines"
+  | "most_files"
+  | "earliest_prompt"
+  | "session_id";
+
+export type ProjectCommitShareBasis = "code_lines" | "files";
+
+export type ProjectCommitContributor = {
+  session_id: string;
+  // Share of the commit on the owner's share_basis; contributors sum to 1.
+  share: number;
+  code_lines: number;
+  comment_lines: number;
+  split: ProjectAuthoredSplit;
+  files: number;
+  prompts: number;
+  first_prompt_at?: string;
+};
+
+export type ProjectCommitOwner = {
+  session_id?: string;
+  reason: ProjectCommitOwnerReason;
+  share_basis?: ProjectCommitShareBasis;
+  // Ranked by the ownership rule; contributors[0] is the owner.
+  contributors: ProjectCommitContributor[];
+};
+
+// ---------- /api/session/<id>/commits ----------
+// The session side of the same ownership fold: every commit this session's
+// prompts reached, and whether this session owns it.
+
+export type SessionCommitRow = {
+  id: number;
+  sha: string;
+  subject: string;
+  committed_at: string;
+  reachable: boolean;
+  is_merge: boolean;
+  // true when THIS session owns the commit.
+  owner: boolean;
+  owner_session_id?: string;
+  reason: ProjectCommitOwnerReason;
+  share_basis?: ProjectCommitShareBasis;
+  share: number;
+  // What this session's carried prompts contributed to the commit.
+  files: number;
+  code_lines: number;
+  comment_lines: number;
+  split: ProjectAuthoredSplit;
+  prompts: number;
+};
+
+export type SessionCommitsResponse = {
+  session_id: string;
+  project_id?: number;
+  link_window_days: number;
+  // The project's commit-capture state; absent when the session has no project.
+  commit_capture?: ProjectCaptureInfo["commits"];
+  rows: SessionCommitRow[];
+} & ProjectTruncationMeta;
+
+export type ProjectCommitsResponse = { rows: ProjectCommitRow[] } & ProjectTruncationMeta;
+
+// ---------- /api/project/<id>/prompts ----------
+
+export type ProjectPromptEdits = {
+  // files counts every AI-touched file (docs/config too: file-level reach);
+  // added/modified/comment are CODE-file lines only.
+  files: number;
+  added: number;
+  modified: number;
+  comment: number;
+  split: ProjectAuthoredSplit;
+};
+
+export type ProjectPromptCommitRef = {
+  id: number;
+  sha: string;
+  subject: string;
+  committed_at: string;
+  // share is this prompt's file-count share of the commit's attributed
+  // files (R4.6) — a fraction in [0,1], not a dollar amount.
+  share: number;
+};
+
+// ProjectPromptStatus mirrors R4.5's ordered status table.
+export type ProjectPromptStatus =
+  | "committed"
+  | "partial"
+  | "uncommitted"
+  | "superseded"
+  | "no_edits";
+
+export type ProjectPromptAlignment = {
+  tier: "local" | "judge" | "cloud";
+  delivered: string[];
+  missed: string[];
+  extra: string[];
+  confidence?: number;
+  graded_at?: string;
+  model?: string;
+};
+
+// ProjectPromptGradeAvailable tells the Grade button which tiers it may
+// offer for THIS prompt (§3.6); `reason` explains an unavailable tier
+// (e.g. "judge disabled" / "hosted kind not deployed") so the UI can show
+// it verbatim rather than just greying the button out.
+export type ProjectPromptGradeAvailable = {
+  judge: boolean;
+  cloud: boolean;
+  reason?: string;
+};
+
+export type ProjectPromptRow = {
+  action_id: number;
+  session_id: string;
+  tool: string;
+  at: string;
+  preview: string;
+  edits: ProjectPromptEdits;
+  commits: ProjectPromptCommitRef[];
+  status: ProjectPromptStatus;
+  // status_uncertain=true means the edits and/or commits inputs this
+  // prompt's chain was linked against were themselves capped in this
+  // response (truncated_inputs will name which) — status is computed
+  // correctly over what WAS loaded, but a missing edit or commit outside
+  // the cap could change it (most visibly: a real "committed"/"partial"
+  // prompt reading as "uncommitted" because its carrying commit fell
+  // outside the cap). Render a caveat rather than trusting status at face
+  // value when this is true.
+  status_uncertain?: boolean;
+  alignment: ProjectPromptAlignment | null;
+  grade_available?: ProjectPromptGradeAvailable;
+};
+
+export type ProjectPromptsResponse = { rows: ProjectPromptRow[] } & ProjectTruncationMeta;
+
+// ---------- /api/project/<id>/cost?by=session|tool|model|day|task|commit ----------
+
+export type ProjectCostRowsResponse = { rows: ProjectCostBucketRow[] } & ProjectTruncationMeta;
+
+export type ProjectCostBy = "session" | "tool" | "model" | "day" | "task" | "commit";
+
+// ---------- /api/project/<id>/skills ----------
+//
+// Three facts about a skill (a .claude/skills/<name>/SKILL.md, project or
+// home-scoped) are kept structurally separate and never merged: what a
+// hook snapshot OBSERVED on disk at session start, what the project's git
+// HEAD held at that time per the reflog (NOT the working copy), and what
+// was actually INVOKED via the Skill tool. A version is an 8-hex git blob
+// id prefix plus an ordinal, rendered "#<ordinal> <id>" by
+// `lib/skills.ts::versionLabel`.
+
+export type SkillGitCaptureState = "not_scanned" | "ok" | "partial";
+
+export type SkillGitCapture = {
+  state: SkillGitCaptureState;
+  scanned_at: string;
+  reflog_since: string;
+  shallow: boolean;
+  ignore_case: boolean;
+  object_format: string;
+  error: string;
+  // Repository probes whose answer is unknown (the probe failed with no
+  // earlier answer); the matching field above is then NOT a fact.
+  probe_unknown: string[];
+};
+
+export type ProjectSkillsCapture = {
+  observed_since: string;
+  snapshot_capable: Record<string, boolean>;
+  invocations_measurable: Record<string, boolean>;
+  git: SkillGitCapture;
+};
+
+// SkillCommit.status: A/M/D for the SKILL.md path in that commit, derived
+// from the commit's tree and the version chain ("" when the commit touched
+// the skill's directory but not its SKILL.md, "?" when it cannot be said:
+// the tree is not resolved yet, an earlier commit's is not, or the commit
+// shares a second with an unrelated commit touching the same skill).
+export type SkillCommitStatus = "A" | "M" | "D" | "" | "?";
+
+export type SkillCommit = {
+  sha: string;
+  committed_at: string;
+  subject: string;
+  reachable: boolean;
+  is_merge: boolean;
+  status: SkillCommitStatus;
+  skill_md_changed: boolean;
+  files: number;
+  version: string;
+};
+
+export type SkillVersion = {
+  id: string;
+  blob_oid: string;
+  ordinal: number;
+  first_seen: string;
+  introduced_by: SkillCommit | null;
+  reintroduced_in: string[];
+  in_commits: boolean;
+  observed_first: string;
+  observed_last: string;
+  sessions_available: number;
+  invocations: number;
+};
+
+export type SkillCurrentInGit =
+  | "committed"
+  | "removed"
+  | "not_committed"
+  | "not_in_project_git"
+  | "unknown";
+
+export type SkillWorktreeState =
+  | ""
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "renamed_away"
+  | "unmerged"
+  | "untracked"
+  | "ignored"
+  | "added";
+
+// SkillCannotMatch names why versions can't be matched to commits for this
+// skill's directory ("" when matching is possible).
+export type SkillCannotMatch = "" | "symlink" | "submodule" | "sha256_repo";
+
+export type SkillCurrent = {
+  in_git: SkillCurrentInGit;
+  worktree: SkillWorktreeState;
+  head_version: string;
+  cannot_match: SkillCannotMatch;
+};
+
+export type SkillMovedFrom = { from_dir: string; sha: string };
+
+export type SkillInvocationsSummary = { measurable: boolean; count: number; last: string };
+
+export type ProjectSkill = {
+  key: string;
+  scope: "project" | "user";
+  dir: string;
+  name: string;
+  names: string[];
+  present: boolean;
+  tools: string[];
+  ambiguous: boolean;
+  current: SkillCurrent;
+  moved_from: SkillMovedFrom | null;
+  versions: SkillVersion[];
+  commits: SkillCommit[];
+  invocations: SkillInvocationsSummary;
+};
+
+export type SkillSessionRelation = "" | "subagent" | "fork";
+
+export type SkillSession = {
+  id: string;
+  tool: string;
+  started_at: string;
+  relation: SkillSessionRelation;
+  parent_id: string;
+  parent_in_window: boolean;
+};
+
+export type SkillObservedState =
+  | "n/a"
+  | "not_measurable"
+  | "not_captured"
+  | "observed"
+  | "changed_during_session"
+  | "absent"
+  | "unknown"
+  | "home_unresolved"
+  | "observed_after_start";
+
+// SkillObserved.changed (only populated in the changed_during_session
+// state) is a list of version ids INTERLEAVED WITH non-version state words
+// ("absent"/"unknown"/"unreadable"/"home_unresolved") - a version id looks like an 8-hex string;
+// `lib/skills.ts::observedLabel` tells the two apart structurally rather
+// than trusting a parallel flag.
+export type SkillObserved = {
+  state: SkillObservedState;
+  version: string;
+  changed: string[];
+  line_endings: boolean;
+  // source: the first snapshot's SessionStart source when state is
+  // "observed_after_start" (resume, compact). reason: "subagent" on a
+  // not_captured sub-agent session.
+  source: string;
+  reason: string;
+};
+
+export type SkillHeadState =
+  | "n/a"
+  | "not_in_project_git"
+  | "git_unavailable"
+  | "reflog_unavailable"
+  | "head_moved_near_start"
+  | "pending"
+  | "commit_unavailable"
+  | "committed"
+  | "absent_in_commit";
+
+export type SkillHead = {
+  state: SkillHeadState;
+  version: string;
+  sha: string;
+  candidates: string[];
+  reason: string;
+};
+
+// SkillSpan is one run of consecutive sessions (for one skill) that share
+// the same observed+head resolution, oldest-to-newest within the wire
+// array across all skills; `lib/skills.ts::sessionsForSkill` filters to one
+// skill and reverses to newest-first for display.
+export type SkillSpan = {
+  skill_key: string;
+  from_session: string;
+  to_session: string;
+  from: string;
+  to: string;
+  sessions: number;
+  observed: SkillObserved;
+  head: SkillHead;
+};
+
+export type SkillInvokedState = "version" | "version_not_captured" | "not_measurable" | "unknown";
+
+export type SkillInvokedEvent = { at: string; state: SkillInvokedState; version: string };
+
+// SkillCell is a SPARSE per-(skill,session) notable-cell entry — not every
+// skill x session pair gets one, only the ones worth calling out (e.g. an
+// invocation happened, or the resolution differs from the enclosing span).
+export type SkillCell = {
+  skill_key: string;
+  session_id: string;
+  observed: SkillObserved;
+  head: SkillHead;
+  invoked: SkillInvokedEvent[];
+};
+
+export type SkillUnmatchedInvocation = { tool: string; name: string; count: number };
+
+export type SkillAmbiguousInvocation = {
+  tool: string;
+  name: string;
+  count: number;
+  candidates: string[];
+};
+
+export type ProjectSkillsResponse = {
+  project_id: number;
+  root_path: string;
+  window_days: number;
+  truncated: boolean;
+  capture: ProjectSkillsCapture;
+  skills: ProjectSkill[];
+  sessions: SkillSession[];
+  spans: SkillSpan[];
+  cells: SkillCell[];
+  unmatched_invocations: SkillUnmatchedInvocation[];
+  ambiguous_invocations: SkillAmbiguousInvocation[];
+};
+
+// ---------- POST /api/project/<id>/prompts/<action_id>/grade ----------
+
+export type ProjectPromptGradeTier = "judge" | "cloud";
+
+export type ProjectPromptGradeRequest = {
+  tier: ProjectPromptGradeTier;
+};
+
+// ProjectPromptGradeResponse — §3.6: "not_available" always carries a
+// `reason` (signed out, tier disabled, hosted kind not deployed); "queued"
+// is the async cloud path (a grade is not yet ready); "ok" carries the
+// finished alignment inline.
+export type ProjectPromptGradeResponse = {
+  status: "ok" | "not_available" | "queued";
+  reason?: string;
+  alignment?: ProjectPromptAlignment;
+};
 
 // ---------- /api/models (cost.Summary) ----------
 
@@ -254,6 +926,31 @@ export type SessionRow = {
   duration_seconds: number;
   total_actions: number;
   sidechain_action_count: number;
+  // Lines-of-code authorship
+  // (docs/plans/lines-of-code-tracking-plan-2026-09-07.md). ai_code_lines is
+  // agent-authored CODE lines: added + modified, with comments, blank lines
+  // and whitespace-only reflows excluded and deleted lines deliberately NOT
+  // included. It covers every AI row stored under THIS session id (main line
+  // plus inline subagent edits), not subagent child sessions, which list as
+  // their own rows; the session card splits main from subagent and folds
+  // child sessions in, so this equals the card's two AI figures summed, and
+  // only when there are no child sessions. human_code_lines is its editor-reported counterpart.
+  //
+  // BOTH are omitempty on the wire, so ABSENT MEANS "NOT COUNTED", NEVER
+  // ZERO — a corpus that has never run `observer backfill --loc`, or a
+  // daemon predating the feature, simply omits the keys. Render absent as a
+  // dash plus the backfill hint; rendering it as 0 would present an absence
+  // of measurement as a measurement.
+  //
+  // Never derive an "AI share" from these two alone: with no editor capture
+  // the human side is unmeasured, not zero, so the share would read 100% AI.
+  // /api/loc/summary is the only surface that carries the human_capture flag
+  // that makes a share legitimate.
+  ai_code_lines?: number;
+  human_code_lines?: number;
+  // Code-vs-comment split of the same AI rows ai_code_lines sums. Absent
+  // (omitempty) when the session has no AI code or comment lines.
+  ai_split?: LOCAuthoredSplit;
   quality_score?: number;
   error_rate?: number;
   redundancy_ratio?: number;
@@ -282,6 +979,46 @@ export type SessionRow = {
   // token_usage rows, ordered by turn count desc (heaviest first).
   // Empty when no proxy/JSONL capture preserved model info.
   models?: string[];
+  // Session classification (docs/plans/session-classification-tags-plan-2026-07-31.md).
+  // All three are `omitempty` on the wire — an untagged session, or an
+  // older daemon that predates the feature, simply omits them. Never
+  // assume presence; treat absent as "no tags / not favorited / no note".
+  tags?: string[];
+  favorite?: boolean;
+  has_note?: boolean;
+  // Overall session rating, 1-10 (absent/0 = unrated). omitempty on the wire.
+  rating?: number;
+  // title is the developer's OWN session title (migration 116) — distinct
+  // from cloud_title below (the AI-generated one) and always wins over it
+  // wherever the UI renders an "effective title". omitempty — absent means
+  // no developer title has been set (fall back to cloud_title, then the
+  // ordinary tool/project fallback text).
+  title?: string;
+  // Cloud-enrichment presence (personal plane). cloud_enriched=true when a
+  // non-superseded cloud_results row exists for the session; cloud_title is the
+  // AI-suggested title. Both omitempty — absent on non-enriched sessions.
+  cloud_enriched?: boolean;
+  cloud_enrichment?: CloudEnrichmentProgress;
+  // enrich_plane is "org" when the session was captured while enrolled (its
+  // data-authority stamp is org), so its Enrich button opens the org plane
+  // (Cloud Intelligence parity ruling Q3). Absent = the personal plane.
+  enrich_plane?: "org";
+  cloud_title?: string;
+  // The newest org-plane AI title this node pulled back (parity phase 3):
+  // the third title source after title and cloud_title. omitempty, and
+  // withheld while the organization hides the `intel` Settings section.
+  org_title?: string;
+  // Capture surface (node migration 107): `surface` is the closed kind
+  // vocabulary (cli / ide / desktop / sdk / web), `surface_host` the
+  // free-form host token ("vscode", "claude-desktop", "jetbrains-idea").
+  // Both omitempty — ABSENT MEANS UNSTAMPED, never "cli". Render through
+  // SurfaceBadge, which draws nothing for an absent pair; never default.
+  surface?: string;
+  surface_host?: string;
+  // Captured tool/CLI version (node migration 125): free-form semver an
+  // adapter read from disk. omitempty — ABSENT MEANS UNSTAMPED, never
+  // fabricated.
+  tool_version?: string;
 };
 
 export type SessionsResponse = {
@@ -488,6 +1225,7 @@ export type ActionsDayCountsResponse = {
 
 export type TokensByModelPoint = {
   bucket: string;
+  t: number;
   model: string;
   input: number;
   output: number;
@@ -498,11 +1236,11 @@ export type TokensByModelPoint = {
   turn_count: number;
 };
 
-export type TokensByModelTimeseries = {
+export type TokensByModelTimeseries = BucketMeta & {
   metric: "tokens_by_model";
-  bucket: "day";
   days: number;
   series: TokensByModelPoint[];
+  grid: GridPoint[];
 };
 
 // ---------- /api/cowork/reconcile ----------
@@ -606,18 +1344,19 @@ export type AnalysisDim = "model" | "project" | "tool";
 
 export type AnalysisTrendPoint = {
   bucket: string;
+  t: number;
   key: string;
   total_tokens: number;
   cost_usd: number;
   turn_count: number;
 };
 
-export type AnalysisTrend = {
+export type AnalysisTrend = BucketMeta & {
   metric: "trend";
   dim: AnalysisDim;
-  bucket: "day";
   days: number;
   series: AnalysisTrendPoint[];
+  grid: GridPoint[];
 };
 
 // ---------- /api/analysis/movers ----------
@@ -704,6 +1443,7 @@ export type HourBucket = {
 
 export type AnalysisCostByHour = {
   days: number;
+  // The viewer zone the hours are in (the `tz` sent; UTC on fallback).
   timezone: string;
   buckets: HourBucket[];
 };
@@ -729,12 +1469,14 @@ export type AnalysisCostByDowHour = {
 // ---------- /api/analysis/cache-savings-trend ----------
 
 export type CacheSavingsPoint = {
+  // The bucket key (historical name): a day key at 1d, RFC3339 sub-day.
   day: string;
+  t: number;
   savings_usd: number;
   cache_read_tokens: number;
 };
 
-export type AnalysisCacheSavingsTrend = {
+export type AnalysisCacheSavingsTrend = BucketMeta & {
   days: number;
   points: CacheSavingsPoint[];
 };
@@ -783,11 +1525,28 @@ export type SessionDetail = {
   /** Carried context budget (estimated) shown for a session with no billed
    *  tokens — e.g. a cancelled, non-proxied cursor turn. Not a bill. */
   context_budget_tokens?: number;
+  /** The daemon's context-window gauge (internal/sessiongauge, the same
+   *  derivation the org drawer reads). Absent on older daemons: the UI then
+   *  falls back to predict's prefix over context_budget_tokens. A null
+   *  ratio (no ceiling, or over_window) means unknown, never 0%. */
+  context_gauge?: ContextGaugeWire;
   /** Human note explaining why billed tokens are empty (set only then). */
   tokens_note?: string;
+  /** Presence of captured usage rows, independent of their numeric total. */
+  token_usage_available?: boolean;
+  /** Usage rows behind `tokens` after the proxy/transcript twin fold, and
+   *  their proxy-observed subset (internal/sessionmsg.SumContributions) -
+   *  the org drawer reports the same pair from the same rule. */
+  turn_count?: number;
+  proxy_turn_count?: number;
   total_actions: number;
   success_actions: number;
   failure_actions: number;
+  /** Inline sub-agent activity volume (claude-code same-session sidechain
+   *  model): actions flagged is_sidechain on this session. Drives the
+   *  LineageBanner sidechain note; per-sub-agent breakdown lives in the
+   *  System tab's Sub-agents section (/api/session/<id>/subagents). */
+  sidechain_action_count: number;
   quality_score?: number;
   error_rate?: number;
   redundancy_ratio?: number;
@@ -822,10 +1581,90 @@ export type SessionDetail = {
   thread_source?: string;
   parent_in_db: boolean;
   children: SessionLineageChild[];
+  // Capture-surface attribution (migration 107): the normalized kind
+  // (cli | ide | desktop | sdk | web) and the concrete host token
+  // ("vscode", "cursor", "jetbrains-idea", "claude-desktop", ...). Both
+  // are OMITTED when no adapter stamped one — absence means UNKNOWN and
+  // must never be rendered as "cli" (see the shared SurfaceBadge).
+  surface?: string;
+  surface_host?: string;
+  // Captured tool/CLI version (migration 125): the version-shaped token an
+  // adapter read from disk (or the proxy read off a session-bound request's
+  // User-Agent). Ships to the org as session metadata since server
+  // migration 161. OMITTED when unstamped: absence means UNKNOWN, never a
+  // fabricated version.
+  tool_version?: string;
+  // The latest build seen in the session (migration 162). Differs from
+  // tool_version when the session was upgraded mid-session; an older daemon
+  // omits it (read it as equal to tool_version, shared/lib/toolVersion.ts).
+  tool_version_last?: string;
   // Resume-capability block (session-attach design Phase 3): how a CLOSED
   // session on this tool can be reopened, derived server-side by capability
   // shape. Always present.
   resume: SessionResumeInfo;
+  // Session classification (see SessionRow above). Optional for the same
+  // reason: a daemon that predates the feature omits them entirely.
+  tags?: string[];
+  favorite?: boolean;
+  note?: string;
+  rating?: number;
+  /** The session's counted proxy turns by client-declared request class
+   *  (internal/requestclass.Split). Absent on an older daemon or a session
+   *  with no counted proxy turn. */
+  request_class_split?: RequestClassSplitWire;
+};
+
+// ---------- session classification: tags / favorites / notes ----------
+// docs/plans/session-classification-tags-plan-2026-07-31.md §4.
+
+// TagRollup is one row of GET /api/sessions/tags: the vocabulary entry
+// plus its per-tag rollup (session count, cost, tokens).
+export type TagRollup = {
+  tag: string;
+  sessions: number;
+  cost_usd: number;
+  tokens: number;
+};
+
+export type TagRollupResponse = {
+  tags: TagRollup[];
+};
+
+// SessionTagsRequest is the POST /api/session/<id>/tags body. `add`/`remove`
+// are always sent (possibly empty); `favorite`/`note`/`rating`/`title` are
+// null when the mutation does not touch them — null means "leave as is", not
+// "clear". A rating of 0 clears it (unrated); 1-10 is a score. A title of ""
+// clears it (falls back to the AI title, if any); `title` is optional so
+// existing callers built before it existed keep compiling unchanged.
+export type SessionTagsRequest = {
+  add: string[];
+  remove: string[];
+  favorite: boolean | null;
+  note: string | null;
+  rating: number | null;
+  title?: string | null;
+};
+
+// SessionTagsResponse is the current state of one session's classification —
+// returned by both POST (post-mutation truth) and GET (read-only snapshot,
+// same shape, no write) on /api/session/<id>/tags. `rating` is 0 when the
+// session is unrated; `title` is "" when no developer title is set.
+export type SessionTagsResponse = {
+  tags: string[];
+  favorite: boolean;
+  note: string;
+  rating: number;
+  title?: string;
+};
+
+// TagManageRequest is the POST /api/sessions/tags/manage body: rename XOR
+// delete, never both.
+export type TagManageRequest =
+  | { rename: { from: string; to: string } }
+  | { delete: string };
+
+export type TagManageResponse = {
+  affected: number;
 };
 
 // SessionResumeInfo tells the Resume affordance which mechanism to offer,
@@ -850,10 +1689,17 @@ export type SessionResumeResponse = SessionLaunchResponse & {
 };
 
 // One spawned (forked/subagent) session in a parent's lineage list.
+// The rollup fields (omitempty server-side) surface what each sub-agent
+// session cost without navigating into it — opencode sub-agents are
+// separate sessions, unlike claude-code's same-session sidechains.
 export type SessionLineageChild = {
   id: string;
   thread_source?: string;
   started_at: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
+  action_count?: number;
 };
 
 // ---------- /api/session/<id>/cache (C13) ----------
@@ -902,6 +1748,10 @@ export type SessionCacheEvent = {
   tokens_written: number;
   message_id?: string;
   zero_usage?: boolean;
+  // cost_delta_usd is the write paid minus the hypothetical read price;
+  // omitted (undefined) when the reconciliation engine did not compute one,
+  // 0 when the delta is genuinely zero. Feeds Efficiency.avoidable_usd.
+  cost_delta_usd?: number;
 };
 
 export type SessionCacheTimelineItem = {
@@ -970,7 +1820,11 @@ export type PredictWarning =
   | "turns_inferred_prior"
   | "turns_inferred_default"
   | "empty_prefix"
-  | "fast_mode_active";
+  | "fast_mode_active"
+  // The model has no pricing entry, so the dollar columns are absent while
+  // the token facts (prefix, per-turn quantiles, fan-out) are real. Distinct
+  // from no_session_history, which means no observed substrate at all.
+  | "no_pricing";
 
 export type PredictTurnsTier = "observed" | "prior" | "default";
 
@@ -985,7 +1839,14 @@ export type PredictBand = {
 export type PredictEstimate = {
   model: string;
   prefix_tokens: number;
+  // has_estimate gates the DOLLAR half (bands' *_usd): it needs both an
+  // observed shape and a pricing entry. has_shape gates the FACT half
+  // (prefix_tokens, band token dimensions, turns_tier, sample counts),
+  // which is present for any session with an observed turn regardless of
+  // pricing. has_shape=true with has_estimate=false is "observed turns,
+  // unpriced model".
   has_estimate: boolean;
+  has_shape: boolean;
   turns_tier: PredictTurnsTier | "";
   low: PredictBand;
   mid: PredictBand;
@@ -999,6 +1860,15 @@ export type PredictLimitGauge = {
   available: boolean;
   needs_proxy: boolean;
   no_window?: boolean;
+  // no_source: an AUDITED registry finding (internal/integration
+  // Capability.Limit) that no local signal can ever exist for this tool
+  // (e.g. cursor, grokbot) — mutually exclusive with needs_proxy/no_window;
+  // source_note is always non-empty when this is true. Distinct from
+  // needs_proxy (a real remedy exists) and no_window (proxied, but this
+  // provider's headers never carry a window): here nothing the operator
+  // does — including routing through the proxy — would ever unlock it.
+  no_source?: boolean;
+  source_note?: string;
   // "proxy" (Anthropic response headers) or "transcript" (the tool's own
   // session log, e.g. codex token_count rate_limits). Empty when unavailable.
   source?: string;
@@ -1017,6 +1887,140 @@ export type PredictResponse = {
   estimate: PredictEstimate;
   reason?: string;
   limit: PredictLimitGauge;
+};
+
+// ---------- /api/session/<id>/tasks + /api/tasks (task tracking) ----------
+// docs/task-tracking.md — session-level todo/plan checklist decode. Field
+// names mirror internal/taskreport/report.go's JSON tags exactly (this
+// codebase does not transform keys between Go and TS).
+
+export type TaskTokenTotals = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+};
+
+// TaskCostBucket bundles a bucket's tokens/actions with its priced cost and
+// the "don't lie about precision" fields: unpriced_turns is the EXACT count
+// of rows in this bucket that had neither a recorded provider cost nor a
+// pricing-table entry for its model — cost_usd is then a known UNDER-count
+// by at least that many turns' worth of tokens. unpriced is kept for
+// back-compat and is simply unpriced_turns > 0; render "unpriced" (ideally
+// with the count) rather than implying $0.00 is the true cost.
+export type TaskCostBucket = {
+  tokens: TaskTokenTotals;
+  actions_count: number;
+  cost_usd: number;
+  unpriced_turns: number;
+  unpriced: boolean;
+};
+
+// TaskReportItem is one task's full lifecycle + cost row (Go: ReportItem).
+export type TaskReportItem = {
+  key: string;
+  key_kind: "native_id" | "content_hash";
+  content: string;
+  active_form?: string;
+  owner?: string;
+  status: string;
+  raw_status?: string;
+  order: number;
+  unmatched: boolean;
+  // never_activated / still_open / elapsed_seconds / terminal_status /
+  // first_in_progress_unix / terminal_at_unix mirror taskflow.TaskSummary
+  // (docs/task-tracking.md "Honesty caveats"): a task can close without
+  // ever passing through in_progress (never_activated), or still be open
+  // at measurement time (still_open, elapsed so far — never a fabricated
+  // completion).
+  never_activated: boolean;
+  still_open: boolean;
+  elapsed_seconds: number;
+  terminal_status?: string;
+  first_in_progress_unix?: number;
+  terminal_at_unix?: number;
+} & TaskCostBucket;
+
+// SessionTaskReport is GET /api/session/<id>/tasks's payload.
+export type SessionTaskReport = {
+  session_id: string;
+  /** Usage captured in the main attribution scope; sidechain is separate. */
+  token_usage_available?: boolean;
+  // has_tasks gates the calm empty state — most sessions (measured ~80%)
+  // never used a task tool at all. This is the majority case, not a
+  // degraded state.
+  has_tasks: boolean;
+  items?: TaskReportItem[];
+  // between_tasks / shared are the two non-per-task buckets a surface must
+  // render as first-class rows, never a rounding residual — only ~52% of a
+  // session's tokens are attributable to one specific task on average.
+  between_tasks: TaskCostBucket;
+  shared: TaskCostBucket;
+  // sidechain is present only when a sub-agent contributed usage AND
+  // include_sidechains is false (the default) — reported as its own
+  // separate total, never folded into whichever task happened to be open.
+  sidechain?: TaskCostBucket | null;
+  // unmatched_count is the "N items could not be matched" substrate.
+  // all_keys_native tells a surface whether to suppress that caveat
+  // entirely — a genuinely keyed tool never loses an item to a wording
+  // change.
+  unmatched_count: number;
+  all_keys_native: boolean;
+  // match_mode / concurrent_attribution / include_sidechains echo the
+  // [tasks] config this report was computed under.
+  match_mode: string;
+  concurrent_attribution: string;
+  include_sidechains: boolean;
+  // cost_note is the fixed "list pricing, never a billed amount"
+  // disclaimer, populated whenever this report carries any cost figure —
+  // render it verbatim.
+  cost_note?: string;
+};
+
+// ToolTaskRollup is one tool's slice of a TaskRollup.
+export type ToolTaskRollup = {
+  tool: string;
+  sessions: number;
+  tasks: number;
+  cost_usd: number;
+  // unpriced_turns mirrors TaskCostBucket.unpriced_turns at tool
+  // granularity: the exact count of rows folded into this tool's
+  // cost_usd that had neither a recorded provider cost nor a
+  // pricing-table entry for its model — cost_usd is a known
+  // under-count by at least that many turns. unpriced (kept for
+  // back-compat) is simply unpriced_turns > 0.
+  unpriced_turns: number;
+  unpriced: boolean;
+};
+
+export type TaskLifecycleCounts = {
+  created: number;
+  completed: number;
+  cancelled: number;
+  never_activated: number;
+  still_open: number;
+  unmatched: number;
+  all_sessions_keys_native: boolean;
+};
+
+// TaskRollup is GET /api/tasks's payload — a project/tool/window aggregate.
+export type TaskRollup = {
+  since_unix?: number;
+  until_unix?: number;
+  project_id?: number;
+  // project_root / tool echo the string-keyed filters (project root
+  // path / session tool) a caller passed to GET /api/tasks — the
+  // dashboard's global project filter never resolves to a numeric id.
+  project_root?: string;
+  tool?: string;
+  sessions_with_tasks: number;
+  attributed_single: TaskCostBucket;
+  between_tasks: TaskCostBucket;
+  shared: TaskCostBucket;
+  counts: TaskLifecycleCounts;
+  by_tool: ToolTaskRollup[];
+  cost_note?: string;
 };
 
 // Output Composition (Verbosity) — GET /api/session/<id>/verbosity.
@@ -1151,15 +2155,15 @@ export type CacheOverviewResponse = {
 
 export type CacheTimeseriesPoint = {
   bucket: string;
+  t: number;
   read_tokens: number;
   written_tokens: number;
   event_count: number;
   rewrite_count: number;
 };
 
-export type CacheTimeseriesResponse = {
+export type CacheTimeseriesResponse = BucketMeta & {
   metric: "cache";
-  bucket: "day";
   days: number;
   series: CacheTimeseriesPoint[];
 };
@@ -1180,7 +2184,11 @@ export type CacheHealthSummary = {
   max_rate_threshold: number;
   gate_passed: boolean;
   bucket_mispredicts: number;
+  /** Denominator for bucket_mispredicts (events carrying a prediction). */
+  predicted_events?: number;
   inconsistent_rewrite_count: number;
+  /** Denominator for inconsistent_rewrite_count (rewrite events). */
+  rewrite_events?: number;
   dominant_cause?: CacheHealthDominantCause;
   // Count of non-Anthropic api_turns rows over the last 7 days —
   // the proxy captured them (cost / tokens / model attribution all
@@ -1249,6 +2257,274 @@ export type CacheStatusResponse = {
   enabled: boolean;
   keepwarm_mode: "off" | "advise" | "enforce";
   windows: CacheWindowStatus[] | null;
+};
+
+// ---------- /api/cloud/status + /api/cloud/session/<id> ----------
+//
+// Cloud Intelligence (Signed-in Free spine). Node-local state ONLY — nothing
+// here reflects hosted-service state. sign_in is the LOCAL credential presence
+// (a keychain read the daemon does through an injected seam, never a network
+// call); it is absent when the dashboard runs without that seam. See plan §6
+// CI-P5 and internal/intelligence/dashboard/cloud_account.go.
+
+// CloudSignInView is the `sign_in` block on /api/cloud/status.
+export type CloudSignInView = {
+  // known=false ⇒ the probe is unwired or failed (error set); presence
+  // fields are then meaningless.
+  known: boolean;
+  error?: string;
+  // Derived headline: a WorkOS sign-in OR an API token is stored locally.
+  signed_in: boolean;
+  api_token_present: boolean;
+  workos_sign_in_present: boolean;
+  credential_backend?: string;
+  // A WorkOS client id resolves (WORKOS_CLIENT_ID env, else
+  // [cloud].workos_client_id). Without one Sign in cannot start.
+  client_id_configured: boolean;
+  login_running: boolean;
+  // The Sign in / Sign out routes are wired (a subprocess runner exists).
+  actions_available: boolean;
+};
+
+// CloudLoginState is GET /api/cloud/login/state (and the POST /api/cloud/login
+// response): the one-at-a-time `observer cloud login` subprocess.
+export type CloudLoginState = {
+  running: boolean;
+  // The AuthKit authorize URL captured from the child's output, once printed —
+  // the manual fallback when the automatic browser open does not reach you.
+  auth_url?: string;
+  finished: boolean;
+  ok: boolean;
+  message?: string;
+  started_at?: string;
+  finished_at?: string;
+};
+
+export type CloudLogoutResponse = {
+  ok: boolean;
+  message?: string;
+};
+
+// CloudSyncState is GET /api/cloud/sync/state (and the POST /api/cloud/sync
+// response): the one-at-a-time `observer cloud sync` subprocess — the
+// dashboard equivalent of the CLI verb.
+export type CloudSyncState = {
+  session_id?: string;
+  running: boolean;
+  started_at?: string;
+  finished_at?: string;
+  // Absent/null until the run finishes (never run yet, or still running).
+  ok?: boolean | null;
+  exit_error?: string;
+  // Last ~2KB of the child's combined stdout+stderr.
+  tail?: string;
+  // Store-derived — the newest synced enrichment result's received_at, the
+  // same fact CloudStatusResponse.last_result_at reports.
+  last_result_at?: string;
+};
+
+// CloudConfigView mirrors the editable [cloud] keys as GET /api/config
+// reports them (Go field names) and PUT /api/config/section/cloud accepts.
+export type CloudConfigView = {
+  BaseURL: string;
+  LoginPort: number;
+  AutoSync: boolean;
+  AutoSyncIntervalMinutes: number;
+  AutoEnrich: boolean;
+  WorkOSClientID: string;
+};
+
+export type CloudStatusResponse = {
+  // active is store-derived (any receipt / outbox item / result / cursor), NOT
+  // a sign-in state. false drives the honest optional-feature empty copy.
+  active: boolean;
+  receipts_total: number;
+  receipts_live: number;
+  // Every outbox state → count, incl. reconfirmation_required and terminals.
+  outbox_by_state: Record<string, number>;
+  outbox_total: number;
+  // pending + failed_retryable subset (the manual drain set).
+  sendable_count: number;
+  results_total: number;
+  last_result_at?: string;
+  has_synced: boolean;
+  // Always false this arc — allowance is server-reported at sync, never stored
+  // node-side, so the UI shows an honest placeholder.
+  allowance_known: boolean;
+  descriptor: string;
+  // Local sign-in presence; absent when the account seam is not wired.
+  sign_in?: CloudSignInView | null;
+};
+
+export type CloudOutboxView = {
+  id: string;
+  state: string;
+  retry_count: number;
+  last_error?: string;
+  receipt_id: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CloudReceiptView = {
+  id: string;
+  purpose?: string;
+  invalidated: boolean;
+  created_at?: string;
+};
+
+export type CloudOverrideView = {
+  user_value: string;
+  updated_at?: string;
+};
+
+export type CloudResultView = {
+  schema_version?: string;
+  received_at?: string;
+  model_route?: string;
+  // The AI-suggested session_enrichment payload (title, taxonomy_tags,
+  // suggested_tags, description, …), passed through as raw JSON.
+  result: {
+    title?: string;
+    taxonomy_tags?: string[];
+    suggested_tags?: string[];
+    description?: string;
+    confidence?: string;
+    // limitations enumerates what the enrichment did NOT observe; evidence_refs
+    // are identifiers into the evidence envelope the result cites. Both are
+    // ordinary string lists per internal/cloudcontract/result.go, but rendered
+    // defensively (never raw JSON) in case an older/foreign payload nests an
+    // object per entry instead.
+    limitations?: string[];
+    evidence_refs?: unknown[];
+    // The five NARRATIVE lists (internal/cloudcontract/result.go): what the
+    // session did, whether the stated plans landed, what is broken, what
+    // failed or is unresolved, and what to do next. All optional - a result
+    // stored before these fields existed simply has none of them.
+    work_done?: string[];
+    plans_implemented?: string[];
+    issues_found?: string[];
+    failures?: string[];
+    next_steps?: string[];
+    [k: string]: unknown;
+  };
+  // field → user edit; the user value always wins visually.
+  overrides?: Record<string, CloudOverrideView>;
+};
+
+export type CloudSessionResponse = {
+  progress?: CloudEnrichmentProgress;
+  session_id: string;
+  // The pseudonym (e.g. "cs_...") this device already minted for the session
+  // in the node-local cloud_session_map, if any — the ONLY identifier the
+  // cloud service itself ever sees for this session. Absent when the session
+  // has never been enrolled for cloud enrichment; a GET never mints one.
+  cloud_session_id?: string;
+  authority: string;
+  authority_version?: number;
+  eligible: boolean;
+  excluded: boolean;
+  excluded_reason?: string;
+  receipts: CloudReceiptView[];
+  outbox: CloudOutboxView[];
+  result?: CloudResultView | null;
+};
+
+export type CloudEnrichmentProgress = {
+  state: string;
+  last_error?: string;
+  updated_at?: string;
+};
+
+// ---------- Cloud actions: preview / consent / grants / delete-account ----------
+//
+// The session-card and Settings controls behind every remaining
+// `observer cloud` CLI verb (operator directive: every verb needs a
+// dashboard equivalent). Every one of these runs the identical consent-gated
+// CLI as a bounded subprocess through CloudCommandRunner — see
+// internal/intelligence/dashboard/cloud_account.go's header comment for the
+// zero-egress invariant these routes preserve.
+
+// CloudPurpose is the closed two-value consent-purpose vocabulary a preview
+// or consent call names. "Title only" in the UI == structural_activity_insights
+// alone; "Title, tags and description" == bounded_context_enrichment (which
+// always implies and includes the structural purpose too).
+export type CloudPurpose =
+  | "structural_activity_insights"
+  | "bounded_context_enrichment";
+
+// CloudPreviewResponse is POST /api/cloud/preview: `cloud preview --session
+// <id> --purpose <p>` run synchronously (bounded 90s, local-only — no
+// network, so this never refuses on sign-in state). output is the child's
+// combined stdout+stderr, capped at 256 KiB keeping the HEAD; truncated says
+// whether the cap was hit.
+export type CloudPreviewResponse = {
+  upload_digest?: string;
+  ok: boolean;
+  output: string;
+  exit_error?: string;
+  truncated: boolean;
+};
+
+// CloudActionResponse is the shape shared by the simple one-shot action
+// verbs (consent grant, consent revoke, delete-account): `cloud <verb> …`
+// run synchronously.
+export type CloudActionResponse = {
+  ok: boolean;
+  output: string;
+  exit_error?: string;
+};
+
+// CloudConsentResponse is POST /api/cloud/consent: computes the purpose SET
+// for the chosen purpose (structural → itself alone; bounded → itself plus
+// structural), grants any missing standing receipt in that set when
+// grant_standing is true, then records the session-scoped consent. granted
+// lists only the purposes that newly received a standing grant during this
+// call (already-live ones are not repeated here).
+export type CloudConsentResponse = {
+  ok: boolean;
+  output: string;
+  exit_error?: string;
+};
+
+// CloudConsentMissingError is the 409 JSON body when consent was posted with
+// grant_standing:false but at least one purpose in the set has no live
+// standing receipt yet.
+export type CloudConsentMissingError = {
+  error: "standing_grant_missing";
+  missing: string[];
+};
+
+// CloudGrantMode mirrors store.CloudGrantMode's two values the way
+// `observer cloud consent list` prints them; an empty/unset mode reads as
+// per_upload.
+export type CloudGrantMode = "standing" | "per_upload";
+
+// CloudConsentGrantRow is one consent RECEIPT already on this device
+// (GET /api/cloud/consent/grants "receipts", from store.ListCloudConsentReceipts).
+export type CloudConsentGrantRow = {
+  id: string;
+  purpose: string;
+  mode: CloudGrantMode;
+  created_at: string;
+  review_at?: string;
+  invalidated_at?: string | null;
+  live: boolean;
+};
+
+// CloudGrantable is one purpose this device COULD grant standing consent
+// for (cloudgateway.StandingGrantable), with an honest reason when it
+// cannot — never fabricated, shown as locked with `reason` in the UI.
+export type CloudGrantable = {
+  purpose: string;
+  ok: boolean;
+  reason?: string;
+};
+
+// CloudGrantsResponse is GET /api/cloud/consent/grants.
+export type CloudGrantsResponse = {
+  receipts: CloudConsentGrantRow[];
+  grantable: CloudGrantable[];
 };
 
 // ---------- /api/cache/events ----------
@@ -1345,7 +2621,17 @@ export type ActionFullText = {
   raw_tool_output?: string;
 };
 
+export type ToolAccountEvidence = {
+  key: string; email?: string; name?: string; account_id?: string;
+  source: string; scope: string; stage: string; observed_at: string;
+};
+export type MessageAccount = {
+  status: "observed" | "unknown" | "conflict";
+  label: string;
+  evidence: ToolAccountEvidence[];
+};
 export type MessageRow = {
+  account?: MessageAccount;
   // seq is the row's 1..N ordinal in CHRONOLOGICAL order, assigned
   // server-side over the whole timeline. Stable across pagination and
   // across any sort_by reordering — the "#" column renders it (a
@@ -1369,18 +2655,18 @@ export type MessageRow = {
   cost_usd: number;
   ai_cost_usd: number;
   tool_cost_usd: number;
+  // Timing figures, all sessionmsg.TimingWire (the SAME projection the org
+  // drawer serves). elapsed_ms is the gap to the NEXT row - a timeline
+  // figure, never a Tok/s denominator; response_ms the capture-recorded
+  // request duration; tps_* render ONLY through @shared/lib/speed.
   elapsed_ms?: number;
-  // tps_ms is the denominator the Tok/s column divides output by — the
-  // best available timing source the backend picked (see tps_basis).
-  // Absent when no source applies (e.g. a single-inference non-proxied
-  // codex turn) → Tok/s shows "—".
+  response_ms?: number;
+  tps_tokens?: number;
   tps_ms?: number;
-  // tps_basis names which timing source tps_ms came from, for the Tok/s
-  // tooltip: "measured" (proxy total_response_ms — the real per-call
-  // wall-clock), "intra-turn" (MAX−MIN of a codex user-turn's
-  // per-inference timestamps), or "elapsed" (gap-to-next-message, the
-  // claude-code fallback).
-  tps_basis?: "measured" | "intra-turn" | "elapsed";
+  tps_basis?: import("@shared/lib/speed").TpsBasis;
+  tps_timed_calls?: number;
+  tps_calls?: number;
+  tps_suppressed?: import("@shared/lib/speed").TpsSuppressed;
   tool_duration_ms?: number;
   tool_call_count: number;
   // Per-turn reasoning effort — codex collaboration_mode.settings
@@ -1398,16 +2684,83 @@ export type MessageRow = {
   // carries the 2x FastMultiplier premium. Renders a FAST badge.
   fast?: boolean;
   tool_calls: ToolCallRow[];
+  // attachments records the files/images/audio the USER attached to this
+  // prompt turn (Issue 1, migration 126). PRESENCE + KIND (+ optional
+  // media_type) only — never a filename or bytes. Absent/empty on non-user
+  // turns and on adapters that don't capture attachments; the Att column
+  // renders "-" in that case.
+  attachments?: MessageAttachment[];
+  // Status readings (a rate_limit snapshot) folded onto this message instead
+  // of rendering as rows of their own: sessionmsg.StatusWire (the SAME
+  // projection the org drawer serves). Only changed readings travel.
+  status_events?: import("@shared/lib/statusEvents").StatusEventLike[];
+  status_event_count?: number;
+};
+
+// MessageAttachment is one user-attachment's metadata: a coarse kind
+// (image | file | audio) and an optional IANA media_type. No filename and
+// no bytes, by construction (Issue 1 privacy rule).
+export type MessageAttachment = {
+  kind: string;
+  media_type?: string;
 };
 
 // NOTE: envelope key is `messages` (not `rows`) — different from
 // /api/sessions and /api/actions. Confirmed in dashboard.go:1357.
 export type SessionMessages = {
+  account_summary?: { accounts: ToolAccountEvidence[]; observed: number; unknown: number; conflicts: number };
   session_id: string;
   messages: MessageRow[];
   total: number;
   limit: number;
   offset?: number;
+};
+
+// ---------- /api/session/<id>/guard ----------
+// One row per hook policy verdict recorded for this session
+// (store.LoadGuardEventsForSessionWithMessageAnchor — unbounded time
+// window; guard verdicts are low-volume by design, allow verdicts never
+// persist). Mirrors the dashboard's guardEventJSON
+// (internal/intelligence/dashboard/guard.go). DEFAULT-FILTERED server-side
+// to BLOCKS — enforced OR decision deny/ask — TOOL-CALL AND PROMPT-GUARD
+// VERDICTS ALIKE (operator decision 2026-09-21, superseding the prior
+// design which excluded prompt-guard rows entirely). The Messages tab's
+// GuardVerdictsStrip (MessagesTab.tsx) renders a distinct "prompt guard"
+// label for rows where event_kind=="user_prompt" or rule_id is R-172
+// (secrets) / R-190 (PII); everything else renders as a tool-call verdict.
+// Informational flag/unenforced rows stay dropped by default. Pass
+// ?include_flags=1 for the full unfiltered history. Feeds the Messages
+// tab's inline guard interleave via @shared/lib/guardMessages: message_id
+// is resolved SERVER-SIDE from action_id via a LEFT JOIN onto actions
+// (~99% of tool-call rows resolve one; prompt-guard rows have no action_id
+// and fall back to nearest-timestamp placement) and is the exact anchor
+// that function matches against a rendered MessageRow's own message_id.
+// `ts` is full RFC3339Nano precision, load-bearing for that same-second
+// fallback order.
+export type SessionGuardEvent = {
+  id: number;
+  ts: string;
+  action_id?: number;
+  api_turn_id?: number;
+  message_id?: string;
+  turn_index?: number;
+  tool?: string;
+  event_kind?: string;
+  rule_id: string;
+  category?: string;
+  severity?: string;
+  decision?: string;
+  degraded_from?: string;
+  enforced: boolean;
+  source?: string;
+  reason?: string;
+  target_excerpt?: string;
+  taint_origin?: string;
+};
+
+export type SessionGuardEventsResponse = {
+  events: SessionGuardEvent[] | null;
+  count: number;
 };
 
 // ---------- /api/session/<id>/raw-events ----------
@@ -1538,12 +2891,18 @@ export type DiscoverResponse = {
 
 // ---------- /api/patterns ----------
 
+// PatternType - project_patterns.pattern_type, the closed set in
+// internal/intelligence/patterns/patterns.go (TypeHotFile ...
+// TypeKnowledgeSnippet). Was "cs_change" / "command" until 2026-09-28,
+// which never matched what the API sends.
 export type PatternType =
   | "hot_file"
-  | "cs_change"
+  | "co_change"
+  | "common_command"
   | "edit_test_pair"
-  | "knowledge_snippet"
-  | "command";
+  | "onboarding_sequence"
+  | "cross_tool_file"
+  | "knowledge_snippet";
 
 export type PatternRow = {
   project: string;
@@ -1563,12 +2922,14 @@ export type PatternsResponse = {
 // ---------- /api/patterns/timeseries ----------
 
 export type PatternsTimeseriesPoint = {
+  // The bucket key (historical name): a day key at 1d, RFC3339 sub-day.
   day: string;
+  t: number;
   total: number;
   by_type: Record<string, number>;
 };
 
-export type PatternsTimeseries = {
+export type PatternsTimeseries = BucketMeta & {
   days: number;
   points: PatternsTimeseriesPoint[];
 };
@@ -1646,6 +3007,7 @@ export type CompressionMechStats = {
 
 export type CompressionTimeseriesPoint = {
   bucket: string;
+  t: number;
   by_mechanism: Record<string, CompressionMechStats>;
   total_saved_bytes: number;
   total_saved_usd_est: number;
@@ -1655,7 +3017,7 @@ export type CompressionTimeseriesPoint = {
   total_evicted_bytes: number;
 };
 
-export type CompressionTimeseries = {
+export type CompressionTimeseries = BucketMeta & {
   metric: "compression_events";
   days: number;
   series: CompressionTimeseriesPoint[];
@@ -1773,14 +3135,40 @@ export type SetupCodex = {
 
 // ---------- /api/tools/breakdown ----------
 
+// Capture-depth honesty block (taxonomy plan §4). expressible_categories
+// is 0 AND vocabulary_declared false when tooltax has no rows for the
+// tool — an honest "not mapped", not "expresses nothing".
+export type ToolBreakdownCoverage = {
+  observed_categories: number;
+  expressible_categories: number;
+  // How many observed categories fall OUTSIDE the declared vocabulary.
+  // observed_categories can exceed expressible_categories (the shared
+  // mcp__ rule and harness failure/meta events belong to no adapter's
+  // declared vocabulary), so the two are never a ratio — this key is
+  // what explains the excess. See lib/actions.ts::coverageCaption.
+  observed_beyond_declared: number;
+  canonical_categories: number;
+  vocabulary_declared: boolean;
+};
+
 export type ToolBreakdown = {
   tool: string;
   total: number;
   by_type: Record<string, number>;
+  // Canonical taxonomy dimensions, computed server-side through
+  // internal/tooltax at query time (never stored). by_surface is keyed on
+  // the canonical surfaces plus "unresolved" for rows whose native tool
+  // name did not resolve.
+  by_category: Record<string, number>;
+  by_surface: Record<string, number>;
+  coverage: ToolBreakdownCoverage;
 };
 
 export type ToolsBreakdownResponse = {
   days: number;
+  // The canonical key spaces, in tooltax display order.
+  categories: string[];
+  surfaces: string[];
   tools: ToolBreakdown[];
 };
 
@@ -1804,7 +3192,6 @@ export type ModelPricing = {
 };
 
 export type IntelligenceConfig = {
-  CodeGraph: { Enabled: boolean };
   Pricing: { Models: Record<string, ModelPricing> };
   APIKeyEnv: string;
   SummaryModel: string;
@@ -1851,6 +3238,26 @@ export type ConfigResponse = {
   // Every resolvable compression profile — built-ins + user profiles
   // (P3.4). Dynamic option source for the Settings Profiles selects.
   profile_names?: string[];
+  // T2 credential redaction (config plan §4.3 / P0-1). The daemon never
+  // sends credential VALUES: [selfobs].secret, [selfobs].token,
+  // [observer.process.etw].token and [routing].key_pool come back as
+  // redacted_sentinel instead. This map is dotted config path → whether a
+  // value is configured there, so a surface that wants to mention a
+  // credential renders a read-only "credential configured" state from the
+  // boolean and never an editable control. Writing a credential is refused
+  // with 403; sending the sentinel back preserves what is on disk.
+  redacted_secrets?: Record<string, boolean>;
+  // The exact placeholder substituted above, so nothing has to hardcode it.
+  redacted_sentinel?: string;
+  // Optimistic-concurrency base for PUT /api/config/keys: sha256 of the
+  // file bytes as served. A stale value gets a 409 naming the diverged keys
+  // (dashboard-config-management plan §2.4).
+  config_etag?: string;
+  // Double-submit confirm token the sensitive-tier (T1) keys must echo in
+  // X-Observer-Confirm on PUT /api/config/keys.
+  confirm_token?: string;
+  // Wire-shape version of GET /api/config/schema this daemon serves.
+  schema_version?: number;
 };
 
 // GET /api/tools/status — the Connected-tools matrix (P4.1). One row
@@ -1859,6 +3266,10 @@ export type ConfigResponse = {
 export type ToolProbe = {
   registered: boolean;
   partial?: boolean;
+  /** Hooks only (T-400): no hook surface Observer registers; detail says why. */
+  no_hooks?: boolean;
+  /** Hooks only (T-400): a hook surface this panel does not dry-run; detail says why. */
+  unprobed?: boolean;
   detail?: string;
 };
 
@@ -1872,11 +3283,44 @@ export type ToolStatusRow = {
   hooks?: ToolProbe;
   mcp?: ToolProbe;
   proxy?: ToolProbe;
+  /** The setup / removal actions the dashboard offers (absent: none). */
+  wiring?: ToolWiring;
+};
+
+/** One integration's actions for a tool (GET /api/tools/status wiring). */
+export type ToolWiringPart = { register: boolean; remove: boolean; note?: string };
+
+/** T-421: which wizard steps a tool has, from the same predicates the CLI uses. */
+export type ToolWiring = {
+  hooks: ToolWiringPart;
+  mcp: ToolWiringPart;
+  route: ToolWiringPart;
+  route_endpoint?: string;
+  /** T-537: point the tool's own OTLP exporter at this node (opt-in). */
+  telemetry?: ToolWiringPart;
 };
 
 export type ToolsStatusResponse = {
   tools: ToolStatusRow[];
   generated_at: string;
+  // Invariant #51 diagnostic: compiled-in default adapters absent from
+  // this operator's EXPLICIT [observer.watch] enabled_adapters array in
+  // config.toml (distinct from a non-default tool, or a default the
+  // operator deliberately disabled — those show up per-row via
+  // ToolStatusRow.enabled === false but never land here). Computed by
+  // the same pure diff the `observer config adopt-defaults` CLI and the
+  // daemon's own startup WARN already use, so this can never disagree
+  // with them. Empty/absent means nothing is missing.
+  missing_default_adapters?: string[];
+  // The exact one-line fix, present only when missing_default_adapters
+  // is non-empty: `observer config adopt-defaults --write`.
+  missing_default_remediation?: string;
+  // Set only when config.toml's enabled_adapters array exists but could
+  // not be safely diffed (a hand-authored shape the adopt-defaults
+  // editor refuses to touch) — missing_default_adapters is empty in
+  // that case too, and this note is what distinguishes "confirmed
+  // nothing missing" from "couldn't tell."
+  missing_default_note?: string;
 };
 
 // GET /api/mcp/value — the MCP value meter (P4.10). Mirrors the
@@ -1912,6 +3356,110 @@ export type ToolLaunchResponse = {
   detail?: string;
 };
 
+// Command wrapping (backlog item 7): GET /api/shell-wrap/status, POST
+// /api/shell-wrap/apply and /api/shell-wrap/disable. Mirrors
+// internal/shellwrap.Status and internal/shellwrapsvc.Outcome (Go embeds the
+// candidate / on-disk fields, so they arrive flattened). Go nil slices
+// arrive as null - read every array with `?? []`.
+export type ShellWrapHonesty = "routed" | "proof_owed" | "launch_only" | "conditional";
+export type ShellWrapShell = "bash" | "zsh" | "fish" | "powershell";
+export type ShellWrapTool = {
+  id: string;
+  label: string;
+  kind: "terminal" | "gui";
+  wrapped: string;
+  commands: string[] | null;
+  routes: boolean;
+  traffic_proven: boolean;
+  honesty: ShellWrapHonesty;
+  honesty_text: string;
+  // Where the real program runs: the target OS ("host") or, on the Windows
+  // target of a WSL daemon, inside the distro ("wsl"). `where` explains a
+  // bridge row; absent on a native target.
+  side?: "host" | "wsl";
+  where?: string;
+  bridge_env?: string[] | null;
+  selected: boolean;
+  installed?: boolean;
+  active: string[] | null;
+  stale?: string[] | null;
+};
+// A target the card can manage: the daemon's own shells, or (inside WSL) the
+// Windows shells of the same machine (T-419). Mirrors shellwrapsvc.TargetInfo.
+export type ShellWrapTargetId = "" | "windows";
+export type ShellWrapTarget = {
+  id: ShellWrapTargetId;
+  label: string;
+  goos: string;
+  available: boolean;
+  reason?: string;
+  home?: string;
+  distro?: string;
+  enabled: boolean;
+};
+export type ShellWrapRCFile = {
+  path: string;
+  shell: ShellWrapShell | "";
+  exists: boolean;
+  has_block: boolean;
+  error?: string;
+  wanted: boolean;
+  current: boolean;
+};
+export type ShellWrapStatus = {
+  goos: string;
+  bridge?: { distro: string } | null;
+  enabled: boolean;
+  shim_dir: string;
+  observer_path: string;
+  shells: ShellWrapShell[] | null;
+  detected_shells: ShellWrapShell[] | null;
+  planned_shells: ShellWrapShell[] | null;
+  active: boolean;
+  in_sync: boolean;
+  tools: ShellWrapTool[] | null;
+  rc: ShellWrapRCFile[] | null;
+  orphans: { file_name: string; path: string; tool_id: string; command: string }[] | null;
+  warnings: string[] | null;
+  // unavailable lists the advertised rows with no command to wrap on this
+  // target, each with its reason (shellwrap.Unavailable, T-492).
+  unavailable?: ShellWrapUnavailable[] | null;
+};
+export type ShellWrapUnavailable = {
+  id: string;
+  label: string;
+  kind: "terminal" | "gui";
+  reason: string;
+  hint?: string;
+};
+export type ShellWrapStatusResponse = {
+  confirm_token: string;
+  status: ShellWrapStatus;
+  target?: ShellWrapTargetId;
+  targets?: ShellWrapTarget[] | null;
+};
+export type ShellWrapChange = {
+  path: string;
+  target?: string;
+  kind: "shim" | "rc" | "dir";
+  action: "create" | "update" | "delete" | "unchanged";
+  shell?: string;
+  detail?: string;
+};
+export type ShellWrapOutcome = {
+  dry_run: boolean;
+  plan: {
+    shim_dir: string;
+    tools: (ShellWrapTool & { shimmed: string[] | null; conflicts?: string[] | null })[] | null;
+    shells: ShellWrapShell[] | null;
+    warnings: string[] | null;
+  };
+  changes: ShellWrapChange[] | null;
+  config_path: string;
+  notes: string[] | null;
+  status: ShellWrapStatus;
+};
+
 // GET /api/health/doctor — the `observer doctor` checks (P4.8).
 export type DoctorReport = {
   checks: {
@@ -1919,6 +3467,9 @@ export type DoctorReport = {
     status: "ok" | "warn" | "fail";
     message: string;
     details?: string[];
+    // T-421: the check's structured fixes, each with the command the CLI
+    // text quotes and the in-app control the Health page links to.
+    remediations?: DoctorRemediation[];
   }[];
   ok: number;
   warn: number;
@@ -1972,15 +3523,33 @@ export type CodexHookTrust = {
     | "no_hooks"
     | "config_missing"
     | "needs_trust"
+    | "needs_register"
     | "all_trusted"
     | "feature_disabled";
   hooks_file?: string;
   config_file?: string;
   registered_events?: string[];
   trusted_events?: string[];
+  // Every present entry codex will not run (untrusted, modified, disabled).
   untrusted_events?: string[];
+  modified_events?: string[];
+  disabled_events?: string[];
+  missing_events?: string[];
+  // Per-event state table (internal/codextrust): one row per event
+  // Observer registers, plus any stale Observer entry.
+  entries?: CodexHookTrustEntry[];
+  // False when no recorded trust hash reproduces (a codex release that
+  // hashes differently): a changed entry then reads as trusted.
+  hash_verified: boolean;
   feature_flag_enabled: boolean;
   instruction?: string;
+};
+
+export type CodexHookTrustEntry = {
+  event: string;
+  key?: string;
+  state: "trusted" | "untrusted" | "modified" | "disabled" | "missing";
+  expected: boolean;
 };
 
 // GET /api/config/profiles/<name> — one profile resolved against the
@@ -1990,6 +3559,8 @@ export type ProfileShowResponse = {
   builtin: boolean;
   editable: boolean;
   raw: string;
+  /** `observer profile show`'s body: TOML with the config's own key names. */
+  resolved_toml?: string;
   resolved: {
     Conversation?: {
       Mode?: string;
@@ -2019,10 +3590,62 @@ export type CostPricing = {
   long_context_cache_creation?: number;
   long_context_cache_creation_1h?: number;
   web_search_per_request?: number;
+  // peak is the model's peak/off-peak variant (`cost.Pricing.Peak`),
+  // absent for the vast majority of models. When present the base
+  // rates above are the OFF-PEAK rates and `peak` carries the
+  // expensive-window rate set plus the schedule that selects it. See
+  // internal/intelligence/cost/peak.go.
+  peak?: PeakRates;
+};
+
+// PeakWindow mirrors `cost.PeakWindow` — one recurring UTC time window.
+// `days` is 0=Sun..6=Sat (Go's time.Weekday numbering); `start_utc` /
+// `end_utc` are "HH:MM" 24h, half-open [start, end).
+export type PeakWindow = {
+  days: number[];
+  start_utc: string;
+  end_utc: string;
+};
+
+// PeakSchedule mirrors `cost.PeakSchedule` — an ordered set of windows.
+export type PeakSchedule = {
+  windows: PeakWindow[];
+};
+
+// PeakRates mirrors `cost.PeakRates` — Go embeds `RateSet` anonymously
+// so its fields flatten into this object alongside `schedule`, rather
+// than nesting under a `rate_set` key.
+export type PeakRates = {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+  cache_creation_1h: number;
+  long_context_threshold?: number;
+  long_context_input?: number;
+  long_context_output?: number;
+  long_context_cache_read?: number;
+  long_context_cache_creation?: number;
+  long_context_cache_creation_1h?: number;
+  schedule: PeakSchedule;
+};
+
+// DatedCostPricing is one rate period in a model's historical rate
+// timeline — `cost.DatedPricing` on the wire: a `cost.Pricing` (see
+// CostPricing above) plus the `effective_from` instant the rate took
+// hold. The zero value ("0001-01-01T00:00:00Z", Go's time.Time zero)
+// means "since forever" — the oldest period in a timeline.
+export type DatedCostPricing = CostPricing & {
+  effective_from: string;
 };
 
 export type PricingDefaultsResponse = {
   defaults: Record<string, CostPricing>;
+  // The baked-in HISTORICAL rate timelines, keyed like `defaults`.
+  // Only present for models whose price actually changed — absent or
+  // empty on a stock build with no dated entries. See
+  // internal/intelligence/cost/dated.go.
+  dated_defaults?: Record<string, DatedCostPricing[]>;
 };
 
 export function costPricingToConfig(p: CostPricing): ModelPricing {
@@ -2096,11 +3719,41 @@ export type EnrolmentStatus = {
   enrolled: boolean;
   org_id?: string;
   org_name?: string;
+  /** Display name (never an id); see orgDisplayLabel in lib/orgName.ts. */
+  org_display?: string;
   org_server_url?: string;
   user_email?: string;
   enrolled_at?: string;
   credential_store?: string;
   last_push?: EnrolmentLastPush | null;
+  // push_paused is present ONLY while the oversized-batch circuit is open: the
+  // composed rollup exceeded the accepted push limit, so the push loop is
+  // parked and nothing is reaching the org server. Absent is the normal case.
+  push_paused?: EnrolmentPushPaused | null;
+};
+
+// EnrolmentPushPaused is the open oversized-batch circuit. `reason` is the
+// underlying serialized-bytes-vs-limit diagnostic; `until` is when the push
+// loop retries (RFC3339).
+export type EnrolmentPushPaused = {
+  reason?: string;
+  until: string;
+};
+
+// EnrolmentInvite is POST /api/enrolment/invite. The org server mints a
+// one-time enrolment token for a teammate who is ALREADY a member of the org;
+// `command` is the paste-ready enroll line. The token is shown once and is
+// never stored node-side — the org server holds only its argon2id hash.
+// minted_this_month / monthly_cap report the caller's per-member allowance.
+export type EnrolmentInvite = {
+  token: string;
+  token_id: string;
+  user_email: string;
+  expires_at: string;
+  org_url: string;
+  minted_this_month: number;
+  monthly_cap: number;
+  command: string;
 };
 
 // --- Advisor (suggestions engine, spec §15.7) ---
@@ -2356,9 +4009,13 @@ export type SessionLaunchResponse = {
   token: string;
   subcommand: string;
   session_id: string;
-  // Additive/optional (review finding 8): whether the launched terminal was
-  // given a project root, so the dock can enable Files/Git immediately without
-  // waiting for a /api/launch/sessions rehydrate. Absence ≡ false.
+  // Additive/optional (review finding 8): whether the launched terminal has a
+  // browsable directory on this machine, so the dock can enable Files/Git
+  // immediately without waiting for a /api/launch/sessions rehydrate. Since the
+  // 2026-08-28 ruling this is true for a default-cwd launch too (the panel then
+  // serves the terminal's working directory and labels it as such); it is false
+  // only when there is nothing local to browse, e.g. an SSH terminal.
+  // Absence ≡ false.
   has_project_root?: boolean;
 };
 
@@ -2376,6 +4033,415 @@ export type ToolPreflight = {
   notes?: string[];
   install_command?: string;
   can_install: boolean;
+  /**
+   * The honest-zero companion to `install_command` (audit DI-03): the grounded
+   * REASON there is no guided install for this tool on this OS. The server
+   * fills it ONLY when no install plan exists — never alongside a usable
+   * `install_command` — and omits it when empty, so an older daemon simply
+   * doesn't send the key. See installGuidanceFor in lib/toolInstall.ts.
+   */
+  install_note?: string;
+  /**
+   * Present ("gui") only when the preflight was resolved for a GUI launchable
+   * (T2.3, ide-desktop-launch-plan-2026-09-03.md §2). Absent for every
+   * terminal-tool preflight, including on an older daemon — the verdict
+   * vocabulary and every other field are unchanged either way.
+   */
+  kind?: "gui";
+  // --- Structured facts behind `notes` (all optional; an older daemon omits
+  // them). The dialog phrases its own copy from these and does not render
+  // `notes`, which stay on the wire for observer adapters / doctor. ---
+  /**
+   * GUI rows only: whether a launch would deliver the SuperBased proxy route
+   * to the app — the launcher's own wrap verdict, dry-run. Absent = unknown.
+   */
+  routing_reaches_app?: boolean;
+  /** The closed reason when routing_reaches_app is false (guilaunch.WrapReason). */
+  routing_reason?: string;
+  /** "used" / "missing" when [launch.tools.<tool>].path is set. */
+  config_override?: "used" | "missing" | string;
+  /** The `#!/usr/bin/env` interpreter the binary needs and nothing provides. */
+  missing_interpreter?: string;
+  /** The program the install command runs, when it is not installed. */
+  install_needs_program?: string;
+  /** Host programs the vendor installer needs that are missing ("a|b" = either). Forces can_install false. */
+  install_missing_prereqs?: string[];
+  /** Plain-language fix for install_missing_prereqs, with this host's package-manager command. */
+  install_prereq_remedy?: string;
+  /** The launch target (a Windows packaged app) was not probed. */
+  install_unverified?: boolean;
+  /** Plain-language install-gap sentence from the registry, when no guided install exists. */
+  user_install_hint?: string;
+  /**
+   * The tool's latest guided install from THIS dashboard (node-local
+   * tool_installs). Absent when the dashboard never installed it — which is
+   * exactly when no Uninstall may be offered.
+   */
+  dashboard_install?: ToolInstallRecord;
+  /**
+   * The tool's grounded minimum host runtime checked against the interpreter
+   * the installed shim would run on. status "too_old" means the launch would
+   * crash at startup; the launcher refuses it with `remedy`. Absent when
+   * nothing applies (or on an older daemon).
+   */
+  launch_runtime?: PreflightRuntime;
+  /**
+   * The same requirement checked for the guided install, when its channel
+   * runs the tool on the host runtime (npm). "too_old" forces can_install
+   * false; the install route refuses with `remedy` before installing.
+   */
+  install_runtime?: PreflightRuntime;
+  /**
+   * T-685: set when the org's managed hard budget will refuse this launch on
+   * a cause that does not depend on the launch's route (Guard not enforcing,
+   * no Observer proxy route, or a route that can never be proven). Reason and
+   * remedy are server sentences; the launcher still decides.
+   */
+  budget_launch?: PreflightBudgetLaunch;
+  /**
+   * T-685: the next step when the tool's proxy route lives in its own config
+   * file and that file is not on this machine yet (the launch starts
+   * unproxied). A server sentence.
+   */
+  route_setup?: string;
+};
+
+// PreflightBudgetLaunch mirrors dashboard.PreflightBudgetLaunch.
+export type PreflightBudgetLaunch = {
+  reason: string;
+  remedy: string;
+};
+
+// PreflightRuntime mirrors dashboard.PreflightRuntime (one minimum-runtime
+// check). Only status "too_old" blocks.
+export type PreflightRuntime = {
+  runtime: string;
+  display: string;
+  product?: string;
+  min: string;
+  have?: string;
+  path?: string;
+  /** "outside_range" is advisory only: above the floor, outside the declared range (never blocks). */
+  status: "ok" | "too_old" | "outside_range" | "unknown" | "missing" | string;
+  /** The whole fix as plain text, one part per line (CLI / doctor form). */
+  remedy?: string;
+  /** Short too_old sentence: what the tool needs, what this machine has. */
+  summary?: string;
+  /** The grounded command that installs a newer runtime on this host. */
+  fix_command?: string;
+  /** One-line context for fix_command, or the whole advice without one. */
+  fix_note?: string;
+  /** Where `min` came from: "installed" (the package's own engines) or "registry". */
+  floor_from?: "installed" | "registry" | string;
+  /** The vendor's whole declared range, for an outside_range status. */
+  range?: string;
+};
+
+// ToolInstallRecord mirrors dashboard.ToolInstallRecord: one guided install
+// the local dashboard ran, and whether/how it can be uninstalled from here.
+export type ToolInstallRecord = {
+  id: number;
+  tool: string;
+  /** The registry's closed install-channel vocabulary (npm, brew, script, ...). */
+  channel: string;
+  /** Package identity the channel installed; absent for a vendor script. */
+  package?: string;
+  /** The install command as it was shown and run. */
+  command: string;
+  /** internal/toolinstall lifecycle status. */
+  status: string;
+  exit_code?: number;
+  installed_at: string;
+  finished_at?: string;
+  resolved_bin?: string;
+  can_uninstall: boolean;
+  /** Exact uninstall command (display form) when the channel has one. */
+  uninstall_command?: string;
+  /** Honest copy when the channel has no defined uninstall. */
+  uninstall_guidance?: string;
+  can_forget: boolean;
+  uninstall_started_at?: string;
+  uninstalled_at?: string;
+  uninstall_exit_code?: number;
+  /** Live PTY an in-flight install / uninstall runs in (T-034j). */
+  terminal_handle?: string;
+  /** Still in flight after the server's wait threshold: the installer may be
+   *  sitting at a prompt in its terminal (T-034j). */
+  maybe_waiting_for_input?: boolean;
+};
+
+// ToolInstallsResponse is GET /api/terminal/installs.
+export type ToolInstallsResponse = {
+  available: boolean;
+  allow_install?: boolean;
+  installs: ToolInstallRecord[];
+};
+
+// ToolUninstallStarted is POST /api/terminal/uninstall's reply.
+export type ToolUninstallStarted = {
+  record_id: number;
+  handle: string;
+  tool: string;
+  command: string;
+  package?: string;
+};
+
+// GUILaunchable mirrors ONE element of GET /api/terminal/sessions'
+// `gui_launchables` (ide-desktop-launch-plan-2026-09-03.md §2.4) — an IDE or
+// desktop-app row the New-Terminal dialog can install/launch. Only ADVERTISED
+// rows are ever sent (Lifecycle.Advertised() && Spec.Launchable()); an older
+// daemon omits the key entirely, which the dialog reads as "no GUI apps",
+// never as an error.
+//
+// `adapter` is "" for a HOST row (an editor like vscode/jetbrains-idea that
+// has no adapter of its own) — `hosts` then lists the adapters that launch
+// AI-tool sessions inside it, and the picker shows that instead of a watched
+// pill (a host has no capture of its own to be watched).
+export type GUILaunchable = {
+  id: string;
+  label: string;
+  adapter: string;
+  surface: "ide" | "desktop";
+  allowed: boolean;
+  watched: boolean;
+  wrap_kind: "none" | "child_env" | "config_write";
+  wrap_reason: string;
+  project_dir_argv: boolean;
+  grounded: boolean;
+  note: string;
+  hosts: string[];
+};
+
+// GUIRun mirrors ONE element of GET /api/terminal/sessions' `gui_runs` — a
+// live (or recently-exited) GUI launch this daemon spawned. Read-only
+// telemetry; there is no PTY behind it, so it never docks a terminal tab.
+export type GUIRun = {
+  run_id: string;
+  id: string;
+  label: string;
+  pid: number;
+  launched_at: string;
+  wrap_applied: boolean;
+  wrap_note: string;
+  /** Launch-composition advisories (launcher-stub pid caveat, ignored project dir). Absent on an older daemon. */
+  notes?: string[];
+  exited: boolean;
+  exit_code: number;
+};
+
+// GUILaunchResponse is the 200 reply from POST /api/terminal/launch when the
+// request body carries `kind: "gui"`. Distinct from FreshLaunchResponse
+// (NewTerminalDialog.tsx): there is no `token` / no websocket — the dialog
+// reports success (pid + wrap outcome) and closes without docking anything.
+export type GUILaunchResponse = {
+  kind: "gui";
+  run_id: string;
+  pid: number;
+  tool: string;
+  label: string;
+  wrap_applied: boolean;
+  wrap_note: string;
+  /** Same verdict as wrap_applied, preflight vocabulary. Absent on an older daemon. */
+  routing_reaches_app?: boolean;
+  /** Structured cause when routing_reaches_app is false. */
+  routing_reason?: string;
+  notes?: string[];
+};
+
+// LaunchableTool mirrors ONE element of GET /api/terminal/sessions'
+// `launchable_tool_info` (Go: internal/intelligence/dashboard.LaunchableTool) —
+// a SIBLING of the plain `launchable_tools` string list, never a replacement.
+// It annotates a picker entry with the TWO INDEPENDENT allow-lists that decide
+// what happens after Start (audit DI-06 / DI-07):
+//   allowed — [terminal.launch].allowed_tools, the LAUNCH gate (default empty
+//             = deny-all), enforced server-side at spawn time;
+//   watched — [observer.watch].enabled_adapters, the CAPTURE gate. A tool can
+//             be allowed yet unwatched (it launches and records nothing) or
+//             watched yet refused at launch — hence two flags, not one.
+// "installed" is deliberately absent: answering it would run the binary
+// resolver once per launchable tool on every poll of this VIEW route; the
+// per-tool /api/terminal/launch/preflight answers it on demand.
+export type LaunchableTool = {
+  tool: string;
+  allowed: boolean;
+  watched: boolean;
+};
+
+// TerminalSessionsMeta is the annotation half of GET /api/terminal/sessions the
+// New-Terminal dialog reads (the `sessions` array itself is consumed
+// elsewhere). `launchable_tool_info` is same-length/same-order as
+// `launchable_tools`; an older daemon omits it, which means UNKNOWN — never
+// "not allowed".
+export type TerminalSessionsMeta = {
+  launchable_tools?: string[];
+  launchable_tool_info?: LaunchableTool[];
+  allowed_project_roots?: string[];
+  shell_enabled?: boolean;
+  /** IDE / desktop-app rows (T2.3). Absent ⇒ no GUI section, never an error. */
+  gui_launchables?: GUILaunchable[];
+  /** Advertised products the picker cannot start, with the reason (T-494).
+   *  Absent on an older daemon (then simply not listed). */
+  unlaunchable_tools?: UnlaunchableTool[];
+  /** Live/recent GUI runs this daemon spawned. Absent ⇒ nothing to list. */
+  gui_runs?: GUIRun[];
+};
+
+// ModelSuggestion is one entry in ToolModels.models — either a model the tool
+// has actually been launched with before ("history", carrying the observed
+// count + last-used timestamp) or a model SuperBased knows the tool supports
+// but has no local usage for ("known"). `count`/`last_used` are present only
+// for source "history".
+export type ModelSuggestion = {
+  model: string;
+  count?: number;
+  last_used?: string;
+  source: "history" | "known";
+};
+
+// ToolModels is the reply from GET /api/terminal/launch/models?tool=<name> —
+// the model-picker suggestion list for the New-Terminal dialog (B5). When
+// `supported` is false the tool has no concept of a selectable model and
+// `models` is empty; the dialog renders no picker in that case. Server order
+// is preserved verbatim (history entries first, then known entries).
+export type ToolModels = {
+  tool: string;
+  supported: boolean;
+  models: ModelSuggestion[];
+};
+
+// SandboxSourceAvail is one entry of SandboxAvailability.sources — whether a
+// given workspace source ("live" | "clone-local" | "clone-remote" |
+// "worktree") is currently usable for a sandboxed launch, and why not when it
+// isn't (e.g. clone-remote reporting available:false because
+// allow_remote_clone is unset).
+export type SandboxSourceAvail = {
+  id: string;
+  available: boolean;
+  reason?: string;
+};
+
+// SandboxToolAvail is one entry of SandboxAvailability.tools, keyed by tool
+// name — whether that tool has a grounded SandboxSpec registry row it can be
+// launched under a sandbox with (v1 grounds only claude-code; every other
+// launchable tool carries an honest reason instead).
+export type SandboxToolAvail = {
+  available: boolean;
+  reason?: string;
+};
+
+// SandboxAvailability is the reply from GET /api/terminal/sandbox (B9) — the
+// New-Terminal dialog's sandbox probe, mirroring the B5 ToolModels fail-soft
+// pattern (always 200, even when the feature is fully off). `verdict` is a
+// closed vocabulary: "available" | "unsupported_platform" | "backend_missing"
+// | "backend_too_old" | "userns_denied" | "netns_denied" | "tool_unmapped" |
+// "disabled_by_config" | "runtime_init_failed" | "workspace_prep_failed" |
+// "not_in_build" (a build without terminals.sandbox, D-514). `reason` names the exact
+// gap in human terms (which sysctl is denied, which bwrap version was found,
+// …) so the dialog's disabled copy can quote it verbatim rather than being
+// generic.
+export type SandboxAvailability = {
+  available: boolean;
+  verdict?: string;
+  reason?: string;
+  backend?: string;
+  backend_version?: string;
+  home_mode?: string;
+  // Live [terminal.sandbox].egress network tier (SR27-SBX-1).
+  egress?: string;
+  default_on: boolean;
+  sources?: SandboxSourceAvail[];
+  tools?: Record<string, SandboxToolAvail>;
+};
+
+// SSHProfileInfo is one row of GET /api/terminal/ssh — an operator-authored
+// remote system from [[terminal.ssh.profiles]] in the daemon's own config
+// (docs/plans/ssh-remote-profiles-plan-2026-08-27.md).
+//
+// This is an OUTBOUND concept: Observer spawns an `ssh` client to reach the
+// machine. It is unrelated to the [remote]/Tailscale feature (and to
+// lib/remoteTerminal.ts), which is INBOUND — exposing THIS dashboard to a
+// paired device.
+//
+// Note what is NOT here: no key material and no key PATH. `key_hint` is the
+// key file's basename only, so the dashboard never discloses the operator's
+// filesystem layout. The client sends `name` back on launch and nothing else;
+// every connection parameter is resolved server-side.
+export type SSHProfileInfo = {
+  name: string;
+  label: string;
+  target: string;
+  jump?: string;
+  has_key: boolean;
+  key_hint?: string;
+};
+
+// SSHProfilesResponse is the reply from GET /api/terminal/ssh. Fail-soft like
+// SandboxAvailability: always 200, with enabled:false when the feature is off
+// or absent, so the dialog can simply omit the system selector.
+export type SSHProfilesResponse = {
+  enabled: boolean;
+  profiles: SSHProfileInfo[];
+};
+
+// InstanceState is the honest lifecycle of one remote instance's port forward.
+// "connecting" is visible while a connect is in flight (including from another
+// tab); "error" always comes with a reason.
+export type InstanceState = "disconnected" | "connecting" | "connected" | "error";
+
+// InstanceInfo is one row of GET /api/instances — a remote developer machine
+// running its OWN Observer install, reached by an `ssh -N -L` local port
+// forward to that machine's dashboard port.
+//
+// It is the SAME operator-authored [[terminal.ssh.profiles]] list the SSH
+// terminal picker reads (one allow-list, two surfaces), extended with the live
+// forward state. `url` is a LOOPBACK address and is present only while the
+// forward actually answers, so the UI never links to a dead port.
+//
+// Note what is NOT here, exactly as with SSHProfileInfo: no key material and no
+// key PATH. The client sends a profile NAME in the path and an empty body;
+// every connection parameter, including the remote dashboard port, is resolved
+// server-side from the daemon's own config.
+export type InstanceInfo = {
+  name: string;
+  label: string;
+  target: string;
+  dashboard_port: number;
+  has_key: boolean;
+  key_hint?: string;
+  jump?: string;
+  state: InstanceState;
+  local_port?: number;
+  url?: string;
+  error?: string;
+  // T-425: what the REMOTE daemon reports about itself through a live
+  // forward (its own /api/status). Present only while connected and only
+  // when the remote answered; an older remote omits remote_host_name.
+  remote_version?: string;
+  remote_schema_version?: number;
+  remote_host_name?: string;
+  // remote_probe_error says why the remote build could not be read, naming
+  // the machine. Never blocks opening the dashboard.
+  remote_probe_error?: string;
+};
+
+// InstancesResponse is the reply from GET /api/instances. Fail-soft like
+// SSHProfilesResponse: always 200, with enabled:false when the feature is off
+// or absent, so the header simply omits the switcher.
+export type InstancesResponse = {
+  enabled: boolean;
+  instances: InstanceInfo[];
+};
+
+// InstanceTestResult is the payload of POST /api/instances/{name}/test — the
+// bounded, non-interactive connectivity probe (known_hosts + auth) run
+// without opening a forward. Mirrors the Go dashboard.InstanceTestResult
+// wire shape field-for-field.
+export type InstanceTestResult = {
+  known_hosts_checked: boolean;
+  known_hosts_ok: boolean;
+  auth_ok: boolean;
+  latency_ms: number;
+  stderr?: string;
 };
 
 // AttachInfo is one row of GET /api/attach/sessions — a LIVE, non-setup
@@ -2402,7 +4468,9 @@ export type AttachInfo = {
   exited: boolean;
   exit_code: number;
   // Additive/optional (review finding 8): whether the attach session has a
-  // project root, so a jumped-in seat enables Files/Git immediately. Absence ≡ false.
+  // browsable directory on this machine (an allow-listed project root, else the
+  // run's own working directory), so a jumped-in seat enables Files/Git
+  // immediately. Absence ≡ false.
   has_project_root?: boolean;
 };
 
@@ -2422,6 +4490,13 @@ export type HandoffResponse = {
   carry_used: string;
   degrade_reason?: string;
   context_warning?: string;
+  /** Whether the source adapter implements the un-excerpted (full-body) read
+   * the "Full + cache" carry needs — mirrors
+   * handoff.EstimateResult.SourceHasFullReader. false for every source
+   * except claudecode/codex/kimicode/grok; the modal greys out that option
+   * when this is false instead of silently offering an identical-to-full
+   * choice. */
+  full_cache_available: boolean;
   fork: {
     requested_index?: number;
     resolved_index: number;
@@ -2450,4 +4525,331 @@ export type HandoffResponse = {
   handoff_id?: number;
   gitignore_hint?: boolean;
   dry_run?: boolean;
+};
+
+// ---------- /api/session/<id>/loc + /api/loc/summary ----------
+//
+// Lines-of-code authorship
+// (docs/plans/lines-of-code-tracking-plan-2026-09-07.md §3.2/§3.5). Wire
+// shapes mirror internal/intelligence/dashboard/loc.go field for field.
+//
+// The honesty rules live in the PAYLOAD, not in the UI's head:
+//   - `human_capture` is "none" until an editor reports saves. While it is
+//     "none" there is NO `ai_share` on the summary payload, and no surface
+//     may synthesise one - with nothing measuring the developer's own
+//     typing the share is 100% by construction, which is a claim about the
+//     developer, not a fact about the agent.
+//   - `capture_note` is the server-owned sentence for that state. Render it
+//     verbatim; do not re-word it per surface.
+//   - `low_confidence_files` / `overwrite_files` travel WITH each bucket so a
+//     caveat can sit next to the number instead of in a footnote.
+
+export type LOCStats = {
+  added_code: number;
+  modified_code: number;
+  deleted_code: number;
+  added_comment: number;
+  deleted_comment: number;
+  whitespace: number;
+  blank: number;
+  unknown: number;
+  // code_touched = added_code + modified_code. The headline "lines of code
+  // written". Deleted lines are deliberately NOT in it.
+  code_touched: number;
+  total: number;
+};
+
+// LOCAuthoredSplit is the code-vs-comment split of AI-authored lines,
+// computed server-side by internal/loc.SplitAuthored (the one derivation:
+// code = added + modified code lines, comment = added comment lines, share =
+// comment / (code + comment), absent when both are zero). Render it only
+// through the shared CodeCommentSplit primitive; never compute a share here.
+// It is NOT an AI-vs-human share, so it is honest while human_capture is
+// "none".
+export type LOCAuthoredSplit =
+  import("@shared/primitives/CodeCommentSplit").AuthoredSplit;
+
+export type LOCActor = "ai" | "human" | "system" | "unknown";
+
+export type LOCCategory =
+  | "code"
+  | "docs"
+  | "config"
+  | "generated"
+  | "vendored"
+  | "unknown";
+
+// LOCBucket is one (actor, sidechain, category) cell.
+export type LOCBucket = {
+  actor: LOCActor | string;
+  sidechain: boolean;
+  category: LOCCategory | string;
+  files: number;
+  low_confidence_files: number;
+  overwrite_files: number;
+  deleted_files: number;
+  stats: LOCStats;
+};
+
+export type LOCLanguage = {
+  language: string;
+  category: LOCCategory | string;
+  files: number;
+  stats: LOCStats;
+};
+
+export type LOCHumanCapture = "none" | "vscode";
+
+export type SessionLOCResponse = {
+  session_id: string;
+  buckets: LOCBucket[];
+  languages: LOCLanguage[];
+  files: number;
+  human_capture: LOCHumanCapture | string;
+  capture_note: string;
+  classifier_version: number;
+  // Pre-summed CODE-only roll-ups; the card never has to know the bucket
+  // algebra to render its headline figures.
+  ai_main: LOCStats;
+  ai_sidechain: LOCStats;
+  human: LOCStats;
+  system: LOCStats;
+  // Non-code buckets, kept separate so a documentation-heavy session reads
+  // as documentation-heavy instead of inflating the code number.
+  docs: LOCStats;
+  config: LOCStats;
+  // Code-vs-comment splits of ai_main / ai_sidechain (code files only).
+  // ai_split.code_lines === ai_main.code_touched by construction. Optional
+  // so a daemon predating the split still type-checks as "no split".
+  ai_split?: LOCAuthoredSplit;
+  ai_sidechain_split?: LOCAuthoredSplit;
+};
+
+// Org-served Cloud Intelligence result cached on this node (GET
+// /api/session/<id>/org-intel). The node cache carries only the content the
+// org derived — no provider / model / tokens / cost. `enriched` is the
+// discriminator: false with a `reason` is the honest empty state.
+export type OrgIntelResultRow = {
+  session_id: string;
+  job_id: string;
+  title: string;
+  description: string;
+  taxonomy_tags: string[];
+  suggested_tags: string[];
+  limitations: string[];
+  // The five narrative lists: what was done, whether the stated plans landed,
+  // what issues were found, what failed, what to do next. Optional because
+  // they are `omitempty` on the wire - a row the node cached before agent
+  // migration 124, or one pulled from a server predating server migration 156,
+  // carries none of them and must render as ABSENCE, never as five empty
+  // headings. evidence_refs stay off this row on purpose: they are the
+  // server's own grounding tokens, not something to show a developer.
+  work_done?: string[];
+  plans_implemented?: string[];
+  issues_found?: string[];
+  failures?: string[];
+  next_steps?: string[];
+  confidence: string;
+  schema_version: string;
+  fetched_at: string;
+};
+
+export type OrgIntelResponse = {
+  enriched: boolean;
+  reason?: string;
+  result?: OrgIntelResultRow;
+};
+
+// GET/POST /api/session/<id>/quality — the persisted spec §15.2 session
+// quality score (internal/intelligence/dashboard/sessionquality.go). The
+// shape is owned by the shared QualityPanel; `scored: false` means never
+// scored (render the empty state, never a zero).
+export type { SessionQualityLike as SessionQualityResponse } from "@shared/lib/sessionQuality";
+
+export type LOCDay = {
+  day: string;
+  project_id: number;
+  actor: LOCActor | string;
+  files: number;
+  stats: LOCStats;
+};
+
+export type LOCSummaryResponse = {
+  days: number;
+  buckets: LOCBucket[];
+  by_day: LOCDay[];
+  human_capture: LOCHumanCapture | string;
+  capture_note: string;
+  ai_code_touched: number;
+  human_code_touched: number;
+  // PRESENT ONLY when human_capture !== "none". Absent is not zero - it
+  // means "no denominator exists", and no surface may fill it in.
+  ai_share?: number;
+  classifier_version: number;
+  // Code-vs-comment split of every AI code line in the window (main and
+  // sidechain). ai_split.code_lines === ai_code_touched by construction.
+  ai_split?: LOCAuthoredSplit;
+};
+
+// UpdateOrgRefusal names a push the org server most recently REFUSED because
+// this node runs below its configured minimum agent version (enterprise update
+// management W5). It is the one condition where the node is neither idle nor
+// updating and still needs the operator's attention right now: nothing is
+// reaching the org at all.
+export type UpdateOrgRefusal = {
+  message: string;
+  min_version?: string;
+  your_version?: string;
+  at?: string;
+};
+
+// UpdateStatusResponse is GET /api/update/status - the ORG-SERVED answer to
+// "does this node have an update", as opposed to the click-gated npm probe in
+// lib/version.ts which asks the public registry.
+//
+// `enabled: false` means [update].enabled is off on this node. Every other
+// field is then empty, and the surface must say the feature is OFF rather than
+// implying the node is up to date.
+// ---------- /api/guard/rules + /api/guard/policy (+ /policy/project) ----------
+// Guard rule management from the UI
+// (docs/plans/guard-rule-management-ui-plan-2026-09-21.md §5/§6 Track B).
+// Canonical wire shapes for the Security page's structured rule manager
+// (RuleManager.tsx) AND the pre-existing raw-TOML PolicyLayersCard, which
+// both read the same two endpoints — defined once here rather than forked
+// per component.
+
+// GuardRule is one /api/guard/rules catalog row — the rule's definition
+// (doc) and remediation hint (advice). Multi-row IDs (e.g. R-152's write +
+// read rows) arrive once per row. `source`/`enforced` are effective-view
+// extras (?effective=1): which policy layer defined the rule (builtin |
+// user | project | trusted_project | org) and whether it's per-rule
+// enforced even in observe mode.
+export type GuardRule = {
+  id: string;
+  category?: string;
+  severity?: string;
+  observe?: string;
+  enforce?: string;
+  doc: string;
+  advice?: string;
+  source?: string;
+  enforced?: boolean;
+};
+
+export type GuardRulesResponse = { rules: GuardRule[] | null };
+
+// GuardPolicyLayerKind names every row `layer` can carry in
+// GuardPolicyView.layers. "trusted_project" (§3) is the NEW daemon-local
+// per-project layer the dashboard writes directly — editable like "user",
+// unlike the read-only in-repo "project" layer.
+export type GuardPolicyLayerKind = "builtin" | "user" | "project" | "trusted_project" | "org" | string;
+
+// GuardPolicyLayer is one /api/guard/policy layers row. `counts_known` is
+// false for the org bundle — a signed JSON envelope we don't structurally
+// count rather than showing a misleading zero. `content` is present ONLY
+// for a row the UI can write back (the trusted_project row carries its
+// current file text so the editor can open it without a second round trip;
+// the user row's content instead lives in `GuardPolicyView.user.content` for
+// historical reasons — both are editable, this is the newer row's shape).
+export type GuardPolicyLayer = {
+  layer: GuardPolicyLayerKind;
+  path: string;
+  exists: boolean;
+  editable: boolean;
+  version?: string;
+  content_hash?: string;
+  counts_known: boolean;
+  rules: number;
+  overrides: number;
+  // Top-level `disable = [...]` count — only ever non-zero on a
+  // trusted_project row (disable is a load-time error on every other
+  // layer's file grammar).
+  disabled?: number;
+  problems?: string[] | null;
+  project_root?: string;
+  content?: string;
+};
+
+export type GuardPolicyUserLayer = {
+  path: string;
+  exists: boolean;
+  content: string;
+  writable: boolean;
+  backup_exists: boolean;
+  backup_path: string;
+};
+
+export type GuardPolicyView = {
+  layers: GuardPolicyLayer[] | null;
+  load_issues: string[] | null;
+  user: GuardPolicyUserLayer;
+  project_policy_relpath: string;
+};
+
+export type GuardPolicyLint = {
+  ok: boolean;
+  problems: string[] | null;
+  rules: number;
+  overrides: number;
+  disabled?: number;
+};
+
+// GuardPolicyLintRequest is POST /api/guard/policy/lint's body. `layer` is
+// "user" for the global layer (existing) or "trusted_project" for the new
+// per-project layer (§4) — the trusted-project lint mode allows the
+// `disable` key and weakening overrides, still checked against the org
+// floor.
+export type GuardPolicyLintRequest = { content: string; layer: "user" | "trusted_project" };
+
+// GuardPolicyProjectSaveRequest/Response are PUT /api/guard/policy/project
+// (§5, NEW) — writes the trusted daemon-local per-project layer. 422 on lint
+// problems leaves the file untouched.
+export type GuardPolicyProjectSaveRequest = { project_root: string; content: string };
+
+export type GuardPolicyProjectSaveResponse = {
+  saved: boolean;
+  path?: string;
+  backup_path?: string;
+  rules?: number;
+  overrides?: number;
+  disabled?: number;
+  restart_required: boolean;
+  project_root: string;
+};
+
+// GuardPolicyBackupParams is POST /api/guard/policy/backup's QUERY STRING
+// (not a JSON body — internal/intelligence/dashboard/guardpolicy.go reads
+// r.URL.Query()). Omit both to swap-undo the user layer (existing
+// behaviour, unchanged); pass both to swap-undo a trusted-project layer's
+// file. Shaped for fetchJSON's `params` argument.
+export type GuardPolicyBackupParams = { layer?: "trusted_project"; project_root?: string };
+
+export type UpdateStatusResponse = {
+  enabled: boolean;
+  version?: string;
+  channel?: string;
+  state: string;
+  reason?: string;
+  error_class?: string;
+  target_version?: string;
+  manifest_version?: number;
+  last_manifest_seen_at?: string;
+  install_method?: string;
+  self_apply: boolean;
+  // advice is what to run INSTEAD when this node cannot replace its own
+  // binary (an npm/brew/apt-owned install). Never a silent "up to date".
+  advice?: string;
+  auto_apply: boolean;
+  auto_apply_reason?: string;
+  window?: string;
+  org_refusal?: UpdateOrgRefusal;
+};
+
+// UnlaunchableTool mirrors Go dashboard.UnlaunchableTool (T-494): an
+// advertised product the New Terminal picker lists as not launchable here.
+export type UnlaunchableTool = {
+  tool: string;
+  kind: "browser" | "hosted" | "desktop" | "no_cli";
+  host?: string;
+  note: string;
 };

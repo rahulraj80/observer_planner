@@ -1,8 +1,8 @@
 {
   "name": "superbased-observer",
   "displayName": "SuperBased",
-  "description": "Claude Code cost tracking, Cursor token usage, Codex spend — AI coding agent observability across 29 adapters (Claude Code, Codex, Cursor, Cline + Cline CLI, Copilot, Gemini CLI, Hermes Agent, Kilo Code, Aider, Goose, Devin, and more), proxy-accurate. No telemetry. No cloud.",
-  "version": "1.27.0",
+  "description": "Local-first AI coding agent observability in your editor: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account, no telemetry.",
+  "version": "1.36.0",
   "publisher": "superbased",
   "license": "Apache-2.0",
   "author": "Santosh Kathira <contact@superbased.app>",
@@ -18,6 +18,16 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted workspace, SuperBased will not resolve or spawn the observer daemon binary. observer.binary.path and observer.binary.preferPathBinary are restricted (machine scope) so a workspace cannot point the extension at an arbitrary executable.",
+      "restrictedConfigurations": [
+        "observer.binary.path",
+        "observer.binary.preferPathBinary"
+      ]
+    }
+  },
   "categories": [
     "Other",
     "AI",
@@ -26,10 +36,14 @@
   "keywords": [
     "ai",
     "claude",
+    "claude-code",
     "codex",
     "copilot",
     "cursor",
     "cline",
+    "gemini",
+    "mcp",
+    "prompt-caching",
     "cost",
     "cost-tracking",
     "token-usage",
@@ -69,6 +83,10 @@
       {
         "command": "observer.openDashboard",
         "title": "SuperBased: Open Dashboard"
+      },
+      {
+        "command": "observer.openComponents",
+        "title": "SuperBased: Choose Components"
       },
       {
         "command": "observer.init",
@@ -167,7 +185,7 @@
           {
             "id": "welcome",
             "title": "Welcome to SuperBased",
-            "description": "SuperBased captures, normalises, and analyses every AI coding tool's activity — locally, with no telemetry.\n[Open Sidebar](command:workbench.view.extension.observer)",
+            "description": "SuperBased captures, normalises, and analyses every AI coding tool's activity, locally, with no telemetry.\n[Open Sidebar](command:workbench.view.extension.observer)",
             "media": {
               "markdown": "walkthroughs/01-welcome.md"
             },
@@ -184,6 +202,17 @@
             },
             "completionEvents": [
               "onCommand:observer.doctor"
+            ]
+          },
+          {
+            "id": "components",
+            "title": "Choose components",
+            "description": "Pick what Observer runs on this machine: AI tool adapters, the proxy, terminals, code intelligence and more. An inactive component starts nothing and writes nothing into your tools.\n[Choose components](command:observer.openComponents)",
+            "media": {
+              "markdown": "walkthroughs/02b-components.md"
+            },
+            "completionEvents": [
+              "onCommand:observer.openComponents"
             ]
           },
           {
@@ -247,6 +276,20 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "observer.launchClaude",
+          "when": "!observer.proxyInactive"
+        },
+        {
+          "command": "observer.launchCodex",
+          "when": "!observer.proxyInactive"
+        },
+        {
+          "command": "observer.copyProxyEnv",
+          "when": "!observer.proxyInactive"
+        }
+      ],
       "view/title": [
         {
           "command": "observer.refreshTrees",
@@ -282,18 +325,20 @@
             "managed",
             "auto"
           ],
-          "default": "detect",
-          "description": "How the extension manages the observer daemon. 'detect' attaches only; 'managed' spawns on activation and kills on deactivate; 'auto' attaches if a daemon is found, otherwise spawns."
+          "default": "auto",
+          "description": "How the extension manages the observer daemon. 'auto' (default) attaches to a daemon you already started, and otherwise spawns one, and only ever stops a daemon it spawned itself. 'managed' behaves the same. 'detect' attaches only and never spawns, so the views stay empty until you run `observer start` yourself."
         },
         "observer.binary.path": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the observer binary. Empty = auto-detect (bundled, then PATH, then download). Set observer.binary.preferPathBinary to scan PATH before the bundled binary."
+          "scope": "machine",
+          "description": "Absolute path to the observer binary. Empty = auto-detect (bundled, then PATH, then download). Set observer.binary.preferPathBinary to scan PATH before the bundled binary. Machine-scoped and restricted in untrusted workspaces: a cloned repo's .vscode/settings.json cannot choose which binary this extension spawns."
         },
         "observer.binary.preferPathBinary": {
           "type": "boolean",
           "default": false,
-          "description": "Scan PATH for an observer binary before using the bundled one; slower activation, use when you intentionally run a self-built daemon."
+          "scope": "machine",
+          "description": "Scan PATH for an observer binary before using the bundled one; slower activation, use when you intentionally run a self-built daemon. Machine-scoped and restricted in untrusted workspaces for the same reason as observer.binary.path."
         },
         "observer.dashboard.port": {
           "type": "number",
@@ -310,10 +355,32 @@
           "default": true,
           "description": "Show the today-spend status bar item."
         },
+        "observer.statusBar.wordmark": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prefix the today-spend status bar text with the SuperBased wordmark (▞ superbased)."
+        },
         "observer.cacheStatusBar.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Show the cache-expiry status bar item (a countdown that appears when a valuable prompt cache is about to go cold)."
+        },
+        "observer.loc.reportSaves": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report how many lines you changed when you save a file, so the dashboard can show human-written lines next to AI-written ones. Only LINE COUNTS leave the editor - how many code, comment, blank and whitespace-only lines changed. File content is never read, sent, or stored: no lines, no excerpts, no filenames beyond the workspace-relative path. Counts go to the local observer daemon on loopback (127.0.0.1) and nowhere else. Generated and vendored files (lockfiles, node_modules, dist, *.pb.go) are skipped entirely."
+        },
+        "observer.loc.editorToken": {
+          "type": "string",
+          "default": "",
+          "description": "Token sent as X-Observer-Token when reporting saved line counts. Leave empty: the daemon generates a per-install token on first start and the extension reads it from the observer home (loc-editor-token, or OBSERVER_HOME if you set that). Fill this in only when the daemon runs somewhere the extension cannot read that file, or when you moved it with the [loc].editor_token_file config key."
+        },
+        "observer.apiToken": {
+          "type": "string",
+          "default": "",
+          "markdownDeprecationMessage": "No longer read. The only request that ever sent this header was the saved-line-count report; it now uses `#observer.loc.editorToken#` and the daemon's generated token file.",
+          "deprecationMessage": "No longer read. Use observer.loc.editorToken instead.",
+          "description": "Deprecated and no longer read by any request. The saved-line-count report now uses observer.loc.editorToken, falling back to the token file the daemon generates in the observer home."
         }
       }
     }
@@ -328,11 +395,11 @@
     "package:platform": "vsce package --target ${TARGET}"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16",
-    "tar": "^7.4.3"
+    "adm-zip": "^0.6.1",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.5",
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.0.0",
     "@types/tar": "^6.1.13",
     "@types/vscode": "^1.90.0",

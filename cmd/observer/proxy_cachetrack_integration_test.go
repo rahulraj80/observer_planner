@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 )
 
 // TestBuildProxy_DefaultConfigWiresCacheEngine is the
@@ -89,14 +92,15 @@ prewarm_targets = []
 		t.Fatalf("config.Load: %v", err)
 	}
 	if !cfg.CacheTrack.Enabled {
-		t.Fatalf("config.Load returned CacheTrack.Enabled=false; default-on invariant broken — every install captures nothing until hand-edited")
+		t.Fatalf("config.Load returned CacheTrack.Enabled=false; default-on invariant broken - every install captures nothing until hand-edited")
 	}
 	if cfg.CacheTrack.MaxTrackedSessions != 64 {
 		t.Errorf("CacheTrack.MaxTrackedSessions = %d, want 64", cfg.CacheTrack.MaxTrackedSessions)
 	}
 
 	// Build the proxy the way `observer start` does.
-	p, cleanup, _, _, _, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1")
+	pwire, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1", nil)
+	p, cleanup := pwire.Proxy, pwire.Cleanup
 	if err != nil {
 		t.Fatalf("buildProxy: %v", err)
 	}
@@ -137,7 +141,7 @@ prewarm_targets = []
 	resp.Body.Close()
 
 	// Open the SAME DB and poll for rows.
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("re-open db: %v", err)
 	}
@@ -155,16 +159,16 @@ prewarm_targets = []
 		time.Sleep(30 * time.Millisecond)
 	}
 	if apiTurns == 0 {
-		t.Fatal("api_turns row never written — proxy assembly broken in a different way")
+		t.Fatal("api_turns row never written - proxy assembly broken in a different way")
 	}
 	if segments == 0 {
-		t.Errorf("cache_segments = 0 despite the proxy receiving a turn with markers — daemon wiring gap (the operator-reported bug). buildProxy must construct cachetrack.Engine + pass *Store as CacheSink.")
+		t.Errorf("cache_segments = 0 despite the proxy receiving a turn with markers - daemon wiring gap (the operator-reported bug). buildProxy must construct cachetrack.Engine + pass *Store as CacheSink.")
 	}
 	if events == 0 {
-		t.Errorf("cache_events = 0 — engine ran but didn't emit events (or PersistCacheObservation isn't wired through CacheSink)")
+		t.Errorf("cache_events = 0 - engine ran but didn't emit events (or PersistCacheObservation isn't wired through CacheSink)")
 	}
 	if entries == 0 {
-		t.Errorf("cache_entries = 0 despite CacheCreationTokens=50000 — engine isn't creating write entries")
+		t.Errorf("cache_entries = 0 despite CacheCreationTokens=50000 - engine isn't creating write entries")
 	}
 }
 
@@ -205,7 +209,8 @@ enabled = false
 		t.Fatalf("write config: %v", err)
 	}
 
-	p, cleanup, _, _, _, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1")
+	pwire, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1", nil)
+	p, cleanup := pwire.Proxy, pwire.Cleanup
 	if err != nil {
 		t.Fatalf("buildProxy: %v", err)
 	}
@@ -224,7 +229,7 @@ enabled = false
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +245,7 @@ enabled = false
 		time.Sleep(20 * time.Millisecond)
 	}
 	if apiTurns == 0 {
-		t.Fatal("api_turn write failed — test setup broken")
+		t.Fatal("api_turn write failed - test setup broken")
 	}
 
 	var segments, events int
@@ -275,7 +280,7 @@ log_level = "info"
 		t.Fatalf("config.Load: %v", err)
 	}
 	if !cfg.CacheTrack.Enabled {
-		t.Fatalf("CacheTrack.Enabled = false; default-on invariant broken — silent-off bug reintroduced")
+		t.Fatalf("CacheTrack.Enabled = false; default-on invariant broken - silent-off bug reintroduced")
 	}
 	if cfg.CacheTrack.MaxTrackedSessions != 64 {
 		t.Errorf("MaxTrackedSessions = %d, want 64 (Default)", cfg.CacheTrack.MaxTrackedSessions)

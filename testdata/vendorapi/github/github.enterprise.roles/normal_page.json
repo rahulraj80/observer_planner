@@ -1,0 +1,53 @@
+{
+  "total_count": 2,
+  "roles": [
+    {
+      "id": 8030,
+      "name": "Security Manager",
+      "description": "A role for security managers",
+      "permissions": [
+        "read_enterprise_custom_enterprise_role",
+        "write_enterprise_security_configuration"
+      ],
+      "enterprise": {
+        "id": 1,
+        "slug": "github-inc",
+        "name": "GitHub, Inc",
+        "node_id": "E_kgAB",
+        "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+        "description": "A great enterprise",
+        "website_url": null,
+        "html_url": "https://github.com/enterprises/github-inc",
+        "created_at": "2025-07-17T18:00:58Z",
+        "updated_at": "2025-07-17T18:00:58Z"
+      },
+      "created_at": "2022-07-04T22:19:11Z",
+      "updated_at": "2022-07-04T22:20:11Z",
+      "source": "Enterprise"
+    },
+    {
+      "id": 8031,
+      "name": "Enterprise Auditor",
+      "description": "Permissions to read enterprise audit logs and security settings",
+      "permissions": [
+        "read_enterprise_audit_logs",
+        "read_enterprise_security_configuration"
+      ],
+      "enterprise": {
+        "id": 1,
+        "slug": "github-inc",
+        "name": "GitHub, Inc",
+        "node_id": "E_kgAB",
+        "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+        "description": "A great enterprise",
+        "website_url": null,
+        "html_url": "https://github.com/enterprises/github-inc",
+        "created_at": "2025-07-17T18:00:58Z",
+        "updated_at": "2025-07-17T18:00:58Z"
+      },
+      "created_at": "2022-07-04T22:19:11Z",
+      "updated_at": "2022-07-04T22:20:11Z",
+      "source": "Enterprise"
+    }
+  ]
+}

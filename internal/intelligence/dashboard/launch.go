@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -15,14 +15,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/components"
+	"github.com/marmutapp/superbased-observer/internal/feasibility/nodefeas"
+	"github.com/marmutapp/superbased-observer/internal/termcore"
+
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/handoff"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/remoteauth"
-	"github.com/marmutapp/superbased-observer/internal/termrun"
-	"github.com/marmutapp/superbased-observer/internal/termsvc"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // Embedded web-terminal launch surface (docs/session-handoff.md launch
@@ -45,383 +49,23 @@ import (
 // manager only when [handoff].allow_dashboard_launch is true, so a nil seam
 // (503) is the honest "disabled" state.
 
-// LaunchManager is the dashboard's seam onto internal/termsession (the
-// embedded web-terminal PTY registry). It is DEFINED here, not imported, so
-// the dashboard package carries no dependency on termsession's concrete
-// types — the same injected-seam discipline as BuildHandoff/DemoSeeder. cmd
-// wires a thin adapter that injects the observer BinPath and translates
-// types. Dispatch is on capability shape (the LaunchSpec set), never tool
-// name.
-type LaunchManager interface {
-	// Create spawns a PTY-backed launcher and returns its opaque handle.
-	Create(spec LaunchSpec) (handle string, err error)
-	// CreateFresh spawns a FRESH agent (no --continue-from) after the
-	// application service validates the operator's fresh-launch opt-in
-	// ([terminal.launch]: allow_fresh_agent + allowed_tools +
-	// allowed_project_roots). It returns the opaque handle. F1.
-	CreateFresh(spec FreshLaunchSpec) (handle string, err error)
-	// CreateResume spawns a NATIVE resume of a CLOSED session (session-attach
-	// design Phase 3): a fresh dashboard-owned PTY running the tool's own resume
-	// mechanism (claude `--resume <id>`, codex `resume <id>`) so the real prior
-	// transcript reopens — NOT a distilled fork. The application service enforces
-	// the SAME fresh-launch opt-in as CreateFresh (a dashboard-initiated Execute
-	// respects the allow-lists, unlike the owner-only CLI attach socket). It
-	// returns the opaque handle AND the durable run id so the response carries
-	// both. P3.
-	CreateResume(spec ResumeLaunchSpec) (handle string, runID string, err error)
-	// CreateSetup spawns a fixed, server-derived local operator SETUP command
-	// (SetupSpec.Argv — e.g. the one-time Tailscale operator grant) in a PTY,
-	// bypassing the AI-launch policy / terminal_run identity / OOB channel. The
-	// resulting session is LOCAL-WRITER-ONLY (a remote principal can never
-	// acquire its writer lease). It returns the opaque handle. The caller MUST
-	// build Argv from a server-side helper, never from request input.
-	CreateSetup(spec SetupSpec) (handle string, err error)
-	// Subscribe registers a read-only viewer (§4.α.1 output fan-out). Every
-	// attach — local or remote — starts as a viewer; input requires a separate
-	// writer lease. The caller MUST Unsubscribe. This is the OWNER-LOCAL path.
-	Subscribe(handle string) (LaunchSubscription, error)
-	// SubscribeRemote is the REMOTE-principal viewer path. It refuses a SpecSetup
-	// (privileged, local-only) session — whose output can echo a typed sudo
-	// password / login URL — mirroring AcquireWriterRemote's write-side pin at
-	// the READ seam; every other session subscribes normally. Used by the
-	// remote-exposed /ws/launch bridge so a paired remote device can never read a
-	// setup PTY.
-	SubscribeRemote(handle string) (LaunchSubscription, error)
-	// IsSetupSession reports whether a handle is a SpecSetup (privileged,
-	// local-only) session. The dashboard redacts these from remotely-visible
-	// snapshots and refuses their remote termination. Unknown handle ⇒ false.
-	IsSetupSession(handle string) bool
-	// IsRemoteSensitiveSession reports whether a handle is a remote-VIEW
-	// sensitive run: an external `observer <tool> --attach` session (KindAttach)
-	// OR a native resume of a real closed transcript (KindResume) — both bind a
-	// daemon-owned PTY to a REAL external transcript whose TUI can echo
-	// secrets/customer data. Whether the dashboard exposes such a handle to a
-	// remote-exposed caller (its snapshot row via visibleSnapshot and its
-	// websocket subscription via handleLaunchWS) is governed by the
-	// [remote].allow_terminal_view toggle, which now DEFAULTS TRUE (§3.2) — set
-	// it false to restore the deny-read posture. Branches on run KIND (the shared
-	// termrun.IsRemoteSensitiveKind table), never a tool name. Unknown handle ⇒
-	// false.
-	IsRemoteSensitiveSession(handle string) bool
-	// Unsubscribe releases a viewer's subscription (child survives for
-	// reconnect).
-	Unsubscribe(sub LaunchSubscription)
-	// AcquireWriterLocal grants the owner-local exclusive writer lease — the
-	// loopback path (CapabilityLocal provenance), never refused, always takes
-	// over an incumbent remote writer (§4.α.2a/§4.α.3).
-	AcquireWriterLocal(handle string) (LaunchWriter, error)
-	// AcquireWriterRemote grants a remote writer lease after the cmd adapter
-	// runs the single §4.δ authorization conjunction over the request-derived
-	// inputs and mints the unforgeable grant. The dashboard passes plain
-	// strings; the grant type never crosses this seam.
-	AcquireWriterRemote(req RemoteWriterRequest) (LaunchWriter, error)
-	// Close reaps the session's process tree and removes it.
-	Close(handle string)
-	// Snapshot lists live sessions (Phase 3 running-session list).
-	Snapshot() []LaunchInfo
-	// SessionForRun resolves a durable run id to the observer session id that
-	// correlation has linked the run's PTY to, if any. It is the run→"driving
-	// session" lookup handleAttachSessions uses to key a handoff row by its
-	// FORKED session (the session the PTY is actually driving) rather than the
-	// SOURCE session the spec stamped at spawn. Returns ("", false) when no link
-	// exists yet (~10–30 s post-spawn) or the run is unknown — the caller
-	// fails open to an empty session id, never crashing the list. Delegates to
-	// termsvc.SessionForRun; the dashboard never imports termsvc.
-	SessionForRun(runID string) (sessionID string, ok bool)
-	// RevokeAllRemoteWriters revokes every live session's REMOTE-held writer
-	// lease (leaving any owner-LOCAL loopback writer untouched) through the ONE
-	// termsession revocation funnel — the manager-level global kill the admin
-	// transitions (remote disable / rotate / allow_terminal→false) drive so a
-	// live remote writer is actually terminated, not merely blocked for future
-	// acquires. Returns the count revoked. The cmd adapter delegates to
-	// termsession.Manager.RevokeAllRemoteWriters; the dashboard never imports it.
-	RevokeAllRemoteWriters(reason string) int
-	// RevokeRemoteWriterByHolder revokes the REMOTE writer lease whose holder key
-	// equals the passed key — the FULL device-session hash (deviceSessionKey /
-	// SessionInfo.ID / grant.HolderKey()), NOT the 8-char display fingerprint —
-	// if any, through the same funnel. It is the single-device kill a device-
-	// session revoke drives; the caller resolves the device to its full session
-	// hash first, so the match hits exactly one lease with no 8-char-prefix
-	// over-revoke. The owner-LOCAL writer is never matched. Returns whether a
-	// lease was revoked.
-	RevokeRemoteWriterByHolder(holderKey, reason string) bool
-}
-
-// LaunchSubscription is one read-only viewer of a terminal session. It streams
-// PTY output (replay then live tail); its input never reaches the PTY.
-// *termsession.Subscription satisfies it structurally.
-type LaunchSubscription interface {
-	io.Reader
-	Done() <-chan struct{}
-	Exited() (bool, int)
-	// Lost is the bytes this viewer missed to the drop-oldest ring (a gap).
-	Lost() int64
-}
-
-// LaunchWriter is the exclusive right to drive a session's PTY. Its Write /
-// Resize reach the PTY only while the lease is live; a revoked/taken-over lease
-// returns an error (the server-side input-frame drop, §4.β).
-// *termsession.WriterLease satisfies it structurally.
-type LaunchWriter interface {
-	io.Writer
-	Resize(rows, cols uint16) error
-	// Revoked is closed when the lease is revoked/taken-over/expired so the WS
-	// bridge can tell the (remote) writer it lost control.
-	Revoked() <-chan struct{}
-	// Release voluntarily yields the lease (local yield / disconnect).
-	Release()
-	// Holder is the lease holder identity ("local" or a device fingerprint).
-	Holder() string
-	// RevokeIsTakeover reports (meaningfully only AFTER Revoked() has closed)
-	// whether the lease ended because another granted writer superseded it. On the
-	// remote bridge a takeover only DEMOTES the client to a viewer (the device
-	// session is still valid); any other termination — an admin/device revoke,
-	// an expiry, or teardown — CLOSES the socket. *termsession.WriterLease
-	// satisfies it structurally.
-	RevokeIsTakeover() bool
-}
-
-// RemoteWriterRequest carries the request-derived inputs for a remote writer
-// acquire. The cmd adapter runs termlease.Authorize over these (device session +
-// allow_terminal + launch policy + single-use capability + bound confirm) and
-// mints the unforgeable grant; the dashboard never sees the grant type.
-type RemoteWriterRequest struct {
-	Handle          string
-	DeviceSessionID string
-	CapabilityToken string
-	Confirm         string
-	// RemoteExposed marks that the request arrived on a remotely-exposed
-	// execute-classified route (listener provenance, §4.4).
-	RemoteExposed bool
-}
-
-// LaunchSpec is the dashboard's server-derived launch request. It carries no
-// BinPath — the cmd adapter injects os.Executable() so a client can never
-// influence which binary runs.
-type LaunchSpec struct {
-	Subcommand  string
-	SessionID   string
-	Carry       string
-	FromMessage int
-	Rows        uint16
-	Cols        uint16
-}
-
-// FreshLaunchSpec is the dashboard's server-derived FRESH-launch request (F1).
-// Tool is the client-chosen tool NAME (validated against the operator's
-// allow-list by the application service); Subcommand is resolved server-side
-// from the capability registry; ProjectRoot is the only client-influenced path
-// and is canonicalized + allow-list-checked before spawn. No BinPath, no argv.
-type FreshLaunchSpec struct {
-	Tool        string
-	Subcommand  string
-	ProjectRoot string
-	Rows        uint16
-	Cols        uint16
-}
-
-// ResumeLaunchSpec is the dashboard's server-derived NATIVE-resume request
-// (P3). Tool is the client-chosen tool NAME (validated against the fresh-launch
-// allow-list by the application service); Subcommand is resolved server-side
-// from the capability registry; SessionID is the closed session being resumed;
-// ExtraArgs is the resume tail composed server-side via integration.ResumeArgs
-// (uniformly `--resume <id>`); ProjectRoot is canonicalized + allow-list-checked
-// before spawn. No BinPath, no raw argv.
-type ResumeLaunchSpec struct {
-	Tool        string
-	Subcommand  string
-	SessionID   string
-	ProjectRoot string
-	ExtraArgs   []string
-	Rows        uint16
-	Cols        uint16
-}
-
-// SetupSpec is a server-derived local operator setup command run in a PTY (the
-// dashboard-tailnet-guided-setup plan §B). Argv is the complete argv built by
-// the handler from a fixed helper (tailnet.OperatorGrantArgv) — NEVER request
-// input; Label is a short human tag for logs. The spawned session is
-// local-writer-only, launches no agent, and mints no terminal_run.
-type SetupSpec struct {
-	Argv  []string
-	Label string
-	Rows  uint16
-	Cols  uint16
-}
-
-// LaunchInfo is a running-session snapshot row (Phase 3 list).
-type LaunchInfo struct {
-	ID         string `json:"token"`
-	Subcommand string `json:"subcommand"`
-	SessionID  string `json:"session_id"`
-	// Kind is the terminal_run kind this PTY handle belongs to ("attach" /
-	// "handoff" / "fresh" / "resume"), resolved from the run identity
-	// (session-attach design Phase 2). Empty when the session predates
-	// run-identity wiring. It drives the dashboard's "Jump in" gating: ANY valid
-	// kind on a live, non-setup handle is joinable, because every such row is a
-	// real daemon-owned PTY with exact liveness. A kindless (empty) row is not a
-	// joinable run.
-	Kind string `json:"kind,omitempty"`
-	// Tool is the target tool NAME (e.g. "claude-code") the run launched, as
-	// distinct from Subcommand (the observer launcher verb). Empty when unknown.
-	Tool string `json:"tool,omitempty"`
-	// RunID is the durable terminal_run identity this PTY handle belongs to
-	// (F1); empty when the session predates the run-identity wiring.
-	RunID string `json:"run_id,omitempty"`
-	// HasProjectRoot reports whether this run has a resolvable project root
-	// (Arc A). It lets the dashboard enable/disable the per-terminal Files/Git
-	// panel buttons straight from the /api/launch/sessions rehydrate with no
-	// extra round-trip. The raw path is DELIBERATELY not carried here (this
-	// struct flows to remote viewers); the path itself is served only by the
-	// gated project-panel endpoint.
-	HasProjectRoot bool      `json:"has_project_root"`
-	CreatedAt      time.Time `json:"created_at"`
-	// Attached is retained for wire compatibility: true when at least one viewer
-	// is subscribed. Viewers is the exact read-only subscriber count and
-	// WriterHolder identifies the controlling writer ("local" or a remote device
-	// fingerprint, empty when none) — the §4.α controller display.
-	Attached     bool   `json:"attached"`
-	Viewers      int    `json:"viewers"`
-	WriterHolder string `json:"writer_holder,omitempty"`
-	// Setup marks a SpecSetup (privileged, local-only) session. It is redacted
-	// from snapshots served to REMOTE callers (visibleSnapshot), so a remote
-	// device never even learns the handle exists.
-	Setup    bool `json:"setup,omitempty"`
-	Exited   bool `json:"exited"`
-	ExitCode int  `json:"exit_code"`
-	// PTY geometry (Feature 2): InitialRows/InitialCols are the spawn size (or
-	// the first resize when the launch Spec was 0×0); Rows/Cols are the current
-	// live size. Zero means not yet known. Surfaced so REST + the terminal UI can
-	// report / restore the session's real dimensions.
-	InitialRows uint16 `json:"initial_rows,omitempty"`
-	InitialCols uint16 `json:"initial_cols,omitempty"`
-	Rows        uint16 `json:"rows,omitempty"`
-	Cols        uint16 `json:"cols,omitempty"`
-}
-
 // Errors the cmd adapter maps termsession errors onto so the handler can
 // pick an honest HTTP status without importing termsession.
 var (
-	// ErrLaunchTooMany signals the concurrent-session cap was hit (429).
-	ErrLaunchTooMany = errors.New("too many concurrent terminal sessions")
-	// ErrLaunchUnsupported signals the platform can't host a PTY (501) —
-	// a native-Windows daemon (run under WSL instead).
-	ErrLaunchUnsupported = errors.New("embedded terminal is not supported on this platform")
+
 	// ErrLaunchAlreadyAttached signals a second client tried to attach. Retained
 	// for callers that still map it; the output fan-out (§4.α) no longer rejects
 	// a second viewer.
 	ErrLaunchAlreadyAttached = errors.New("session already has an attached client")
-	// ErrLaunchExecuteUnavailable signals the remote writer-lease path is not
-	// wired (the §4.γ/§4.δ authorizer is nil) — a fail-closed 503-shaped state.
-	ErrLaunchExecuteUnavailable = errors.New("remote terminal writer is not configured")
-	// ErrLaunchFreshDisabled signals [terminal.launch].allow_fresh_agent is
-	// off (403). Fresh-agent launch is a conscious opt-in, never migrated on.
-	ErrLaunchFreshDisabled = errors.New("fresh-agent launch is disabled (set [terminal.launch].allow_fresh_agent)")
-	// ErrLaunchToolNotAllowed signals the tool is not in the operator's
-	// [terminal.launch].allowed_tools allow-list (403).
-	ErrLaunchToolNotAllowed = errors.New("tool is not in the fresh-launch allow-list")
-	// ErrLaunchProjectRootDenied signals the requested project_root failed the
-	// allow-list / canonicalization check (400).
-	ErrLaunchProjectRootDenied = errors.New("project root not permitted")
-	// ErrLaunchSetupInFlight signals a setup session of the same kind
-	// (operator-grant / login / install) is already starting — the setup
-	// single-flight refusal (409). Prevents a POST-spam from spawning many
-	// privileged PTYs.
-	ErrLaunchSetupInFlight = errors.New("a setup session of this kind is already starting")
+
+	// ErrLaunchSandboxUnavailable signals a sandbox=true fresh-launch
+	// request arrived with Options.SandboxProber nil — the B9 sandbox
+	// feature is entirely absent from this daemon build/config (501). This
+	// is the A5 build-order invariant: a nil seam is fail-CLOSED, exactly
+	// like ErrLaunchUnsupported for the base PTY seam, never a silent
+	// fall-through to an unsandboxed launch.
+	ErrLaunchSandboxUnavailable = errors.New("sandboxed launch requested but the sandbox seam is not configured on this daemon")
 )
-
-// ControlDenialReason is the stable wire taxonomy for a refused remote writer
-// acquire. Exactly TWO values are permanent verdicts on the presented
-// credential — ControlDenialAuth (it was judged and rejected) and
-// ControlDenialAuthRevoked (no standing secret exists on the server at all).
-// Callers must not clear a standing secret for any other reason.
-type ControlDenialReason string
-
-const (
-	// ControlDenialAuth means the capability/confirm or standing secret failed
-	// its credential check — the credential WAS judged and rejected. It is the
-	// ONLY reason a device may treat as proof that a saved standing secret is
-	// dead (and therefore the only one it may clear the secret for).
-	ControlDenialAuth ControlDenialReason = "auth"
-	// ControlDenialAuthTransient means the credential leg refused WITHOUT ever
-	// judging the presented credential — standing access is currently switched
-	// off, the attempt was rate-limited, or the acquire raced an admin
-	// transition (the standing generation moved between verify and install).
-	// The refusal is exactly as hard as ControlDenialAuth; the difference is
-	// purely diagnostic, and the device MUST keep its saved standing secret.
-	// Added 2026-07-25: these cases used to report "auth", which made a
-	// momentary rate-limit or a disabled-then-re-enabled toggle wipe a valid
-	// secret and force the operator to mint a new one. Clients that predate this
-	// value fall through their default branch to the neutral "temporarily
-	// unavailable, secret not cleared" handling, which is the correct behaviour.
-	ControlDenialAuthTransient ControlDenialReason = "auth_transient"
-	// ControlDenialAuthRevoked means the standing terminal-control secret has
-	// been REVOKED on this server and not re-provisioned: the revoke path
-	// deletes the hash at rest, so there is nothing left for any device's saved
-	// secret to match, now or later (a fresh mint issues a DIFFERENT secret).
-	// Like ControlDenialAuth it is a PERMANENT verdict on the presented
-	// credential and the device should clear it — unlike ControlDenialAuth the
-	// secret was never compared, because there was nothing to compare it
-	// against.
-	//
-	// Added 2026-07-25 (operator decision A2). It splits the one genuinely
-	// terminal case out of ControlDenialAuthTransient, which had swept up
-	// "revoked forever" with "switched off for a minute" and left devices
-	// retrying a dead secret indefinitely. The server emits it ONLY when it can
-	// prove no secret exists at rest; a merely-disabled gate stays transient.
-	// Clients that predate this value fall through to their default branch and
-	// keep the secret, which is the safe direction.
-	ControlDenialAuthRevoked ControlDenialReason = "auth_revoked"
-	// ControlDenialHeldLocally means a local/native writer holds control and the
-	// authenticated-remote takeover policy is disabled.
-	ControlDenialHeldLocally ControlDenialReason = "held_locally"
-	// ControlDenialHeldByRemote means another remote writer holds control and the
-	// authenticated-remote takeover policy is disabled.
-	ControlDenialHeldByRemote ControlDenialReason = "held_by_remote"
-	// ControlDenialTerminalDisabled means [remote].allow_terminal is off.
-	ControlDenialTerminalDisabled ControlDenialReason = "terminal_disabled"
-	// ControlDenialSessionInvalid means the paired device session is no longer valid.
-	ControlDenialSessionInvalid ControlDenialReason = "session_invalid"
-	// ControlDenialPolicyDenied means listener/launch/session policy refused the target.
-	ControlDenialPolicyDenied ControlDenialReason = "policy_denied"
-	// ControlDenialNotFound means the terminal session no longer exists.
-	ControlDenialNotFound ControlDenialReason = "not_found"
-	// ControlDenialUnavailable means the writer path or a raced lifecycle state
-	// was unavailable without proving any credential defect.
-	ControlDenialUnavailable ControlDenialReason = "unavailable"
-)
-
-// ControlDeniedError carries a typed acquire refusal across the cmd adapter
-// boundary without importing internal/termsession into dashboard. Cause remains
-// unwrap-able for backend tests and diagnostics. CapabilityConsumed is true
-// only when a valid single-use capability was burned before a later lease-policy
-// refusal, allowing the audit/UI to request a fresh approval honestly.
-type ControlDeniedError struct {
-	Reason             ControlDenialReason
-	CapabilityConsumed bool
-	Cause              error
-}
-
-// Error implements error without exposing secret-adjacent details.
-func (e *ControlDeniedError) Error() string {
-	if e == nil {
-		return "terminal control denied"
-	}
-	return "terminal control denied: " + string(e.Reason)
-}
-
-// Unwrap preserves the adapter's underlying sentinel for internal callers.
-func (e *ControlDeniedError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
-
-// NewControlDeniedError constructs a typed dashboard-boundary denial.
-func NewControlDeniedError(reason ControlDenialReason, capabilityConsumed bool, cause error) error {
-	return &ControlDeniedError{Reason: reason, CapabilityConsumed: capabilityConsumed, Cause: cause}
-}
 
 // visibleSnapshot returns the live launch-session list filtered for the request
 // principal: on the owner-trusted loopback listener (not remote-exposed) it is
@@ -458,7 +102,7 @@ func (s *Server) visibleSnapshot(ctx context.Context) []LaunchInfo {
 		if info.Setup {
 			continue // redact privileged setup handles from remote callers
 		}
-		if !viewSensitive && termrun.IsRemoteSensitiveKind(termrun.Kind(info.Kind)) {
+		if !viewSensitive && termcore.IsRemoteSensitiveKind(termcore.Kind(info.Kind)) {
 			continue // allow_terminal_view is OFF — hide this attach/resume PTY (§3.2; default is now ON)
 		}
 		out = append(out, info)
@@ -479,22 +123,6 @@ func (s *Server) visibleSnapshot(ctx context.Context) []LaunchInfo {
 func (s *Server) allowTerminalView() bool {
 	v, ok := s.opts.Remote.(allowTerminalViewer)
 	return ok && v.AllowTerminalView()
-}
-
-// SpawnAuditKind maps a spawned run KIND to its metadata-only remote_audit
-// event kind (session-attach design §3.5). Table-driven per CLAUDE.md #5 — a new
-// spawnable kind is one row, never a nested branch — and the SINGLE vocabulary
-// both spawn sites use (the dashboard resume handler + the cmd-side attach host)
-// instead of bespoke inline strings. Empty for a kind with no spawn-audit event.
-func SpawnAuditKind(k termrun.Kind) string {
-	switch k {
-	case termrun.KindAttach:
-		return "terminal_attach"
-	case termrun.KindResume:
-		return "terminal_resume"
-	default:
-		return ""
-	}
 }
 
 // sensitiveViewer is one registered remote-exposed read-only viewer of a
@@ -749,7 +377,7 @@ func (s *Server) sessionHasLiveSensitiveRun(sessionID string) bool {
 		if info.Exited || info.SessionID != sessionID {
 			continue
 		}
-		if termrun.IsRemoteSensitiveKind(termrun.Kind(info.Kind)) {
+		if termcore.IsRemoteSensitiveKind(termcore.Kind(info.Kind)) {
 			return true
 		}
 	}
@@ -758,10 +386,12 @@ func (s *Server) sessionHasLiveSensitiveRun(sessionID string) bool {
 
 // launchSubcommand resolves a target tool name to its observer launcher
 // verb, or ("", false) when the tool is not launchable in the embedded
-// terminal. Branches on the Launch capability shape, never the tool name.
+// terminal. Branches on the Launch capability shape + the harness
+// lifecycle (integration.TerminalLaunchable), never the tool name: a
+// deprecated or dead row is never offered for launch.
 func launchSubcommand(tool string) (string, bool) {
 	cap, ok := integration.For(tool)
-	if !ok || !cap.Handoff.Launchable() {
+	if !ok || !integration.TerminalLaunchable(cap) {
 		return "", false
 	}
 	return cap.Handoff.Launch.Subcommand, true
@@ -799,26 +429,110 @@ func resumeInfoForTool(tool string) sessionResumeInfo {
 	if cap.Resume.Kind == integration.ResumeNative {
 		return sessionResumeInfo{Kind: "native", Subcommand: cap.Resume.Subcommand}
 	}
-	if cap.Handoff.Launchable() {
+	if integration.TerminalLaunchable(cap) {
 		return sessionResumeInfo{Kind: "handoff"}
 	}
 	return sessionResumeInfo{Kind: "none"}
 }
 
+// resumeInfoForSession excludes transcript partitions whose display ID is not
+// a vendor-resumable conversation. Their parent link and handoff stay usable.
+func resumeInfoForSession(tool, sessionID string) sessionResumeInfo {
+	info := resumeInfoForTool(tool)
+	if info.Kind == "native" && strings.Contains(sessionID, ":agent:") {
+		return sessionResumeInfo{Kind: "handoff"}
+	}
+	return info
+}
+
 // launchableTools returns every tool NAME launchable in the embedded terminal,
 // sorted, resolved from the capability registry (dispatch on capability shape,
-// never tool name). The fresh-launch dialog uses it to populate its picker
-// honestly; the operator's [terminal.launch].allowed_tools allow-list still
-// governs which of these actually launch (enforced server-side).
+// never tool name) through integration.TerminalLaunchable — so a row whose
+// product the vendor deprecated or killed is absent from the picker while its
+// existing sessions keep being captured. The fresh-launch dialog uses it to
+// populate its picker honestly; the operator's [terminal.launch].allowed_tools
+// allow-list still governs which of these actually launch (enforced
+// server-side).
 func launchableTools() []string {
 	var out []string
 	for _, c := range integration.Capabilities() {
-		if c.Handoff.Launchable() {
+		if integration.TerminalLaunchable(c) {
 			out = append(out, c.Tool)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// modelSuggestion is one entry in the New Terminal model picker's
+// suggestion list (B5). Source is "history" for a model this tool has
+// actually been launched with recently, or "known" for a model the
+// capability registry documents as a grounded example but that hasn't been
+// observed locally yet. Count/LastUsed are populated only for "history"
+// entries (omitempty — a "known" entry never fabricates usage stats).
+type modelSuggestion struct {
+	Model    string `json:"model"`
+	Count    int    `json:"count,omitempty"`
+	LastUsed string `json:"last_used,omitempty"`
+	Source   string `json:"source"`
+}
+
+// modelSuggestionsFor composes the New Terminal model picker's suggestion
+// list for tool (B5): recent usage history (via the nil-able
+// Options.RecentModels seam) followed by the capability registry's
+// grounded Known examples, deduplicated against history. It is the SINGLE
+// composition point shared by handleTerminalLaunchModels (the picker's own
+// endpoint) and handleTerminalLaunch (server-side membership validation of
+// a client-supplied model) — dispatch is on capability SHAPE
+// (ModelSpec.Kind), never tool name (CLAUDE.md #3).
+//
+// supported is false — with an empty, non-nil suggestion slice — when the
+// tool has no registry row, no launch capability, or a zero ModelSpec
+// (ModelKind ModelNone); the picker stays hidden for that row, the honest
+// floor. It is also false when the RecentModels seam itself is nil (an
+// older daemon build without the store wiring) so the endpoint and the
+// launch-time validator degrade identically to a preflight-less daemon.
+func modelSuggestionsFor(ctx context.Context, recentModels func(context.Context, string) ([]store.RecentToolModel, error), tool string) (supported bool, suggestions []modelSuggestion) {
+	suggestions = []modelSuggestion{}
+	if recentModels == nil {
+		return false, suggestions
+	}
+	cap, ok := integration.For(tool)
+	if !ok || !integration.TerminalLaunchable(cap) || cap.Model.Kind == integration.ModelNone {
+		return false, suggestions
+	}
+
+	seen := make(map[string]bool)
+	if history, err := recentModels(ctx, tool); err == nil {
+		for _, h := range history {
+			suggestions = append(suggestions, modelSuggestion{
+				Model: h.Model, Count: h.Count, LastUsed: h.LastUsed, Source: "history",
+			})
+			seen[h.Model] = true
+		}
+	}
+	// A history load error is fail-soft here (not fail-closed): the Known
+	// list below still gives the picker something honest to show, and the
+	// endpoint's overall response is still `supported: true`.
+	for _, m := range cap.Model.Known {
+		if !seen[m] {
+			suggestions = append(suggestions, modelSuggestion{Model: m, Source: "known"})
+			seen[m] = true
+		}
+	}
+	return true, suggestions
+}
+
+// modelIsMember reports whether model appears among suggestions — the
+// server-side membership check handleTerminalLaunch applies to a
+// client-supplied model before trusting it (B5).
+func modelIsMember(suggestions []modelSuggestion, model string) bool {
+	for _, s := range suggestions {
+		if s.Model == model {
+			return true
+		}
+	}
+	return false
 }
 
 type launchRequest struct {
@@ -839,16 +553,19 @@ type launchResponse struct {
 }
 
 // hasProjectRoot reports whether a freshly-minted terminal token resolves to a
-// known, non-default project root — via the same ProjectRootResolver seam the
-// project panel uses. A nil resolver (panel unwired) or a rootless/unknown token
-// both yield false, so a POST response can honestly tell the dock up front
-// whether the Files/Git panels are available (finding 8).
+// BROWSABLE directory — via the same ProjectRootResolver seam the project panel
+// uses, so the button the dock enables and the endpoint that serves it can
+// never disagree. A nil resolver (panel unwired), an unknown token, or a run
+// with no local directory at all (SSH) yield false; a default-cwd launch yields
+// TRUE on its own working directory (operator ruling 2026-08-28), so the
+// Files/Git buttons are enabled by default rather than gated on the launch
+// allow-list.
 func (s *Server) hasProjectRoot(token string) bool {
 	if s.opts.ProjectRootResolver == nil {
 		return false
 	}
 	root, known := s.opts.ProjectRootResolver(token)
-	return known && root != ""
+	return known && root.Path != ""
 }
 
 // handleSessionLaunch serves POST /api/session/<id>/launch. It validates the
@@ -861,7 +578,7 @@ func (s *Server) handleSessionLaunch(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "launch unavailable — this dashboard runs without the embedded-terminal launcher (set [handoff].allow_dashboard_launch and run via `observer start`)", http.StatusServiceUnavailable)
+		http.Error(w, "launch unavailable - this dashboard runs without the embedded-terminal launcher (set [handoff].allow_dashboard_launch and run via `observer start`)", http.StatusServiceUnavailable)
 		return
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -872,6 +589,16 @@ func (s *Server) handleSessionLaunch(w http.ResponseWriter, r *http.Request, ses
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+	// W5.1 org-governed feature gate: node.features.terminals — this path
+	// spawns an embedded terminal with no sandbox lane, so it presents
+	// requestedSandbox=false (an org sandbox_required policy therefore
+	// denies it). Fail-open on nil gate / no accepted policy.
+	if s.opts.TerminalFeatureGate != nil {
+		if allowed, reason := s.opts.TerminalFeatureGate(false); !allowed {
+			http.Error(w, reason, http.StatusForbidden)
+			return
+		}
 	}
 	sub, ok := launchSubcommand(body.To)
 	if !ok {
@@ -981,12 +708,22 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "resume unavailable — this dashboard runs without the embedded-terminal launcher (set [handoff].allow_dashboard_launch and run via `observer start`)", http.StatusServiceUnavailable)
+		http.Error(w, "resume unavailable - this dashboard runs without the embedded-terminal launcher (set [handoff].allow_dashboard_launch and run via `observer start`)", http.StatusServiceUnavailable)
 		return
 	}
 	if strings.TrimSpace(sessionID) == "" {
 		http.Error(w, "missing session id", http.StatusBadRequest)
 		return
+	}
+	// W5.1 org-governed feature gate: node.features.terminals — this path
+	// spawns an embedded terminal with no sandbox lane, so it presents
+	// requestedSandbox=false (an org sandbox_required policy therefore
+	// denies it). Fail-open on nil gate / no accepted policy.
+	if s.opts.TerminalFeatureGate != nil {
+		if allowed, reason := s.opts.TerminalFeatureGate(false); !allowed {
+			http.Error(w, reason, http.StatusForbidden)
+			return
+		}
 	}
 
 	// Load the session's tool + project_root (the only server-side inputs a
@@ -1012,7 +749,7 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 	// with an honest message naming the handoff-fork fallback the Continue-in…
 	// card provides. Dispatch on capability SHAPE, never a tool-name switch.
 	cap, ok := integration.For(tool)
-	if !ok || cap.Resume.Kind != integration.ResumeNative {
+	if !ok || cap.Resume.Kind != integration.ResumeNative || resumeInfoForSession(tool, sessionID).Kind != "native" {
 		http.Error(w, "native resume not grounded for "+tool+"; use Continue in… to fork instead", http.StatusConflict)
 		return
 	}
@@ -1032,7 +769,7 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 	// concurrently. 409 with an honest message; the client flips the Resume
 	// button to a disabled "already running" state on this status.
 	if s.sessionHasLiveSensitiveRun(sessionID) {
-		http.Error(w, "session already has a live terminal run — jump in or wait for it to end", http.StatusConflict)
+		http.Error(w, "session already has a live terminal run - jump in or wait for it to end", http.StatusConflict)
 		return
 	}
 
@@ -1078,7 +815,7 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 	// never opens the websocket produces a real process with NO remote_audit row
 	// (the writer-lease audit only fires once a client attaches). Metadata only —
 	// run id, handle, tool — never argv/env/content.
-	s.auditSpawn(SpawnAuditKind(termrun.KindResume), tool, handle, runID, r)
+	s.auditSpawn(SpawnAuditKind(termcore.KindResume), tool, handle, runID, r)
 	writeJSON(w, resumeResponse{
 		Token: handle, RunID: runID, Subcommand: cap.Resume.Subcommand, SessionID: sessionID,
 		HasProjectRoot: s.hasProjectRoot(handle),
@@ -1086,12 +823,37 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 }
 
 // terminalLaunchRequest is the POST /api/terminal/launch body (F1). The only
-// client inputs are the tool NAME (allow-listed server-side) and an optional
-// project_root (canonicalized + allow-list-checked server-side). No argv, no
-// session id (fresh launch), no BinPath.
+// client inputs are the tool NAME (allow-listed server-side), an optional
+// project_root (canonicalized + allow-list-checked server-side), and an
+// optional model (B5, New Terminal model picker) — re-validated by
+// MEMBERSHIP against modelSuggestionsFor's own output server-side (never
+// trusted verbatim); an invalid/unknown value is silently dropped rather
+// than rejected, see handleTerminalLaunch. No argv, no session id (fresh
+// launch), no BinPath.
 type terminalLaunchRequest struct {
+	// Kind selects the launch SHAPE (integration.LaunchKind): "" or "terminal"
+	// is the PTY launch this endpoint has always served — that path is
+	// byte-identical when the field is absent — and "gui" dispatches to the
+	// detached IDE / desktop-app launch. The dashboard branches on this SHAPE,
+	// never on the tool name (CLAUDE.md #3). Any other value is a 400.
+	Kind        string `json:"kind"`
 	Tool        string `json:"tool"`
 	ProjectRoot string `json:"project_root"`
+	Model       string `json:"model"`
+	// Sandbox requests a B9 filesystem-isolated launch (bwrap). Unlike
+	// Model (a preference, fail-open on any problem), a true Sandbox is a
+	// SAFETY property handleTerminalLaunch validates fail-CLOSED — see the
+	// "validation inversion vs B5" comment on that handler.
+	Sandbox bool `json:"sandbox"`
+	// WorkspaceSource / WorkspaceRemote / WorkspaceBranch select and
+	// parameterize the B9 workspace-preparation mechanism for a sandboxed
+	// launch (plan §4/§5). All three are re-validated server-side —
+	// WorkspaceSource by membership against the daemon's own probed
+	// Sources list, never trusted verbatim from the client. Ignored when
+	// Sandbox is false.
+	WorkspaceSource string `json:"workspace_source"`
+	WorkspaceRemote string `json:"workspace_remote"`
+	WorkspaceBranch string `json:"workspace_branch"`
 }
 
 // terminalLaunchResponse mirrors launchResponse plus the tool label so the
@@ -1117,7 +879,7 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "launch unavailable — this dashboard runs without the embedded-terminal launcher (run via `observer start`)", http.StatusServiceUnavailable)
+		http.Error(w, "launch unavailable - this dashboard runs without the embedded-terminal launcher (run via `observer start`)", http.StatusServiceUnavailable)
 		return
 	}
 	var body terminalLaunchRequest
@@ -1125,15 +887,87 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	sub, ok := launchSubcommand(body.Tool)
-	if !ok {
-		http.Error(w, "tool "+body.Tool+" is not launchable in the embedded terminal", http.StatusBadRequest)
+	// W5.1 org-governed feature gate: node.features.terminals. Checked
+	// before any launch work begins. Fail-open (nil TerminalFeatureGate,
+	// or no accepted policy) — see dashboard.Options.TerminalFeatureGate.
+	if s.opts.TerminalFeatureGate != nil {
+		if allowed, reason := s.opts.TerminalFeatureGate(body.Sandbox); !allowed {
+			http.Error(w, reason, http.StatusForbidden)
+			return
+		}
+	}
+	// Launch-SHAPE dispatch (T2). An absent or "terminal" kind falls through to
+	// the PTY path below unchanged — every gate above it already ran, and
+	// nothing after this switch reads body.Kind — so a client that predates the
+	// field gets byte-identical behaviour. Only "gui" branches away.
+	switch integration.LaunchKind(strings.TrimSpace(body.Kind)) {
+	case "", integration.LaunchKindTerminal:
+		// fall through to the PTY launch
+	case integration.LaunchKindGUI:
+		s.handleGUILaunch(w, body)
+		return
+	default:
+		writeErrStatus(w, errors.New("unknown launch kind "+body.Kind), http.StatusBadRequest)
+		return
+	}
+	// The reserved pseudo-tool "shell" (termsvc.ShellTool) requests a fresh
+	// PLAIN SHELL — never a member of the launchable capability set, so it
+	// skips launchSubcommand entirely and is gated by [terminal.launch].
+	// allow_shell instead of allowed_tools (see FreshLaunchSpec.Shell).
+	isShell := body.Tool == termcore.ShellTool
+	var sub string
+	if !isShell {
+		var ok bool
+		sub, ok = launchSubcommand(body.Tool)
+		if !ok {
+			http.Error(w, "tool "+body.Tool+" is not launchable in the embedded terminal", http.StatusBadRequest)
+			return
+		}
+	}
+	// Model (B5): re-derive the SAME suggestion list the picker itself
+	// showed and require membership before trusting a client-supplied
+	// value. A model that isn't in that list — including every case where
+	// the tool has no model capability at all — is silently DROPPED so the
+	// launch proceeds with the tool's own default; this is deliberate
+	// fail-open (never a 400, never a blocked launch) per the New Terminal
+	// model picker's semantics.
+	model := strings.TrimSpace(body.Model)
+	if model != "" && !isShell {
+		if _, suggestions := modelSuggestionsFor(r.Context(), s.opts.RecentModels, body.Tool); !modelIsMember(suggestions, model) {
+			model = ""
+		}
+	} else {
+		model = ""
+	}
+	// Sandbox (B9, plan §5): a client-supplied workspace_source is
+	// re-derived server-side by MEMBERSHIP against the daemon's own probed
+	// Sources list — the SAME re-derivation discipline the model check
+	// above applies — but where an unusable Model is silently DROPPED
+	// (fail-open: a model is a preference, the launch still succeeds
+	// without it), an unsatisfiable sandbox request FAILS THE LAUNCH
+	// outright (fail-closed: the caller asked for isolation, and silently
+	// handing back an unsandboxed process instead would be a safety
+	// regression, not a graceful degrade). Both rules get this comment
+	// because the two endpoints look identical at a glance and the
+	// difference is deliberate, not an oversight. See plan §7 "no
+	// unsandboxed fallback path exists in the code" (mutation proof #1).
+	workspaceSource := strings.TrimSpace(body.WorkspaceSource)
+	if workspaceSource == "" {
+		workspaceSource = "live"
+	}
+	if body.Sandbox && !s.sandboxRequestOK(w, r, body, workspaceSource) {
 		return
 	}
 	handle, err := s.opts.LaunchManager.CreateFresh(FreshLaunchSpec{
-		Tool:        body.Tool,
-		Subcommand:  sub,
-		ProjectRoot: body.ProjectRoot,
+		Tool:            body.Tool,
+		Subcommand:      sub,
+		ProjectRoot:     body.ProjectRoot,
+		Shell:           isShell,
+		Model:           model,
+		Sandbox:         body.Sandbox,
+		WorkspaceSource: workspaceSource,
+		WorkspaceRemote: body.WorkspaceRemote,
+		WorkspaceBranch: body.WorkspaceBranch,
 	})
 	if err != nil {
 		switch {
@@ -1141,12 +975,27 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusForbidden)
 		case errors.Is(err, ErrLaunchToolNotAllowed):
 			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, ErrLaunchSandboxRequired):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, ErrLaunchShellDisabled):
+			http.Error(w, err.Error(), http.StatusForbidden)
 		case errors.Is(err, ErrLaunchProjectRootDenied):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, ErrLaunchTooMany):
 			http.Error(w, err.Error(), http.StatusTooManyRequests)
 		case errors.Is(err, ErrLaunchUnsupported):
 			http.Error(w, err.Error(), http.StatusNotImplemented)
+		case errors.Is(err, termcore.ErrSandboxUnavailable):
+			// U4's own fail-closed refusal (e.g. the Sandboxer seam was
+			// removed/raced between this handler's probe check and the
+			// actual spawn) — 501, same class as ErrLaunchSandboxUnavailable
+			// above.
+			http.Error(w, err.Error(), http.StatusNotImplemented)
+		case errors.Is(err, termcore.ErrWorkspacePrepFailed):
+			// git/clone workspace preparation failed server-side — 500 per
+			// plan §7 (the default branch below already maps to 500; this
+			// case exists so the mapping is explicit and documented).
+			http.Error(w, "workspace preparation failed: "+err.Error(), http.StatusInternalServerError)
 		default:
 			http.Error(w, "launch failed: "+err.Error(), http.StatusInternalServerError)
 		}
@@ -1156,18 +1005,245 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		Token: handle, Tool: body.Tool, Subcommand: sub,
 		HasProjectRoot: s.hasProjectRoot(handle),
 	})
+	// Kick the watcher so a tool whose sessions directory did not exist
+	// at daemon start (just-installed Muse/Prime/…) is hot-added and
+	// scanned. Fire-and-forget; never blocks the launch response.
+	s.kickWatchRootsRefresh()
+}
+
+// sandboxRequestOK runs handleTerminalLaunch's FAIL-CLOSED sandbox validation
+// and reports whether the launch may proceed. It writes the refusal itself
+// (and returns false) on every miss, so the caller's whole sandbox branch is
+// one line. Extracted verbatim from handleTerminalLaunch — the checks, their
+// order, their status codes and their messages are unchanged; the extraction
+// exists to keep that handler under the gocyclo bound as the launch-kind
+// dispatch grows.
+//
+// Every arm refuses rather than degrading: the caller asked for isolation, and
+// silently handing back an unsandboxed process would be a safety regression,
+// not a graceful degrade (plan §7, "no unsandboxed fallback path exists in the
+// code").
+func (s *Server) sandboxRequestOK(w http.ResponseWriter, r *http.Request, body terminalLaunchRequest, workspaceSource string) bool {
+	if s.opts.SandboxProber == nil {
+		// A5: nil seam = feature absent = fail closed, exactly like the
+		// LaunchManager==nil 503 but scoped to the sandbox sub-feature (501 —
+		// capability absent on this daemon build/config, distinct from
+		// LaunchManager's total absence).
+		http.Error(w, ErrLaunchSandboxUnavailable.Error(), http.StatusNotImplemented)
+		return false
+	}
+	av := s.opts.SandboxProber.ProbeSandbox(r.Context())
+	if !av.Available {
+		http.Error(w, "sandbox unavailable ("+av.Verdict+"): "+av.Reason, statusForSandboxVerdict(av.Verdict))
+		return false
+	}
+	src, ok := sandboxSourceByID(av.Sources, workspaceSource)
+	switch {
+	case !ok:
+		http.Error(w, "unknown workspace source "+workspaceSource, http.StatusBadRequest)
+		return false
+	case !src.Available:
+		http.Error(w, "workspace source "+workspaceSource+" is not available: "+src.Reason, http.StatusBadRequest)
+		return false
+	}
+	if workspaceSource == "live" && strings.TrimSpace(body.ProjectRoot) == "" {
+		http.Error(w, "a sandboxed terminal needs a project directory", http.StatusBadRequest)
+		return false
+	}
+	toolAvail, ok := av.Tools[body.Tool]
+	switch {
+	case !ok:
+		http.Error(w, "tool "+body.Tool+" cannot be sandboxed: no grounded sandbox row for this tool", http.StatusBadRequest)
+		return false
+	case !toolAvail.Available:
+		http.Error(w, "tool "+body.Tool+" cannot be sandboxed: "+toolAvail.Reason, http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// kickWatchRootsRefresh invokes Options.RefreshWatchRoots when wired.
+// Fail-open: a nil seam is a no-op (standalone dashboard without watcher).
+func (s *Server) kickWatchRootsRefresh() {
+	if s.opts.RefreshWatchRoots == nil {
+		return
+	}
+	s.opts.RefreshWatchRoots()
+}
+
+// sandboxVerdictStatus maps a closed B9 sandbox verdict (plan §7) to the
+// HTTP status handleTerminalLaunch's fail-closed check refuses the launch
+// with. Table-driven per CLAUDE.md #5 (a growing if/else-if ladder is
+// refactored before it lands): verdicts describing the daemon's own
+// environment — a missing/too-old backend, an unsupported OS, or a denied
+// user-namespace sysctl — are 501 (feature absent server-side, nothing the
+// caller can fix); "disabled_by_config" is 403 (the operator switched it
+// off, an authorization refusal, not a capability gap). An unrecognised
+// verdict is NOT in this table — statusForSandboxVerdict below defaults it
+// to 501, the fail-closed floor, so a new verdict added to the probe by a
+// future change is never silently treated as available.
+var sandboxVerdictStatus = map[string]int{
+	"unsupported_platform": http.StatusNotImplemented,
+	"backend_missing":      http.StatusNotImplemented,
+	"backend_too_old":      http.StatusNotImplemented,
+	"userns_denied":        http.StatusNotImplemented,
+	"tool_unmapped":        http.StatusNotImplemented,
+	"disabled_by_config":   http.StatusForbidden,
+	VerdictNotInBuild:      http.StatusNotImplemented,
+}
+
+// statusForSandboxVerdict resolves sandboxVerdictStatus with a fail-closed
+// default (501) for any verdict the table doesn't name.
+func statusForSandboxVerdict(verdict string) int {
+	if status, ok := sandboxVerdictStatus[verdict]; ok {
+		return status
+	}
+	return http.StatusNotImplemented
+}
+
+// sandboxSourceByID finds the SandboxSourceAvail entry matching id in a
+// probe's Sources list — the server-side membership check
+// handleTerminalLaunch applies to a client-supplied workspace_source
+// before trusting it, mirroring modelIsMember's role for the model picker.
+// ok is false when no entry matches id at all (an unrecognised source
+// name, distinct from a recognised-but-unavailable one).
+func sandboxSourceByID(sources []SandboxSourceAvail, id string) (src SandboxSourceAvail, ok bool) {
+	for _, s := range sources {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return SandboxSourceAvail{}, false
+}
+
+// errTerminalUnavailable is the ONE honest sentence every 503 on the terminal
+// routes uses when Options.LaunchManager is nil (audit DI-16). A nil manager
+// means buildTerminalStack returned nothing, which has exactly two causes:
+// [handoff].allow_dashboard_launch = false, or no PTY backend on this OS.
+// The pre-ConPTY copy ("run the daemon under WSL/Linux") is WRONG since
+// 2026-07-04 — a native-Windows daemon runs these terminals.
+const errTerminalUnavailable = "the in-dashboard terminal is disabled on this daemon " +
+	"([handoff].allow_dashboard_launch = false) or unsupported on this OS " +
+	"(Windows before 10 version 1809 has no ConPTY)"
+
+// LaunchableTool annotates ONE entry of the New-Terminal picker with the two
+// independent allow-lists that decide what actually happens after the operator
+// hits Start (audit DI-06 / DI-07). It is a SIBLING of the plain
+// launchable_tools string list, never a replacement — existing clients keep
+// reading launchable_tools.
+//
+// Allowed and Watched are deliberately separate because the gates are
+// separate: a tool may be launchable-and-allowed yet produce no captured data,
+// or be watched yet refused at launch. "installed" is deliberately ABSENT —
+// answering it would run the binary resolver once per launchable tool on every
+// poll of this VIEW route; the per-tool /api/terminal/launch/preflight answers
+// it on demand.
+type LaunchableTool struct {
+	Tool string `json:"tool"`
+	// Allowed mirrors [terminal.launch].allowed_tools membership — the LAUNCH
+	// gate termsvc enforces at spawn time (default empty = deny-all).
+	Allowed bool `json:"allowed"`
+	// Watched mirrors [observer.watch].enabled_adapters membership — the
+	// CAPTURE gate. Computed through diag.AdapterWatched, the one owner of the
+	// list's nil-vs-empty rule (nil = every adapter watched; non-nil empty =
+	// none), so this flag and /api/terminal/policy's unwatched_allowed_tools
+	// can never disagree.
+	Watched bool `json:"watched"`
+	// Unavailable, when set, says why the tool's adapter component is not
+	// active on this node (D-514 / D-516, from the feasibility seam): not in
+	// this build, switched off, or denied by policy. The picker shows the
+	// tool disabled with this reason. Empty means the adapter is active.
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+// annotateToolAvailability fills LaunchableTool.Unavailable from the live
+// component snapshot. Without a wired component service every row stays
+// available (the legacy everything-active posture).
+func (s *Server) annotateToolAvailability(ctx context.Context, rows []LaunchableTool) []LaunchableTool {
+	snap, ok := s.comps.live(ctx)
+	if !ok {
+		return rows
+	}
+	why := map[string]string{}
+	for _, v := range nodefeas.ComponentVerdicts(snap.Result.Decisions, snap.Selected) {
+		if !v.Feasible {
+			why[v.ID] = v.Reason
+		}
+	}
+	for i := range rows {
+		if snap.AdapterActive(rows[i].Tool) {
+			continue
+		}
+		id := components.AdapterID(strings.TrimSuffix(rows[i].Tool, "-windows"))
+		reason := why[id]
+		if reason == "" {
+			reason = id + " is installed but not active; turn it on in " + nodefeas.ComponentsStep
+		}
+		rows[i].Unavailable = reason
+	}
+	return rows
+}
+
+// UnlaunchableTool is one advertised product the New Terminal picker cannot
+// start, listed with an honest note instead of omitted (T-494, D-160). Kind
+// is integration.UnlaunchableKind's wire value (browser / hosted / desktop /
+// no_cli); Host names the editor a hosted row runs inside.
+type UnlaunchableTool struct {
+	Tool string `json:"tool"`
+	Kind string `json:"kind"`
+	Host string `json:"host,omitempty"`
+	Note string `json:"note"`
+}
+
+// unlaunchableTools renders integration.Unlaunchables for the wire (a real
+// array, never null).
+func unlaunchableTools() []UnlaunchableTool {
+	rows := integration.Unlaunchables()
+	out := make([]UnlaunchableTool, 0, len(rows))
+	for _, u := range rows {
+		out = append(out, UnlaunchableTool{Tool: u.Tool, Kind: string(u.Kind), Host: u.Host, Note: u.Note})
+	}
+	return out
+}
+
+// launchableToolInfo annotates the launchable capability set with the two
+// independent allow-lists (DI-06). It is pure over the passed config — the
+// zero config is the honest floor (nothing allowed, everything watched),
+// matching what the launch + watch paths themselves do with a zero config.
+func launchableToolInfo(cfg config.Config) []LaunchableTool {
+	allowed := make(map[string]bool, len(cfg.Terminal.Launch.AllowedTools))
+	for _, t := range cfg.Terminal.Launch.AllowedTools {
+		allowed[strings.TrimSpace(t)] = true
+	}
+	tools := launchableTools()
+	out := make([]LaunchableTool, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, LaunchableTool{
+			Tool:    t,
+			Allowed: allowed[t],
+			Watched: diag.AdapterWatched(cfg, t),
+		})
+	}
+	return out
 }
 
 // handleTerminalSessions serves GET /api/terminal/sessions — the live
 // terminal-session list (metadata only, no content). Classified VIEW (§9).
 // It generalizes /api/launch/sessions under the terminal route namespace.
+//
+// It is also the picker's annotation SOURCE (DI-06): a paired remote device
+// gets 403 on the Local /api/terminal/policy route, so the per-tool allowed /
+// watched flags must ride this VIEW route to be readable from a remote tab.
 func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "launch unavailable", http.StatusServiceUnavailable)
+		// Two causes, both honest (DI-16): the operator turned the launch
+		// surface off, or this OS cannot build a PTY. JSON so the SPA can read
+		// the reason instead of rendering "no launchable tools" (DI-05).
+		writeErrStatus(w, errors.New(errTerminalUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	// Surface the operator's canonicalized [terminal.launch].allowed_project_roots
@@ -1177,32 +1253,35 @@ func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) 
 	// re-canonicalizes a path — so its permitted/not-permitted marking matches the
 	// server's spawn-time ValidateProjectRoot check.
 	var allowedRoots []string
-	if cfg, err := loadConfigForDashboard(s.opts.ConfigPath); err == nil {
+	// shellEnabled reflects [terminal.launch].allow_shell — the "New terminal"
+	// dialog uses it to decide whether to offer the plain-shell picker option
+	// honestly (rather than always showing it and failing at launch time).
+	var shellEnabled bool
+	// cfg stays the zero value when the config cannot be loaded — the same
+	// deny-all / watch-all floor every other read of an unloadable config uses.
+	var cfg config.Config
+	if loaded, err := loadConfigForDashboard(s.opts.ConfigPath); err == nil {
+		cfg = loaded
 		allowedRoots = resolveAllowedProjectRoots(cfg.Terminal.Launch.AllowedProjectRoots)
+		shellEnabled = cfg.Terminal.Enabled && cfg.Terminal.Launch.AllowShell
 	}
 	writeJSON(w, map[string]any{
 		"sessions":              s.visibleSnapshot(r.Context()),
 		"launchable_tools":      launchableTools(),
+		"launchable_tool_info":  s.annotateToolAvailability(r.Context(), launchableToolInfo(cfg)),
 		"allowed_project_roots": allowedRoots,
+		"shell_enabled":         shellEnabled,
+		// The GUI launch surface (T2), strictly ADDITIVE: the picker's
+		// "IDE / desktop app" group and the live detached-app list. A GUI run
+		// owns no PTY, so it can never appear in "sessions" — the two lists
+		// describe disjoint things and neither shadows the other.
+		"gui_launchables": guiLaunchableInfo(cfg),
+		"gui_runs":        s.guiRuns(),
+		// Advertised products the picker cannot start (T-494), shown in
+		// their own disabled group with the reason. Additive: an older SPA
+		// ignores the key.
+		"unlaunchable_tools": unlaunchableTools(),
 	})
-}
-
-// ToolPreflight is the wire shape of GET /api/terminal/launch/preflight — the
-// pre-launch binary-resolution verdict for a launchable tool
-// (tool-binary-resolution arc). It tells the New-Terminal dialog, BEFORE a
-// launch, whether the daemon can resolve the tool's binary and — when it cannot
-// — the grounded install command to fix it. The install ARGV is NEVER carried
-// here: InstallCommand is the human Display string only; the server owns argv
-// (registry constants) at the install endpoint. Produced by the nil-able
-// Options.ToolPreflight seam, so the dashboard package carries no dependency on
-// internal/toolresolve (CLAUDE.md #2).
-type ToolPreflight struct {
-	Tool           string   `json:"tool"`
-	Verdict        string   `json:"verdict"`
-	Bin            string   `json:"bin,omitempty"`
-	Notes          []string `json:"notes,omitempty"`
-	InstallCommand string   `json:"install_command,omitempty"`
-	CanInstall     bool     `json:"can_install"`
 }
 
 // handleTerminalPreflight serves GET /api/terminal/launch/preflight?tool=<name>
@@ -1220,7 +1299,58 @@ func (s *Server) handleTerminalPreflight(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if s.opts.ToolPreflight == nil {
-		http.Error(w, "preflight unavailable — this dashboard runs without the tool-resolution seam (run via `observer start`)", http.StatusNotImplemented)
+		writeErrStatus(w, errors.New("preflight unavailable - this dashboard runs without the tool-resolution seam (run via `observer start`)"), http.StatusNotImplemented)
+		return
+	}
+	tool := strings.TrimSpace(r.URL.Query().Get("tool"))
+	if tool == "" {
+		writeErrStatus(w, errors.New("missing tool query parameter"), http.StatusBadRequest)
+		return
+	}
+	// DI-18: the reserved plain-shell pseudo-tool LAUNCHES fine (handleTerminalLaunch
+	// special-cases termsvc.ShellTool and skips binary resolution entirely) but has
+	// no binary to preflight. Keep the 400 — there is genuinely no verdict to give —
+	// but say WHY, instead of the misleading "not launchable" the generic arm below
+	// produces. termsvc.ShellTool is the single owner of the sentinel's spelling
+	// (handleTerminalLaunch reads the same constant); the SPA mirrors it as
+	// SHELL_TOOL in NewTerminalDialog.tsx.
+	if tool == termcore.ShellTool {
+		writeErrStatus(w, errors.New("the plain shell has no binary to preflight"), http.StatusBadRequest)
+		return
+	}
+	pf, ok := s.opts.ToolPreflight(tool)
+	if !ok {
+		writeErrStatus(w, errors.New("tool "+tool+" is not launchable in the embedded terminal"), http.StatusBadRequest)
+		return
+	}
+	pf.DashboardInstall = s.dashboardInstallFor(r.Context(), tool)
+	writeJSON(w, pf)
+}
+
+// terminalLaunchModelsResponse is the wire shape of
+// GET /api/terminal/launch/models — the New Terminal model picker's
+// suggestion list (B5). Supported is false (with an empty Models slice)
+// when the tool has no grounded model-selection mechanism (ModelSpec.Kind
+// ModelNone) or the tool is unknown/not launchable; the frontend treats
+// supported=false identically to a fetch error — no picker.
+type terminalLaunchModelsResponse struct {
+	Tool      string            `json:"tool"`
+	Supported bool              `json:"supported"`
+	Models    []modelSuggestion `json:"models"`
+}
+
+// handleTerminalLaunchModels serves GET /api/terminal/launch/models?tool=<name>
+// — the New Terminal model picker's suggestion list (B5, VIEW). It composes
+// recent usage history (via the nil-able Options.RecentModels seam) with the
+// capability registry's grounded Known examples through the single shared
+// modelSuggestionsFor function — the SAME composition handleTerminalLaunch
+// uses to validate a client-supplied model. A nil RecentModels seam or an
+// unknown/non-model-capable tool both resolve to supported=false rather than
+// an error status, matching the frontend's fail-soft "any problem = no
+// picker" contract (unlike preflight, which distinguishes 501/400).
+func (s *Server) handleTerminalLaunchModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	tool := strings.TrimSpace(r.URL.Query().Get("tool"))
@@ -1228,12 +1358,10 @@ func (s *Server) handleTerminalPreflight(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "missing tool query parameter", http.StatusBadRequest)
 		return
 	}
-	pf, ok := s.opts.ToolPreflight(tool)
-	if !ok {
-		http.Error(w, "tool "+tool+" is not launchable in the embedded terminal", http.StatusBadRequest)
-		return
-	}
-	writeJSON(w, pf)
+	supported, suggestions := modelSuggestionsFor(r.Context(), s.opts.RecentModels, tool)
+	writeJSON(w, terminalLaunchModelsResponse{
+		Tool: tool, Supported: supported, Models: suggestions,
+	})
 }
 
 // terminalInstallRequest is the POST /api/terminal/install body. The only client
@@ -1255,36 +1383,58 @@ type terminalInstallRequest struct {
 // (or its seam nil) → 403; no grounded install command for the tool → 400. The
 // argv is a registry constant supplied by the Options.ToolInstallHint seam,
 // never request input, and the spawned session is SpecSetup → local-writer-only.
+//
+// DELIBERATELY NOT gated by [terminal.launch].allowed_tools or
+// allow_fresh_agent (audit DI-21, decision confirmed 2026-09-02): installing is
+// not launching. The argv is a compile-time constant, the route is Local +
+// confirm-token gated, and the operator who flipped allow_install on has
+// already consented to running vendor installers from here. Gating install on
+// the LAUNCH allow-list would force an operator to widen the launch policy just
+// to obtain a binary. The picker's per-tool `allowed` flag (LaunchableTool,
+// DI-06) closes the real UX gap instead. Pinned by
+// TestTerminalInstallIsNotGatedByAllowedTools.
+//
+// Every non-200 emits application/json {"error": …} via writeErrStatus (DI-05)
+// so the SPA can map status → copy instead of surfacing a raw body.
 func (s *Server) handleTerminalInstall(w http.ResponseWriter, r *http.Request) {
 	if !requireConfirmToken(w, r) {
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, `{"error":"the in-dashboard terminal is not available on this platform — run the observer daemon under WSL/Linux to install tools from here"}`, http.StatusServiceUnavailable)
+		writeErrStatus(w, errors.New(errTerminalUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	if s.opts.AllowToolInstall == nil || !s.opts.AllowToolInstall() {
-		http.Error(w, `{"error":"guided install is disabled — set [terminal.launch].allow_install = true to enable the Install-in-terminal affordance"}`, http.StatusForbidden)
+		writeErrStatus(w, errors.New("guided install is disabled - set [terminal.launch].allow_install = true to enable the Install-in-terminal affordance"), http.StatusForbidden)
 		return
 	}
 	var body terminalInstallRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		writeErrStatus(w, fmt.Errorf("invalid JSON body: %w", err), http.StatusBadRequest)
 		return
 	}
 	tool := strings.TrimSpace(body.Tool)
 	if tool == "" {
-		http.Error(w, "missing tool", http.StatusBadRequest)
+		writeErrStatus(w, errors.New("missing tool"), http.StatusBadRequest)
 		return
 	}
 	if s.opts.ToolInstallHint == nil {
-		http.Error(w, "no grounded install command for "+tool, http.StatusBadRequest)
+		writeErrStatus(w, errors.New("no grounded install command for "+tool), http.StatusBadRequest)
 		return
 	}
 	argv, display, ok := s.opts.ToolInstallHint(tool)
 	if !ok {
-		http.Error(w, "no grounded install command for "+tool, http.StatusBadRequest)
+		writeErrStatus(w, errors.New("no grounded install command for "+tool), http.StatusBadRequest)
 		return
+	}
+	// A grounded prerequisite of the vendor installer (unzip, bzip2, ...) is
+	// missing: refuse BEFORE spawning, with the fix, rather than run a script
+	// that is known to fail. 409: the request is fine, the host is not ready.
+	if s.opts.ToolInstallBlocked != nil {
+		if remedy := s.opts.ToolInstallBlocked(tool); remedy != "" {
+			writeErrStatus(w, errors.New(remedy), http.StatusConflict)
+			return
+		}
 	}
 	handle, err := s.opts.LaunchManager.CreateSetup(SetupSpec{
 		Argv:  argv,
@@ -1295,11 +1445,18 @@ func (s *Server) handleTerminalInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.opts.Logger.Info("dashboard: guided tool install spawned", slog.String("tool", tool), slog.String("command", display))
+	// Record it (node-local tool_installs) so an Uninstall can later be
+	// offered for exactly this install. Fail-soft: the install is running.
+	s.recordInstall(r.Context(), tool, handle, argv, display)
 	writeJSON(w, map[string]any{
 		"handle":  handle,
 		"tool":    tool,
 		"command": display,
 	})
+	// Best-effort: the install script may create the tool's home/sessions
+	// tree before first launch. Even when it does not, the retry schedule
+	// behind RefreshWatchRoots is harmless. Primary kick remains post-launch.
+	s.kickWatchRootsRefresh()
 }
 
 // handleAttachSessions serves GET /api/attach/sessions — the live
@@ -1361,7 +1518,7 @@ func (s *Server) handleAttachSessions(w http.ResponseWriter, r *http.Request) {
 		if info.Exited || info.Setup {
 			continue // dead handle / privileged local-only setup PTY
 		}
-		if !termrun.Kind(info.Kind).Valid() {
+		if !termcore.Kind(info.Kind).Valid() {
 			continue // kindless row predates run-identity wiring — not a joinable run
 		}
 		// On THIS endpoint session_id ALWAYS means "the session this PTY is
@@ -1372,7 +1529,7 @@ func (s *Server) handleAttachSessions(w http.ResponseWriter, r *http.Request) {
 		// links it (~10–30 s) — or "" pre-link, so the row is still LISTED but
 		// matches no session-detail page until the fork is known. Endpoint-scoped:
 		// Snapshot/visibleSnapshot semantics are untouched.
-		if termrun.Kind(info.Kind) == termrun.KindHandoff {
+		if termcore.Kind(info.Kind) == termcore.KindHandoff {
 			info.SessionID = ""
 			if info.RunID != "" {
 				if sid, ok := s.opts.LaunchManager.SessionForRun(info.RunID); ok {
@@ -1402,7 +1559,7 @@ func resolveAllowedProjectRoots(roots []string) []string {
 		if entry == "" {
 			continue
 		}
-		canonical, err := termsvc.ValidateProjectRoot(entry, []string{entry})
+		canonical, err := termcore.ValidateProjectRoot(entry, []string{entry})
 		if err != nil {
 			continue
 		}
@@ -1413,8 +1570,15 @@ func resolveAllowedProjectRoots(roots []string) []string {
 
 // handleLaunchAdmin serves the running-session admin routes under
 // /api/launch/: GET /api/launch/sessions lists live terminal sessions
-// (metadata only — no content), and DELETE /api/launch/<handle> reaps one.
+// (metadata only — no content), and DELETE /api/launch/<ref> reaps one.
 // Gated by the LaunchManager seam; DELETE is Origin-checked by browserGuard.
+//
+// <ref> is the session's token (the handle), or its run_id / session_id
+// from the same GET /api/launch/sessions row (resolveLaunchRef). T-803: the
+// route used to call Close on whatever it was given and answer 204, so a
+// caller passing a session_id got 204 while the terminal kept running. An
+// unknown ref is now 404 and an ambiguous one 409; 204 means a session was
+// actually closed.
 func (s *Server) handleLaunchAdmin(w http.ResponseWriter, r *http.Request) {
 	if s.opts.LaunchManager == nil {
 		http.Error(w, "launch unavailable", http.StatusServiceUnavailable)
@@ -1444,12 +1608,59 @@ func (s *Server) handleLaunchAdmin(w http.ResponseWriter, r *http.Request) {
 	// the handle exists (same confidentiality posture as the snapshot redaction
 	// + SubscribeRemote refusal). The owner-local loopback listener is never
 	// remote-exposed, so the local owner's Cancel still reaps it.
-	if remoteExposedFromContext(r.Context()) && s.opts.LaunchManager.IsSetupSession(rest) {
+	handle, status := s.resolveLaunchRef(r.Context(), rest)
+	if status != http.StatusOK {
+		msg := "no running terminal session matches " + rest
+		if status == http.StatusConflict {
+			msg = rest + " matches more than one running terminal session; close it by its token"
+		}
+		writeJSONStatus(w, status, map[string]string{"error": msg})
+		return
+	}
+	if remoteExposedFromContext(r.Context()) && s.opts.LaunchManager.IsSetupSession(handle) {
 		http.NotFound(w, r)
 		return
 	}
-	s.opts.LaunchManager.Close(rest)
+	s.opts.LaunchManager.Close(handle)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// resolveLaunchRef maps a DELETE /api/launch/<ref> reference onto one live
+// handle. Rules, walked top-down:
+//
+//  1. ref is a live token: that handle (any caller, the pre-T-803 contract).
+//  2. ref equals the run_id or session_id of exactly one session the caller
+//     can see: that session's handle.
+//  3. it matches several: 409, the caller must pick a token.
+//  4. otherwise: 404.
+//
+// Rule 2 reads the caller's visibleSnapshot, so a remote caller can never
+// resolve a session hidden from it (a setup PTY, or an attach/resume run
+// with allow_terminal_view off) through an alias.
+func (s *Server) resolveLaunchRef(ctx context.Context, ref string) (string, int) {
+	for _, info := range s.opts.LaunchManager.Snapshot() {
+		if info.ID == ref {
+			return ref, http.StatusOK
+		}
+	}
+	var hit string
+	n := 0
+	for _, info := range s.visibleSnapshot(ctx) {
+		if (info.RunID != "" && info.RunID == ref) || (info.SessionID != "" && info.SessionID == ref) {
+			if info.ID != hit {
+				hit = info.ID
+				n++
+			}
+		}
+	}
+	switch n {
+	case 0:
+		return "", http.StatusNotFound
+	case 1:
+		return hit, http.StatusOK
+	default:
+		return "", http.StatusConflict
+	}
 }
 
 // wsControl is the text-frame control protocol between the browser and the
@@ -1497,6 +1708,11 @@ type wsControl struct {
 	Expiry bool `json:"expiry,omitempty"`
 	// Reason carries the typed denial taxonomy on control_denied.
 	Reason ControlDenialReason `json:"reason,omitempty"`
+	// PolicyStop rides the {"t":"exit",…} frame ONLY, when this run's PTY
+	// child was stopped by an org-managed node's own node-intervention loop
+	// (policystop.go). Omitted when there is nothing to show — a bare exit
+	// still renders exactly as before this arc.
+	PolicyStop *PolicyStop `json:"policy_stop,omitempty"`
 }
 
 // ptyGeometry is the PTY dimension snapshot the on-open (and control-transition)
@@ -1504,6 +1720,14 @@ type wsControl struct {
 type ptyGeometry struct {
 	rows, cols, initialRows, initialCols uint16
 }
+
+// known reports whether this snapshot carries real dimensions. The launch
+// manager seeds a session's geometry from the launch Spec and adopts the first
+// successful resize when that Spec was 0×0, so an all-zero pair is its documented
+// "size not yet known" — never a legitimate window size (a 0-row or 0-col winsize
+// does not exist). Both axes must be known: a half-known pair describes no
+// terminal the client could fit to.
+func (g ptyGeometry) known() bool { return g.rows != 0 && g.cols != 0 }
 
 // ptySizeForHandle returns the PTY geometry the pty_size frame reports for handle
 // (Feature 2). It reads the ONE live snapshot the launch manager owns — never a
@@ -1529,6 +1753,77 @@ func writePTYSize(ctx context.Context, c *websocket.Conn, g ptyGeometry) {
 		T: "pty_size", Rows: g.rows, Cols: g.cols,
 		InitialRows: g.initialRows, InitialCols: g.initialCols,
 	})
+}
+
+// ptySizeAnnounceInterval / ptySizeAnnounceWindow bound the on-open wait for a
+// PTY geometry that is not known yet (Q1 probe, P4). The interval is short
+// because the gap it covers is short — the launch manager converges within a
+// spawn, and a client's own first resize lands in milliseconds — and the window
+// is small enough that a session which simply never acquires a size (a launch
+// that requested none and a client that never resizes) costs one idle goroutine
+// for a couple of seconds and then nothing, rather than a permanent poller.
+const (
+	ptySizeAnnounceInterval = 25 * time.Millisecond
+	ptySizeAnnounceWindow   = 2 * time.Second
+)
+
+// startPTYSizeAnnounce performs the bridge's on-open geometry announce and
+// returns the send closure the bridge reuses on control transitions.
+//
+// An UNKNOWN geometry is never announced: the launch manager reports all-zero
+// until the size is known (a launch that requested no dimensions, with no resize
+// yet), and {"t":"pty_size"} with every field stripped by omitempty tells the
+// client nothing it can restore — which is the frame's whole promise, and
+// exactly what the Q1 probe captured as the FIRST text frame of every session
+// (P4). So the returned closure reports whether it actually wrote, and an
+// on-open announce with nothing to say instead leaves a bounded waiter that
+// sends the first REAL geometry, off the bridge's own goroutine.
+//
+// nil geo (older call sites / tests) disables the frame entirely.
+func startPTYSizeAnnounce(ctx context.Context, c *websocket.Conn, geo func() ptyGeometry) func() bool {
+	send := func() bool {
+		if geo == nil {
+			return false
+		}
+		g := geo()
+		if !g.known() {
+			return false
+		}
+		writePTYSize(ctx, c, g)
+		return true
+	}
+	if !send() {
+		go awaitPTYSize(ctx, send, ptySizeAnnounceInterval, ptySizeAnnounceWindow)
+	}
+	return send
+}
+
+// awaitPTYSize retries send until it reports a frame actually went out, the
+// window elapses, or ctx is done — whichever comes first. send is the bridge's
+// geometry announce, which writes nothing while the size is unknown; this is the
+// only thing that turns "nothing to announce yet" into "announced once, with real
+// dimensions". It never sends more than one frame: the first successful send
+// ends the loop.
+//
+// Durations are parameters rather than the constants above so the behaviour is
+// testable without a real 2-second wait.
+func awaitPTYSize(ctx context.Context, send func() bool, interval, window time.Duration) {
+	deadline := time.NewTimer(window)
+	defer deadline.Stop()
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+			if send() {
+				return
+			}
+		}
+	}
 }
 
 // applyResizeFrame forwards ONE client {"t":"resize"} frame to a live writer
@@ -1743,7 +2038,7 @@ func (s *Server) handleLaunchWS(w http.ResponseWriter, r *http.Request) {
 		// failed leg (never which leg) + consume on success.
 		acquire := func(capTok, confirm string) (LaunchWriter, error) {
 			s.auditTerminalControl("terminal_control_request", deviceFP, handle, peer, "request", "acquire_writer")
-			standingCredential := remoteauth.IsStandingSecret(capTok)
+			standingCredential := isStandingSecret(capTok)
 			wl, err := s.opts.LaunchManager.AcquireWriterRemote(RemoteWriterRequest{
 				Handle:          handle,
 				DeviceSessionID: device,
@@ -1780,7 +2075,7 @@ func (s *Server) handleLaunchWS(w http.ResponseWriter, r *http.Request) {
 		// the writer lease closes the socket (the device is no longer trusted); a
 		// lease takeover only demotes. The owner-local bridge below passes false
 		// so its revoke behaviour stays byte-identical (always demote).
-		s.bridgeTerminalWS(r.Context(), c, sub, nil, acquire, denied, true, func() ptyGeometry { return s.ptySizeForHandle(handle) })
+		s.bridgeTerminalWS(r.Context(), c, sub, nil, acquire, denied, true, handle, func() ptyGeometry { return s.ptySizeForHandle(handle) })
 		return
 	}
 
@@ -1806,7 +2101,7 @@ func (s *Server) handleLaunchWS(w http.ResponseWriter, r *http.Request) {
 	// closeOnHardRevoke=false: the local loopback path always DEMOTES on a
 	// revoke (byte-identical to prior behaviour) — the socket-closing branch is
 	// remote-only.
-	s.bridgeTerminalWS(r.Context(), c, sub, writer, localAcquire, nil, false, func() ptyGeometry { return s.ptySizeForHandle(handle) })
+	s.bridgeTerminalWS(r.Context(), c, sub, writer, localAcquire, nil, false, handle, func() ptyGeometry { return s.ptySizeForHandle(handle) })
 }
 
 // terminalPingInterval / terminalPingTimeout drive the WS liveness probe. Every
@@ -1884,7 +2179,7 @@ func SetTerminalPingPolicy(interval, timeout time.Duration, failuresAllowed int)
 // demotes, keeping that path byte-identical. A normal PTY-exit teardown never
 // reaches this branch: the exit notifier cancels the bridge context first, so
 // watchRevoke returns via ctx.Done rather than the revoked channel.
-func (s *Server) bridgeTerminalWS(parent context.Context, c *websocket.Conn, sub LaunchSubscription, writer LaunchWriter, acquire func(capTok, confirm string) (LaunchWriter, error), denied *deniedFrameCoalescer, closeOnHardRevoke bool, geo func() ptyGeometry) {
+func (s *Server) bridgeTerminalWS(parent context.Context, c *websocket.Conn, sub LaunchSubscription, writer LaunchWriter, acquire func(capTok, confirm string) (LaunchWriter, error), denied *deniedFrameCoalescer, closeOnHardRevoke bool, handle string, geo func() ptyGeometry) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -1894,12 +2189,10 @@ func (s *Server) bridgeTerminalWS(parent context.Context, c *websocket.Conn, sub
 	// re-fits when control changes hands). geo re-reads the manager's live size
 	// each call, so a control-transition re-send is never stale. nil geo (older
 	// call sites / tests) disables the frame.
-	sendPTYSize := func() {
-		if geo != nil {
-			writePTYSize(ctx, c, geo())
-		}
-	}
-	sendPTYSize()
+	//
+	// An UNKNOWN geometry is never announced — see startPTYSizeAnnounce, which
+	// performs the on-open announce and returns the closure reused below.
+	sendPTYSize := startPTYSizeAnnounce(ctx, c, geo)
 	// Flush the coalesced tail of dropped-frame drops on teardown so a viewer
 	// that floods then disconnects still yields a bounded final count (nil-safe:
 	// the owner-local path wires no coalescer).
@@ -2005,7 +2298,7 @@ func (s *Server) bridgeTerminalWS(parent context.Context, c *websocket.Conn, sub
 
 	// When the process exits AND its output is fully flushed, emit the exit
 	// control frame and unblock the read loop.
-	go func() {
+	go func() { //nolint:gosec // G118: the exit watcher selects on the request ctx and returns when it ends
 		select {
 		case <-sub.Done():
 		case <-ctx.Done():
@@ -2013,7 +2306,18 @@ func (s *Server) bridgeTerminalWS(parent context.Context, c *websocket.Conn, sub
 		}
 		<-readerDone // let the reader flush the final bytes first
 		_, code := sub.Exited()
-		_ = wsjson.Write(ctx, c, wsControl{T: "exit", Code: code})
+		frame := wsControl{T: "exit", Code: code}
+		// Resolve the policy-stop explanation ONCE, off a short bounded
+		// timeout independent of ctx (which this same goroutine cancels right
+		// below) — a slow/unavailable lookup must never delay the exit frame
+		// beyond a bounded budget. A nil PolicyStop seam or a not-found lookup
+		// both leave frame.PolicyStop nil, so a bare exit renders unchanged.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if stop, ok := s.resolvePolicyStop(stopCtx, handle); ok {
+			frame.PolicyStop = &stop
+		}
+		stopCancel()
+		_ = wsjson.Write(ctx, c, frame)
 		cancel()
 	}()
 

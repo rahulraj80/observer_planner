@@ -1,0 +1,28 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.data": "VerifiedOfficial",
+    "error.data.code": "VerifiedOfficial",
+    "error.data.httpStatus": "VerifiedOfficial",
+    "error.data.path": "VerifiedOfficial",
+    "error.data.zodError": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial"
+  },
+  "fixture_sha256": "337684afe564308e02155045868882557aad1f01a49f70c288965e37f3cd4ca4",
+  "http": {
+    "method": "GET",
+    "path": "/api/trpc/usageAnalytics.getTable",
+    "status": 401
+  },
+  "notes": "The documented tRPC error envelope with code UNAUTHORIZED; the values are synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Kilo Code API 1.0.0 (openapi.json), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "f0b9556c39ea4454732029afcc4c985077e96c173185b92c84708b640af51180",
+  "source_url": "https://app.kilo.ai/api/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "kilo.analytics.table"
+}

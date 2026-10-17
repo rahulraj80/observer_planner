@@ -35,6 +35,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/proxyroute"
 )
 
 // newClaudeCmd implements `observer claude` — sets ANTHROPIC_BASE_URL
@@ -64,7 +65,7 @@ func newClaudeCmd() *cobra.Command {
 			"proxy. For Pro/Max OAuth users, also re-exports the OAuth access\n" +
 			"token as ANTHROPIC_AUTH_TOKEN so Claude Code's normal `/v1/messages`\n" +
 			"path lands at the proxy instead of bypassing it. Same Pro/Max\n" +
-			"billing — observer just gets to see (and compress) the body.\n\n" +
+			"billing - observer just gets to see (and compress) the body.\n\n" +
 			"All arguments after the subcommand are forwarded to claude. Use\n" +
 			"`--` to separate observer flags from claude flags:\n" +
 			"    observer claude -- --print \"hi\"\n\n" +
@@ -73,8 +74,13 @@ func newClaudeCmd() *cobra.Command {
 			"and print a one-line PASS/FAIL summary without launching claude.\n\n" +
 			"Requires a running observer proxy. Start one with `observer start`\n" +
 			"or `observer proxy start` first.",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			return runClaudeLauncher(cmd.Context(), claudeLauncherOptions{
 				configPath:   configPath,
 				proxyURL:     proxyURL,
@@ -131,9 +137,8 @@ func newClaudeCmd() *cobra.Command {
 	// combinable with --attach (the daemon owns the resumed PTY).
 	if capClaude, _ := integration.For("claude-code"); capClaude.Resume.Kind == integration.ResumeNative {
 		cmd.Flags().StringVar(&resume, "resume", "",
-			"Resume a CLOSED claude-code session by its id: launches `claude --resume <id>`, reattaching the tool's REAL prior conversation (signed thinking blocks and all) — NOT a distilled fork. Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
+			"Resume a CLOSED claude-code session by its id: launches `claude --resume <id>`, reattaching the tool's REAL prior conversation (signed thinking blocks and all) - NOT a distilled fork. Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
 	}
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
@@ -164,6 +169,15 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: opts.configPath})
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// P6 item 5: refuse a bare launch of an org-disallowed tool (node.features
+	// tools.disallow). "claude-code" is claude's integration-registry key.
+	// A PEEK here (review M3-10): an attached launch is started by the
+	// daemon's inner `observer claude`, which counts the grant use; the bare
+	// path below counts it after the attach decision. One launch, one use.
+	if err := refuseIfToolDisallowedPeekCfg(cfg, "claude-code", opts.stderr); err != nil {
+		return err
 	}
 
 	proxyURL := opts.proxyURL
@@ -223,6 +237,10 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 	if outcome.handled {
 		return attachErr
 	}
+	// The bare path starts claude itself: count the grant use here (M3-10).
+	if err := refuseIfToolDisallowedCfg(cfg, "claude-code", opts.stderr); err != nil {
+		return err
+	}
 	// F3(a): remember when the attach layer already emitted its daemon-unreachable
 	// notice, so a downstream empty-unset proxy-down notice (same root cause — the
 	// daemon IS the proxy) doesn't print a redundant SECOND line, and the
@@ -255,7 +273,7 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 		defer release()
 		opts.claudeArgs = injectClaudeResume(opts.claudeArgs, opts.resume)
 		fmt.Fprintf(opts.stderr,
-			"observer claude: native resume — reattaching session %s via `claude --resume` (real transcript, not a fork)\n",
+			"observer claude: native resume - reattaching session %s via `claude --resume` (real transcript, not a fork)\n",
 			opts.resume)
 	}
 
@@ -336,7 +354,7 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 	// didn't prove); fix or drop --settings and re-run.
 	if route.cliUnreadable {
 		fmt.Fprintf(opts.stderr,
-			"observer claude: refusing to launch — your --settings value (%s) could not be read or parsed as a settings object, so observer cannot tell whether it routes claude to the observer proxy. Fix or drop --settings (pass a readable file path or valid inline JSON) and re-run.\n",
+			"observer claude: refusing to launch - your --settings value (%s) could not be read or parsed as a settings object, so observer cannot tell whether it routes claude to the observer proxy. Fix or drop --settings (pass a readable file path or valid inline JSON) and re-run.\n",
 			route.file)
 		return exitErr(1)
 	}
@@ -395,7 +413,7 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 	// proxyRouteProceed → the routed launch below (proxy reachable, and no
 	// baked-in route pointing at a dead proxy).
 
-	return runClaudeRoutedLaunch(opts, bin, proxyURL, launchArgs, continueDir)
+	return runClaudeRoutedLaunch(opts, bin, proxyURL, route, launchArgs, continueDir)
 }
 
 // runClaudeRoutedLaunch prepares the claude child environment (OAuth token
@@ -404,7 +422,7 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 // claude on the proxy-routed path. Extracted from runClaudeLauncher to keep its
 // cyclomatic complexity in bounds; reached only on a proxyRouteProceed verdict
 // (proxy reachable, no baked-in route into a dead proxy).
-func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, launchArgs []string, continueDir string) error {
+func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, route claudeRouteResolution, launchArgs []string, continueDir string) error {
 	credPath := claudeCredentialsPath()
 	env, info, err := prepareClaudeEnv(os.Environ(), proxyURL, credPath)
 	if err != nil {
@@ -420,11 +438,11 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, lau
 	switch {
 	case info.OAuthStale:
 		fmt.Fprintf(opts.stderr,
-			"observer claude: stored OAuth token in %s is expired — NOT re-exporting it (a stale env token blocks Claude Code's own refresh and the session 401s). Launching with ANTHROPIC_BASE_URL only; claude refreshes its token itself.\n",
+			"observer claude: stored OAuth token in %s is expired - NOT re-exporting it (a stale env token blocks Claude Code's own refresh and the session 401s). Launching with ANTHROPIC_BASE_URL only; claude refreshes its token itself.\n",
 			credPath)
 	case info.CredentialsErr != nil:
 		fmt.Fprintf(opts.stderr,
-			"observer claude: warning — credentials file %s exists but is unparseable (%v); falling back to API-key mode. Fix the file or set ANTHROPIC_AUTH_TOKEN manually if you're a Pro/Max user.\n",
+			"observer claude: warning - credentials file %s exists but is unparseable (%v); falling back to API-key mode. Fix the file or set ANTHROPIC_AUTH_TOKEN manually if you're a Pro/Max user.\n",
 			credPath, info.CredentialsErr)
 	case info.OAuthPreset:
 		fmt.Fprintf(opts.stderr,
@@ -435,7 +453,7 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, lau
 		// hand-edited file the user probably wants to know about).
 		if credentialsFileExists(credPath) {
 			fmt.Fprintf(opts.stderr,
-				"observer claude: warning — credentials file %s has no claudeAiOauth.accessToken; falling back to API-key mode. Re-run `claude` to refresh your OAuth credentials if you're a Pro/Max user.\n",
+				"observer claude: warning - credentials file %s has no claudeAiOauth.accessToken; falling back to API-key mode. Re-run `claude` to refresh your OAuth credentials if you're a Pro/Max user.\n",
 				credPath)
 		}
 	}
@@ -452,7 +470,7 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, lau
 			proxyURL)
 	} else {
 		fmt.Fprintf(opts.stderr,
-			"observer claude: routing via %s (ANTHROPIC_BASE_URL only — using existing API-key auth)\n",
+			"observer claude: routing via %s (ANTHROPIC_BASE_URL only - using existing API-key auth)\n",
 			proxyURL)
 	}
 
@@ -466,7 +484,12 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, lau
 		launchArgs = forceClaudeSessionID(launchArgs)
 	}
 
-	return execClaudeChild(bin, launchArgs, env, continueDir)
+	evidence := budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
+	if route.class == claudeRouteObserver ||
+		(route.class == claudeRouteNone && urlRoutesToProxy(envValue(env, "ANTHROPIC_BASE_URL"), proxyURL)) {
+		evidence = budgetLaunchEvidence{Route: budgetLaunchRouteObserverProxy, ProxyURL: proxyURL}
+	}
+	return execClaudeChild(bin, launchArgs, env, continueDir, opts.configPath, evidence)
 }
 
 // claudeAttachEnv builds the profile env forwarded across the attach socket to
@@ -480,10 +503,15 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, lau
 // verbatim so the child resets to claude's default profile rather than silently
 // retaining the daemon's inherited value — launchChildEnv layers ExtraEnv AFTER
 // the inherited env, so the empty override wins at the child (last-wins). Nil
-// when neither key is present.
+// when no key is present.
+//
+// CLAUDE_CODE_GATEWAY_HINT_HEADERS rides along on the same presence rule: the
+// inner launcher turns the hint headers on only when the variable is unset
+// (prepareClaudeEnv), and without forwarding it would read the DAEMON's
+// environment, so a caller's explicit opt-out would be lost on attach.
 func claudeAttachEnv(environ []string) []string {
 	var out []string
-	for _, key := range []string{"CLAUDE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR"} {
+	for _, key := range []string{"CLAUDE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR", claudeGatewayHintEnv} {
 		if v, ok := lookupEnvValue(environ, key); ok {
 			out = append(out, key+"="+v)
 		}
@@ -563,7 +591,7 @@ func rejectIncompatibleClaudeAttachFlags(opts claudeLauncherOptions) error {
 func rejectIncompatibleClaudeResumeFlags(opts claudeLauncherOptions) error {
 	switch {
 	case opts.continueFrom != "":
-		return errors.New("observer claude: --resume (native, reattaches the REAL transcript) is mutually exclusive with --continue-from (distilled fork into a NEW session) — pick one")
+		return errors.New("observer claude: --resume (native, reattaches the REAL transcript) is mutually exclusive with --continue-from (distilled fork into a NEW session) - pick one")
 	case opts.carry != "":
 		return errors.New("observer claude: --carry only applies to --continue-from and cannot be combined with --resume")
 	case opts.fromMessage != 0:
@@ -775,18 +803,37 @@ type claudeEnvInfo struct {
 	OAuthPreset    bool  // user already had ANTHROPIC_AUTH_TOKEN; we kept theirs
 	OAuthStale     bool  // stored token expired — deliberately NOT re-exported (D13)
 	CredentialsErr error // non-fatal — file missing / unreadable / wrong shape
+	// GatewayHintsSet: the launcher turned on Claude Code's gateway hint
+	// headers (CLAUDE_CODE_GATEWAY_HINT_HEADERS=1) because the child routes
+	// to the observer proxy and the user had not set the variable.
+	GatewayHintsSet bool
 }
+
+// claudeGatewayHintEnv is Claude Code's switch for its gateway hint headers
+// (x-claude-code-request-class / -agent-type / -compaction /
+// -context-compacted / -prev-tool-durations, and since 2.1.283
+// x-claude-code-prompt-id). They are sent by default only on a direct
+// connection to the Anthropic API; behind a custom ANTHROPIC_BASE_URL they
+// stay off unless this is "1"
+// (https://code.claude.com/docs/en/llm-gateway-protocol#gateway-hint-headers).
+const claudeGatewayHintEnv = proxyroute.ClaudeGatewayHintEnv
 
 // prepareClaudeEnv merges the OAuth-routing env vars into the parent
 // environment without clobbering anything the user explicitly set.
 //
 // Rules:
 //   - If ANTHROPIC_BASE_URL is unset, set it to proxyURL.
+//   - If CLAUDE_CODE_GATEWAY_HINT_HEADERS is unset and the child routes to
+//     the observer proxy, set it to "1" (prompt-id capture).
 //   - If ANTHROPIC_AUTH_TOKEN is unset and credentialsPath has a usable
 //     `claudeAiOauth.accessToken`, set it from there.
 //   - Anything the user already exported wins. The launcher never
 //     overrides explicit env state.
 func prepareClaudeEnv(parent []string, proxyURL, credentialsPath string) ([]string, claudeEnvInfo, error) {
+	// The env this builds is handed to the untrusted claude child, so drop the
+	// trusted-OOB-channel vars up front — they must never reach the child (the
+	// per-session auth secret would let it forge frames on the trusted channel).
+	parent = scrubOOBEnv(parent)
 	env := make(map[string]string, len(parent))
 	keys := make([]string, 0, len(parent)) // preserve order for determinism
 	for _, kv := range parent {
@@ -809,6 +856,20 @@ func prepareClaudeEnv(parent []string, proxyURL, credentialsPath string) ([]stri
 		env["ANTHROPIC_BASE_URL"] = proxyURL
 		keys = appendIfMissing(keys, "ANTHROPIC_BASE_URL")
 		info.BaseURLSet = true
+	}
+
+	// Gateway hint headers (backlog item 14). The proxy records the prompt id
+	// as an exact user-message boundary (api_turns.prompt_id) and forwards
+	// every hint header upstream untouched; Anthropic's own API receives the
+	// same headers by default on a direct connection, so they are safe on
+	// the loopback hop. Only when the child actually routes to the observer
+	// proxy (never a user's own gateway, which might reject unknown headers),
+	// and never over the user's own setting - presence wins, so an explicit
+	// "0" or "" is kept.
+	if _, preset := env[claudeGatewayHintEnv]; !preset && urlRoutesToProxy(env["ANTHROPIC_BASE_URL"], proxyURL) {
+		env[claudeGatewayHintEnv] = "1"
+		keys = appendIfMissing(keys, claudeGatewayHintEnv)
+		info.GatewayHintsSet = true
 	}
 
 	if existing, ok := env["ANTHROPIC_AUTH_TOKEN"]; ok && existing != "" {
@@ -930,7 +991,7 @@ func runClaudeVerify(stderr interface{ Write([]byte) (int, error) }, r claudeVer
 	if r.ProxyReachable {
 		fmt.Fprintf(stderr, "  PASS  proxy reachable at %s\n", r.ProxyURL)
 	} else {
-		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s — start `observer start` or `observer proxy start`\n", r.ProxyURL)
+		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s - start `observer start` or `observer proxy start`\n", r.ProxyURL)
 		failed++
 	}
 
@@ -943,7 +1004,7 @@ func runClaudeVerify(stderr interface{ Write([]byte) (int, error) }, r claudeVer
 	case r.Info.OAuthInjected:
 		fmt.Fprintf(stderr, "  PASS  Pro/Max OAuth token found in %s; would re-export as ANTHROPIC_AUTH_TOKEN\n", r.CredentialsPath)
 	case credentialsFileExists(r.CredentialsPath):
-		fmt.Fprintf(stderr, "  WARN  %s present but has no accessToken — API-key mode will be used. If you're a Pro/Max user, re-run `claude` interactively to refresh credentials.\n", r.CredentialsPath)
+		fmt.Fprintf(stderr, "  WARN  %s present but has no accessToken - API-key mode will be used. If you're a Pro/Max user, re-run `claude` interactively to refresh credentials.\n", r.CredentialsPath)
 	default:
 		fmt.Fprintf(stderr, "  PASS  no Pro/Max credentials file at %s (assuming API-key mode; ensure ANTHROPIC_API_KEY is set)\n", r.CredentialsPath)
 	}
@@ -958,7 +1019,7 @@ func runClaudeVerify(stderr interface{ Write([]byte) (int, error) }, r claudeVer
 		fmt.Fprintln(stderr, "observer claude --verify: all checks passed; `observer claude` should capture every turn.")
 		return nil
 	}
-	fmt.Fprintf(stderr, "observer claude --verify: %d check(s) failed — fix above and re-verify.\n", failed)
+	fmt.Fprintf(stderr, "observer claude --verify: %d check(s) failed - fix above and re-verify.\n", failed)
 	return exitErr(1)
 }
 

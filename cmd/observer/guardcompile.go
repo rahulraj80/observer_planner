@@ -175,7 +175,7 @@ func (r *dialectRunner) CompileTargets(ctx context.Context, names []string, writ
 			continue
 		}
 		if requireExisting && !exists {
-			rep.Skipped = "config file not present (client not in use?) — select the tool explicitly to create it"
+			rep.Skipped = "config file not present (client not in use?) - select the tool explicitly to create it"
 			reports = append(reports, rep)
 			continue
 		}
@@ -196,7 +196,7 @@ func (r *dialectRunner) CompileTargets(ctx context.Context, names []string, writ
 				rep.Wrote = true
 			}
 			if r.st == nil {
-				rep.Issues = append(rep.Issues, "pin skipped: observer DB unavailable — drift detection starts after the next `observer guard compile` with the daemon DB reachable")
+				rep.Issues = append(rep.Issues, "pin skipped: observer DB unavailable - drift detection starts after the next `observer guard compile` with the daemon DB reachable")
 			} else if err := r.st.UpsertGuardPin(ctx, store.GuardPinRow{
 				Kind: "native_dialect", Name: string(t.Dialect), Client: t.Client,
 				PinHash:   compile.HashEntries(compiled.Entries),
@@ -377,7 +377,7 @@ func newGuardCompileCmd() *cobra.Command {
 		Long: "Translates the effective guard policy into native enforcement config\n" +
 			"(Claude Code permissions.deny/ask; OpenCode permission.bash in\n" +
 			"last-match-wins order) so the client itself blocks even when the\n" +
-			"observer daemon is down — defense-in-depth from one policy\n" +
+			"observer daemon is down - defense-in-depth from one policy\n" +
 			"definition. Writes are ADDITIVE: user entries are never clobbered;\n" +
 			"managed entries are recognised by value and retired when policy\n" +
 			"stops wanting them. Compiled entries reflect ENFORCE-mode decisions\n" +
@@ -386,7 +386,7 @@ func newGuardCompileCmd() *cobra.Command {
 			"documented per rule (--diff prints them). Each artifact is pinned\n" +
 			"(guard_pins kind=native_dialect); later drift fires R-204.\n\n" +
 			"--diff reports divergence without writing (exit 1 when out of sync)\n" +
-			"— the R-204 remediation surface.",
+			"- the R-204 remediation surface.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
@@ -400,7 +400,7 @@ func newGuardCompileCmd() *cobra.Command {
 			database, err := db.Open(cmd.Context(), db.Options{Path: cfg.Observer.DBPath})
 			var st *store.Store
 			if err != nil {
-				fmt.Fprintf(out, "WARN: observer DB unavailable (%v) — compiling without pinning\n", err)
+				fmt.Fprintf(out, "WARN: observer DB unavailable (%v) - compiling without pinning\n", err)
 			} else {
 				defer database.Close()
 				st = store.New(database)
@@ -418,7 +418,7 @@ func newGuardCompileCmd() *cobra.Command {
 			if diff && outOfSync {
 				// Exit 1 (the guard lint precedent) — composable into
 				// scripts and the R-204 remediation loop.
-				return fmt.Errorf("native configs out of sync with policy — run `observer guard compile`")
+				return fmt.Errorf("native configs out of sync with policy - run `observer guard compile`")
 			}
 			return nil
 		},
@@ -445,11 +445,11 @@ func printDialectReports(out io.Writer, reports []dialectReport, diff bool) bool
 		case rep.Skipped != "":
 			fmt.Fprintf(out, "%-12s skipped: %s\n", rep.Target.Dialect, rep.Skipped)
 		case diff && rep.InSync():
-			fmt.Fprintf(out, "%-12s in sync (%d managed entr%s) — %s\n",
+			fmt.Fprintf(out, "%-12s in sync (%d managed entr%s) - %s\n",
 				rep.Target.Dialect, rep.Entries, pluralIES(rep.Entries), rep.Path)
 		case diff:
 			outOfSync = true
-			fmt.Fprintf(out, "%-12s OUT OF SYNC — %s\n", rep.Target.Dialect, rep.Path)
+			fmt.Fprintf(out, "%-12s OUT OF SYNC - %s\n", rep.Target.Dialect, rep.Path)
 			for _, e := range rep.Added {
 				fmt.Fprintf(out, "  missing: %-4s %s\n", e.Action, e.Value)
 			}
@@ -465,7 +465,7 @@ func printDialectReports(out io.Writer, reports []dialectReport, diff bool) bool
 			if rep.Pinned {
 				pin = ", pinned"
 			}
-			fmt.Fprintf(out, "%-12s %s (%d managed entr%s%s) — %s\n",
+			fmt.Fprintf(out, "%-12s %s (%d managed entr%s%s) - %s\n",
 				rep.Target.Dialect, verb, rep.Entries, pluralIES(rep.Entries), pin, rep.Path)
 		}
 		if diff {

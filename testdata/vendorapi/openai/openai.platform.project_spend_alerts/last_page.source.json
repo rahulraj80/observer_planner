@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].currency": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].interval": "VerifiedOfficial",
+    "data[].notification_channel": "VerifiedOfficial",
+    "data[].notification_channel.recipients": "VerifiedOfficial",
+    "data[].notification_channel.recipients[]": "VerifiedOfficial",
+    "data[].notification_channel.subject_prefix": "VerifiedOfficial",
+    "data[].notification_channel.type": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "data[].threshold_amount": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "last_id": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "a2585ca2263a84ac17fec5cacadc867ee9141e7b5b9db1f3ef7185321d6a002b",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/projects/{project_id}/spend_alerts",
+    "query": {
+      "after": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId list-project-spend-alerts. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_spend_alerts"
+}

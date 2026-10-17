@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { Pill } from "@/components/primitives";
-import {
-  LaunchTerminal,
-  type Status as LaunchTerminalStatus,
-} from "@/components/LaunchTerminal";
+import { Suspense, useState } from "react";
+import { CopyOnClick, Pill, SuccessCheck } from "@/components/primitives";
+import { Summary } from "@/components/Summary";
+import type { Status as LaunchTerminalStatus } from "@/lib/launchStatus";
+// Settings is in every distro; the terminal is not (lib/components.gen.ts).
+import { LAUNCH_TERMINAL as LaunchTerminal } from "@/lib/components.gen";
 import { fetchJSON } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { useApi } from "@/lib/useApi";
 import { markRestartPending } from "@/lib/restartPending";
 
@@ -152,7 +153,7 @@ export function ETWCapturerCard() {
       const cfg = await fetchJSON<{ confirm_token?: string }>("/api/remote/config");
       const ctok = cfg.confirm_token ?? "";
       if (!ctok) {
-        setErr("No confirm token — reload the page.");
+        setErr("No confirm token - reload the page.");
         return;
       }
       const res = await fetchJSON<RegisterResult>("/api/process/etw/register", undefined, {
@@ -194,19 +195,11 @@ export function ETWCapturerCard() {
     setErr(null);
     setEnableMsg(null);
     try {
-      const res = await fetchJSON<{ restart_required?: boolean }>(
-        "/api/config/section/process",
-        undefined,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ Enabled: true, ETW: { Enabled: true } }),
-        },
-      );
+      const res = await saveConfigSection("process", { Enabled: true, ETW: { Enabled: true } });
       if (res.restart_required) markRestartPending("process");
       setEnableMsg(
         res.restart_required
-          ? "Saved. Restart the observer daemon — the accept listener binds at start — then come back here to register the task."
+          ? "Saved. Restart the observer daemon - the accept listener binds at start - then come back here to register the task."
           : "Saved.",
       );
       status.reload();
@@ -289,21 +282,21 @@ export function ETWCapturerCard() {
         <p className="text-[11.5px] leading-relaxed text-fg-2">
           Windows process telemetry is off. With it on, SuperBased can attribute{" "}
           <strong className="text-fg-0">per-process network bytes</strong> to the AI-tool
-          session that caused them — the one thing the zero-privilege poll backend cannot
+          session that caused them - the one thing the zero-privilege poll backend cannot
           see, because reading it needs an ETW trace session and ETW session control always
           requires elevation. Without it, network accounting reports{" "}
           <code className={CODE}>off</code> rather than guessing.
         </p>
         <p className="text-[11px] leading-relaxed text-fg-3">
           The button writes two keys:{" "}
-          <code className={CODE}>[observer.process].enabled</code> (the master switch — the
+          <code className={CODE}>[observer.process].enabled</code> (the master switch - the
           whole subsystem, listener included, is skipped without it) and{" "}
           <code className={CODE}>[observer.process.etw].enabled</code>, which opens the
           loopback listener the elevated capturer dials into. Nothing else changes: existing
           capture keeps running exactly as it does now, and an install where no capturer ever
           connects behaves identically to one without the feature. Leave the{" "}
           <strong className="text-fg-1">Backend</strong> selector above on{" "}
-          <code className={CODE}>auto</code> unless you know otherwise —{" "}
+          <code className={CODE}>auto</code> unless you know otherwise -{" "}
           <code className={CODE}>off</code> disables capture regardless of these keys.
         </p>
         <div className="flex flex-wrap items-center gap-3">
@@ -319,7 +312,7 @@ export function ETWCapturerCard() {
               >
                 {busy ? "saving…" : "Turn on Windows process telemetry"}
               </button>
-              {enableMsg && <span className="text-[11.5px] text-success">{enableMsg}</span>}
+              {enableMsg && <SuccessCheck label={enableMsg} className="!text-[11.5px]" />}
               {err && <span className="text-[11.5px] text-danger">{err}</span>}
             </>
           )}
@@ -335,7 +328,7 @@ export function ETWCapturerCard() {
     return (
       <Shell
         badge={<Pill variant="warn">blocked</Pill>}
-        subtitle="The elevated capturer cannot be set up yet — one dependency is missing."
+        subtitle="The elevated capturer cannot be set up yet - one dependency is missing."
       >
         {data.reason ? <Note tone="warn">{data.reason}</Note> : <WithheldNote data={data} />}
         <p className="text-[11px] leading-relaxed text-fg-3">
@@ -359,7 +352,7 @@ export function ETWCapturerCard() {
       >
         <HealthBlock data={data} />
         <details className="group text-[11px] text-fg-3">
-          <summary className="cursor-pointer">Manage the task yourself</summary>
+          <Summary>Manage the task yourself</Summary>
           <div className="mt-2 space-y-2">
             <CommandRow label="verify" text={`schtasks.exe /Query /TN "${data.task_name}" /V /FO LIST`} />
             <CommandRow label="start now" text={`schtasks.exe /Run /TN "${data.task_name}"`} />
@@ -388,7 +381,7 @@ export function ETWCapturerCard() {
           <span>
             The read-only <code className={CODE}>schtasks /Query</code> probe could not tell
             us whether the task exists
-            {data.probe_error ? <> — {data.probe_error}</> : null}. Treat the step below as
+            {data.probe_error ? <> - {data.probe_error}</> : null}. Treat the step below as
             &ldquo;do it if the task is absent&rdquo;: the command carries no{" "}
             <code className={CODE}>/F</code>, so schtasks refuses to overwrite a task that
             already exists rather than clobbering it.
@@ -407,7 +400,7 @@ export function ETWCapturerCard() {
           <p className="text-[11px] leading-relaxed text-fg-2">
             <strong className="text-fg-0">What happens:</strong> SuperBased opens a terminal
             below and runs a fixed command that asks Windows to elevate. Windows shows a{" "}
-            <strong className="text-fg-0">User Account Control prompt</strong> — that prompt
+            <strong className="text-fg-0">User Account Control prompt</strong> - that prompt
             cannot be suppressed and must be approved{" "}
             <strong className="text-fg-0">on this machine</strong>, at its console. Approve
             it and the task is registered; dismiss it and nothing is registered and this card
@@ -418,7 +411,7 @@ export function ETWCapturerCard() {
           </button>
           {err && <p className="text-[11px] text-danger">{err}</p>}
           <p className="text-[10.5px] text-fg-3">
-            No UAC prompt can be answered on a headless machine or over a remote session —
+            No UAC prompt can be answered on a headless machine or over a remote session -
             this button is owner-local only. Use the command below there.
           </p>
         </div>
@@ -431,38 +424,47 @@ export function ETWCapturerCard() {
           {reattached && (
             <Note tone="info">
               A registration terminal was <strong className="text-fg-0">already running</strong>,
-              so nothing new was started — this is that run, and its Windows UAC prompt is
+              so nothing new was started - this is that run, and its Windows UAC prompt is
               probably still waiting. Approve or dismiss it there.
             </Note>
           )}
           <p className="text-[11px] text-fg-3">
             Approve the Windows UAC prompt to continue. This terminal runs only the elevated{" "}
-            <code className={CODE}>schtasks /Create</code> and reports its exit code — it
+            <code className={CODE}>schtasks /Create</code> and reports its exit code - it
             cannot show the elevated window&rsquo;s own output, because an elevated process
             does not share this console.
           </p>
           <div className="h-[240px] overflow-hidden rounded-2 border border-line-2">
-            <LaunchTerminal
-              token={handle}
-              tool="etw task registration"
-              expanded
-              onStatus={onTerminalStatus}
-              onClose={() => void cancel()}
-              onMinimize={() => void cancel()}
-            />
+            {LaunchTerminal ? (
+              <Suspense fallback={null}>
+                <LaunchTerminal
+                  token={handle}
+                  tool="etw task registration"
+                  expanded
+                  onStatus={onTerminalStatus}
+                  onClose={() => void cancel()}
+                  onMinimize={() => void cancel()}
+                />
+              </Suspense>
+            ) : (
+              <p className="p-3 text-[12px] text-fg-3">
+                This build does not include dashboard terminals, so the elevated step cannot run
+                here. Use the command below in an elevated Windows shell instead.
+              </p>
+            )}
           </div>
         </div>
       )}
 
       {data.command && (
         <details className="group text-[11px] text-fg-3">
-          <summary className="cursor-pointer">…or run it yourself, once, in an elevated Windows shell</summary>
+          <Summary>…or run it yourself, once, in an elevated Windows shell</Summary>
           <div className="mt-2 space-y-2">
             <p className="text-[11px] leading-relaxed text-fg-3">
               {data.command_cmd_shell_only ? (
                 <>
                   Run this in an elevated <strong className="text-fg-1">Command Prompt</strong>{" "}
-                  — not PowerShell. Your token path contains a space, which forces the{" "}
+                  - not PowerShell. Your token path contains a space, which forces the{" "}
                   <code className={CODE}>\&quot;</code> escaping PowerShell rejects.
                 </>
               ) : (
@@ -511,7 +513,7 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mt-6 space-y-3 rounded-3 border border-line-2 bg-bg-1 p-4">
+    <section className="mt-6 space-y-3 rounded-3 border border-line-2 bg-bg-2 p-4">
       <header className="flex items-baseline justify-between gap-3">
         <h4 className="text-[13px] font-semibold text-fg-0">Elevated ETW capturer (Windows)</h4>
         {badge}
@@ -534,7 +536,7 @@ function WithheldNote({ data }: { data: ETWStatus }) {
       <strong className="text-fg-0">on that machine</strong>. The command and its notes
       contain its file paths and Windows account name, so they are not sent here, and the
       registration itself raises a Windows UAC prompt that can only be approved at that
-      console — the buttons that do it are owner-local. The capturer-link health below is
+      console - the buttons that do it are owner-local. The capturer-link health below is
       live either way.
       {data.state === "skip" && (
         <>
@@ -554,13 +556,14 @@ function WithheldNote({ data }: { data: ETWStatus }) {
   );
 }
 
+const NOTE_TONE: Readonly<Record<"warn" | "danger" | "info", string>> = {
+  danger: "border-danger/40 bg-danger-soft/40",
+  warn: "border-warn/40 bg-warn-soft/40",
+  info: "border-info/30 bg-info-soft/40",
+};
+
 function Note({ tone, children }: { tone: "warn" | "danger" | "info"; children: React.ReactNode }) {
-  const cls =
-    tone === "danger"
-      ? "border-danger/40 bg-danger-soft/40"
-      : tone === "warn"
-        ? "border-warn/40 bg-warn-soft/40"
-        : "border-info/30 bg-info-soft/40";
+  const cls = NOTE_TONE[tone];
   return (
     <div className={`rounded-2 border px-3 py-2 text-[11.5px] leading-relaxed text-fg-1 ${cls}`}>
       {children}
@@ -569,25 +572,20 @@ function Note({ tone, children }: { tone: "warn" | "danger" | "info"; children: 
 }
 
 function CommandRow({ label, text }: { label: string; text: string }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="space-y-1">
       <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-3">{label}</div>
       <div className="flex items-start gap-2">
-        <code className="flex-1 overflow-x-auto whitespace-pre rounded-2 border border-line-2 bg-bg-1 px-2 py-1 font-mono text-[11px] text-fg-2">
+        <code className="flex-1 overflow-x-auto whitespace-pre rounded-2 border border-line-2 bg-bg-3 px-2 py-1 font-mono text-caption text-fg-2">
           {text}
         </code>
-        <button
-          type="button"
-          className="shrink-0 rounded-2 border border-line-2 bg-bg-2 px-2 py-1 text-[11px] text-fg-2 hover:bg-bg-3"
-          onClick={() => {
-            navigator.clipboard?.writeText(text);
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1200);
-          }}
+        <CopyOnClick
+          value={text}
+          title="Copy the command"
+          className="shrink-0 rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-caption text-fg-2 hover:bg-bg-4"
         >
-          {copied ? "copied" : "copy"}
-        </button>
+          copy
+        </CopyOnClick>
       </div>
     </div>
   );
@@ -619,7 +617,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
     : `as of ${fmtAge(h.age_seconds)} ago`;
 
   return (
-    <div className="space-y-2 rounded-2 border border-line-2 bg-bg-2 px-3 py-2">
+    <div className="space-y-2 rounded-2 border border-line-2 bg-bg-3/40 px-3 py-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-2">
           Capturer link
@@ -635,21 +633,21 @@ function HealthBlock({ data }: { data: ETWStatus }) {
 
       {h.transport_state === "none" && (
         <p className="text-[11px] leading-relaxed text-fg-3">
-          No dial-in transport was requested on this daemon — the normal state when the ETW
+          No dial-in transport was requested on this daemon - the normal state when the ETW
           listener is not configured. This is absence, not failure.
         </p>
       )}
       {h.transport_state === "unavailable" && (
         <Note tone="warn">
           The listener could not be created
-          {h.transport_unavailable_reason ? <> — {h.transport_unavailable_reason}</> : null}.
+          {h.transport_unavailable_reason ? <> - {h.transport_unavailable_reason}</> : null}.
         </Note>
       )}
 
       {h.transport && (
         <>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-4">
-            <Stat label="listening on" value={h.transport.addr || "—"} />
+            <Stat label="listening on" value={h.transport.addr || "-"} />
             <Stat
               label="streaming"
               value={h.transport.connected ? "yes" : "no"}
@@ -666,7 +664,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
           {h.transport.connections === 0 && h.transport.auth_failures === 0 && (
             <p className="text-[11px] leading-relaxed text-fg-3">
               Waiting for a capturer to dial in. If the task is registered, it starts at your
-              next logon — or start it now (elevated):{" "}
+              next logon - or start it now (elevated):{" "}
               <code className={CODE}>schtasks.exe /Run /TN &quot;{data.task_name}&quot;</code>
             </p>
           )}
@@ -700,7 +698,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
               and actually decoding. */}
           {!h.transport.capturer_decode ? (
             <p className="text-[11px] leading-relaxed text-fg-3">
-              The capturer has not reported decoder health. That is not a clean zero — a
+              The capturer has not reported decoder health. That is not a clean zero - a
               capturer with no running network decoder (every non-elevated run) reports
               nothing at all, and showing it as zero would claim the payload assumptions had
               been exercised and held.
@@ -720,7 +718,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
                   </>
                 )}
                 . A non-zero drop count means the capturer&rsquo;s payload-length assumption
-                does not hold on this host — the per-process byte totals are{" "}
+                does not hold on this host - the per-process byte totals are{" "}
                 <strong className="text-fg-0">wrong</strong>, not merely incomplete. Please
                 report it with your Windows build.
                 {h.transport.capturer_decode.line && (
@@ -734,7 +732,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
             <Note tone="warn">
               <span>
                 <strong className="text-fg-0">No data events classified.</strong> The decoder
-                refused nothing — but it accepted nothing either:{" "}
+                refused nothing - but it accepted nothing either:{" "}
                 {h.transport.capturer_decode.ignored} event
                 {h.transport.capturer_decode.ignored === 1 ? " was" : "s were"} classified as
                 not-a-data-event and {h.transport.capturer_decode.decoded} as data. Ignoring
@@ -743,7 +741,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
                 it means the byte totals from this host are a flat zero that every
                 drop-counter check reads as healthy. If this host was moving TCP traffic, the
                 provider&rsquo;s event ids no longer match this build&rsquo;s layout table.
-                If it was idle, this is not yet evidence either way — drive some TCP traffic
+                If it was idle, this is not yet evidence either way - drive some TCP traffic
                 and re-read.
                 {h.transport.capturer_decode.line && (
                   <span className="mt-1 block font-mono text-[10.5px] text-fg-2">
@@ -768,7 +766,7 @@ function HealthBlock({ data }: { data: ETWStatus }) {
 
       <p className="text-[10.5px] text-fg-3">
         network accounting: <span className="font-mono">{h.network_accounting_mode}</span>
-        {h.network_accounting_reason ? ` — ${h.network_accounting_reason}` : ""}
+        {h.network_accounting_reason ? ` - ${h.network_accounting_reason}` : ""}
       </p>
     </div>
   );

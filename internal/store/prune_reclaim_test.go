@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // bytesByTable folds a StorageStats (dbstat) report into a name→bytes map so
@@ -39,7 +40,7 @@ func TestPruneReclaimsCodeIntelAndProcessBulk(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reclaim.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestPruneReclaimsCodeIntelAndProcessBulk(t *testing.T) {
 
 	// Old + fresh process_runs (the 30-day horizon takes the old ones).
 	sess, pid0 := mustProjectAndSession(t, s)
-	var runs []processobs.ProcessRun
+	var runs []procmodel.ProcessRun
 	for i := 0; i < 400; i++ {
 		runs = append(runs, execRun(
 			fmt.Sprintf("reclaim-old-%d", i), sess, pid0, 5000+i, t0Proc().Add(-100*24*time.Hour),

@@ -17,7 +17,7 @@ func newRestartServer(t *testing.T, restart func() error) http.Handler {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "observer.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestHandleAdminRestart(t *testing.T) {
 		called := false
 		rec := postRestart(t, newRestartServer(t, func() error {
 			called = true
-			return errors.New("restart refused — config would not load")
+			return errors.New("restart refused - config would not load")
 		}))
 		if rec.Code == http.StatusOK {
 			t.Fatalf("a refusal must not 200: %s", rec.Body.String())
@@ -84,14 +84,34 @@ func TestHandleAdminRestart(t *testing.T) {
 		}
 	})
 
-	t.Run("GET not allowed", func(t *testing.T) {
-		h := newRestartServer(t, func() error { return nil })
+	t.Run("GET is the live-traffic status report, never a restart", func(t *testing.T) {
+		// dashboard-config-management plan §3.3 item 3: GET reports whether a
+		// restart is available and how many proxied requests landed in the
+		// last minute, so the confirm dialog can say so. It must not restart.
+		var called bool
+		h := newRestartServer(t, func() error { called = true; return nil })
 		req := httptest.NewRequest(http.MethodGet, "/api/admin/restart", nil)
 		req.Host = "127.0.0.1:8080"
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		if called {
+			t.Error("GET must never invoke RestartFunc")
+		}
+		if !strings.Contains(rec.Body.String(), `"available":true`) {
+			t.Errorf("GET must report availability: %s", rec.Body.String())
+		}
+	})
+	t.Run("DELETE not allowed", func(t *testing.T) {
+		h := newRestartServer(t, func() error { return nil })
+		req := httptest.NewRequest(http.MethodDelete, "/api/admin/restart", nil)
+		req.Host = "127.0.0.1:8080"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("GET = %d, want 405", rec.Code)
+			t.Errorf("DELETE = %d, want 405", rec.Code)
 		}
 	})
 }

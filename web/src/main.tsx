@@ -5,6 +5,7 @@ import App from "./App";
 import { ThemeProvider } from "./lib/theme";
 import { LaunchDockProvider } from "./components/LaunchDock";
 import { RemotePairingGate } from "./components/RemotePairing";
+import { CostDisplayGate } from "./lib/costDisplay";
 import "./index.css";
 
 // Input-event trace overlay (lib/sttdebug.ts) — the diagnostic that cracked
@@ -45,7 +46,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             floating over an unauthenticated screen. */}
         <RemotePairingGate>
           <LaunchDockProvider>
-            <App />
+            {/* Resolves the org's verified developer cost display (dollars
+                or token usage) before first paint; see lib/costDisplay.tsx. */}
+            <CostDisplayGate>
+              <App />
+            </CostDisplayGate>
           </LaunchDockProvider>
         </RemotePairingGate>
       </BrowserRouter>

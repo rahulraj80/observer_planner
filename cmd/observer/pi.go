@@ -3,7 +3,7 @@
 package main
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/integration"
 )
 
 // piProviderName is the custom pi provider entry the launcher ensures in
@@ -54,16 +55,23 @@ func newPiCmd() *cobra.Command {
 			"OPENAI_BASE_URL, so observer routes it via a custom provider in\n" +
 			"~/.pi/agent/models.json (an `observer` provider whose baseUrl is the\n" +
 			"proxy's OpenAI-compatible endpoint), then runs `pi --provider " + piProviderName + "`.\n\n" +
-			"The provider entry is merged in idempotently — your other pi\n" +
-			"providers are preserved. NEVER writes a secret: the provider's\n" +
+			"The provider entry is merged in for the session and removed again\n" +
+			"when pi exits; your other pi providers are preserved. It is not\n" +
+			"written over your own provider named `observer`, nor when no key\n" +
+			"is available (pi then starts unrouted). NEVER writes a secret: the provider's\n" +
 			"apiKey is the NAME `OPENAI_API_KEY`, which pi resolves from your\n" +
 			"environment at runtime. Provide your key via OPENAI_API_KEY or pi's\n" +
 			"--api-key flag.\n\n" +
 			"All arguments after the subcommand are forwarded to pi. Use `--` to\n" +
 			"separate observer flags from pi flags. Requires a running observer\n" +
 			"proxy (`observer start`).",
-		SilenceErrors: true,
+		SilenceErrors:      true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, done, err := launcherArgsOrDone(cmd, args)
+			if done {
+				return err
+			}
 			// Attach-by-default (attach-all-launchers): hand the PTY to the
 			// daemon when attach resolves. pi routes via the `observer` provider
 			// in ~/.pi/agent/models.json (written by the daemon-spawned inner
@@ -110,8 +118,37 @@ func newPiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ensurePiObserverProvider(resolved + "/v1"); err != nil {
-				return fmt.Errorf("ensure pi provider: %w", err)
+			// Sol A5-08: the `observer` provider is session-scoped. It is
+			// written only when the child will have a key for it and the
+			// name is not the operator's own provider, and it is removed
+			// again after pi exits.
+			prov, err := preparePiObserverProvider(resolved+"/v1", launcherHasOpenAIKey(args))
+			if err != nil {
+				return err
+			}
+			if prov.note != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), prov.note)
+			}
+			if prov.restore != nil {
+				defer func() {
+					if rerr := prov.restore(); rerr != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "observer pi: could not remove the session %q provider from %s; remove it by hand if pi lists it\n",
+							piProviderName, piModelsDisplay)
+					}
+				}()
+			}
+			// T-035: on a managed node, every built-in provider the registry
+			// row can cover is pointed at its proxy lane for the session too,
+			// so a mid-session provider switch stays on the proxy.
+			restoreOverrides, err := applyManagedProviderOverrides(cmd.Context(), configPath, providerOverridesSpec{
+				tool: "pi", path: filepath.Join(piAgentDir(), "models.json"), display: piModelsDisplay,
+				proxyRoot: resolved, ownName: piProviderName, overrides: integration.ProviderOverridesFor("pi"),
+			}, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			if restoreOverrides != nil {
+				defer restoreOverrides()
 			}
 			// Seed the handover into the USER args as a trailing positional
 			// BEFORE prepending --provider, so the conflict check sees only
@@ -139,17 +176,39 @@ func newPiCmd() *cobra.Command {
 				args = seeded
 				continueDir = cwd
 			}
-			// Prepend the provider selection; the user's args (plus any
-			// seeded prompt) follow (and may override --model / --api-key).
-			forwarded := append([]string{"--provider", piProviderName}, args...)
+			// Two decisions, in order. (1) Sol A5-08 above: is the
+			// session-scoped `observer` provider in place at all? If not
+			// (no key, or the operator's own provider of that name), pi keeps
+			// its own selection and the user's args go through untouched.
+			// (2) Only when it is: select the observer provider AND a model,
+			// because pi refuses `--provider` without `--model` ("--provider
+			// requires --model", pi 1.0); the routing decision table picks
+			// one or says why it could not (pi_route.go).
+			forwarded, routed := args, false
+			if prov.routed {
+				defProvider, defModel := readPiDefaults(piAgentDir())
+				route := piRouteFor(piRouteInputs{
+					args:            args,
+					defaultProvider: defProvider,
+					defaultModel:    defModel,
+					providerModels:  piObserverModelIDs(),
+				})
+				if route.notice != "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), "observer pi: "+route.notice)
+				}
+				forwarded, routed = route.args, route.routed
+			}
 			return runEnvLauncher(envLauncherSpec{
-				tool:     "pi",
-				bin:      bin,
-				args:     forwarded,
-				dir:      continueDir,
-				proxyURL: resolved,
-				env:      nil, // pi routes via models.json, not an env var
-				stderr:   os.Stderr,
+				tool:       "pi",
+				bin:        bin,
+				args:       forwarded,
+				unrouted:   !routed, // the notice above already said why
+				configPath: configPath,
+				dir:        continueDir,
+				proxyURL:   resolved,
+				env:        nil, // pi routes via models.json, not an env var
+				dbPath:     cfg.Observer.DBPath,
+				stderr:     os.Stderr,
 			})
 		},
 	}
@@ -162,7 +221,6 @@ func newPiCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
 	attach, noAttach = registerAttachFlags(cmd, "pi")
 	resume = registerResumeFlag(cmd, "pi")
-	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
@@ -176,56 +234,32 @@ func piAttachPassthrough(binPath string) []string {
 	return nil
 }
 
-// ensurePiObserverProvider idempotently writes/merges the `observer` provider
-// into ~/.pi/agent/models.json with the given OpenAI-compatible base URL. Any
-// existing providers are preserved; only the observer entry is (re)written, so
-// repeated runs and a changed proxy port both converge. The apiKey is the env
-// var NAME, never a literal key.
-func ensurePiObserverProvider(baseURL string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Join(home, ".pi", "agent")
-	path := filepath.Join(dir, "models.json")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
+// piModelsDisplay is how the launcher names pi's models file in terminal
+// text: a fixed home-relative spelling, never the resolved absolute path.
+const piModelsDisplay = "~/.pi/agent/models.json"
 
-	root := map[string]any{}
-	if data, rerr := os.ReadFile(path); rerr == nil && len(data) > 0 {
-		if jerr := json.Unmarshal(data, &root); jerr != nil {
-			return fmt.Errorf("parse existing %s: %w", path, jerr)
-		}
-	} else if rerr != nil && !os.IsNotExist(rerr) {
-		return rerr
+// preparePiObserverProvider puts the session-scoped `observer` provider into
+// ~/.pi/agent/models.json (see prepareObserverModelsProvider for the rules:
+// only with a credential, never over the operator's own provider of that
+// name, removed again after the session). Every other provider is preserved.
+// The apiKey is the env var NAME, never a literal key.
+// The model list is piObserverModelEntries (pi_route.go), the same list the
+// routing decision table picks a model from, default first.
+func preparePiObserverProvider(baseURL string, hasCredential bool) (observerModelsRoute, error) {
+	dir := piAgentDir()
+	if dir == "" {
+		return observerModelsRoute{}, newVisibleLauncherError(errors.New("cannot resolve the home directory"),
+			"observer pi: cannot locate your home directory to configure pi's provider")
 	}
-
-	providers, _ := root["providers"].(map[string]any)
-	if providers == nil {
-		providers = map[string]any{}
-	}
-	providers[piProviderName] = map[string]any{
-		"baseUrl": baseURL,
-		"api":     "openai-completions",
-		"apiKey":  "OPENAI_API_KEY", // env var NAME — pi resolves it; no secret on disk
-		"models": []any{
-			piModel("gpt-4o", "gpt-4o (observer proxy)"),
-			piModel("gpt-4o-mini", "gpt-4o-mini (observer proxy)"),
-		},
-	}
-	root["providers"] = providers
-
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Atomic-ish write: temp + rename so a crash can't truncate the file.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return prepareObserverModelsProvider(observerModelsProviderSpec{
+		tool:          "pi",
+		path:          filepath.Join(dir, "models.json"),
+		display:       piModelsDisplay,
+		name:          piProviderName,
+		baseURL:       baseURL,
+		models:        piObserverModelEntries(),
+		hasCredential: hasCredential,
+	})
 }
 
 // piModel builds one model entry for the observer provider's models list.

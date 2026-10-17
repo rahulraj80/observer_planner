@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -18,7 +20,7 @@ func noopHandler(http.ResponseWriter, *http.Request) {}
 // accepted.
 func TestExtraRoutesLocalPropagation(t *testing.T) {
 	rc, _ := newReadyRemoteController(t)
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +48,7 @@ func TestExtraRoutesLocalPropagation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := newWith(tc.route)
 			if tc.wantErr && err == nil {
-				t.Fatalf("New accepted %q as %s — a mutation ExtraRoute must be Local or allowlisted", tc.route.Pattern, tc.route.Capability)
+				t.Fatalf("New accepted %q as %s - a mutation ExtraRoute must be Local or allowlisted", tc.route.Pattern, tc.route.Capability)
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("New rejected %q as %s: %v", tc.route.Pattern, tc.route.Capability, err)
@@ -78,7 +80,7 @@ func TestPatternHasUnsafeMethod(t *testing.T) {
 // capability actually enforced is the one on the MORE-SPECIFIC matched pattern.
 func TestServeMuxShadowing(t *testing.T) {
 	s := newRemoteTestServer(t, Options{})
-	mux, capMap := s.registerRoutes(nil)
+	mux, capMap, _ := s.registerRoutes(nil)
 
 	cases := []struct {
 		name        string
@@ -110,7 +112,7 @@ func TestServeMuxShadowing(t *testing.T) {
 				t.Fatalf("mux.Handler(%s %s) matched %q, want %q", tc.method, tc.path, pattern, tc.wantPattern)
 			}
 			if cap := capMap[pattern]; cap != tc.wantCap {
-				t.Fatalf("capMap[%q] = %s, want %s — the enforced capability must be the more-specific route's", pattern, cap, tc.wantCap)
+				t.Fatalf("capMap[%q] = %s, want %s - the enforced capability must be the more-specific route's", pattern, cap, tc.wantCap)
 			}
 		})
 	}

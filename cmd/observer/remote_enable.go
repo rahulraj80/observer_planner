@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package main
 
 import (
@@ -68,12 +70,12 @@ func newRemoteEnableCmd(configPath *string) *cobra.Command {
 		Long: "Provisions remote dashboard access over Tailscale HTTPS (view tier).\n" +
 			"Mints a 128-bit pairing secret (stored hashed, argon2id, 0600), pins a\n" +
 			"dedicated loopback backend for `tailscale serve` to forward to, and adds\n" +
-			"the tailnet host to the Host allow-list. Default OFF elsewhere — this is\n" +
+			"the tailnet host to the Host allow-list. Default OFF elsewhere - this is\n" +
 			"the explicit opt-in. Execute-tier terminal stays off unless --allow-terminal\n" +
 			"is ALSO passed (a separate knob; view access never turns it on).",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if useLAN {
-				return fmt.Errorf("`--lan` is deferred (Phase 3, operator decision 2026-07-12 — tailnet-HTTPS-only for v1). Use --tailscale")
+				return fmt.Errorf("`--lan` is deferred (Phase 3, operator decision 2026-07-12 - tailnet-HTTPS-only for v1). Use --tailscale")
 			}
 			_ = useTailscale // tailscale is the only supported mode in v1; the flag documents intent
 			out := cmd.OutOrStdout()
@@ -95,7 +97,7 @@ func newRemoteEnableCmd(configPath *string) *cobra.Command {
 			}
 			host = strings.TrimSpace(strings.TrimSuffix(host, "."))
 			if host == "" {
-				return fmt.Errorf("could not determine the tailnet host — pass it explicitly, e.g. `observer remote enable --tailscale --host my-machine.tailnet-name.ts.net` (it is the HTTPS host `tailscale serve` exposes; run `tailscale status` to find it)")
+				return fmt.Errorf("could not determine the tailnet host - pass it explicitly, e.g. `observer remote enable --tailscale --host my-machine.tailnet-name.ts.net` (it is the HTTPS host `tailscale serve` exposes; run `tailscale status` to find it)")
 			}
 
 			// Durable-first (codex §7): invalidate any sessions from a prior
@@ -124,19 +126,19 @@ func newRemoteEnableCmd(configPath *string) *cobra.Command {
 			fmt.Fprintf(out, "       tailscale serve --bg %s\n", remotecfg.BackendPortOnly(info.BackendAddr))
 			fmt.Fprintf(out, "     (this terminates HTTPS on the tailnet and forwards to %s)\n", info.BackendAddr)
 			fmt.Fprintf(out, "  2. Restart the observer daemon so the backend listener binds:\n")
-			fmt.Fprintf(out, "       (route OFF → stop → `observer start` → route ON — see the daemon-restart-runbook)\n")
+			fmt.Fprintf(out, "       (route OFF → stop → `observer start` → route ON - see the daemon-restart-runbook)\n")
 			fmt.Fprintf(out, "  3. On your phone/laptop (same tailnet), open the pairing URL and pair:\n\n")
 			fmt.Fprintf(out, "     %s\n\n", info.PairingURL)
-			fmt.Fprintf(out, "  The secret rides the URL FRAGMENT (after #) — it is never sent to or logged\n")
+			fmt.Fprintf(out, "  The secret rides the URL FRAGMENT (after #) - it is never sent to or logged\n")
 			fmt.Fprintf(out, "  by the server. Treat this URL like a password; `observer remote rotate`\n")
-			fmt.Fprintf(out, "  invalidates it. (QR rendering is a follow-up — the URL above is scannable\n")
+			fmt.Fprintf(out, "  invalidates it. (QR rendering is a follow-up - the URL above is scannable\n")
 			fmt.Fprintf(out, "  via any QR generator, or copy it directly.)\n")
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&useTailscale, "tailscale", false, "Arm tailnet-HTTPS remote access (the only supported mode in v1)")
-	cmd.Flags().BoolVar(&useLAN, "lan", false, "Deferred (Phase 3) — refuses")
-	cmd.Flags().BoolVar(&allowTerminal, "allow-terminal", false, "Also enable the execute-tier remote terminal (Phase 4; default off — separate opt-in)")
+	cmd.Flags().BoolVar(&useLAN, "lan", false, "Deferred (Phase 3) - refuses")
+	cmd.Flags().BoolVar(&allowTerminal, "allow-terminal", false, "Also enable the execute-tier remote terminal (Phase 4; default off - separate opt-in)")
 	cmd.Flags().StringVar(&host, "host", "", "The tailnet HTTPS host (e.g. my-machine.tailnet.ts.net); auto-detected via `tailscale status` when omitted")
 	return cmd
 }
@@ -148,7 +150,7 @@ func newRemoteEnableCmd(configPath *string) *cobra.Command {
 func newRemoteDisableCmd(configPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "disable",
-		Short: "Close remote access — revert to loopback-only + revoke the pairing secret",
+		Short: "Close remote access - revert to loopback-only + revoke the pairing secret",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 			cfg, err := config.Load(config.LoadOptions{GlobalPath: *configPath})
@@ -169,7 +171,7 @@ func newRemoteDisableCmd(configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "remote access DISABLED — reverted to loopback-only.\n")
+			fmt.Fprintf(out, "remote access DISABLED - reverted to loopback-only.\n")
 			fmt.Fprintf(out, "  pairing secret removed: %v\n", removed)
 			fmt.Fprintf(out, "  Restart the observer daemon to close the backend listener + drop live sessions.\n")
 			fmt.Fprintf(out, "  (You may also want to run `tailscale serve --https=443 off` to stop forwarding.)\n")
@@ -208,11 +210,11 @@ func newRemoteRotateCmd(configPath *string) *cobra.Command {
 			info, err := remotecfg.Rotate(cfg, cfgPath)
 			if err != nil {
 				if !cfg.Remote.Enabled {
-					return fmt.Errorf("remote access is not enabled — run `observer remote enable --tailscale` first")
+					return fmt.Errorf("remote access is not enabled - run `observer remote enable --tailscale` first")
 				}
 				return err
 			}
-			fmt.Fprintf(out, "pairing secret ROTATED — all previously paired devices are invalidated.\n")
+			fmt.Fprintf(out, "pairing secret ROTATED - all previously paired devices are invalidated.\n")
 			if info.Host != "" {
 				fmt.Fprintf(out, "\n  Re-pair with:\n\n     %s\n\n", info.PairingURL)
 			} else {

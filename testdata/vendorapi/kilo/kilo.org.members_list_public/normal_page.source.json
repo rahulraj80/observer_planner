@@ -1,0 +1,33 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "result": "VerifiedOfficial",
+    "result.data": "VerifiedOfficial",
+    "result.data[]": "VerifiedOfficial",
+    "result.data[].email": "VerifiedOfficial",
+    "result.data[].emailStatus": "VerifiedOfficial",
+    "result.data[].id": "VerifiedOfficial",
+    "result.data[].inviteDate": "VerifiedOfficial",
+    "result.data[].name": "VerifiedOfficial",
+    "result.data[].role": "VerifiedOfficial",
+    "result.data[].status": "VerifiedOfficial"
+  },
+  "fixture_sha256": "a9d1d58fb4ce889f48c863d549c71ca54fcd3ab9309221c6fac5e1651a166fd3",
+  "http": {
+    "method": "GET",
+    "path": "/api/trpc/organizations.members.listPublic",
+    "query": {
+      "input": "{\"organizationId\":\"6f1e0c2a-3b4d-4e5f-8a9b-0c1d2e3f4a5b\"}"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the organizations_members_listPublic 200 schema: two active members and one invited row (no id; invite tokens and URLs are omitted by the vendor). imageUrl is optional and not shown.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Kilo Code API 1.0.0 (openapi.json), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "f0b9556c39ea4454732029afcc4c985077e96c173185b92c84708b640af51180",
+  "source_url": "https://app.kilo.ai/api/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "kilo.org.members_list_public"
+}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/attachsock"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/termsession"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
 )
@@ -18,7 +21,7 @@ import (
 // which wrap it in a store but issue no queries at construction time.
 func openStackTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -41,7 +44,7 @@ func surfaceTestConfig(allowLaunch, attach bool) config.Config {
 // headline row is "gate off, attach on": attach must still serve (WP-A goal).
 func TestBuildTerminalSurfacesGating(t *testing.T) {
 	if !termsession.PTYSupported() {
-		t.Skip("no in-process PTY backend on this OS — buildTerminalStack returns nil")
+		t.Skip("no in-process PTY backend on this OS - buildTerminalStack returns nil")
 	}
 	cases := []struct {
 		name        string
@@ -59,7 +62,7 @@ func TestBuildTerminalSurfacesGating(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			surfaces, err := buildTerminalSurfaces(surfaceTestConfig(tc.allowLaunch, tc.attach), openStackTestDB(t), slog.Default())
+			surfaces, err := buildTerminalSurfaces(context.Background(), surfaceTestConfig(tc.allowLaunch, tc.attach), openStackTestDB(t), slog.Default(), nil)
 			if err != nil {
 				t.Fatalf("buildTerminalSurfaces: %v", err)
 			}
@@ -92,7 +95,7 @@ func TestAttachServesWithoutDashboardLaunchGate(t *testing.T) {
 	}
 	// (1) Decoupling: attach is wired off the shared stack even though the
 	// dashboard-launch gate is off (so no launch manager exists).
-	surfaces, err := buildTerminalSurfaces(surfaceTestConfig(false, true), openStackTestDB(t), slog.Default())
+	surfaces, err := buildTerminalSurfaces(context.Background(), surfaceTestConfig(false, true), openStackTestDB(t), slog.Default(), nil)
 	if err != nil {
 		t.Fatalf("buildTerminalSurfaces: %v", err)
 	}
@@ -132,13 +135,13 @@ func TestAttachDisabledNoHost(t *testing.T) {
 	if !termsession.PTYSupported() {
 		t.Skip("no in-process PTY backend on this OS")
 	}
-	surfaces, err := buildTerminalSurfaces(surfaceTestConfig(true, false), openStackTestDB(t), slog.Default())
+	surfaces, err := buildTerminalSurfaces(context.Background(), surfaceTestConfig(true, false), openStackTestDB(t), slog.Default(), nil)
 	if err != nil {
 		t.Fatalf("buildTerminalSurfaces: %v", err)
 	}
 	t.Cleanup(surfaces.close)
 	if surfaces.attachHost != nil {
-		t.Error("attach host must be nil when [terminal.attach].enabled is off — no socket is served")
+		t.Error("attach host must be nil when [terminal.attach].enabled is off - no socket is served")
 	}
 	if surfaces.launchMgr == nil {
 		t.Error("the launch surface must be unaffected by the attach gate")
@@ -153,7 +156,7 @@ func TestTerminalStackSharesOneManager(t *testing.T) {
 	if !termsession.PTYSupported() {
 		t.Skip("no in-process PTY backend on this OS")
 	}
-	stack, err := buildTerminalStack(surfaceTestConfig(true, true), openStackTestDB(t), slog.Default())
+	stack, err := buildTerminalStack(context.Background(), surfaceTestConfig(true, true), openStackTestDB(t), slog.Default(), nil)
 	if err != nil {
 		t.Fatalf("buildTerminalStack: %v", err)
 	}
@@ -175,7 +178,7 @@ func TestTerminalStackSharesOneManager(t *testing.T) {
 		t.Fatalf("attach host mgr is %T, want *termsession.Manager", host.mgr)
 	}
 	if lm.mgr != stack.mgr || hostMgr != stack.mgr {
-		t.Errorf("Manager identity split: launch=%p attach=%p stack=%p — must all be one", lm.mgr, hostMgr, stack.mgr)
+		t.Errorf("Manager identity split: launch=%p attach=%p stack=%p - must all be one", lm.mgr, hostMgr, stack.mgr)
 	}
 
 	// One Service: same for the termsvc.Service behind both surfaces.
@@ -184,6 +187,6 @@ func TestTerminalStackSharesOneManager(t *testing.T) {
 		t.Fatalf("attach host svc is %T, want *termsvc.Service", host.svc)
 	}
 	if lm.svc != stack.svc || hostSvc != stack.svc {
-		t.Errorf("Service identity split: launch=%p attach=%p stack=%p — must all be one", lm.svc, hostSvc, stack.svc)
+		t.Errorf("Service identity split: launch=%p attach=%p stack=%p - must all be one", lm.svc, hostSvc, stack.svc)
 	}
 }

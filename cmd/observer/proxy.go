@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -16,8 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/cachetrack"
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 	"github.com/marmutapp/superbased-observer/internal/compression/conversation"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
@@ -28,8 +29,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/pidbridge"
 	"github.com/marmutapp/superbased-observer/internal/proxy"
-	"github.com/marmutapp/superbased-observer/internal/routing"
-	"github.com/marmutapp/superbased-observer/internal/routingconfig"
+	"github.com/marmutapp/superbased-observer/internal/selfobs/emit"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -61,18 +61,72 @@ func newProxyStartCmd() *cobra.Command {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
-			p, cleanup, addr, _, _, err := buildProxy(ctx, configPath, "", port, bindAddr)
+			// Built BEFORE buildProxy so the C1 judge relay func
+			// (docs/plans/c1-judge-relay-spec-2026-08-15.md §3) can be threaded
+			// into the admission judge build — the org client (and its bearer/
+			// signing-key access) must exist before admission wiring runs.
+			var relay orgJudgeRelayFunc
+			oc, orgCleanup, ocEnabled, ocErr := buildOrgClient(ctx, configPath)
+			if ocErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "policy resource: org client init failed (LKG/poller skipped): %v\n", ocErr)
+			} else if ocEnabled && oc != nil {
+				defer orgCleanup()
+				relay = orgJudgeRelayFuncFor(oc)
+			}
+
+			pwire, err := buildProxy(ctx, configPath, "", port, bindAddr, relay)
+			p, cleanup, addr, admissionHandle := pwire.Proxy, pwire.Cleanup, pwire.Addr, pwire.Admission
 			if err != nil {
 				return err
 			}
 			defer cleanup()
+
+			// Plane-A P0-5 §6.5 / R2-B3: standalone `observer proxy start` must
+			// load verified LKG BEFORE binding the listener, and run the
+			// policy-resource poller — same org-rail posture as `observer start`.
+			// gw wires the gateway.providers family (Phase 3, gateway config
+			// plane spec) onto this proxy's own SetLaneTable, same as the
+			// full `observer start` path.
+			if ocErr == nil && ocEnabled && oc != nil {
+				if pcfg, pdb, pcleanup, perr := loadConfigAndDB(ctx, configPath); perr == nil {
+					bootstrapUpstreams, bootstrapAutoLane := pcfg.Proxy.Upstreams, pcfg.Proxy.AutoDefaultLane
+					bootstrapOrgRoute := pcfg.Proxy.OrgRoute
+					gw := newGatewayProvidersHandle(
+						p.SetLaneTable,
+						func() {
+							_ = p.SetRoutingSnapshotWithFallback(bootstrapUpstreams, bootstrapAutoLane,
+								bootstrapOrgRoute.Mode, bootstrapOrgRoute.Primary, bootstrapOrgRoute.Fallbacks,
+								bootstrapOrgRoute.TerminalPolicy, bootstrapOrgRoute.DirectFallbackCustodyAck)
+						},
+						p.LaneTable,
+					)
+					// Bind the atomic lanes+org-route+fallback setter (Sol S7 /
+					// Luna L16) so a gateway.providers MODE body flips the mode
+					// and installs the fallback terminal rung in one generation.
+					gw.SetRouteApply(p.SetRoutingSnapshotWithFallback)
+					// node.governance (admin-controlled Plane B) and
+					// node.features (org-parity W5.1) are both passed nil
+					// here on purpose: `observer proxy start` runs no
+					// dashboard, so there is no surface for either a
+					// governance body or a feature-gate body to govern. Both
+					// families are still polled and reported; nothing is
+					// applied. Every call through a nil handle is a no-op by
+					// construction (nodeFeaturesHandle.Allowed/TerminalAllowed
+					// both nil-check to "allowed").
+					loadPolicyResourceLKG(ctx, pcfg, oc, store.New(pdb), admissionHandle, gw, nil, nil, newLogger(pcfg.Observer.LogLevel))
+					pcleanup()
+					go runPolicyResourcePoller(ctx, pcfg, oc, admissionHandle, gw, nil, nil, nil, newLogger(pcfg.Observer.LogLevel))
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "policy resource: LKG/poller skipped - db open failed: %v\n", perr)
+				}
+			}
 
 			// buildProxy opens the DB without the integrity probe (fast bind);
 			// run the one-time quick_check + path-hash backfill in the
 			// background so it never delays the listener on a large DB.
 			go runStartupDBMaintenance(ctx, configPath)
 
-			fmt.Fprintf(cmd.OutOrStdout(), "proxy listening on %s — ctrl-c to stop\n", addr)
+			fmt.Fprintf(cmd.OutOrStdout(), "proxy listening on %s - ctrl-c to stop\n", addr)
 			if err := p.ListenAndServe(ctx, addr); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -85,18 +139,44 @@ func newProxyStartCmd() *cobra.Command {
 	return cmd
 }
 
+// obsProxyBinder binds Plane A observability onto the proxy options (the
+// admitter and egress reporter of the shared admission service, then the
+// gateway rail). obs_wire_proxy.go sets it from its init when obs is
+// compiled in; it stays nil in a build without obs and on the public tree,
+// which is the stub's "no admission, no gateway rail" (lane MP-L1L, T-715).
+// The registration keeps every proxy-typed obs adapter in that one private
+// file, so obs_wire_stub.go never imports internal/proxy.
+var obsProxyBinder func(ctx context.Context, cfg config.Config, db *sql.DB, h *obsAdmissionHandle, opts *proxy.Options, logger *slog.Logger)
+
+// The core activityTurn (nodeactivity.go) must spell proxy.ActivityTurn: a
+// duplicate map key fails to compile the moment the two differ.
+var _ = map[bool]struct{}{false: {}, activityTurn == proxy.ActivityTurn: {}}
+
 // buildProxy loads config, opens the DB, constructs the Proxy wired to the
 // storage layer, and returns the Proxy + cleanup closure + resolved listen
 // address + the compression-profiles hot-reload hook (nil when conversation
 // compression is disabled at boot — the master switch stays restart-gated)
 // + the live router's demotion accessor (nil when routing is not wired;
-// `observer start` hands it to the same-process dashboard, R2.4).
+// `observer start` hands it to the same-process dashboard, R2.4)
+// + the shared admission handle (gap P0-7): an opaque carrier for the ONE
+// *obs.AdmissionService the proxy's admitter enforces, so `observer start` can
+// hand the SAME live instance to the dashboard's policy/egress editors instead
+// of the dashboard building a second, split instance. Nil when admission is
+// disabled; discarded by `observer proxy` and the benchmark harness.
 // The db is closed by the cleanup.
 //
 // recipeName is the deprecated `--recipe` alias: it no longer overlays
 // the Load() chain (Track R, P2.2) — it maps onto the [profiles] table
 // for this run via applyRecipeAliasToProfiles. Pass "" everywhere new.
-func buildProxy(ctx context.Context, configPath, recipeName string, portOverride int, bindAddr string) (*proxy.Proxy, func(), string, func(), func() map[string]string, error) {
+//
+// relay is the C1 judge-relay func (docs/plans/c1-judge-relay-spec-2026-08-15.md
+// §3), built by the caller from its own orgclient.Client instance (which must
+// therefore be constructed BEFORE calling buildProxy) and threaded through to
+// the admission judge build. Pass nil where no orgclient instance is in scope
+// (the benchmark harness) — admission then behaves exactly as it did before
+// C1 for a config that doesn't set use_org_relay, and soft-fails honestly
+// (judge=nil, hosting="org_relay", one logged warning) for one that does.
+func buildProxy(ctx context.Context, configPath, recipeName string, portOverride int, bindAddr string, relay orgJudgeRelayFunc) (proxyWiring, error) {
 	loadFresh := func() (config.Config, error) {
 		cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 		if err != nil {
@@ -105,14 +185,16 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 		if err := applyRecipeAliasToProfiles(&cfg, recipeName); err != nil {
 			return config.Config{}, err
 		}
-		return cfg, nil
+		// Component gate (T-659 / T-661): every load, including the
+		// compression-profile hot reload, sees inactive components off.
+		return applyProxyComponentGate(cfg), nil
 	}
 	cfg, err := loadFresh()
 	if err != nil {
-		return nil, nil, "", nil, nil, fmt.Errorf("load config: %w", err)
+		return proxyWiring{}, fmt.Errorf("load config: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.Observer.DBPath), 0o755); err != nil {
-		return nil, nil, "", nil, nil, fmt.Errorf("ensure db dir: %w", err)
+		return proxyWiring{}, fmt.Errorf("ensure db dir: %w", err)
 	}
 	// No integrity probe here: this is a long-running daemon open. The multi-GB
 	// PRAGMA quick_check is deferred off the readiness path and run once via
@@ -120,7 +202,7 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	// standalone). See db.Options.IntegrityCheck.
 	database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
-		return nil, nil, "", nil, nil, fmt.Errorf("open db %s: %w", cfg.Observer.DBPath, err)
+		return proxyWiring{}, fmt.Errorf("open db %s: %w", cfg.Observer.DBPath, err)
 	}
 	s := store.New(database)
 
@@ -129,8 +211,15 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 		port = portOverride
 	}
 	if port <= 0 || port > 65535 {
-		_ = database.Close()
-		return nil, nil, "", nil, nil, fmt.Errorf("proxy: port %d out of range", port)
+		// D-516: the port only matters when the proxy listens. With
+		// capture.proxy inactive (or compiled out) nothing binds it, so a bad
+		// value never stops start; the wiring keeps the default.
+		if !componentSnapshotFor(configPath).Active("capture.proxy") {
+			port = config.Default().Proxy.Port
+		} else {
+			_ = database.Close()
+			return proxyWiring{}, fmt.Errorf("proxy: port %d out of range", port)
+		}
 	}
 
 	logger := newLogger(cfg.Observer.LogLevel)
@@ -156,19 +245,29 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	resolver := pidbridge.NewProcResolver(bridge, "", 30*time.Second)
 
 	opts := proxy.Options{
+		// Node activity + soft-budget warning seams (nodeactivity.go,
+		// 2026-10-02 budget-latency arc). Both are process-level
+		// fan-outs the daemon's subsystems subscribe to after the proxy
+		// is built, so the proxy never learns who listens.
+		Activity:          processNodeActivity.Note,
+		BudgetWarning:     processBudgetWarningHeader,
 		AnthropicUpstream: cfg.Proxy.AnthropicUpstream,
 		OpenAIUpstream:    cfg.Proxy.OpenAIUpstream,
 		ChatGPTUpstream:   cfg.Proxy.ChatGPTUpstream,
 		GeminiUpstream:    cfg.Proxy.GeminiUpstream,
 		Upstreams:         cfg.Proxy.Upstreams,
-		ForceChatGPTHTTP:  cfg.Proxy.ForceChatGPTHTTP,
-		PrewarmTargets:    cfg.Proxy.PrewarmTargets,
-		Sink:              s,
-		ObserverLog:       s,
-		SessionResolver:   resolver,
-		CostComputer:      costEngineAdapter{e: cost.NewEngine(cfg.Intelligence)},
-		Logger:            logger,
-		CompressTypes:     cfg.Compression.Conversation.CompressTypes,
+		// The registry's built-in lanes under [proxy.agent_upstreams]
+		// (proxylane.go), so a launcher's lane resolves on a fresh install.
+		AgentUpstreams:   effectiveAgentUpstreams(cfg),
+		AutoDefaultLane:  cfg.Proxy.AutoDefaultLane,
+		ForceChatGPTHTTP: cfg.Proxy.ForceChatGPTHTTP,
+		PrewarmTargets:   cfg.Proxy.PrewarmTargets,
+		Sink:             s,
+		ObserverLog:      s,
+		SessionResolver:  resolver,
+		CostComputer:     costEngineAdapter{e: acquireProcessCostEngine(ctx, cfg, database, logger)},
+		Logger:           logger,
+		CompressTypes:    cfg.Compression.Conversation.CompressTypes,
 	}
 	// Limit-snapshot capture for the Next-Message Cost & Limit Predictor
 	// (migration 049). Default-on per [predict]; the store (*Store)
@@ -177,6 +276,9 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	if cfg.Predict.Enabled {
 		opts.LimitSink = s
 	}
+	// Proxy-side tool-version capture (T-784): the User-Agent build of a
+	// session-bound request, written through the one tool-version seam.
+	opts.ToolVersionSink = proxyToolVersionSink{s: s}
 	if cfg.Observer.Process.Enabled && cfg.Observer.Process.Network.Enabled {
 		opts.NetworkSink = s
 		opts.NetworkCapture = proxy.NetworkCaptureOptions{
@@ -204,7 +306,10 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	// shares THIS same engine: `observer start` calls
 	// Watcher.SetCacheEngine(p.CacheEngine()) so Tier-2
 	// (transcript) ingest advances the same CacheModel state.
-	wireCacheTrack(cfg, s, &opts, logger)
+	if engine := buildCacheTrackEngine(cfg, s, logger); engine != nil {
+		opts.CacheEngine = engine
+		opts.CacheSink = s
+	}
 	var profilesReload func()
 	if cfg.Compression.Conversation.Enabled {
 		masterPath, _ := config.ResolveGlobalPath(configPath)
@@ -239,37 +344,69 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	// when guard is disabled/off or every [guard.proxy] + [guard.mcp]
 	// feature is off: opts.Guard stays nil and the proxy is
 	// byte-identical to the pre-guard baseline.
-	if cfg.Guard.Proxy.EgressScan || cfg.Guard.Proxy.ResponseScan || cfg.Guard.Proxy.InjectionHeuristics ||
-		cfg.Guard.MCP.Pinning || cfg.Guard.MCP.PoisoningHeuristics {
-		if g := acquireProcessGuard(ctx, cfg, s, logger); g != nil {
-			// §9.2: the proxy is also where MCP tool declarations are
-			// observed (the tools array in request bodies) — the
-			// adapter forwards them to the mcpsec runner off-path.
-			mcpRunner := newMCPSecRunner(configGuardMCP{
-				Pinning:             cfg.Guard.MCP.Pinning,
-				PoisoningHeuristics: cfg.Guard.MCP.PoisoningHeuristics,
-			}, s, g, logger)
-			opts.Guard = guardScannerAdapter{g: g, st: s, logger: logger, mcp: mcpRunner}
-			logger.Info("guard: proxy seams wired",
-				"egress_scan", cfg.Guard.Proxy.EgressScan,
-				"egress_action", cfg.Guard.Proxy.EgressAction,
-				"response_scan", cfg.Guard.Proxy.ResponseScan,
-				"injection_heuristics", cfg.Guard.Proxy.InjectionHeuristics,
-				"mcp_pinning", cfg.Guard.MCP.Pinning)
-		}
+	wireGuardProxy(ctx, cfg, s, &opts, logger)
+	// Agent Access P4 (mcprelay_wire.go): the ONE production binding of the
+	// node MCP relay handle. Under [mcp_relay].enabled this stores the
+	// process-wide processMCPRelay handle (which the tools.mcp_access
+	// policy-resource publisher, the policy-state point reader and the
+	// daemon's relay runtime goroutine in start.go all read), binds the
+	// proxy tools[] seam on opts and the MCP-access lookup on the SAME
+	// per-process Guard wireGuardProxy just composed (nil when guard is off:
+	// the lookup is then simply not bound). ngov is nil here by design:
+	// `observer start` builds the node-governance handle after buildProxy
+	// and attaches it via processMCPRelay.Load().SetGovernance. With
+	// [mcp_relay].enabled=false this is a no-op that binds nothing.
+	bindMCPRelayProxy(wireMCPRelay(cfg, s, nil, lookupProcessGuard(cfg.Observer.DBPath), logger), &opts)
+	// P1-10: construct the self-obs sink once for the proxy lifetime.
+	// Handed to wireRouting for Decide sampling; Shutdown on cleanup.
+	selfObsSink, selfObsCleanup, serr := buildSelfObsSink(cfg, logger)
+	if serr != nil {
+		logger.Warn("selfobs: sink build failed - using Nop", "err", serr)
+		selfObsSink = emit.Nop()
+		selfObsCleanup = func() {}
 	}
-	routingDemotions := wireRouting(ctx, cfg, s, &opts, logger)
+	routingDemotions, routingStateHandle := wireRouting(ctx, cfg, s, &opts, logger, selfObsSink)
 
 	// Pre-forward input-admission gate (admission spec §6.2). No-op unless
 	// [observability.admission] is enabled; bound here so internal/proxy
-	// never imports internal/obs (obs_wire.go owns the adapter).
-	wireAdmission(ctx, cfg, database, &opts, logger)
+	// never imports internal/obs (obs_wire.go owns the adapter). The returned
+	// handle carries the ONE admission service (gap P0-7) so `observer start`
+	// can share it with the dashboard editors; nil when admission is off.
+	admissionHandle := wireAdmission(ctx, cfg, database, relay, logger, selfObsSink)
+
+	// The admitter seams, then the gateway rail (docs/observability.md
+	// "proxy turn (automatic)"): synthesizes a Plane-A trace for every
+	// proxied LLM turn when [observability].proxy_turn_traces is on. No-op
+	// (opts.ObsSink stays nil) unless [observability] itself is enabled.
+	// The rail runs after the admitter so it can lift
+	// opts.AdmissionUserHeader when admission left it unset. nil binder: a
+	// build without obs (obs_wire_proxy.go not linked).
+	if obsProxyBinder != nil {
+		obsProxyBinder(ctx, cfg, database, admissionHandle, &opts, logger)
+	}
+
+	// Plane B AI Gateway virtual-key source (P5a Sol S2). Lazy: no keychain
+	// probe until a gateway-routed request first needs the key, so solo
+	// installs are unaffected. internal/proxy never imports internal/orgclient
+	// — the adapter is bound here, the CostComputer/Admitter seam pattern.
+	opts.VirtualKeySource = newVirtualKeySource(cfg, filepath.Dir(cfg.Observer.DBPath), logger)
+	// The node's bounded-drain seam (enterprise-update-management plan §3.7
+	// step 4a, rulings R9/R13). Always wired: the gate ADMITS everything
+	// until an apply closes it, so a daemon that never updates behaves
+	// exactly as before. internal/proxy never imports internal/quiesce — the
+	// concrete gate is bound here, the Sink/Admitter/CostComputer pattern.
+	opts.DrainGate = updateDrainGate()
 
 	p, err := proxy.New(opts)
 	if err != nil {
+		selfObsCleanup()
 		_ = database.Close()
-		return nil, nil, "", nil, nil, err
+		return proxyWiring{}, err
 	}
+	// Install the node-local [proxy.org_route] bootstrap onto the routing
+	// snapshot (SetOrgGatewayRoute). Inert when no section is configured; an
+	// org-published mode body supersedes it hot via the same one-snapshot seam.
+	applyOrgRouteBootstrap(p, cfg, logger)
 	// §R12.3 optional active prober — OFF by default (no gratuitous
 	// network). When enabled it re-fires the prewarm HEADs on the
 	// configured cadence: connectivity failures surface in the daemon
@@ -294,140 +431,51 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 		logger.Info("routing: active upstream prober enabled", "interval", interval)
 	}
 	addr := net.JoinHostPort(bindAddr, strconv.Itoa(port))
-	cleanup := func() { _ = database.Close() }
-	return p, cleanup, addr, profilesReload, routingDemotions, nil
+	cleanup := func() {
+		selfObsCleanup()
+		_ = database.Close()
+	}
+	return proxyWiring{
+		Proxy:            p,
+		Cleanup:          cleanup,
+		Addr:             addr,
+		ProfilesReload:   profilesReload,
+		RoutingDemotions: routingDemotions,
+		Admission:        admissionHandle,
+		Routing:          routingStateHandle,
+	}, nil
 }
 
-// wireCacheTrack wires the Tier-1 cache-observation engine (spec §8 / §11) onto
-// opts and hands the SAME engine to the store so Tier-2 (watcher / backfill)
-// observations advance the shared CacheModel state (§24.4 — single engine,
-// multiple feed paths). No-op (with a log line) when [cachetrack] is disabled.
-// Extracted from buildProxy to keep its cyclomatic complexity in check.
-func wireCacheTrack(cfg config.Config, s *store.Store, opts *proxy.Options, logger *slog.Logger) {
-	if !cfg.CacheTrack.Enabled {
-		logger.Info("cachetrack: disabled by config")
+// wireGuardProxy wires the Guard proxy seams (guard spec §8 / G9, §9.2 / G10)
+// onto opts: egress scan + injection heuristics on the request path,
+// tool_use inspection on the response path, and MCP tool-declaration
+// observation feeding the pin diff. The Guard instance is the per-process
+// shared one (guardwire.go) — in the `observer start` assembly buildProxy
+// runs FIRST, so the instance acquired here is the same one wireGuard hands
+// the watcher store, making taint state daemon-wide (the cachetrack
+// single-engine precedent). No-op only when guard is disabled/off. The Guard
+// stays attached when the egress/response/MCP scan toggles are all off because
+// the budget rule is another independent request-path consumer. Extracted from
+// buildProxy to keep its cyclomatic complexity in check.
+func wireGuardProxy(ctx context.Context, cfg config.Config, s *store.Store, opts *proxy.Options, logger *slog.Logger) {
+	g := acquireProcessGuard(ctx, cfg, s, logger)
+	if g == nil {
 		return
 	}
-	engine := cachetrack.NewEngine(cfg.CacheTrack.MaxTrackedSessions)
-	opts.CacheEngine = engine
-	opts.CacheSink = s
-	// C10 wiring: hand the SAME engine instance to the store so Tier-2
-	// (watcher / backfill) observations advance the shared CacheModel state.
-	// CacheEventExistsForMessage is the cross-tier dedup so a Tier-1 message
-	// can't be double-observed by Tier-2.
-	s.SetCacheEngine(engine)
-	logger.Info("cachetrack: engine wired", "max_tracked_sessions", cfg.CacheTrack.MaxTrackedSessions)
-	path := cfg.CacheTrack.CalibrateLogPath
-	if path == "" {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		logger.Warn("cachetrack: calibrate log path open failed", "path", path, "err", err)
-		return
-	}
-	engine.EnableCalibrateSink(f)
-	logger.Info("cachetrack: calibrate sidecar wired",
-		"path", path, "cap_blocks", cachetrack.CalibrateBlockCap)
-	// File handle leaks until process exit — intentional; the sidecar is a
-	// soak-time diagnostic, not a steady-state surface. Auto-stop trips after
-	// CalibrateBlockCap writes; the operator unsets the config and restarts.
-}
-
-// wireRouting assembles the Channel B routing seam (model-routing spec
-// §R5/§R11) onto opts. Gated on the [routing] master switch + a non-off
-// mode: when off, no router is wired and the request path is
-// byte-identical to a pre-routing build (pinned by the proxy seam
-// tests). The policy compiles from config (template expansion + appended
-// custom rules, §R6.3); lint errors degrade affected rules to fail-open
-// and are logged loudly, never fatal — a typo'd policy must not take
-// the proxy down.
-//
-// Returns the live router's §R18.3 demotion accessor (R2.4) so the
-// same-process dashboard can surface calibration demotions — they are
-// in-memory state only a live router can answer for. Nil when routing
-// is not wired.
-func wireRouting(ctx context.Context, cfg config.Config, s *store.Store, opts *proxy.Options, logger *slog.Logger) func() map[string]string {
-	if !cfg.Routing.Enabled || cfg.Routing.Mode == "off" {
-		return nil
-	}
-	spec := routingconfig.Spec(cfg.Routing)
-	// §R19.1 org policy composition: the cached (signature-verified)
-	// org document's hard constraints intersect in; its soft rules
-	// rank under local. The cache never carries an enforce switch —
-	// the [routing] gate above is the only one (§R23).
-	if orgPol, ok, perr := s.GetOrgRoutingPolicy(ctx); perr != nil {
-		logger.Warn("routing: org policy cache read failed", "err", perr)
-	} else if ok {
-		composed, cerr := routingconfig.ComposeOrgPolicy(spec, orgPol.Body)
-		if cerr != nil {
-			logger.Warn("routing: org policy body unusable; continuing with local policy", "err", cerr)
-		} else {
-			spec = composed
-			logger.Info("routing: org policy composed", "version", orgPol.Version)
-		}
-	}
-	policy, issues := routing.Compile(spec)
-	for _, issue := range issues {
-		logger.Warn("routing: policy lint finding",
-			"check", issue.Check, "rule", issue.RuleName,
-			"severity", string(issue.Severity), "msg", issue.Message)
-	}
-	resolver := routing.NewTierResolver()
-	overrides, provenance, benchErrs := routingconfig.ResolvedTierOverrides(cfg.Routing)
-	for _, berr := range benchErrs {
-		logger.Warn("routing: benchmark import skipped", "err", berr)
-	}
-	for _, prov := range provenance {
-		logger.Info("routing: benchmark tiers imported", "provenance", prov)
-	}
-	// §R11.7 local upstreams: declared models place in TierLocal,
-	// the OpenAI-shape local representative installs, and the
-	// proxy learns the per-model endpoint routes.
-	luTiers, luReps, luRoutes := routingconfig.LocalUpstreamRouting(cfg.Routing)
-	if luTiers != nil {
-		overrides = routing.MergeTierOverrides(luTiers, overrides)
-	}
-	if luReps != nil {
-		resolver.ReloadWithLocalUpstreams(overrides, luReps)
-	} else if overrides != nil {
-		resolver.Reload(overrides)
-	}
-	if len(luRoutes) > 0 {
-		opts.LocalUpstreams = luRoutes
-		logger.Info("routing: local upstreams wired", "models", len(luRoutes))
-	}
-	// §R12.4 key pools — local-only config; never log key material.
-	if len(cfg.Routing.KeyPool) > 0 {
-		opts.KeyPools = cfg.Routing.KeyPool
-		logger.Info("routing: key pools wired", "providers", len(cfg.Routing.KeyPool))
-	}
-	// One price seam for the whole Channel-B surface — the refresher's
-	// snapshot and the liveRouter's realized-benefit write share the
-	// same adapter, so estimated and realized math never drift.
-	price := routingPriceFn(cost.NewEngine(cfg.Intelligence))
-	refresher := store.NewRoutingRefresher(s, policy, resolver, price)
-	go refresher.Run(ctx)
-	lr := newLiveRouter(policy, cfg.Routing.Mode, refresher, s, logger, price)
-	opts.ModelRouter = lr
-	// §R7.2/§R18.3 calibration job: refreshes model_calibration
-	// through the existing one-owner seam and (auto_demote) grades
-	// the policy's downshift rules — pure SQL, off the hot path,
-	// same daemon as the watcher in `observer start`.
-	if cfg.Routing.Calibration.Enabled {
-		go routingCalibrationLoop(ctx, s, cfg, lr, logger)
-	}
-	// §R12.2 same-target retries follow the routing master gate
-	// (config lives under [routing.reliability]).
-	opts.Reliability = proxy.ReliabilityOptions{
-		MaxRetries:           cfg.Routing.Reliability.MaxRetries,
-		RetryOverloaded:      cfg.Routing.Reliability.RetryOverloaded,
-		RetryUnavailable:     cfg.Routing.Reliability.RetryUnavailable,
-		RetryConnectionReset: cfg.Routing.Reliability.RetryConnectionReset,
-	}
-	logger.Info("routing: Channel B wired",
-		"mode", cfg.Routing.Mode, "policy", policy.Name, "hash", policy.Hash())
-	return lr.DemotedRules
+	// §9.2: the proxy is also where MCP tool declarations are
+	// observed (the tools array in request bodies) — the
+	// adapter forwards them to the mcpsec runner off-path.
+	mcpRunner := newMCPSecRunner(configGuardMCP{
+		Pinning:             cfg.Guard.MCP.Pinning,
+		PoisoningHeuristics: cfg.Guard.MCP.PoisoningHeuristics,
+	}, s, g, logger)
+	opts.Guard = guardScannerAdapter{g: g, st: s, logger: logger, mcp: mcpRunner}
+	logger.Info("guard: proxy seams wired",
+		"egress_scan", cfg.Guard.Proxy.EgressScan,
+		"egress_action", cfg.Guard.Proxy.EgressAction,
+		"response_scan", cfg.Guard.Proxy.ResponseScan,
+		"injection_heuristics", cfg.Guard.Proxy.InjectionHeuristics,
+		"mcp_pinning", cfg.Guard.MCP.Pinning)
 }
 
 // pipelineAdapter bridges conversation.Pipeline (no context parameter —
@@ -438,10 +486,12 @@ type pipelineAdapter struct {
 	p *conversation.Pipeline
 }
 
-// costEngineAdapter bridges (*cost.Engine).Compute to proxy.CostComputer
-// — same pattern as pipelineAdapter for the conversation pipeline.
-// Lives here so the proxy contract stays free of an intelligence-pkg
-// import cycle.
+// costEngineAdapter bridges (*cost.Engine).ComputeAt to proxy.CostComputer
+// — same pattern as pipelineAdapter for the conversation pipeline. It
+// passes CostTokens.At through so time-of-day-dependent rates (e.g.
+// peak/off-peak) resolve against the turn's own timestamp rather than
+// wall-clock-now. Lives here so the proxy contract stays free of an
+// intelligence-pkg import cycle.
 type costEngineAdapter struct {
 	e *cost.Engine
 }
@@ -451,14 +501,18 @@ func (a costEngineAdapter) Compute(model string, t proxy.CostTokens) (float64, b
 	if a.e == nil {
 		return 0, false
 	}
-	return a.e.Compute(model, cost.TokenBundle{
+	// A tier sold as its own SKU (OpenAI Ultrafast) is priced under that
+	// SKU when the table has it; otherwise the model's own rate applies and
+	// the engine records a PricingWarnings entry (TierUnpriced).
+	model, _ = a.e.ResolveServiceTier(model, t.ServiceTier)
+	return a.e.ComputeAt(model, cost.TokenBundle{
 		Input:           t.Input,
 		Output:          t.Output,
 		CacheRead:       t.CacheRead,
 		CacheCreation:   t.CacheCreation,
 		CacheCreation1h: t.CacheCreation1h,
 		Fast:            t.Fast,
-	})
+	}, t.At)
 }
 
 // Compress implements proxy.Compressor (the legacy non-session-aware
@@ -537,28 +591,7 @@ func (a authCacheAdapter) Set(sessionID string, creds proxy.AuthCredentials) {
 	})
 }
 
-// buildCodeIntelProvider returns the code-intelligence provider for the
-// proxy + MCP layers. The NATIVE engine is the only implementation (the
-// external codegraph dependency was decommissioned in Phase 4 — see
-// docs/codeintel/migration-from-codegraph.md). The engine is returned
-// even when its index is still empty: it self-heals as `observer start`
-// indexes projects, flipping Available() true mid-run without a restart.
-// Never returns nil — an unavailable provider degrades enrichment
-// gracefully.
-func buildCodeIntelProvider(cfg config.Config, database *sql.DB, logger *slog.Logger) codeintel.Provider {
-	if !cfg.CodeIntel.Enabled || database == nil {
-		return codeintel.Unavailable()
-	}
-	native := codeintel.NewEngine(store.New(database))
-	if native.Available() {
-		logger.Info("codeintel: native engine attached (structural enrichment, traversal, collapse)")
-	} else {
-		logger.Info("codeintel: native engine attached; index empty — enrichment activates as projects are indexed")
-	}
-	return native
-}
-
-// codeintelPipelineAdapter bridges codeintel.Provider to
+// codeintelPipelineAdapter bridges codeintelapi.Provider to
 // conversation.SymbolLookup. The conversation package owns the
 // interface so it never imports the codeintel engine — the adapter
 // here in cmd/observer is the connecting tissue. Pattern mirrors
@@ -569,7 +602,7 @@ func buildCodeIntelProvider(cfg config.Config, database *sql.DB, logger *slog.Lo
 // same logical data; the duplicate type lets each package own its
 // own surface.
 type codeintelPipelineAdapter struct {
-	p codeintel.Provider
+	p codeintelapi.Provider
 }
 
 func (a codeintelPipelineAdapter) Available() bool {

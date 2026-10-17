@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package dashboard
 
 import (
@@ -6,7 +8,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/processbridge/setup"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // ETW setup states, as the dashboard card sees them. They are the
@@ -451,7 +453,7 @@ func (r *etwStatusResponse) withholdLocalDetail() {
 		// wording; dropping it lets the card fall back to its own
 		// transport_state === "unavailable" branch, which already renders
 		// without a reason.
-		if h.TransportState == processobs.TransportStateUnavailable {
+		if h.TransportState == procmodel.TransportStateUnavailable {
 			h.TransportLine = ""
 		}
 	}
@@ -523,7 +525,7 @@ func (s *Server) attachETWHealth(resp *etwStatusResponse) {
 	}
 	h, ok := diag.LatestProcessHealth(dir)
 	if !ok {
-		resp.HealthReason = "no running daemon has published a process-observability health record — " +
+		resp.HealthReason = "no running daemon has published a process-observability health record - " +
 			"normal when the daemon is not running or process capture is disabled, and not a failure of the feature"
 		return
 	}
@@ -548,7 +550,7 @@ func (s *Server) attachETWHealth(resp *etwStatusResponse) {
 	// decodes empty, and empty must read as "none" rather than as a broken
 	// transport with zero connections.
 	if out.TransportState == "" {
-		out.TransportState = processobs.TransportStateNone
+		out.TransportState = procmodel.TransportStateNone
 	}
 	if h.TransportConfigured() {
 		out.Transport = etwTransportOf(h)
@@ -571,7 +573,7 @@ func etwTransportOf(h diag.ProcessHealth) *etwTransport {
 	// this build (or an older daemon) did not record.
 	if h.TransportAuthFailures > 0 || h.TransportLastAuthError != "" {
 		t.LastAuthError = h.TransportLastAuthError
-		t.LastAuthErrorClass = processobs.NormalizeTransportAuthClass(h.TransportLastAuthErrorClass)
+		t.LastAuthErrorClass = procmodel.NormalizeTransportAuthClass(h.TransportLastAuthErrorClass)
 	}
 	// Never-happened is ABSENT, not epoch 0.
 	if !h.TransportLastConnectAt.IsZero() {

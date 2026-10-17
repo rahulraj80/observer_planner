@@ -1,3 +1,5 @@
+//go:build !sbo_omit_notify_email
+
 package main
 
 import (
@@ -11,10 +13,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	notifydigest "github.com/marmutapp/superbased-observer/internal/notify/digest"
 	"github.com/marmutapp/superbased-observer/internal/notify/email"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // digest.go is the NODE-SIDE scheduled digest surface (gap-register G13):
@@ -44,6 +47,8 @@ type nodeDigestRunner struct {
 	// send delivers one composed message. Defaults to notifier.Send; tests
 	// substitute a recorder.
 	send func(context.Context, email.Message)
+	// mode overrides the developer cost display (tests); nil resolves it.
+	mode func() string
 }
 
 // digestClock is the wall-clock source for a CLI-built digest runner. It is a
@@ -56,7 +61,7 @@ func newNodeDigestRunner(cfg config.Config, db *sql.DB, notifier *email.Notifier
 	r := &nodeDigestRunner{
 		cfg:      cfg,
 		db:       db,
-		engine:   cost.NewEngine(cfg.Intelligence),
+		engine:   acquireProcessCostEngine(context.Background(), cfg, db, logger),
 		notifier: notifier,
 		logger:   logger,
 		now:      digestClock,
@@ -139,23 +144,30 @@ func (r *nodeDigestRunner) tick(ctx context.Context) {
 // assemble builds the content-free node digest Data for a period: current +
 // prior per-model/per-tool spend, ranked movers, and the local alert count.
 func (r *nodeDigestRunner) assemble(ctx context.Context, period notifydigest.Period) (notifydigest.Data, error) {
-	curModels, curTotal, err := r.spendItems(ctx, cost.GroupByModel, period.Start, period.End)
+	curModels, curTotal, curTokens, err := r.spendItems(ctx, cost.GroupByModel, period.Start, period.End)
 	if err != nil {
 		return notifydigest.Data{}, err
 	}
-	curTools, _, err := r.spendItems(ctx, cost.GroupByTool, period.Start, period.End)
+	curTools, _, _, err := r.spendItems(ctx, cost.GroupByTool, period.Start, period.End)
 	if err != nil {
 		return notifydigest.Data{}, err
 	}
 	priorStart := period.Start.Add(-period.End.Sub(period.Start))
-	priorModels, priorTotal, err := r.spendItems(ctx, cost.GroupByModel, priorStart, period.Start)
+	priorModels, priorTotal, priorTokens, err := r.spendItems(ctx, cost.GroupByModel, priorStart, period.Start)
 	if err != nil {
 		return notifydigest.Data{}, err
 	}
 
-	title := "Weekly cost digest"
+	// The digest follows the developer cost display (T-204): under token usage
+	// every figure is the tokens behind it and the wording says usage.
+	mode := r.costMode()
+	kind, by := "cost", "Spend"
+	if costtext.Tokens(mode) {
+		kind, by = "usage", "Usage"
+	}
+	title := "Weekly " + kind + " digest"
 	if r.cfg.Digest.FrequencyOrDefault() == notifydigest.Monthly {
-		title = "Monthly cost digest"
+		title = "Monthly " + kind + " digest"
 	}
 	data := notifydigest.Data{
 		Title:         title,
@@ -164,12 +176,15 @@ func (r *nodeDigestRunner) assemble(ctx context.Context, period notifydigest.Per
 		PriorTotalUSD: priorTotal,
 		HasPrior:      true,
 		Breakdowns: []notifydigest.Breakdown{
-			{Title: "Spend by tool", Items: capItems(curTools, nodeDigestTopN)},
-			{Title: "Spend by model", Items: capItems(curModels, nodeDigestTopN)},
+			{Title: by + " by tool", Items: capItems(curTools, nodeDigestTopN)},
+			{Title: by + " by model", Items: capItems(curModels, nodeDigestTopN)},
 		},
-		Movers:  notifydigest.RankMovers(curModels, priorModels, nodeDigestTopN),
-		Version: version,
-		To:      r.cfg.Digest.To,
+		CostDisplay:      mode,
+		TotalTokens:      curTokens,
+		PriorTotalTokens: priorTokens,
+		Movers:           notifydigest.RankMovers(curModels, priorModels, nodeDigestTopN),
+		Version:          version,
+		To:               r.cfg.Digest.To,
 	}
 	if len(data.To) == 0 {
 		data.To = r.cfg.Email.To
@@ -183,7 +198,7 @@ func (r *nodeDigestRunner) assemble(ctx context.Context, period notifydigest.Per
 
 // spendItems runs one cost summary over [start, end) and returns its rows as
 // digest line items plus the window total.
-func (r *nodeDigestRunner) spendItems(ctx context.Context, groupBy cost.GroupBy, start, end time.Time) ([]notifydigest.LineItem, float64, error) {
+func (r *nodeDigestRunner) spendItems(ctx context.Context, groupBy cost.GroupBy, start, end time.Time) ([]notifydigest.LineItem, float64, int64, error) {
 	sum, err := r.engine.Summary(ctx, r.db, cost.Options{
 		Since:   start,
 		Until:   end,
@@ -192,13 +207,13 @@ func (r *nodeDigestRunner) spendItems(ctx context.Context, groupBy cost.GroupBy,
 		Limit:   200,
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("digest.spendItems: %w", err)
+		return nil, 0, 0, fmt.Errorf("digest.spendItems: %w", err)
 	}
 	items := make([]notifydigest.LineItem, 0, len(sum.Rows))
 	for _, row := range sum.Rows {
-		items = append(items, notifydigest.LineItem{Label: row.Key, CostUSD: row.CostUSD})
+		items = append(items, notifydigest.LineItem{Label: row.Key, CostUSD: row.CostUSD, Tokens: digestTokens(row.Tokens)})
 	}
-	return items, sum.TotalCost, nil
+	return items, sum.TotalCost, digestTokens(sum.TotalTokens), nil
 }
 
 // capItems truncates items to the first n (already cost-sorted by the engine).
@@ -321,53 +336,6 @@ func (r *briefingDigestRunner) tick(ctx context.Context) {
 	r.logger.Info("briefing digest sent", "period", period.Key)
 }
 
-// assemble builds the content-free daily briefing DigestData for a period by
-// composing the real briefing through a minimal dashboard server and projecting
-// its at_glance + activity onto the email shape.
-func (r *briefingDigestRunner) assemble(ctx context.Context, period notifydigest.Period) (notifydigest.BriefingData, error) {
-	srv, err := dashboard.New(dashboard.Options{DB: r.db, CostEngine: r.engine, Logger: r.logger})
-	if err != nil {
-		return notifydigest.BriefingData{}, err
-	}
-	b, err := srv.ComposeBriefing(ctx, period.Start.Format("2006-01-02"))
-	if err != nil {
-		return notifydigest.BriefingData{}, err
-	}
-	g := b.AtGlance
-	tools := make([]notifydigest.LineItem, 0, len(b.Activity))
-	for _, a := range b.Activity {
-		tools = append(tools, notifydigest.LineItem{Label: a.Tool, CostUSD: a.SpendUSD})
-	}
-	savings := 0.0
-	for _, o := range b.Opportunities {
-		savings += o.SavingsUSD
-	}
-	to := r.cfg.Digest.To
-	if len(to) == 0 {
-		to = r.cfg.Email.To
-	}
-	return notifydigest.BriefingData{
-		Title:                 "Daily briefing",
-		PeriodLabel:           period.Label,
-		TotalUSD:              g.SpendUSD,
-		Sessions:              g.Sessions,
-		Turns:                 g.Turns,
-		InputTokens:           g.InputTokens,
-		OutputTokens:          g.OutputTokens,
-		CacheReadTokens:       g.CacheReadTokens,
-		CacheCreationTokens:   g.CacheCreationTokens,
-		CacheHitRate:          g.CacheHitRate,
-		ErrorTurns:            g.ErrorTurns,
-		ActiveHours:           g.ActiveHours,
-		FastShare:             g.FastShare,
-		Tools:                 tools,
-		OpportunityCount:      len(b.Opportunities),
-		OpportunitySavingsUSD: savings,
-		Version:               version,
-		To:                    to,
-	}, nil
-}
-
 // newDigestCmd is `observer digest send [--dry-run]`: compose the current
 // period's personal cost digest and email it (or print it, with --dry-run).
 func newDigestCmd() *cobra.Command {
@@ -388,7 +356,7 @@ func newDigestSendCmd() *cobra.Command {
 		Short: "Compose the scheduled digest for the most-recent completed period and email it",
 		Long: "Compose the scheduled digest for the most-recently-COMPLETED period and\n" +
 			"email it, then record the send-once marker. With --kind node (default):\n" +
-			"the personal cost digest ([digest].frequency, default weekly) — per-tool\n" +
+			"the personal cost digest ([digest].frequency, default weekly) - per-tool\n" +
 			"+ per-model observed spend with the prior-period delta. With --kind\n" +
 			"briefing: the daily briefing for the most-recently-completed local day\n" +
 			"(sessions, turns, spend, tokens, cache hit rate, opportunities).\n" +
@@ -406,7 +374,7 @@ func newDigestSendCmd() *cobra.Command {
 			var notifier *email.Notifier
 			if !dryRun {
 				if !cfg.Email.Enabled {
-					return errors.New("digest send: [email].enabled is false — enable [email] or use --dry-run")
+					return errors.New("digest send: [email].enabled is false - enable [email] or use --dry-run")
 				}
 				n, nerr := email.NewNotifier(cfg.Email, logger)
 				if nerr != nil {
@@ -459,4 +427,22 @@ func newDigestSendCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the composed email to stdout instead of sending")
 	cmd.Flags().StringVar(&kind, "kind", "node", "digest kind: node (weekly/monthly cost) or briefing (daily)")
 	return cmd
+}
+
+// digestTokens is the token figure behind a digest line: input, output and
+// both cache legs, the node dashboard's token figure (the statusline's too).
+func digestTokens(t cost.TokenBundle) int64 {
+	return t.Input + t.Output + t.CacheRead + t.CacheCreation
+}
+
+// costMode is the developer cost display the digest follows, resolved
+// through the shared seam (store.ResolveDeveloperCostDisplay).
+func (r *nodeDigestRunner) costMode() string {
+	if r.mode != nil {
+		return r.mode()
+	}
+	if r.db == nil {
+		return costtext.ModeUSD
+	}
+	return newCostDisplayResolver(store.New(r.db)).Mode()
 }

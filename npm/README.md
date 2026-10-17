@@ -88,7 +88,11 @@ npm-distributing a native binary. Same shape used by `esbuild`,
 `@swc/cli`, `@biomejs/biome`, `prisma`, `bun`. Tradeoffs vs alternatives:
 
 - **vs postinstall download script**: faster install, works offline
-  once cached, no postinstall script (which some orgs disable).
+  once cached, nothing downloaded at install time (some orgs disable
+  install scripts). The one postinstall step (`bin/postinstall.js`, T-753)
+  only PRINTS a restart hint when a running Observer daemon still runs the
+  binary the upgrade replaced; with scripts disabled the install is the
+  same, minus that note.
 - **vs single platform-detect-at-runtime package**: the package
   installed is small (one binary, ~25 MB) instead of containing all 5
   (~125 MB).

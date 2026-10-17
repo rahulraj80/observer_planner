@@ -19,6 +19,9 @@ type LockInfo struct {
 	StartedAt  time.Time `json:"started_at"`
 	DBPath     string    `json:"db_path"`
 	BinaryPath string    `json:"binary_path"`
+	// Version is the daemon's release version (U3, FIX-UPGRADE). Absent
+	// in a lock an older build wrote.
+	Version string `json:"version,omitempty"`
 }
 
 // lockGlob matches per-PID lock files written into the DB directory.

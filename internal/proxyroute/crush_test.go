@@ -51,7 +51,7 @@ const crushBaseConfig = `{
   }
 }`
 
-func TestRegisterCrushAddsBaseURLAndBacksUp(t *testing.T) {
+func TestRegisterCrushAddsBaseURLWithoutBackup(t *testing.T) {
 	home := t.TempDir()
 	path := writeCrushConfig(t, home, crushBaseConfig)
 	r := newCrushRegistrar(t, home)
@@ -64,9 +64,9 @@ func TestRegisterCrushAddsBaseURLAndBacksUp(t *testing.T) {
 		t.Fatalf("want Added; got Added=%v ConfigMissing=%v", res.Added, res.ConfigMissing)
 	}
 
-	bak, err := os.ReadFile(path + ".bak")
-	if err != nil || strings.Contains(string(bak), "base_url") {
-		t.Errorf("backup missing or already mutated: %v", err)
+	// T-657: no backup copy of a credential-bearing file.
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("the writer must leave no .bak copy of the file")
 	}
 
 	var doc map[string]any

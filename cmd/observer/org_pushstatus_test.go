@@ -3,14 +3,15 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 func TestEligibleAndHistoricalTotals(t *testing.T) {
 	maxIDs := store.PushCursor{Sessions: 10, Actions: 100, APITurns: 20, TokenUsage: 30, GuardEvents: 5}
-	cur := store.PushCursor{Sessions: 10, Actions: 90, APITurns: 20, TokenUsage: 30, GuardEvents: 5}
-	if got := eligibleTotal(cur, maxIDs); got != 10 {
+	counts := store.PushCursor{Sessions: 0, Actions: 10, APITurns: 0, TokenUsage: 0, GuardEvents: 0}
+	if got := eligibleTotal(counts); got != 10 {
 		t.Errorf("eligibleTotal = %d, want 10", got)
 	}
 	if got := historicalTotal(maxIDs); got != 165 {
@@ -53,5 +54,27 @@ func TestNextAttempt(t *testing.T) {
 	bad := &store.PushLogEntry{PushedAt: "not-a-time"}
 	if got := nextAttempt(true, bad, 900); !strings.Contains(got, "after the last attempt") {
 		t.Errorf("bad-timestamp fallback = %q", got)
+	}
+}
+
+// TestPushStampLocalNamesTheZone: the last-push stamp is SQLite UTC with no
+// zone; every surface renders it in local time with the zone named.
+func TestPushStampLocalNamesTheZone(t *testing.T) {
+	ist := time.FixedZone("IST", 5*3600+1800)
+	cases := []struct {
+		in   string
+		loc  *time.Location
+		want string
+	}{
+		{"2026-10-03 04:59:07", ist, "2026-10-03 10:29 IST"},
+		{"2026-10-03 04:59:07", time.UTC, "2026-10-03 04:59 UTC"},
+		{"2026-10-03T04:59:07Z", ist, "2026-10-03T04:59:07Z"},
+		{"", ist, ""},
+		{"2026-10-03 04:59:07", nil, "2026-10-03 04:59:07"},
+	}
+	for _, c := range cases {
+		if got := pushStampLocal(c.in, c.loc); got != c.want {
+			t.Errorf("pushStampLocal(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

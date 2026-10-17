@@ -1,7 +1,9 @@
 package antigravity
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -9,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // LanguageServer represents a running language_server process —
@@ -242,19 +245,58 @@ func requiresCSRF(basename string) bool {
 //
 // Returns an empty slice (no error) when no language servers are
 // running — the network-recovery path simply skips in that case.
-func discoverLanguageServers() ([]LanguageServer, error) {
+func discoverLanguageServers(ctx context.Context) ([]LanguageServer, error) {
+	return discoverLanguageServersWith(ctx, platformDiscoverer())
+}
+
+// discoveryTimeout bounds one whole discovery pass (T-557). Discovery shells
+// out (powershell.exe cold-starts in 1 to 3 s on WSL2; ps + one lsof per
+// candidate on macOS), and a hung child used to hold the parse, and so a
+// daemon stop, for as long as it ran. A var so tests can shorten it.
+var discoveryTimeout = 10 * time.Second
+
+// discoveryWaitDelay bounds how long a killed discovery child may keep its
+// output pipes open (a WSL interop grandchild can outlive powershell.exe).
+const discoveryWaitDelay = 2 * time.Second
+
+// discoverLanguageServersWith runs one discovery pass under the caller's
+// context, bounded by discoveryTimeout.
+func discoverLanguageServersWith(ctx context.Context, discover func(context.Context) ([]LanguageServer, error)) ([]LanguageServer, error) {
+	dctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
+	return discover(dctx)
+}
+
+// discoveryOutput runs one discovery subprocess under ctx and returns its
+// stdout. The child is killed when ctx ends, and its pipes are abandoned
+// discoveryWaitDelay later, so a cancelled discovery returns promptly.
+func discoveryOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: name is one of the fixed discovery binaries (powershell.exe, ps, lsof); args are constants or an integer PID via strconv.Itoa.
+	cmd.WaitDelay = discoveryWaitDelay
+	out, err := cmd.Output()
+	if err != nil && ctx.Err() != nil {
+		return nil, fmt.Errorf("antigravity: %s: %w", name, ctx.Err())
+	}
+	return out, err
+}
+
+// platformDiscoverer picks the discovery routine for this host.
+func platformDiscoverer() func(context.Context) ([]LanguageServer, error) {
 	switch runtime.GOOS {
 	case "linux":
 		if isWSL() {
-			return discoverViaPowerShell()
+			return discoverViaPowerShell
 		}
-		return discoverNativeLinux()
+		return func(context.Context) ([]LanguageServer, error) { return discoverNativeLinux() }
 	case "darwin":
-		return discoverNativeMac()
+		return discoverNativeMac
 	case "windows":
-		return discoverNativeWindows()
+		return discoverNativeWindows
 	default:
-		return nil, nil
+		return func(context.Context) ([]LanguageServer, error) { return nil, nil }
 	}
 }
 
@@ -279,7 +321,7 @@ func isWSL() bool {
 // tab-separated:
 //
 //	<pid>\t<httpPort>\t<httpsPort>\t<csrfToken>\t<workspaceId>
-func discoverViaPowerShell() ([]LanguageServer, error) {
+func discoverViaPowerShell(ctx context.Context) ([]LanguageServer, error) {
 	if _, err := exec.LookPath("powershell.exe"); err != nil {
 		return nil, errors.New("antigravity: powershell.exe not on PATH (corporate-locked WSL?)")
 	}
@@ -311,7 +353,7 @@ foreach ($p in $lsProcesses) {
     "$($p.ProcessId)` + "`t" + `$httpPort` + "`t" + `$httpsPort` + "`t" + `$csrf` + "`t" + `$workspace"
 }
 `
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	out, err := discoveryOutput(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	if err != nil {
 		return nil, err
 	}
@@ -568,8 +610,8 @@ func sortInts(s []int) {
 
 // discoverNativeMac queries `ps` + `lsof` to find language_server
 // processes and their listening ports on macOS.
-func discoverNativeMac() ([]LanguageServer, error) {
-	out, err := exec.Command("ps", "-axwwo", "pid=,command=").Output()
+func discoverNativeMac(ctx context.Context) ([]LanguageServer, error) {
+	out, err := discoveryOutput(ctx, "ps", "-axwwo", "pid=,command=")
 	if err != nil {
 		return nil, err
 	}
@@ -599,7 +641,10 @@ func discoverNativeMac() ([]LanguageServer, error) {
 			continue
 		}
 		// Use lsof to find listening TCP ports for this PID.
-		lsofOut, err := exec.Command("lsof", "-iTCP", "-sTCP:LISTEN", "-a", "-p", strconv.Itoa(pid), "-Pn").Output() //nolint:gosec // G204: fixed 'lsof' binary; the only variable argument is an integer PID via strconv.Itoa.
+		if ctx.Err() != nil {
+			return servers, ctx.Err()
+		}
+		lsofOut, err := discoveryOutput(ctx, "lsof", "-iTCP", "-sTCP:LISTEN", "-a", "-p", strconv.Itoa(pid), "-Pn")
 		if err != nil {
 			servers = append(servers, LanguageServer{PID: pid, CSRFToken: csrf, WorkspaceID: workspace})
 			continue
@@ -636,8 +681,8 @@ func discoverNativeMac() ([]LanguageServer, error) {
 
 // discoverNativeWindows uses tasklist + Get-NetTCPConnection (via
 // powershell). Reuses the same script as discoverViaPowerShell.
-func discoverNativeWindows() ([]LanguageServer, error) {
-	return discoverViaPowerShell()
+func discoverNativeWindows(ctx context.Context) ([]LanguageServer, error) {
+	return discoverViaPowerShell(ctx)
 }
 
 // parseCmdlineFlags extracts --csrf_token and --workspace_id from

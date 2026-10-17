@@ -5,15 +5,20 @@ import {
   PageHeader,
   Pill,
   SegmentedControl,
+  Tooltip,
 } from "@/components/primitives";
 import { Pagination } from "@/components/DataTable";
 import { ChartState } from "@/components/ChartState";
 import { HelpInd } from "@/components/HelpInd";
-import { CoinsIcon } from "@/components/icons";
+import { HeroWordmark } from "@/components/HeroWordmark";
 import { useApi } from "@/lib/useApi";
 import { useFilters, windowLabel, windowParams } from "@/lib/filters";
-import { fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtShortId, fmtUSD, maskDollarAmounts } from "@/lib/format";
 import type { AdvisorListResponse, AdvisorSuggestion } from "@/lib/types";
+import { VocabPill } from "@shared/lib/vocabPill";
+import { SUGGESTION_CATEGORY, SUGGESTION_SCOPE, SUGGESTION_SEVERITY } from "@/lib/vocabTones";
+import { navIcon } from "@/lib/nav";
+import { MetricIcon } from "@/components/MetricIcon";
 
 const PAGE_LIMIT = 20;
 
@@ -25,26 +30,21 @@ const CATEGORIES = [
   { value: "hygiene", label: "Hygiene" },
 ];
 
-const SEVERITY_TONE: Record<string, string> = {
-  warning: "text-danger",
-  advice: "text-accent",
-  info: "text-fg-2",
-};
-
 export function SuggestionsPage() {
   // Global filters (TopBar): window, tool, project — the suggestions
   // surface honors all three like every other page (no local duplicate
   // window control; operator feedback 2026-06-10).
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   // "all" maps to a far horizon (matches every sibling page; the backend
   // window is uncapped so this genuinely means all-time).
   const winParams = windowParams(win, customRange);
   const spendLabel =
     win === "all"
-      ? "Avoidable spend — all time"
-      : `Avoidable spend — last ${windowLabel(win, customRange)}`;
+      ? "Avoidable spend - all time"
+      : `Avoidable spend - last ${windowLabel(win, customRange)}`;
   const [category, setCategory] = useState("all");
   const [page, setPage] = useState(1);
 
@@ -52,7 +52,7 @@ export function SuggestionsPage() {
   // window/tool/project or the local category) so a narrowed result set
   // never strands the user on an out-of-range, blank page. Mirrors
   // Actions.tsx / Sessions.tsx.
-  const filterKey = `${win}|${JSON.stringify(customRange)}|${tool}|${project}|${category}`;
+  const filterKey = `${win}|${JSON.stringify(customRange)}|${tool}|${project}|${model}|${category}`;
   useMemo(() => setPage(1), [filterKey]);
 
   const data = useApi<AdvisorListResponse>(
@@ -61,6 +61,7 @@ export function SuggestionsPage() {
       ...winParams,
       project: projectParam,
       tool: toolParam,
+      model: modelParam,
       category: category === "all" ? undefined : category,
       page,
       limit: PAGE_LIMIT,
@@ -68,39 +69,53 @@ export function SuggestionsPage() {
     // Every control re-fires the query (useApi refetches on deps, not on
     // params identity — the original page missed this and the window
     // control was dead).
-    [win, customRange, projectParam, toolParam, category, page],
+    [win, customRange, projectParam, toolParam, modelParam, category, page],
   );
   const rep = data.data;
   const suggestions = rep?.suggestions ?? [];
   const totalCount = rep?.total_count ?? 0;
 
   return (
-    <div className="space-y-4 p-5">
+    <div className="space-y-6 p-4 sm:p-6">
       <PageHeader
+        icon={navIcon("suggestions")}
         title="Suggestions"
-        sub="Prescriptive, dollar-quantified recommendations computed locally from your captured activity. Every number's arithmetic is shown."
+        sub={costLabel(
+          "Prescriptive, dollar-quantified recommendations computed locally from your captured activity. Every number's arithmetic is shown.",
+          "Prescriptive recommendations computed locally from your captured activity.",
+        )}
         helpId="tab.suggestions"
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <HeroStat
-          label={spendLabel}
-          helpId="tile.suggestions.avoidable"
-          icon={<CoinsIcon />}
-          loading={data.loading}
-          value={rep ? fmtUSD(rep.total_savings_usd) : "—"}
-          sub={
-            rep && rep.total_savings_min > 0
-              ? `+ ~${Math.round(rep.total_savings_min)} min of recoverable time`
-              : undefined
-          }
-          variant="danger"
-        />
+      {/* Camera-ready pass (growth-review §4): "avoidable spend" is the
+          screenshot-shaped headline number on this page — a subtle
+          corner wordmark carries the crop. */}
+      {/* The avoidable-spend hero is dollars only: in the org's token-usage
+          view (format.ts cost affordances) the strip is the two counts. */}
+      <div className={dollarsShown() ? "relative grid grid-cols-1 gap-3 pb-4 sm:grid-cols-3" : "relative grid grid-cols-1 gap-3 pb-4 sm:grid-cols-2"}>
+        <HeroWordmark />
+        {dollarsShown() && (
+          <HeroStat
+            label={spendLabel}
+            helpId="tile.suggestions.avoidable"
+            icon={<MetricIcon metric="avoidableSpend" />}
+            loading={data.loading}
+            value={rep ? fmtUSD(rep.total_savings_usd) : "-"}
+            sub={
+              rep && rep.total_savings_min > 0
+                ? `+ ~${Math.round(rep.total_savings_min)} min of recoverable time`
+                : undefined
+            }
+            variant="accent"
+          />
+        )}
         <HeroStat
           label="Open suggestions"
+          icon={<MetricIcon metric="openSuggestions" />}
           helpId="tile.suggestions.open"
           loading={data.loading}
-          value={rep ? String(totalCount) : "—"}
+          stale={data.isStale}
+          value={rep ? String(totalCount) : "-"}
           sub={
             rep
               ? Object.entries(rep.by_detector ?? {})
@@ -113,9 +128,11 @@ export function SuggestionsPage() {
         />
         <HeroStat
           label="Sessions scanned"
+          icon={<MetricIcon metric="sessions" />}
           helpId="tile.suggestions.scanned"
           loading={data.loading}
-          value={rep ? String(rep.sessions_scanned) : "—"}
+          stale={data.isStale}
+          value={rep ? String(rep.sessions_scanned) : "-"}
         />
       </div>
 
@@ -124,7 +141,7 @@ export function SuggestionsPage() {
           <SegmentedControl options={CATEGORIES} value={category} onChange={setCategory} size="sm" />
           <HelpInd id="glossary.suggestion_card" />
         </span>
-        {rep && category === "all" ? (
+        {rep && category === "all" && dollarsShown() ? (
           <div className="flex flex-wrap gap-2 text-[11px] text-fg-3">
             {Object.entries(rep.by_category ?? {})
               .filter(([, usd]) => usd > 0)
@@ -140,9 +157,13 @@ export function SuggestionsPage() {
 
       <ChartState
         loading={data.loading}
+        stale={data.isStale}
+        onRetry={data.reload}
         error={data.error}
+        denied={data.denied}
+        deniedPermission={data.deniedPermission}
         empty={!data.loading && suggestions.length === 0}
-        emptyHint="No suggestions above the confidence and savings floors — nothing worth nagging about in this window."
+        emptyHint="No suggestions above the confidence and savings floors - nothing worth nagging about in this window."
       >
         <div className="space-y-3">
           {suggestions.map((s) => (
@@ -163,16 +184,21 @@ export function SuggestionsPage() {
 function ScopeChip({ s }: { s: AdvisorSuggestion }) {
   if (s.scope === "session" && s.scope_id) {
     return (
-      <Link
-        to={`/sessions?session=${encodeURIComponent(s.scope_id)}`}
-        className="font-mono text-[10px] text-accent underline decoration-dotted underline-offset-2 hover:text-accent-strong"
-        title="Open session detail"
-      >
-        session: {s.scope_id.slice(0, 8)}
-      </Link>
+      <Tooltip content={`Open session detail (${s.scope_id})`}>
+        <Link
+          to={`/sessions?session=${encodeURIComponent(s.scope_id)}`}
+          className="font-mono text-micro text-accent underline decoration-dotted underline-offset-2 hover:text-accent-strong"
+        >
+          session: {fmtShortId(s.scope_id, 8)}
+        </Link>
+      </Tooltip>
     );
   }
-  return <Pill>{s.scope_id ? `${s.scope}: ${s.scope_id.slice(0, 24)}` : s.scope}</Pill>;
+  return (
+    <VocabPill vocab="suggestionScope" table={SUGGESTION_SCOPE} value={s.scope} title={s.scope_id || undefined}>
+      {s.scope_id ? `${s.scope}: ${fmtShortId(s.scope_id, 24)}` : s.scope}
+    </VocabPill>
+  );
 }
 
 // actionHref maps a suggestion's schema-level Action (C3) to a
@@ -216,29 +242,32 @@ function SuggestionCard({
   };
   if (gone) return null;
   return (
-    <div className="rounded-lg border border-line-1 bg-bg-1 p-4">
+    <div className="sb-lift rounded-3 border border-line-2 bg-bg-2 p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-[13px] font-semibold ${SEVERITY_TONE[s.severity] ?? "text-fg-1"}`}>
-              {s.title}
-            </span>
-            <Pill>{s.category}</Pill>
+            {/* Title, nudge and math are server-authored prose that can carry
+                dollar amounts: masked in the org's token-usage view. */}
+            <span className="text-[13px] font-semibold text-fg-0">{maskDollarAmounts(s.title)}</span>
+            {/* Severity: one tone table (SUGGESTION_SEVERITY) as a glyph pill,
+                instead of colouring the title text. */}
+            <VocabPill vocab="suggestionSeverity" table={SUGGESTION_SEVERITY} value={s.severity} />
+            <VocabPill vocab="suggestionCategory" table={SUGGESTION_CATEGORY} value={s.category} />
             <Pill>{s.detector.replaceAll("_", " ")}</Pill>
             <ScopeChip s={s} />
           </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-fg-2">{s.nudge}</p>
-          {open && s.evidence?.math ? (
-            <p className="mt-2 rounded bg-bg-2 px-2 py-1 font-mono text-[11px] text-fg-3">
+          <p className="mt-2 text-[12px] leading-relaxed text-fg-2">{maskDollarAmounts(s.nudge)}</p>
+          {open && s.evidence?.math && dollarsShown() ? (
+            <p className="mt-2 rounded-1 bg-bg-3 px-2 py-1 font-mono text-caption text-fg-3">
               {s.evidence.math}
             </p>
           ) : null}
         </div>
         <div className="shrink-0 text-right">
-          {s.savings_usd ? (
-            <div className="text-[15px] font-semibold text-danger">{fmtUSD(s.savings_usd)}</div>
+          {s.savings_usd && dollarsShown() ? (
+            <div className="text-lead font-semibold text-success">{fmtUSD(s.savings_usd)}</div>
           ) : null}
-          {!s.savings_usd && s.savings_min ? (
+          {(!s.savings_usd || !dollarsShown()) && s.savings_min ? (
             <div className="text-[15px] font-semibold text-warn">~{Math.round(s.savings_min)} min</div>
           ) : null}
           <div className="text-[10px] uppercase tracking-wide text-fg-3">
@@ -254,7 +283,9 @@ function SuggestionCard({
               </Link>
             </div>
           ) : null}
-          {s.evidence?.math ? (
+          {/* The math is dollar arithmetic end to end: not offered in the
+              org's token-usage view. */}
+          {s.evidence?.math && dollarsShown() ? (
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}

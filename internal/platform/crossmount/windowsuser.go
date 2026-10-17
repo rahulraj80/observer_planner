@@ -2,6 +2,7 @@ package crossmount
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -61,7 +62,19 @@ var currentWindowsUser = sync.OnceValue(resolveWindowsUserName)
 // (/mnt/c/Users/<u>/.claude, /.codex, /.cursor) belongs to the operator before
 // rewriting that user's config — an empty result means "ownership
 // unverifiable" and the caller must refuse to auto-pick rather than guess.
+//
+// A layout staged by StageForeignLayoutForTest pins the answer. Otherwise,
+// while foreign discovery is suppressed (EnvDisableForeignHomes, or the
+// test-binary guard in testguard.go) it returns "" WITHOUT probing: no
+// cmd.exe interop exec happens from a test binary, and the memo is never
+// filled from a suppressed state.
 func WindowsUserName() string {
+	if staged := stagedForeign.Load(); staged != nil {
+		return staged.windowsUser
+	}
+	if foreignSuppressedWith(nil, os.Getenv(EnvDisableForeignHomes), testBinaryGuard) {
+		return ""
+	}
 	return currentWindowsUser()
 }
 

@@ -9,9 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/budgetwarnfile"
+	"github.com/marmutapp/superbased-observer/internal/config"
+
 	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/guard/mcpsec"
+	"github.com/marmutapp/superbased-observer/internal/guardposture"
 	"github.com/marmutapp/superbased-observer/internal/mcp/locate"
+	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -33,6 +38,65 @@ type guardSummaryResponse struct {
 	Counts7d  guardCounts `json:"counts_7d"`
 
 	Chain guardChainStatus `json:"chain"`
+
+	// UserPolicy is set only when the configured user guard-policy.toml
+	// exists and does NOT load (T-323): the guard dropped it, so its
+	// rules are off while built-ins and the org bundle stay in force.
+	// The Security page renders it as a read-only banner. Derived by
+	// guard.CheckUserPolicy, the same check `observer doctor` and the
+	// daemon's user_policy_invalid guard event use.
+	UserPolicy *guardUserPolicyJSON `json:"user_policy,omitempty"`
+
+	// HookFailure is what a failing gate hook does, per gate family
+	// (T-346): "closed" blocks the call, "open" lets it run unevaluated.
+	// Absent when the daemon wired no seam (guardhookfailure.go).
+	HookFailure *guardHookFailureJSON `json:"hook_failure,omitempty"`
+
+	// ToolGates is, per hook_block tool, whether its tool-gate hook holds
+	// on THIS node and the channel it falls back to when not
+	// (guardtoolgates.go). Absent when the daemon wired no seam.
+	ToolGates []guardToolGateJSON `json:"tool_gates,omitempty"`
+}
+
+// guardUserPolicyJSON is the invalid-user-policy banner payload.
+type guardUserPolicyJSON struct {
+	Path  string `json:"path"`
+	Line  int    `json:"line,omitempty"`
+	Error string `json:"error"`
+	// FailClosed is the organization's T-327 choice in force on this node
+	// (D-221): the daemon's verified guard posture says the enforced gated
+	// hooks fail closed while this file does not load, so they are BLOCKED
+	// now, not merely missing the developer's rules.
+	FailClosed bool `json:"fail_closed,omitempty"`
+}
+
+// userPolicyProblem reports the on-disk user policy's load failure, or
+// nil when it loads, is absent, or the config cannot be read (the
+// summary must never fail on this advisory field).
+func (s *Server) userPolicyProblem() *guardUserPolicyJSON {
+	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
+	if err != nil {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	st := guard.CheckUserPolicy(cfg.Guard, home, os.ReadFile)
+	if !st.Invalid() {
+		return nil
+	}
+	return &guardUserPolicyJSON{Path: st.Path, Line: st.Line, Error: st.Error, FailClosed: s.userPolicyFailClosed()}
+}
+
+// userPolicyFailClosed reads the organization's fail_closed choice off the
+// daemon's own verified guard posture: the same file every hook on this node
+// acts on, so the banner can never claim a block the hooks do not apply. An
+// absent or unverifiable posture reads as not fail-closed.
+func (s *Server) userPolicyFailClosed() bool {
+	resolved, err := config.ResolveGlobalPath(s.opts.ConfigPath)
+	if err != nil {
+		return false
+	}
+	ld := guardposture.Load(guardposture.PosturePath(resolved), guardposture.KeyPath(resolved))
+	return ld.State == guardposture.StateValid && ld.Posture.Enforced && ld.Posture.UserPolicyFailClosed
 }
 
 // guardCounts mirrors store.GuardEventSummary for the wire.
@@ -89,6 +153,9 @@ func (s *Server) handleGuardSummary(w http.ResponseWriter, r *http.Request) {
 			OK: report.OK, Checked: report.Checked,
 			DivergenceID: report.FirstDivergenceID, Detail: report.Detail,
 		},
+		UserPolicy:  s.userPolicyProblem(),
+		HookFailure: s.hookFailure(),
+		ToolGates:   s.toolGates(),
 	})
 }
 
@@ -96,10 +163,17 @@ func (s *Server) handleGuardSummary(w http.ResponseWriter, r *http.Request) {
 // node-local operator UI — the privacy gating applies to the ORG
 // WIRE (SelectUnpushedSince), not to the operator's own dashboard.
 type guardEventJSON struct {
-	ID            int64  `json:"id"`
-	Ts            string `json:"ts"`
-	SessionID     string `json:"session_id,omitempty"`
-	ActionID      *int64 `json:"action_id,omitempty"`
+	ID        int64  `json:"id"`
+	Ts        string `json:"ts"`
+	SessionID string `json:"session_id,omitempty"`
+	ActionID  *int64 `json:"action_id,omitempty"`
+	// APITurnID is the api_turns.id anchor a proxy-path guard verdict
+	// carries (guard_events has three producers with different anchors —
+	// see store.GuardEventRow). Added alongside the session-scoped
+	// /api/session/<id>/guard endpoint (sessionguard.go) so the Messages
+	// tab's merge can attempt exact placement; ActionID remains the only
+	// anchor that resolves against a rendered message row today.
+	APITurnID     *int64 `json:"api_turn_id,omitempty"`
 	Tool          string `json:"tool,omitempty"`
 	EventKind     string `json:"event_kind,omitempty"`
 	RuleID        string `json:"rule_id"`
@@ -112,6 +186,59 @@ type guardEventJSON struct {
 	Reason        string `json:"reason,omitempty"`
 	TargetExcerpt string `json:"target_excerpt,omitempty"`
 	TaintOrigin   string `json:"taint_origin,omitempty"`
+	// Overridable / OrgLocked are the ORG-GRANTED OVERRIDE posture of
+	// this row's rule under the org policy bundle currently on disk
+	// (Track B, guard_override.go). They describe the RULE now, not
+	// the historical event: "can this still be overridden", which is
+	// what the Security page's "Allow for this session" button needs.
+	// Both false on an un-enrolled node, where the page renders
+	// exactly as it did before the wave.
+	Overridable bool `json:"overridable,omitempty"`
+	OrgLocked   bool `json:"org_locked,omitempty"`
+	// MessageID / TurnIndex resolve ActionID to the upstream
+	// actions.message_id / turn_index (a LEFT JOIN — see
+	// store.LoadGuardEventsForSessionWithMessageAnchor). Populated only by
+	// /api/session/<id>/guard (sessionguard.go); the global
+	// /api/guard/events timeline leaves these empty/nil (it doesn't pay the
+	// join, and the Security page has no message row to anchor against).
+	// This is what the Messages tab's merge (@shared/lib/guardMessages)
+	// uses for exact placement instead of guessing from timestamps.
+	MessageID string `json:"message_id,omitempty"`
+	TurnIndex *int64 `json:"turn_index,omitempty"`
+}
+
+// toGuardEventJSON is the single row->wire mapper for guardEventJSON,
+// shared by /api/guard/events (this file) and /api/session/<id>/guard
+// (sessionguard.go) so the Security page's global timeline and the session
+// drawer's interleaved feed can never drift on shape.
+//
+// Ts is full precision (RFC3339Nano, matching how store.timestamp() stamps
+// the column at insert) rather than truncated to whole seconds
+// (time.RFC3339) — the Messages tab's merge
+// (@shared/lib/guardMessages::mergeGuardIntoTimeline) can fall back to
+// nearest-timestamp ordering among several guard events or messages that
+// land in the same second, and second-truncation would silently discard
+// the sub-second ordering it needs to place them correctly.
+func toGuardEventJSON(row *store.GuardEventRow) guardEventJSON {
+	return guardEventJSON{
+		ID: row.ID, Ts: row.TS.UTC().Format(time.RFC3339Nano),
+		SessionID: row.SessionID, ActionID: row.ActionID, APITurnID: row.APITurnID,
+		Tool: row.Tool, EventKind: row.EventKind,
+		RuleID: row.RuleID, Category: row.Category,
+		Severity: row.Severity, Decision: row.Decision,
+		DegradedFrom: row.DegradedFrom, Enforced: row.Enforced,
+		Source: row.Source, Reason: row.Reason,
+		TargetExcerpt: row.TargetExcerpt, TaintOrigin: row.TaintOrigin,
+	}
+}
+
+// toGuardEventJSONAnchored extends toGuardEventJSON with the
+// message_id/turn_index a GuardEventAnchoredRow resolved via its LEFT JOIN.
+func toGuardEventJSONAnchored(row *store.GuardEventAnchoredRow) guardEventJSON {
+	j := toGuardEventJSON(&row.GuardEventRow)
+	j.MessageID = row.MessageID
+	j.TurnIndex = row.TurnIndex
+	return j
 }
 
 // handleGuardEvents serves GET /api/guard/events — the verdict
@@ -151,6 +278,9 @@ func (s *Server) handleGuardEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("guard events: %v", err), http.StatusInternalServerError)
 		return
 	}
+	// One org-bundle read for the whole page (cached, TTL-bounded),
+	// never one per row.
+	orgOverride := s.orgOverrides(r.Context())
 	out := make([]guardEventJSON, 0, len(rows))
 	for i := range rows {
 		row := &rows[i]
@@ -162,16 +292,9 @@ func (s *Server) handleGuardEvents(w http.ResponseWriter, r *http.Request) {
 			(wantSession != "" && row.SessionID != wantSession) {
 			continue
 		}
-		out = append(out, guardEventJSON{
-			ID: row.ID, Ts: row.TS.UTC().Format(time.RFC3339),
-			SessionID: row.SessionID, ActionID: row.ActionID,
-			Tool: row.Tool, EventKind: row.EventKind,
-			RuleID: row.RuleID, Category: row.Category,
-			Severity: row.Severity, Decision: row.Decision,
-			DegradedFrom: row.DegradedFrom, Enforced: row.Enforced,
-			Source: row.Source, Reason: row.Reason,
-			TargetExcerpt: row.TargetExcerpt, TaintOrigin: row.TaintOrigin,
-		})
+		ev := toGuardEventJSON(row)
+		ev.Overridable, ev.OrgLocked = orgOverride.For(row.RuleID)
+		out = append(out, ev)
 		if len(out) >= limit {
 			break
 		}
@@ -366,13 +489,34 @@ func (s *Server) handleGuardBudget(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// The token windows on the same substrate (T-204): the node's token caps
+	// ([guard.budget] *_tokens) are what a developer under the token-usage
+	// cost display reads and edits, so the card needs their usage too.
+	tok, err := st.GuardBudgetTokens(r.Context(), "", now.Truncate(24*time.Hour), weekStart, monthStart)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	util5h, util7d, _, _ := st.LatestLimitWindows(r.Context())
 	writeJSON(w, map[string]any{
-		"session_usd":     cfg.Guard.Budget.SessionUSD,
-		"daily_usd":       cfg.Guard.Budget.DailyUSD,
-		"weekly_usd":      cfg.Guard.Budget.WeeklyUSD,
-		"monthly_usd":     cfg.Guard.Budget.MonthlyUSD,
-		"hard":            cfg.Guard.Budget.Hard,
+		"session_usd": cfg.Guard.Budget.SessionUSD,
+		"daily_usd":   cfg.Guard.Budget.DailyUSD,
+		"weekly_usd":  cfg.Guard.Budget.WeeklyUSD,
+		"monthly_usd": cfg.Guard.Budget.MonthlyUSD,
+		"hard":        cfg.Guard.Budget.Hard,
+		// The token-denominated caps, one for one with the dollar caps above.
+		"session_tokens":     cfg.Guard.Budget.SessionTokens,
+		"daily_tokens":       cfg.Guard.Budget.DailyTokens,
+		"weekly_tokens":      cfg.Guard.Budget.WeeklyTokens,
+		"monthly_tokens":     cfg.Guard.Budget.MonthlyTokens,
+		"usage_today_tokens": tok.DailyTokens,
+		"usage_week_tokens":  tok.WeeklyTokens,
+		"usage_month_tokens": tok.MonthlyTokens,
+		// The ORG's composed windows (budgetstatus.go): the numbers above are
+		// the node's own config, which on an org-budgeted node is usually
+		// all zeros - showing only those read as "no budget" (2026-10-02
+		// finding).
+		"org_budget":      budgetStatusPayload(budgetwarnfile.StatusPath(cfg.Observer.DBPath), nil),
 		"spend_today_usd": spend.DailyUSD,
 		"spend_week_usd":  spend.WeeklyUSD,
 		"spend_month_usd": spend.MonthlyUSD,
@@ -455,6 +599,22 @@ func (s *Server) handleGuardApprovals(w http.ResponseWriter, r *http.Request) {
 		if req.RuleID == "" {
 			http.Error(w, "rule_id required", http.StatusBadRequest)
 			return
+		}
+		// Org-lock gate (Track B): under an org policy bundle only a
+		// rule the organization marked `overridable` may be granted a
+		// local exception. Refused at CREATION with the reason, so the
+		// register never fills with grants that applyApprovals would
+		// silently ignore. No bundle = no gate.
+		//
+		// One exception (request-grants G3): when the organization issued a
+		// SOFTEN grant for the rule, the approval IS the developer's per-call
+		// confirmation the grant asks for, so it is allowed; the guard only
+		// lets it act while that grant also covers the call.
+		if _, orgLocked := s.orgOverrideFor(r.Context(), req.RuleID); orgLocked {
+			if _, softened := orgclient.SoftenGrantForRule(r.Context(), store.New(s.opts.DB), req.RuleID, s.now()); !softened {
+				http.Error(w, "locked by org policy: "+req.RuleID, http.StatusForbidden)
+				return
+			}
 		}
 		now := s.now()
 		row := store.GuardApprovalRow{

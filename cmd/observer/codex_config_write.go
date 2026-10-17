@@ -70,7 +70,7 @@ func writeCodexConfigBaseURL(configPath, targetURL, stamp string) (string, error
 	}
 
 	backupPath := configPath + ".bak." + stamp
-	if err := os.WriteFile(backupPath, existing, 0o600); err != nil {
+	if err := os.WriteFile(backupPath, existing, 0o600); err != nil { //nolint:gosec // G703: the codex config path resolved from the operator's own CODEX_HOME or home
 		return "", fmt.Errorf("backup %s: %w", backupPath, err)
 	}
 
@@ -167,6 +167,11 @@ func runWriteCodexConfig(stderr interface{ Write([]byte) (int, error) }, misconf
 	// safe separator for the backup stamp.
 	stamp = strings.ReplaceAll(stamp, ":", "-")
 	for _, m := range misconfigs {
+		if !m.fixable() {
+			// A wrong [model_providers.<id>].base_url: appending a top-level
+			// openai_base_url would not change the selected provider's route.
+			continue
+		}
 		backup, err := writeCodexConfigBaseURL(m.ConfigPath, m.WantURL, stamp)
 		if err != nil {
 			fmt.Fprintf(stderr,

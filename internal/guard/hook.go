@@ -43,8 +43,23 @@ func (g *Guard) EvaluateHook(ev policy.Event) (ActionVerdict, bool) {
 		ev.Now = time.Now().UTC()
 	}
 	ev.Taint = g.taint.Snapshot(ev.SessionID, 0, ev.Now)
-	verdict, guardErr := g.Evaluate(ev)
-	verdict, approved := g.applyApprovals(verdict, &ev)
+	// One snapshot for the evaluate+categorize pair (NIT contract).
+	es := g.set.Load()
+	verdict, guardErr := g.evaluateWith(es, ev)
+	verdict, appr := g.applyApprovals(verdict, &ev, OrgGrantLaneTool)
+	// An exhausted managed budget stops this call too (T-519), on a channel
+	// that can block: a post-hoc event cannot be stopped, and recording the
+	// same breach on every one of them is what the once-per-session watcher
+	// flag already does. Stricter wins: a policy deny keeps its own rule.
+	// Budget rows never take an approval or an org guard grant (a budget
+	// increase is its own grant, folded into the cap), so nothing below
+	// may soften it.
+	budgetStop := false
+	if ev.Caps.CanBlock && verdict.Decision < policy.DecisionDeny {
+		if bv, ok := g.hookBudgetVerdict(ev); ok {
+			verdict, appr, guardErr, budgetStop = bv, approvalOutcome{}, nil, true
+		}
+	}
 	av := ActionVerdict{
 		Input: ActionInput{
 			SessionID:   ev.SessionID,
@@ -55,16 +70,23 @@ func (g *Guard) EvaluateHook(ev policy.Event) (ActionVerdict, bool) {
 			Timestamp:   ev.Now,
 		},
 		Kind:        ev.Kind,
-		Category:    g.CategoryFor(verdict.RuleID),
+		Category:    g.categoryWith(es, verdict.RuleID),
 		Verdict:     verdict,
 		TaintOrigin: taintOriginFor(verdict, ev.Taint),
 		GuardError:  guardErr != nil,
 	}
-	if approved {
-		// The grant is an audited exception: the row records what the
-		// verdict WAS downgraded from (§14.4 exception register).
-		av.DegradedFrom = "approved"
+	if budgetStop {
+		// The budget category is the rule's own, whatever the project
+		// layer's category table says; a budget stop is never "org locked"
+		// (its remedy is a budget request, not an access request).
+		av.Category = string(policy.CategoryBudget)
+	} else {
+		g.stampOrgOverride(es, &av)
 	}
+	// An exception is audited: the row records what the verdict WAS
+	// downgraded from (§14.4 exception register) and, for an org grant,
+	// which grant.
+	appr.stamp(&av)
 	return av, verdict.Decision >= policy.DecisionFlag || guardErr != nil
 }
 
@@ -107,14 +129,14 @@ type Emission struct {
 //
 // The verdict's Decision already encodes mode + per-rule enforcement
 // (the engine resolved it); this function only reconciles it with the
-// channel.
+// channel — plus the ONE org-granted softening below.
 func ResolveEmission(v policy.Verdict, caps policy.Capabilities) Emission {
 	reason := v.Reason
 	if v.Advice != "" {
 		reason += " " + v.Advice
 	}
 	em := Emission{Permission: "allow", Reason: reason}
-	switch v.Decision {
+	switch emissionDecision(v) {
 	case policy.DecisionDeny:
 		if caps.CanBlock {
 			em.Permission = "deny"
@@ -138,4 +160,22 @@ func ResolveEmission(v policy.Verdict, caps policy.Capabilities) Emission {
 		// allow stands.
 	}
 	return em
+}
+
+// emissionDecision is the org-granted-override softening applied
+// BEFORE the capability table above (Track B, override.go): a deny on
+// a rule the organization marked `overridable` is emitted as an ASK,
+// so a channel that can prompt asks the human instead of hard-blocking
+// them. Everything downstream is then the EXISTING, already-correct
+// ask row of the §6.2 table — on a no-ask/can-block channel (the proxy
+// lane, a hook without ask) it degrades right back to deny with
+// DegradedFrom="ask", which is what reporting reads.
+//
+// A hard (non-overridable) deny, and every verdict on a node with no
+// org bundle, returns unchanged.
+func emissionDecision(v policy.Verdict) policy.Decision {
+	if v.Decision == policy.DecisionDeny && v.Overridable {
+		return policy.DecisionAsk
+	}
+	return v.Decision
 }

@@ -1,0 +1,13 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1730505600,
+      "end_time": 1730592000,
+      "results": []
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

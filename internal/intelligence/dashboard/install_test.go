@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -26,7 +28,7 @@ import (
 func newPreflightServer(t *testing.T, seam func(string) (ToolPreflight, bool)) *Server {
 	t.Helper()
 	tdir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
+	database, err := openTestDB(context.Background(), db.Options{Path: filepath.Join(tdir, "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +135,7 @@ func newInstallServer(t *testing.T, lm LaunchManager, allowInstall func() bool, 
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "observer.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -203,6 +205,53 @@ func TestTerminalInstallHappyPath(t *testing.T) {
 	}
 }
 
+// TestTerminalInstallKicksWatchRootsRefresh pins that a successful guided
+// install invokes Options.RefreshWatchRoots (the Muse/Prime-after-install
+// capture seam). Fail-open: a nil seam must not panic — covered by the
+// happy-path test above which leaves the seam unset.
+func TestTerminalInstallKicksWatchRootsRefresh(t *testing.T) {
+	lm := &fakeLaunchManager{}
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "observer.db")
+	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[observer]\ndb_path = \""+filepath.ToSlash(dbPath)+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rc, _ := newReadyRemoteController(t)
+	kicked := make(chan struct{}, 1)
+	s, err := New(Options{
+		DB:               database,
+		ConfigPath:       cfgPath,
+		Remote:           rc,
+		LaunchManager:    lm,
+		AllowToolInstall: func() bool { return true },
+		ToolInstallHint:  codexHint,
+		RefreshWatchRoots: func() {
+			select {
+			case kicked <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := postInstall(t, s.Handler(), "codex")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-kicked:
+	default:
+		t.Fatal("RefreshWatchRoots was not kicked after successful install")
+	}
+}
+
 // TestTerminalInstallDisabledGate pins the kill-switch: allow_install off ⇒ 403
 // whose message names the exact config key the operator must flip.
 func TestTerminalInstallDisabledGate(t *testing.T) {
@@ -217,6 +266,62 @@ func TestTerminalInstallDisabledGate(t *testing.T) {
 	}
 	if lm.lastSetupSpec.Argv != nil {
 		t.Errorf("no PTY must spawn when disabled: %v", lm.lastSetupSpec.Argv)
+	}
+}
+
+// TestTerminalInstallMissingPrereqRefusedBeforeSpawn pins the prerequisite
+// gate (2026-10-03, kiro-cli on demo node 1: "Missing required dependencies:
+// unzip"): when the ToolInstallBlocked seam names a remedy the route answers
+// 409 with that remedy verbatim and spawns NOTHING; an empty answer lets the
+// install run.
+func TestTerminalInstallMissingPrereqRefusedBeforeSpawn(t *testing.T) {
+	const remedy = "The installer needs unzip, which is not installed on this machine. Install it with: sudo apt-get install -y unzip (Debian/Ubuntu), then press Re-check."
+	build := func(lm *fakeLaunchManager, blocked func(string) string) http.Handler {
+		dir := t.TempDir()
+		dbPath := filepath.Join(dir, "observer.db")
+		database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
+		if err != nil {
+			t.Fatalf("db.Open: %v", err)
+		}
+		t.Cleanup(func() { _ = database.Close() })
+		cfgPath := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(cfgPath, []byte("[observer]\ndb_path = \""+filepath.ToSlash(dbPath)+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rc, _ := newReadyRemoteController(t)
+		s, err := New(Options{
+			DB:                 database,
+			ConfigPath:         cfgPath,
+			Remote:             rc,
+			LaunchManager:      lm,
+			AllowToolInstall:   func() bool { return true },
+			ToolInstallHint:    codexHint,
+			ToolInstallBlocked: blocked,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Handler()
+	}
+
+	lm := &fakeLaunchManager{}
+	rec := postInstall(t, build(lm, func(string) string { return remedy }), "codex")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("blocked install = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "sudo apt-get install -y unzip") {
+		t.Errorf("409 must carry the remedy verbatim: %s", rec.Body.String())
+	}
+	if lm.lastSetupSpec.Argv != nil {
+		t.Errorf("no PTY may spawn when a prerequisite is missing: %v", lm.lastSetupSpec.Argv)
+	}
+
+	lm2 := &fakeLaunchManager{}
+	if rec := postInstall(t, build(lm2, func(string) string { return "" }), "codex"); rec.Code != http.StatusOK {
+		t.Fatalf("unblocked install = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if !reflect.DeepEqual(lm2.lastSetupSpec.Argv, codexArgv) {
+		t.Errorf("unblocked install spawned %v, want %v", lm2.lastSetupSpec.Argv, codexArgv)
 	}
 }
 

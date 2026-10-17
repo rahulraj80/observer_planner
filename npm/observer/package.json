@@ -1,23 +1,29 @@
 {
   "name": "@superbased/observer",
-  "version": "1.27.0",
-  "description": "Claude Code cost tracking, Cursor token usage, Codex spend — AI coding agent observability across 29 adapters, proxy-accurate token counts and cost.",
+  "version": "1.36.0",
+  "description": "Local-first AI coding agent observability: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account, no telemetry.",
   "keywords": [
     "ai",
     "observability",
-    "anthropic",
-    "openai",
-    "claude-code",
-    "codex",
-    "cursor",
-    "mcp",
-    "tokens",
-    "cost",
-    "cost-tracking",
-    "token-usage",
     "ai-coding-agent",
     "llm-observability",
-    "spend"
+    "claude-code",
+    "claude-code-usage",
+    "codex",
+    "cursor",
+    "copilot",
+    "gemini-cli",
+    "anthropic",
+    "openai",
+    "mcp",
+    "tokens",
+    "token-usage",
+    "cost",
+    "cost-tracking",
+    "prompt-caching",
+    "spend",
+    "local-first",
+    "no-telemetry"
   ],
   "homepage": "https://superbased.app/",
   "repository": {
@@ -42,13 +48,25 @@
     "LICENSE"
   ],
   "optionalDependencies": {
-    "@superbased/observer-linux-x64": "1.27.0",
-    "@superbased/observer-linux-arm64": "1.27.0",
-    "@superbased/observer-darwin-x64": "1.27.0",
-    "@superbased/observer-darwin-arm64": "1.27.0",
-    "@superbased/observer-win32-x64": "1.27.0"
+    "@superbased/observer-linux-x64": "1.36.0",
+    "@superbased/observer-linux-arm64": "1.36.0",
+    "@superbased/observer-darwin-x64": "1.36.0",
+    "@superbased/observer-darwin-arm64": "1.36.0",
+    "@superbased/observer-win32-x64": "1.36.0"
   },
   "scripts": {
-    "test": "node bin/observer.js --version"
+    "test": "node bin/observer.js --version",
+    "postinstall": "node bin/postinstall.js"
+  },
+  "superbased": {
+    "announcement": {
+      "id": "2026-08-26-disk-maintenance-fix",
+      "severity": "notice",
+      "title": "v1.32.0 fixes unbounded database maintenance that could fill the disk",
+      "body": "Large databases could trigger automatic full-database VACUUM and integrity scans, silently consuming tens of GB of disk plus sustained CPU. v1.32.0 removes the unbounded paths, bounds SQLite memory and temp use, and adds a watchdog. Upgrade any machines on older versions.",
+      "url": "https://github.com/superbasedapp/observer/releases",
+      "expires_at": "2026-11-01T00:00:00Z",
+      "source": "release"
+    }
   }
 }

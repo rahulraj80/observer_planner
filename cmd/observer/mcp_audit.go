@@ -30,7 +30,7 @@ func newMCPAuditCmd() *cobra.Command {
 		Short: "Read and prune the mcp_audit table (V7-12 retrieval tools' call log)",
 		Long: "Inspect the V7-14 audit log. Every V7-12 MCP call (get_file,\n" +
 			"get_symbols, get_relations, retrieve_stashed) writes one row when\n" +
-			"the audit writer is enabled — operators consult this surface to\n" +
+			"the audit writer is enabled - operators consult this surface to\n" +
 			"answer 'why was X denied?', 'which file is the agent re-reading?',\n" +
 			"or 'how many sessions hit the cap last hour?'.",
 	}
@@ -84,7 +84,7 @@ func newMCPAuditListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml")
 	cmd.Flags().StringVar(&sessionID, "session", "", "Restrict to one session_id")
 	cmd.Flags().StringVar(&tool, "tool", "", "Restrict to one tool_name (e.g. get_file)")
-	cmd.Flags().StringVar(&sinceStr, "since", "24h", "Time window (e.g. 30m, 24h, 7d — empty = all time)")
+	cmd.Flags().StringVar(&sinceStr, "since", "24h", "Time window (e.g. 30m, 24h, 7d - empty = all time)")
 	cmd.Flags().IntVar(&limit, "limit", 50, "Cap returned rows")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON instead of table")
 	return cmd
@@ -224,7 +224,7 @@ func newMCPAuditPurgeCmd() *cobra.Command {
 				return fmt.Errorf("--older-than must be > 0")
 			}
 			if !yes {
-				return fmt.Errorf("destructive operation — re-run with --yes to confirm")
+				return fmt.Errorf("destructive operation - re-run with --yes to confirm")
 			}
 			_, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
 			if err != nil {

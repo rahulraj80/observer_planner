@@ -12,10 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/cachetrack"
 	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
+	"github.com/marmutapp/superbased-observer/internal/contentcap"
+	"github.com/marmutapp/superbased-observer/internal/dataauthority"
 	"github.com/marmutapp/superbased-observer/internal/failure"
 	"github.com/marmutapp/superbased-observer/internal/freshness"
 	"github.com/marmutapp/superbased-observer/internal/guard"
@@ -23,6 +26,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/identity"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/pidbridge"
+	"github.com/marmutapp/superbased-observer/internal/sessionend"
 )
 
 // Store is the storage layer over an initialized SQLite database. All methods
@@ -41,7 +45,78 @@ type Store struct {
 	stamper     *identity.Stamper
 	cacheEngine *cachetrack.Engine
 	guard       *guard.Guard
-	obsOrg      ObsOrgProviders
+	// pushPricer is the push-time token_usage pricer (orgpush_pricing.go,
+	// G1-COST(b)). nil = ship the adapter-stored cost untouched.
+	pushPricer OrgPushPricer
+	// tasksEnabled gates the taskflow ingest seam (internal/store/taskflow.go,
+	// [tasks].enabled). Set via SetTasksEnabled at daemon composition; the
+	// zero value (false) is the pre-feature baseline — a Store built by a
+	// struct literal decodes nothing.
+	tasksEnabled bool
+	// tasksMatchMode / tasksConcurrentAttribution / tasksIncludeSidechains
+	// mirror [tasks].match_mode / .concurrent_attribution /
+	// .include_sidechains (FIX-4). Set via SetTasksOptions at daemon
+	// composition alongside SetTasksEnabled; the zero values ("", "",
+	// false) are each their documented default (exact / shared /
+	// false), so a Store built by a struct literal behaves identically
+	// to a fully-defaulted [tasks] section.
+	tasksMatchMode             string
+	tasksConcurrentAttribution string
+	tasksIncludeSidechains     bool
+	obsOrg                     ObsOrgProviders
+	advisorOrg                 AdvisorOrgProvider
+	// snap is the org-push snapshot change-detection gate (Track R2 —
+	// internal/store/orgsnapgate.go). In-memory and per-daemon; a nil gate
+	// degrades to "recompute every family every tick", which is the
+	// pre-R2 behaviour, so a Store built by a struct literal still works.
+	snap *snapGate
+	// contentCapture is the enterprise adapter-side message-content
+	// producer's posture (internal/store/messagecontent.go). Its zero value
+	// (nil ShipsRawContent) disables the producer, so a Store built by a
+	// struct literal — and every non-enterprise node — writes no
+	// otel_content rows and behaves exactly as before the producer existed.
+	contentCapture ContentCapture
+	// rootCommitResolver is the lazy root-commit exec used by Ingest
+	// (Project Identity Resolver v2, W1 — internal/store/projectidentity.go).
+	// nil (the New() default) disables it entirely, so internal/store's
+	// own test suite never shells out to git. See SetRootCommitResolver.
+	rootCommitResolver RootCommitResolverFunc
+	// budgetPosture is the org BUDGET posture provider seam
+	// (internal/store/budgetposture.go, wave W3b). nil (the New() default)
+	// means "no posture reported", which is byte-identical to a build without
+	// the budget rail. See SetBudgetPostureProvider.
+	budgetPosture BudgetPostureProvider
+	// mcpInventory is the shadow-MCP discovery inventory seam
+	// (internal/store/mcpinventory.go, Agent Access P11 (c)). A zero value
+	// composes no MCPInventoryRow. See SetMCPInventoryProviders.
+	mcpInventory MCPInventoryProviders
+	// agentConfigStateGate reports whether this node reports the org AI tool
+	// settings state (a MANAGED enrolment holding a live grant;
+	// internal/store/agentconfigorgstate.go). nil = never report.
+	agentConfigStateGate func(ctx context.Context) bool
+	// agentConfigDigest is the last AgentConfigState digest the org server
+	// ACCEPTED from this process; agentConfigDigestPending is the one the last
+	// compose carried, promoted by CommitPushedSnapshots (a change forces a
+	// push until it is delivered; agentconfigorg.go, review C156-39).
+	// componentPosture is the component posture provider seam
+	// (componentposture.go, T-682); nil reports nothing.
+	componentPosture ComponentPostureProvider
+	// componentPostureDigest is the last component posture the org server
+	// accepted from this process; componentPostureDigestPending is the one
+	// the last compose carried (promoted by CommitPushedSnapshots);
+	// componentPostureCommittedAt is when it was promoted.
+	componentPostureMu            sync.Mutex
+	componentPostureDigest        string
+	componentPostureDigestPending string
+	componentPostureCommittedAt   time.Time
+	agentConfigDigestMu           sync.Mutex
+	agentConfigDigest             string
+	agentConfigDigestPending      string
+	// agentConfigInventory is the managed node's latest AI tool
+	// configuration inventory and its delivery digests (D-112, T-427;
+	// internal/store/agentconfiginventory.go). In memory only: it is rebuilt
+	// from the files, never a table.
+	agentConfigInventory agentConfigInventoryHolder
 }
 
 // SetObsOrgProviders wires the org-tier observability provider seam
@@ -55,20 +130,7 @@ type Store struct {
 func (s *Store) SetObsOrgProviders(p ObsOrgProviders) { s.obsOrg = p }
 
 // New wraps an already-opened *sql.DB (use internal/db.Open).
-// If dbPath is provided, it's stored for file-adjacent operations
-// (e.g., reading the briefing-CTA ledger for virtuous-cycle org push).
-func New(db *sql.DB, dbPath ...string) *Store {
-	st := &Store{db: db}
-	if len(dbPath) > 0 {
-		st.dbPath = dbPath[0]
-	}
-	return st
-}
-
-// SetDBPath sets the database file path for file-adjacent operations
-// (e.g., reading the briefing-CTA ledger for virtuous-cycle org push).
-// Called by `observer start` after creating the Store.
-func (s *Store) SetDBPath(path string) { s.dbPath = path }
+func New(db *sql.DB) *Store { return &Store{db: db, snap: newSnapGate()} }
 
 // SetCacheEngine wires the same per-process cachetrack.Engine
 // instance the proxy uses through to the watcher-side Ingest
@@ -170,8 +232,19 @@ func normalizeProjectRoot(rootPath string) string {
 }
 
 // UpsertProject inserts or returns the id of the projects row for rootPath.
-// remote may be empty.
+// remote may be empty. It is a thin wrapper over UpsertProjectWithIdentity
+// with a zero ProjectIdentity, kept so the ~dozens of existing call sites
+// that only ever had a root path and a remote need no change (CLAUDE.md
+// module-boundary rule #6, additive not invasive).
 func (s *Store) UpsertProject(ctx context.Context, rootPath, remote string) (int64, error) {
+	return s.upsertProjectBase(ctx, rootPath, remote)
+}
+
+// upsertProjectBase is UpsertProject's original body, factored out so
+// UpsertProjectWithIdentity (internal/store/projectidentity.go) can call it
+// once and layer the migration-102 identity columns on top without a
+// second INSERT/SELECT round-trip's worth of duplicated SQL.
+func (s *Store) upsertProjectBase(ctx context.Context, rootPath, remote string) (int64, error) {
 	if rootPath == "" {
 		return 0, errors.New("store.UpsertProject: rootPath is required")
 	}
@@ -216,22 +289,107 @@ func (s *Store) UpsertSession(ctx context.Context, sess models.Session) error {
 		return errors.New("store.UpsertSession: ID, ProjectID, Tool are required")
 	}
 	s.stamper.Stamp(sessionOrgRow{&sess})
-	_, err := s.db.ExecContext(
+	// Data-authority stamp (migration 096, CI-P1 Lane B). FD2: the enrolment
+	// read and the session UPSERT run in ONE immediate transaction (the DSN's
+	// _txlock=immediate makes BeginTx take the write lock at BEGIN), so a
+	// concurrent WriteEnrolment cannot commit between the resolver read and the
+	// write — closing the "capture lands personal AFTER enrolment" race. The
+	// stamp is resolved LIVE per write (fail-closed: an undeterminable resolve
+	// binds NULL == UNKNOWN, never personal). See internal/store/dataauthority.go.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store.UpsertSession: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	authStamp, authVerStamp := s.resolveAuthorityStampFrom(ctx, tx)
+
+	// upsertSessionMidTxHook fires here, between the in-tx enrolment read and
+	// the session write, for the FD2 barrier regression test only (nil in
+	// production). It proves the read+write are atomic: a concurrent
+	// WriteEnrolment launched here cannot commit while this tx holds the
+	// write lock.
+	if upsertSessionMidTxHook != nil {
+		upsertSessionMidTxHook()
+	}
+
+	workspaceHash := sha256Hex(sess.Workspace)
+
+	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, project_id, tool, model, git_branch, started_at, ended_at, total_actions, metadata, org_id, user_email)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO sessions (id, project_id, tool, model, git_branch, started_at, ended_at, total_actions, metadata, org_id, user_email, authority, authority_classifier_version, workspace, workspace_hash, is_worktree)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   project_id = excluded.project_id,
-		   model = COALESCE(NULLIF(excluded.model, ''), sessions.model),
+		   -- A router placeholder ("default" / "auto": the model id an
+		   -- auto-routing client reports before the answering model is
+		   -- known) never replaces a concrete model already recorded -
+		   -- e.g. a Cursor Auto session resolved to cursor-grok-4.5-high
+		   -- from its store.db must not flip back to "default" when a
+		   -- later hook batch lands. Empty never clobbers either.
+		   model = CASE
+		     WHEN NULLIF(excluded.model, '') IS NULL THEN sessions.model
+		     WHEN lower(excluded.model) IN ('default', 'auto')
+		      AND COALESCE(sessions.model, '') <> ''
+		      AND lower(sessions.model) NOT IN ('default', 'auto') THEN sessions.model
+		     ELSE excluded.model
+		   END,
 		   ended_at = COALESCE(excluded.ended_at, sessions.ended_at),
 		   git_branch = COALESCE(NULLIF(excluded.git_branch, ''), sessions.git_branch),
 		   total_actions = MAX(sessions.total_actions, excluded.total_actions),
+		   -- Project Identity Resolver v2 (migration 102, W1). workspace/
+		   -- workspace_hash follow git_branch's exact backfill-on-touch
+		   -- idiom: a non-empty new value wins, an empty one never
+		   -- clobbers. is_worktree is a plain bool derived deterministically
+		   -- from the session's cwd (stable for the session's lifetime), so
+		   -- once true it is never flipped back to false by a later write
+		   -- that simply didn't carry the signal.
+		   workspace = COALESCE(NULLIF(excluded.workspace, ''), sessions.workspace),
+		   workspace_hash = COALESCE(NULLIF(excluded.workspace_hash, ''), sessions.workspace_hash),
+		   is_worktree = CASE WHEN excluded.is_worktree = 1 THEN 1 ELSE sessions.is_worktree END,
 		   -- Org attribution refreshes forward: a session first inserted
 		   -- pre-enrolment upgrades once the agent enrols mid-stream
 		   -- (M2). NULLIF keeps a no-op (NULL) stamp from clobbering an
 		   -- existing value — so solo-local stays NULL, byte-identical.
 		   org_id = COALESCE(NULLIF(excluded.org_id, ''), sessions.org_id),
-		   user_email = COALESCE(NULLIF(excluded.user_email, ''), sessions.user_email)`,
+		   user_email = COALESCE(NULLIF(excluded.user_email, ''), sessions.user_email),
+		   -- Data-authority sticky/upgrade rule (dataauthority.Combine)
+		   -- applied ATOMICALLY here so two concurrent ingests of the same
+		   -- session can never read-modify-write a corrupt stamp.
+		   -- excluded.authority is THIS write's at-capture classification:
+		   -- 'org' iff currently enrolled, 'personal' iff definitively
+		   -- unenrolled, NULL iff the live resolver could not determine
+		   -- enrolment. Ordered rule (first match wins):
+		   --   1. prior 'org'         -> 'org'  (sticky; even if now
+		   --                                     unenrolled or the resolver
+		   --                                     errored on this write)
+		   --   2. currently enrolled  -> 'org'  (excluded.authority='org';
+		   --                                     upgrades a prior personal or
+		   --                                     unknown session)
+		   --   3. else                -> keep prior. 'personal' is written
+		   --                                     ONLY on first capture (the
+		   --                                     INSERT above); a later write
+		   --                                     while unenrolled leaves
+		   --                                     personal as personal and
+		   --                                     UNKNOWN (NULL) as UNKNOWN —
+		   --                                     unknown never upgrades to
+		   --                                     personal.
+		   authority = CASE
+		     WHEN sessions.authority = 'org' OR excluded.authority = 'org' THEN 'org'
+		     ELSE sessions.authority
+		   END,
+		   -- Combine always carries the CURRENT contract Version. FD5: a
+		   -- personal session rewritten while still unenrolled upgrades its
+		   -- stored version to the current contract version too (dataauthority
+		   -- .Combine returns the current Version for personal-then-unenrolled,
+		   -- not the stale one). The ELSE preserves the prior version for the
+		   -- undeterminable-resolver case and for a SQL NULL (unknown), which is
+		   -- a distinct fail-closed legacy/indeterminate state, not personal.
+		   authority_classifier_version = CASE
+		     WHEN sessions.authority = 'org' OR excluded.authority = 'org' THEN ?
+		     WHEN sessions.authority = 'personal' AND excluded.authority = 'personal' THEN ?
+		     ELSE sessions.authority_classifier_version
+		   END`,
 		// project_id is always overwritten on conflict because the
 		// caller's incoming value reflects the latest adapter parse
 		// (which may correct an earlier mis-attribution). The
@@ -258,12 +416,27 @@ func (s *Store) UpsertSession(ctx context.Context, sess models.Session) error {
 		sess.Metadata,
 		nullableString(sess.OrgID),
 		nullableString(sess.UserEmail),
+		authStamp,    // INSERT: authority (at-capture stamp; nil == UNKNOWN)
+		authVerStamp, // INSERT: authority_classifier_version (nil == UNKNOWN)
+		sess.Workspace,
+		workspaceHash,
+		boolToInt(sess.IsWorktree),
+		dataauthority.Version, // ON CONFLICT: version carried on an 'org' result
+		dataauthority.Version, // ON CONFLICT: version carried on a personal upgrade (FD5)
 	)
 	if err != nil {
 		return fmt.Errorf("store.UpsertSession: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store.UpsertSession: %w", err)
+	}
 	return nil
 }
+
+// upsertSessionMidTxHook, when non-nil, is invoked inside UpsertSession's
+// transaction after the enrolment read and before the session write. It is a
+// test seam for the FD2 atomicity regression test and is nil in production.
+var upsertSessionMidTxHook func()
 
 // SetSessionLineage persists codex fork/subagent lineage markers onto
 // an existing session row (migration 069). It is the SINGLE owner of
@@ -316,6 +489,12 @@ func (s *Store) SetSessionLineage(ctx context.Context, lin models.SessionLineage
 // persisted. Used by Ingest to stop a terminal lifecycle marker
 // (session_end) from bootstrapping a phantom session that has no other
 // record (the empty Windows-CC session case).
+// SessionExists reports whether a sessions row with id exists. The lifecycle
+// spool drainer asks it before landing a held hook record (T-320).
+func (s *Store) SessionExists(ctx context.Context, id string) (bool, error) {
+	return s.sessionExists(ctx, id)
+}
+
 func (s *Store) sessionExists(ctx context.Context, id string) (bool, error) {
 	var present int
 	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM sessions WHERE id = ? LIMIT 1`, id).Scan(&present)
@@ -350,12 +529,50 @@ func (s *Store) SessionHasSourceFileRows(ctx context.Context, sessionID, sourceF
 	return true, nil
 }
 
+// SessionHasActionsOutside reports whether sessionID has at least one
+// action row whose source_file is NOT excludeSourceFile and whose
+// action_type is none of ignoreTypes. It is the mirror of
+// SessionHasSourceFileRows: a replay path that writes under one source
+// identity (Cursor's hooks-log replay, `cursor:hook`) asks whether a
+// DIFFERENT source already captured the conversation's activity, so it
+// does not add a second, differently-keyed copy. ignoreTypes names row
+// kinds the other source writes but the replay never does (e.g. the
+// store.db system_prompt / prompt_context rows), which must not count.
+func (s *Store) SessionHasActionsOutside(ctx context.Context, sessionID, excludeSourceFile string, ignoreTypes ...string) (bool, error) {
+	q := `SELECT 1 FROM actions WHERE session_id = ? AND source_file <> ?`
+	args := []any{sessionID, excludeSourceFile}
+	if len(ignoreTypes) > 0 {
+		q += ` AND action_type NOT IN (?` + strings.Repeat(`, ?`, len(ignoreTypes)-1) + `)`
+		for _, t := range ignoreTypes {
+			args = append(args, t)
+		}
+	}
+	q += ` LIMIT 1`
+	var present int
+	err := s.db.QueryRowContext(ctx, q, args...).Scan(&present)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store.SessionHasActionsOutside: %w", err)
+	}
+	return true, nil
+}
+
 // LoadActionTargets returns the distinct Target column values already
 // persisted for sourceFile, split by ActionType into user_prompt
-// targets and task_complete targets. Used by the antigravity
+// targets and assistant targets. Used by the antigravity
 // adapter's plaintext-transcript augmentation path to dedup
 // synthesized entries against rows from prior parse cycles — see
 // antigravity.TargetCoverageReader for the bug it closes.
+//
+// The assistant bucket matches BOTH 'assistant_message' and
+// 'task_complete'. The WP-T6/B2 sweep re-typed the assistant-text emit
+// sites to assistant_message while genuinely-terminal rows keep
+// task_complete, and a database mid-upgrade (rows ingested before the
+// sweep, or before migration 078 ran) carries both spellings for the
+// same text. Matching one type only would return an empty coverage set
+// and reopen the duplicate-assistant-row bug this query closes.
 //
 // Empty Target rows are skipped on the SQL side (DISTINCT collapses
 // them but they'd be useless for text dedup anyway). Returning empty
@@ -366,7 +583,7 @@ func (s *Store) LoadActionTargets(ctx context.Context, sourceFile string) (userT
 		`SELECT DISTINCT action_type, target FROM actions
 		  WHERE source_file = ?
 		    AND target <> ''
-		    AND action_type IN ('user_prompt', 'task_complete')`,
+		    AND action_type IN ('user_prompt', 'task_complete', 'assistant_message')`,
 		sourceFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("store.LoadActionTargets: %w", err)
@@ -380,7 +597,7 @@ func (s *Store) LoadActionTargets(ctx context.Context, sourceFile string) (userT
 		switch actionType {
 		case "user_prompt":
 			userTargets = append(userTargets, target)
-		case "task_complete":
+		case "task_complete", "assistant_message":
 			asstTargets = append(asstTargets, target)
 		}
 	}
@@ -463,6 +680,31 @@ func (s *Store) SetCursor(ctx context.Context, sourceFile string, offset int64) 
 	return nil
 }
 
+// RewindCursor stores offset for sourceFile AS-IS, even when it is lower
+// than the persisted cursor. It exists for a file whose writer rotates
+// it in place (adapter.FileCursorSemantics.RewindsOnTruncate): after a
+// rotation the stale cursor points past the end of a different, new
+// file, and SetCursor's MAX rule would pin it there forever. Callers
+// other than the watcher's rotation branch must use SetCursor.
+func (s *Store) RewindCursor(ctx context.Context, sourceFile string, offset int64) error {
+	if sourceFile == "" {
+		return errors.New("store.RewindCursor: sourceFile is required")
+	}
+	now := timestamp(time.Now().UTC())
+	if _, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO parse_cursors (source_file, byte_offset, last_parsed)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(source_file) DO UPDATE SET
+		   byte_offset = excluded.byte_offset,
+		   last_parsed = excluded.last_parsed`,
+		sourceFile, offset, now,
+	); err != nil {
+		return fmt.Errorf("store.RewindCursor: %w", err)
+	}
+	return nil
+}
+
 // DeleteCursor removes the parse_cursors row for sourceFile. Safe to
 // call on a missing row (no-op). Used by the hook-spool drainer to drop
 // the cursor when it deletes a fully-drained, aged-out spool file, so
@@ -511,8 +753,9 @@ const insertActionSQL = `INSERT INTO actions (
 	message_id,
 	metadata,
 	org_id, user_email,
-	content_bytes
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	content_bytes,
+	user_attachments
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(source_file, source_event_id) DO UPDATE SET
 	duration_ms = CASE
 		WHEN excluded.duration_ms > 0 AND (actions.duration_ms IS NULL OR actions.duration_ms = 0)
@@ -590,6 +833,61 @@ ON CONFLICT(source_file, source_event_id) DO UPDATE SET
 		THEN excluded.content_bytes
 		ELSE actions.content_bytes
 	END,
+	-- user_attachments (Issue 1, migration 126): a re-emit can carry the
+	-- structured attachment metadata where the original insert had none
+	-- (e.g. a hook emit lacking the user content, later refreshed by the
+	-- JSONL adapter which does see the image/document blocks). Fill only
+	-- when the existing value is NULL; never regress a captured value back
+	-- to NULL. Metadata (kinds/counts/media-types) only — never content.
+	user_attachments = CASE
+		WHEN excluded.user_attachments IS NOT NULL
+		 AND actions.user_attachments IS NULL
+		THEN excluded.user_attachments
+		ELSE actions.user_attachments
+	END,
+	-- success self-heal, ASYMMETRIC 1 → 0 ONLY (outcome seam).
+	-- A tool_use and its tool_result are separate records: every call
+	-- inserts optimistically successful and is corrected when the
+	-- result is seen. When a parse window ends between the two, the
+	-- row can be left permanently wrong; a force rescan (offset 0)
+	-- pairs them in ONE window and re-emits the CORRECTED event, but
+	-- with success frozen on conflict that repair could never land.
+	--
+	-- The reverse direction must stay frozen: an optimistic re-emit
+	-- carries success=1 by construction, so allowing 0 → 1 would let
+	-- an ordinary re-scan un-fix a row a real failure had already
+	-- corrected. Same asymmetry as the action_type unknown → known
+	-- rule below — a re-emit may only ever ADD information.
+	--
+	-- The flip is gated on EVIDENCE, not on tool identity: a measured
+	-- failure carries its error text, while a PROVISIONAL false
+	-- carries none. Snapshot adapters re-emit stable ids with such
+	-- sentinels — antigravity's "no exit code yet" (success is derived
+	-- from an unsigned exit value) and copilot's isComplete=false
+	-- task_complete row — and a stale or truncated snapshot parse
+	-- landing after a complete one would otherwise downgrade a real
+	-- success. Requiring the error body makes that impossible without
+	-- naming a single adapter.
+	--
+	-- Accepted miss: a genuine failure whose result body is empty
+	-- won't self-heal on rescan. The cross-tick update path still
+	-- fixes it — ActionOutcomeUpdate.SuccessKnown carries the verdict
+	-- without needing a message.
+	success = CASE
+		WHEN actions.success = 1 AND excluded.success = 0
+		 AND excluded.error_message IS NOT NULL AND excluded.error_message != ''
+		THEN excluded.success
+		ELSE actions.success
+	END,
+	-- error_message rides along on that same flip (and only then), so
+	-- a healed row explains itself. Bound as a plain string by
+	-- InsertActions, hence the '' guard rather than IS NULL alone.
+	error_message = CASE
+		WHEN actions.success = 1 AND excluded.success = 0
+		 AND excluded.error_message IS NOT NULL AND excluded.error_message != ''
+		THEN excluded.error_message
+		ELSE actions.error_message
+	END,
 	-- action_type reclassification (rescan self-heal). An adapter
 	-- mapping fix (e.g. grok's search_replace -> edit_file, 2026-07-09)
 	-- lets a re-scan finally classify a tool the original emit stored
@@ -627,6 +925,23 @@ func marshalActionMetadata(m *models.ActionMetadata) any {
 	return string(b)
 }
 
+// marshalUserAttachments returns the JSON-encoded attachment array
+// suitable for insertion into actions.user_attachments, or nil for the
+// "no attachments" case (NULL on disk). Metadata only by construction
+// (kind + optional media_type) — the UserAttachment type carries no
+// filename and no bytes. Marshal errors fall back to nil so a per-event
+// bug can't fail the whole batch.
+func marshalUserAttachments(atts []models.UserAttachment) any {
+	if len(atts) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(atts)
+	if err != nil {
+		return nil
+	}
+	return string(b)
+}
+
 // InsertActions writes a batch of actions using INSERT OR IGNORE — duplicate
 // (source_file, source_event_id) rows are silently skipped. Returns the
 // count of newly inserted rows. Runs in a single transaction.
@@ -635,6 +950,20 @@ func marshalActionMetadata(m *models.ActionMetadata) any {
 // populated with the new rowid so callers can chain additional work
 // (e.g. freshness.UpsertFileState). Rows skipped via INSERT OR IGNORE retain
 // ID = 0.
+// capToolOutput is the store-side backstop for the 1 MiB
+// actions.raw_tool_output contract (models.ToolEvent.ToolOutput). Adapters
+// are meant to cap at emit time via internal/contentcap, but several tool
+// paths never did (the OpenCode-family tool parts, Codex exec output), so a
+// multi-megabyte build log or diff dump landed in the DB verbatim - the
+// "store excerpts, not command outputs" rule in CLAUDE.md. Every writer of
+// the column (InsertActions, insertSingleAction, updateActionOutcome) binds
+// through here, so the contract holds whatever an adapter forgets. Capping
+// is idempotent: an already-capped body is at most max + marker bytes and
+// the length-merge in the upserts never prefers it over a longer stored one.
+func capToolOutput(s string) string {
+	return contentcap.Cap(s, contentcap.DefaultMaxBytes)
+}
+
 func (s *Store) InsertActions(ctx context.Context, actions []models.Action) (int, error) {
 	if len(actions) == 0 {
 		return 0, nil
@@ -695,12 +1024,13 @@ func (s *Store) InsertActions(ctx context.Context, actions []models.Action) (int
 				nullableInt64(a.PriorActionID), boolToInt(a.ChangeDetected),
 				nullableString(a.PrecedingReasoning),
 				nullableString(a.RawToolName), nullableString(a.RawToolInput),
-				nullableString(a.RawToolOutput),
+				nullableString(capToolOutput(a.RawToolOutput)),
 				a.Tool, a.SourceFile, sha256HexOrEmpty(a.SourceFile), a.SourceEventID,
 				boolToInt(a.IsSidechain), nullableString(a.MessageID),
 				marshalActionMetadata(a.Metadata),
 				nullableString(a.OrgID), nullableString(a.UserEmail),
 				nullableInt64(a.ContentBytes),
+				marshalUserAttachments(a.UserAttachments),
 			); err != nil {
 				return inserted, fmt.Errorf("store.InsertActions: upsert dup: %w", err)
 			}
@@ -723,12 +1053,13 @@ func (s *Store) InsertActions(ctx context.Context, actions []models.Action) (int
 			nullableInt64(a.PriorActionID), boolToInt(a.ChangeDetected),
 			nullableString(a.PrecedingReasoning),
 			nullableString(a.RawToolName), nullableString(a.RawToolInput),
-			nullableString(a.RawToolOutput),
+			nullableString(capToolOutput(a.RawToolOutput)),
 			a.Tool, a.SourceFile, sha256HexOrEmpty(a.SourceFile), a.SourceEventID,
 			boolToInt(a.IsSidechain), nullableString(a.MessageID),
 			marshalActionMetadata(a.Metadata),
 			nullableString(a.OrgID), nullableString(a.UserEmail),
 			nullableInt64(a.ContentBytes),
+			marshalUserAttachments(a.UserAttachments),
 		)
 		if err != nil {
 			return inserted, fmt.Errorf("store.InsertActions: exec: %w", err)
@@ -785,13 +1116,43 @@ func (s *Store) UpdateActionOutcome(
 	durationMs int64,
 	toolOutput, toolName, target string,
 ) (int64, error) {
+	// successKnown=true: an after-event hook always reports a verdict,
+	// and this path is the authoritative one for it.
+	return s.updateActionOutcome(ctx, sourceFile, sourceEventID, true, success,
+		errorMessage, durationMs, toolOutput, toolName, target, s.indexer)
+}
+
+// updateActionOutcome is the implementation behind UpdateActionOutcome,
+// with the FTS5 indexer supplied by the caller instead of read off the
+// Store. The watcher's Store has no WithIndexer binding — its indexer
+// arrives per-call through IngestOptions — so the Ingest path must be
+// able to hand its own indexer in, or cross-tick tool output would
+// silently skip the action_excerpts index.
+//
+// idx may be nil: the outcome columns still update, only the FTS insert
+// is skipped.
+//
+// successKnown=false leaves the success column untouched — for a result
+// record that carried no verdict, where writing anything would be an
+// invention (see [models.ActionOutcomeUpdate.SuccessKnown]).
+func (s *Store) updateActionOutcome(
+	ctx context.Context,
+	sourceFile, sourceEventID string,
+	successKnown bool,
+	success bool,
+	errorMessage string,
+	durationMs int64,
+	toolOutput, toolName, target string,
+	idx *indexing.Indexer,
+) (int64, error) {
 	if sourceFile == "" || sourceEventID == "" {
 		return 0, errors.New("store.UpdateActionOutcome: sourceFile and sourceEventID are required")
 	}
+	toolOutput = capToolOutput(toolOutput)
 	res, err := s.db.ExecContext(
 		ctx,
 		`UPDATE actions SET
-			success = ?,
+			success = CASE WHEN ? THEN ? ELSE success END,
 			error_message = CASE WHEN ? <> '' THEN ? ELSE error_message END,
 			duration_ms = CASE
 				WHEN ? > 0 AND (duration_ms IS NULL OR duration_ms = 0)
@@ -814,7 +1175,7 @@ func (s *Store) UpdateActionOutcome(
 				ELSE raw_tool_output
 			END
 		 WHERE source_file = ? AND source_event_id = ?`,
-		boolToInt(success),
+		boolToInt(successKnown), boolToInt(success),
 		errorMessage, errorMessage,
 		durationMs, durationMs,
 		toolOutput, toolOutput, toolOutput,
@@ -824,34 +1185,231 @@ func (s *Store) UpdateActionOutcome(
 		return 0, fmt.Errorf("store.UpdateActionOutcome: %w", err)
 	}
 	n, _ := res.RowsAffected()
-	// FTS5 index the tool output if (a) we matched a row, (b) the
-	// caller provided non-empty output, and (c) an Indexer is bound.
-	// Look up the action.id first — the indexer is keyed by rowid,
-	// not by source_event_id. Failures here log but don't propagate;
-	// the action's outcome columns are already correctly updated.
-	if n > 0 && toolOutput != "" && s.indexer != nil {
-		var actionID int64
+	// FTS5 index the tool output only when the column NOW holds exactly
+	// this payload. Read the POST-update state and compare bytes: the
+	// UPDATE's length-merge may have rejected this body (a shorter
+	// duplicate), and indexing a rejected payload would leave
+	// action_excerpts describing something raw_tool_output doesn't
+	// hold. Asking the row what it ended up with — rather than
+	// predicting the merge from a pre-read length — closes two holes at
+	// once: a concurrent writer installing a longer body between the
+	// two statements, and SQLite's LENGTH() stopping at the first
+	// embedded U+0000 where a Go-side count would not. A later, longer
+	// write by another path re-indexes with its own body, exactly as
+	// the hook path already behaves.
+	//
+	// Index failures are swallowed: the outcome columns are the
+	// load-bearing write. The indexer's replace (delete prior + insert)
+	// is one transaction and seeks the prior row by rowid, so this costs
+	// two index probes, not a scan of every excerpt (T-412).
+	if n > 0 && toolOutput != "" && idx != nil {
+		var (
+			actionID  int64
+			isCurrent int
+		)
 		err := s.db.QueryRowContext(
 			ctx,
-			`SELECT id FROM actions WHERE source_file = ? AND source_event_id = ?`,
-			sourceFile, sourceEventID,
-		).Scan(&actionID)
-		if err == nil && actionID > 0 {
-			_ = s.indexer.Index(ctx, actionID, toolName, target, toolOutput, errorMessage)
+			`SELECT id, COALESCE(raw_tool_output, '') = ?
+			   FROM actions WHERE source_file = ? AND source_event_id = ?`,
+			toolOutput, sourceFile, sourceEventID,
+		).Scan(&actionID, &isCurrent)
+		if err == nil && actionID > 0 && isCurrent != 0 {
+			_ = idx.Index(ctx, actionID, toolName, target, toolOutput, errorMessage)
 		}
 	}
 	return n, nil
 }
 
+// Cursor's mislabelled stop (grounded 3.17.21, session cc8322af,
+// 2026-09-08): Cursor can fire `stop` carrying the NEXT request's
+// generation_id while its usage is byte-identical to the
+// afterAgentResponse that closed the previous request. Both hook kinds
+// share one row identity (`<generation>:stop`), so the restatement would
+// land under the next request's key - double-counting the request and
+// squatting the key the next request's real usage then MAX-merges into.
+//
+// The rules below act ONLY on a proven pair (review finding F3,
+// 2026-09-26). Counter equality alone is never enough to drop or delete a
+// row: two genuinely distinct requests with the same counts must both
+// survive, and a row already stored is never deleted because a neighbour
+// happens to match it. What proves a pair is the hook KIND the adapter
+// carries in memory (TokenEvent.HookEvent, never persisted) plus the
+// state of the incoming row's own key:
+//
+//   - a STOP whose own generation has NO row yet (its afterAgentResponse
+//     has not fired - the mislabelled stop names the next request) that
+//     restates, byte for byte and with the same model, an earlier row of
+//     the same session within 10 s is skipped (cursorStopRestatesEarlier).
+//     A real request's stop follows its own afterAgentResponse, finds its
+//     key present, and upserts as ever;
+//   - an AFTERAGENTRESPONSE - the authoritative usage for its generation -
+//     whose key holds a row that differs from it but is a byte-for-byte
+//     copy of another generation's earlier row within 10 s evicts that
+//     squatter before it is written, so the real usage is never MAX-merged
+//     into a restatement (evictCursorSquatter);
+//   - an event the ADAPTER proved from both halves in its own source
+//     (TokenEvent.Restates, the hooks-log replay) is never written, and a
+//     row under its key is removed only while it still carries exactly the
+//     restated usage and the restated row is present (removeProvenRestatement).
+//
+// 10 s: the three live restatements sit 0.37 / 0.81 / 1.35 s after the
+// row they restate, and no other identical pair exists within 600 s
+// (every Cursor hook token row in the live DB, 2026-09-23).
+//
+// Stated residuals. (1) If the two hook processes race and the restating
+// stop commits BEFORE the afterAgentResponse it restates, neither live rule
+// can prove the pair at that moment: the double count stands until the
+// next request's afterAgentResponse evicts the squatter, or a hooks-log
+// replay proves it. (2) The stop rule infers "its afterAgentResponse has
+// not fired" from the stop's own key being empty; on a Cursor build whose
+// afterAgentResponse carried no usage at all, two real consecutive requests
+// with byte-identical usage and model inside 10 s would lose the second.
+// No captured build is that shape (3.4.20 / 3.9.16 put usage on
+// afterAgentResponse only; 3.17.21 / 3.20.21 on both).
+const (
+	cursorHookStop               = "stop"               // cursor.EventStop (the store cannot import the adapter)
+	cursorHookAfterAgentResponse = "afterAgentResponse" // cursor.EventAfterAgentResponse
+)
+
+// hookUsageMatchSQL is the byte-identical usage predicate between a
+// candidate row `o` and the bound usage (model + all eight billed dims).
+const hookUsageMatchSQL = `o.model = ?
+	  AND COALESCE(o.input_tokens, 0) = ? AND COALESCE(o.output_tokens, 0) = ?
+	  AND COALESCE(o.cache_read_tokens, 0) = ? AND COALESCE(o.cache_creation_tokens, 0) = ?
+	  AND COALESCE(o.cache_creation_1h_tokens, 0) = ? AND COALESCE(o.reasoning_tokens, 0) = ?
+	  AND COALESCE(o.web_search_requests, 0) = ? AND COALESCE(o.fast, 0) = ?`
+
+func hookUsageArgs(e models.TokenEvent) []any {
+	return []any{
+		e.Model, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens,
+		e.CacheCreation1hTokens, e.ReasoningTokens, e.WebSearchRequests, boolToInt(e.Fast),
+	}
+}
+
+// cursorStopRestatesEarlierSQL: an earlier-or-equal hook row of the same
+// session, under a different generation, with identical usage within 10 s,
+// while the incoming stop's OWN key holds nothing yet.
+const cursorStopRestatesEarlierSQL = `SELECT 1 FROM token_usage o
+	WHERE o.tool = 'cursor' AND o.source = 'hook' AND o.session_id = ?
+	  AND COALESCE(o.message_id, '') != ?
+	  AND ` + hookUsageMatchSQL + `
+	  AND ABS(julianday(o.timestamp) - julianday(?)) * 86400.0 <= 10
+	  AND julianday(o.timestamp) <= julianday(?)
+	  AND NOT EXISTS (SELECT 1 FROM token_usage k WHERE k.source_file = ? AND k.source_event_id = ?)
+	LIMIT 1`
+
+// cursorStopRestatesEarlier reports whether the incoming STOP e is Cursor's
+// mislabelled restatement of an already-stored request.
+func cursorStopRestatesEarlier(ctx context.Context, q querier, e models.TokenEvent) (bool, error) {
+	ts := timestamp(e.Timestamp)
+	args := append([]any{e.SessionID, e.MessageID}, hookUsageArgs(e)...)
+	args = append(args, ts, ts, e.SourceFile, e.SourceEventID)
+	var one int
+	err := q.QueryRowContext(ctx, cursorStopRestatesEarlierSQL, args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("cursor stop restatement check: %w", err)
+	}
+	return true, nil
+}
+
+// execer is the tx / db subset the restatement removals need.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// evictCursorSquatterSQL deletes the row under an incoming
+// afterAgentResponse's key when that row DIFFERS from the authoritative
+// usage being delivered for its generation AND is a byte-for-byte copy
+// (same model, all dims) of ANOTHER generation's row of the same session
+// written within 10 s of it - the squatter a mislabelled stop left. Either
+// side of the 10 s: when the two hook processes race, the restating stop
+// can commit (and be timestamped) before the afterAgentResponse it
+// restates, and this is what heals that order once the next request's own
+// usage arrives.
+const evictCursorSquatterSQL = `DELETE FROM token_usage
+	WHERE source_file = ? AND source_event_id = ? AND tool = 'cursor' AND source = 'hook'
+	  AND NOT (model = ?
+	       AND COALESCE(input_tokens, 0) = ? AND COALESCE(output_tokens, 0) = ?
+	       AND COALESCE(cache_read_tokens, 0) = ? AND COALESCE(cache_creation_tokens, 0) = ?
+	       AND COALESCE(cache_creation_1h_tokens, 0) = ? AND COALESCE(reasoning_tokens, 0) = ?
+	       AND COALESCE(web_search_requests, 0) = ? AND COALESCE(fast, 0) = ?)
+	  AND EXISTS (
+	    SELECT 1 FROM token_usage o
+	     WHERE o.tool = 'cursor' AND o.source = 'hook'
+	       AND o.session_id = token_usage.session_id
+	       AND o.id != token_usage.id
+	       AND COALESCE(o.message_id, '') != COALESCE(token_usage.message_id, '')
+	       AND o.model = token_usage.model
+	       AND COALESCE(o.input_tokens, 0) = COALESCE(token_usage.input_tokens, 0)
+	       AND COALESCE(o.output_tokens, 0) = COALESCE(token_usage.output_tokens, 0)
+	       AND COALESCE(o.cache_read_tokens, 0) = COALESCE(token_usage.cache_read_tokens, 0)
+	       AND COALESCE(o.cache_creation_tokens, 0) = COALESCE(token_usage.cache_creation_tokens, 0)
+	       AND COALESCE(o.cache_creation_1h_tokens, 0) = COALESCE(token_usage.cache_creation_1h_tokens, 0)
+	       AND COALESCE(o.reasoning_tokens, 0) = COALESCE(token_usage.reasoning_tokens, 0)
+	       AND COALESCE(o.web_search_requests, 0) = COALESCE(token_usage.web_search_requests, 0)
+	       AND COALESCE(o.fast, 0) = COALESCE(token_usage.fast, 0)
+	       AND ABS(julianday(o.timestamp) - julianday(token_usage.timestamp)) * 86400.0 <= 10)`
+
+// evictCursorSquatter applies evictCursorSquatterSQL for one incoming
+// afterAgentResponse and returns the rows removed (0 or 1).
+func evictCursorSquatter(ctx context.Context, ex execer, e models.TokenEvent) (int, error) {
+	args := append([]any{e.SourceFile, e.SourceEventID}, hookUsageArgs(e)...)
+	res, err := ex.ExecContext(ctx, evictCursorSquatterSQL, args...)
+	if err != nil {
+		return 0, fmt.Errorf("cursor squatter eviction: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// removeProvenRestatementSQL deletes the row under a PROVEN restatement's
+// key only while it still carries exactly the restated usage AND the
+// restated row (same session, message_id = e.Restates) is present with
+// that same usage - so a row that has since absorbed real usage, or whose
+// original is gone, is never removed.
+const removeProvenRestatementSQL = `DELETE FROM token_usage
+	WHERE source_file = ? AND source_event_id = ? AND session_id = ?
+	  AND EXISTS (SELECT 1 FROM token_usage o WHERE o.id = token_usage.id AND ` + hookUsageMatchSQL + `)
+	  AND EXISTS (SELECT 1 FROM token_usage o WHERE o.session_id = token_usage.session_id
+	       AND o.id != token_usage.id AND o.message_id = ? AND ` + hookUsageMatchSQL + `)`
+
+// removeProvenRestatement applies removeProvenRestatementSQL for one
+// adapter-proven restatement and returns the rows removed (0 or 1).
+func removeProvenRestatement(ctx context.Context, ex execer, e models.TokenEvent) (int, error) {
+	args := []any{e.SourceFile, e.SourceEventID, e.SessionID}
+	args = append(args, hookUsageArgs(e)...)
+	args = append(args, e.Restates)
+	args = append(args, hookUsageArgs(e)...)
+	res, err := ex.ExecContext(ctx, removeProvenRestatementSQL, args...)
+	if err != nil {
+		return 0, fmt.Errorf("proven restatement removal: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // InsertTokenEvents batches token_usage rows. Idempotent via
 // UNIQUE(source_file, source_event_id).
 func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEvent) (int, error) {
+	n, _, err := s.insertTokenEvents(ctx, events)
+	return n, err
+}
+
+// insertTokenEvents is InsertTokenEvents that also reports how many stored
+// rows a proven restatement rule removed (see the Cursor mislabelled-stop
+// block above), so Ingest can surface it.
+//
+//nolint:gocyclo // one sequential branch per per-tool cross-key dedup rule, walked in order.
+func (s *Store) insertTokenEvents(ctx context.Context, events []models.TokenEvent) (int, int, error) {
 	if len(events) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("store.InsertTokenEvents: begin: %w", err)
+		return 0, 0, fmt.Errorf("store.InsertTokenEvents: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -874,16 +1432,48 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 	//
 	// model upgrade rule retained: empty new value is preserved as the
 	// existing one via COALESCE+NULLIF (placeholder → resolved swap).
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO token_usage (
+	//
+	// RELIABILITY (2026-09-29, lane G-WIRE2). `reliability` used to be
+	// frozen on first insert too, so a source that changed its mind about
+	// whether its counts are MEASURED left a stale tier and stale counts
+	// behind (Crush: a one-step session's real counts stayed `approximate`
+	// after the session grew and its re-emit became 0/0 `unknown`). It now
+	// follows the ordered reconcile table in tokenreliability.go
+	// (tokenReliabilityRules): same tier keeps today's MAX merge; `unknown`
+	// is promoted by a measured tier (counts still MAX); a measured row
+	// restated as all-zero `unknown` is DEMOTED and its counts REPLACED;
+	// anything else keeps the stored tier and MAX. Only transitions to or
+	// from `unknown` change behaviour, so every adapter that re-emits one
+	// constant tier (all the MAX-reliant ones) is untouched.
+	stmt, err := tx.PrepareContext(ctx, renderTokenUpsertSQL(`INSERT INTO token_usage (
 		session_id, timestamp, tool, model,
 		input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 		cache_creation_1h_tokens, reasoning_tokens, web_search_requests,
 		estimated_cost_usd, source, reliability,
 		source_file, source_file_hash, source_event_id, message_id, turn_id,
-		org_id, user_email, fast
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		org_id, user_email, fast, is_sidechain,
+		gen_ms, gen_basis, gen_timing_v
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source_file, source_event_id) DO UPDATE SET
 		model = COALESCE(NULLIF(excluded.model, ''), token_usage.model),
+		-- Generation timing (agent migration 136, S10-SPEED). Adapters stamp
+		-- gen_ms only on a COMPLETE row, so the first stamped value is final:
+		-- a re-parse at the SAME parser version never moves it (no healing,
+		-- no MIN/MAX), and an empty re-emit never clears it. Only a STRICTLY
+		-- newer gen_timing_v replaces the triple - that is how a fixed
+		-- parser re-derives on rescan.
+		gen_ms = CASE
+			WHEN COALESCE(excluded.gen_ms, 0) > 0
+			 AND (token_usage.gen_ms IS NULL OR COALESCE(excluded.gen_timing_v, 0) > COALESCE(token_usage.gen_timing_v, 0))
+			THEN excluded.gen_ms ELSE token_usage.gen_ms END,
+		gen_basis = CASE
+			WHEN COALESCE(excluded.gen_ms, 0) > 0
+			 AND (token_usage.gen_ms IS NULL OR COALESCE(excluded.gen_timing_v, 0) > COALESCE(token_usage.gen_timing_v, 0))
+			THEN excluded.gen_basis ELSE token_usage.gen_basis END,
+		gen_timing_v = CASE
+			WHEN COALESCE(excluded.gen_ms, 0) > 0
+			 AND (token_usage.gen_ms IS NULL OR COALESCE(excluded.gen_timing_v, 0) > COALESCE(token_usage.gen_timing_v, 0))
+			THEN excluded.gen_timing_v ELSE token_usage.gen_timing_v END,
 		-- Heal a placeholder message_id. Modern Copilot CLI process logs
 		-- record a "Request-ID null" header, so a Tier-1 row first lands with
 		-- the literal "null"; a later parse recovers the real id from the
@@ -911,41 +1501,64 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 		-- decomposition — trust it. Scoped to the copilot tools + the
 		-- cache_creation-grew condition, so every other adapter keeps the
 		-- monotonic MAX (a partial re-parse can't lower a complete count).
-		input_tokens = CASE
+		-- Token counts: MAX-monotone, EXCEPT where the reliability
+		-- reconcile table (tokenreliability.go) says a re-parse restates
+		-- the row - then the incoming counts replace the stored ones.
+		-- {{replace_counts}} is that table's replace predicate
+		-- (renderTokenUpsertSQL); a demotion wins over the copilot input
+		-- carve-out because it is the outer CASE.
+		input_tokens = CASE WHEN {{replace_counts}} THEN excluded.input_tokens ELSE CASE
 			WHEN excluded.tool IN ('copilot-cli', 'copilot')
-			 AND excluded.cache_creation_tokens > token_usage.cache_creation_tokens
+			 AND COALESCE(excluded.cache_creation_tokens, 0) > COALESCE(token_usage.cache_creation_tokens, 0)
 			THEN excluded.input_tokens
-			ELSE MAX(token_usage.input_tokens, excluded.input_tokens)
-		END,
-		output_tokens         = MAX(token_usage.output_tokens, excluded.output_tokens),
-		cache_read_tokens     = MAX(token_usage.cache_read_tokens, excluded.cache_read_tokens),
-		cache_creation_tokens = MAX(token_usage.cache_creation_tokens, excluded.cache_creation_tokens),
-		cache_creation_1h_tokens = CASE
-			-- NULL-safe MAX: the column is nullable (Anthropic-only),
-			-- so coalesce both sides to 0 for comparison and preserve
-			-- NULL only when both are NULL.
+			ELSE MAX(COALESCE(token_usage.input_tokens, 0), COALESCE(excluded.input_tokens, 0))
+		END END,
+		output_tokens         = CASE WHEN {{replace_counts}} THEN excluded.output_tokens
+			ELSE MAX(COALESCE(token_usage.output_tokens, 0), COALESCE(excluded.output_tokens, 0)) END,
+		cache_read_tokens     = CASE WHEN {{replace_counts}} THEN excluded.cache_read_tokens
+			ELSE MAX(COALESCE(token_usage.cache_read_tokens, 0), COALESCE(excluded.cache_read_tokens, 0)) END,
+		cache_creation_tokens = CASE WHEN {{replace_counts}} THEN excluded.cache_creation_tokens
+			ELSE MAX(COALESCE(token_usage.cache_creation_tokens, 0), COALESCE(excluded.cache_creation_tokens, 0)) END,
+		-- NULL-safe MAX: the column is nullable (Anthropic-only), so
+		-- coalesce both sides to 0 for comparison and preserve NULL only
+		-- when both are NULL.
+		cache_creation_1h_tokens = CASE WHEN {{replace_counts}} THEN excluded.cache_creation_1h_tokens
 			WHEN excluded.cache_creation_1h_tokens IS NULL AND token_usage.cache_creation_1h_tokens IS NULL
 			THEN NULL
 			ELSE MAX(COALESCE(token_usage.cache_creation_1h_tokens, 0), COALESCE(excluded.cache_creation_1h_tokens, 0))
 		END,
-		reasoning_tokens      = MAX(token_usage.reasoning_tokens, excluded.reasoning_tokens),
+		reasoning_tokens      = CASE WHEN {{replace_counts}} THEN excluded.reasoning_tokens
+			ELSE MAX(COALESCE(token_usage.reasoning_tokens, 0), COALESCE(excluded.reasoning_tokens, 0)) END,
+		-- reliability: the ordered reconcile table (tokenreliability.go).
+		-- Every SET expression reads the PRE-update row, so the count
+		-- columns above see the stored tier, not this new one.
+		reliability = {{reliability}},
 		-- turn_id backfill: existing row's NULL upgrades to a non-empty
 		-- new value (older codex parses pre-migration 032 had no TurnID
 		-- to set; re-parse with v1.7.24+ adapter fills it in). Keep an
 		-- existing non-NULL value if the new emit is empty so a stale
 		-- adapter can't clear it.
 		turn_id = COALESCE(NULLIF(excluded.turn_id, ''), token_usage.turn_id),
+		-- is_sidechain heals on re-parse (migration 087): the flag is a
+		-- deterministic function of the source line — the adapter reads it
+		-- straight off every transcript record — so the incoming value
+		-- always wins. That is exactly what lets "observer scan --force"
+		-- backfill the flag onto pre-087 rows with no dedicated surgical
+		-- pass. Contrast the MAX-guarded counters above: those defend
+		-- against a PARTIAL re-parse of an in-flight request; a boolean
+		-- read whole off the line has no partial state to protect.
+		is_sidechain = excluded.is_sidechain,
 		-- Cost: upgrade when the new emit carries a non-zero cost and
 		-- the existing one is zero (proxy-sourced rows are gold standard
 		-- per the v1.4.12 cost-provenance rule). Two non-zero values
 		-- shouldn't disagree, but if they do, keep the larger so an
 		-- adapter regression can't silently lower a row's cost.
 		estimated_cost_usd = CASE
-			WHEN excluded.estimated_cost_usd > 0 AND token_usage.estimated_cost_usd = 0
+			WHEN excluded.estimated_cost_usd > 0 AND COALESCE(token_usage.estimated_cost_usd, 0) = 0
 			THEN excluded.estimated_cost_usd
-			WHEN excluded.estimated_cost_usd > token_usage.estimated_cost_usd
+			WHEN excluded.estimated_cost_usd > COALESCE(token_usage.estimated_cost_usd, 0)
 			THEN excluded.estimated_cost_usd
-			ELSE token_usage.estimated_cost_usd
+			ELSE COALESCE(token_usage.estimated_cost_usd, 0)
 		END,
 		-- Backfill web_search_requests when a rescan re-emits the
 		-- same token_count line but now carries the count from a
@@ -970,18 +1583,36 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 	-- depend on this: a batch without those tools must not be able to
 	-- modify their rows at all. On a cross-tool collision this predicate
 	-- is false, so conflict resolution no-ops (RowsAffected 0, no error).
-	WHERE token_usage.tool = excluded.tool`)
+	WHERE token_usage.tool = excluded.tool`))
 	if err != nil {
-		return 0, fmt.Errorf("store.InsertTokenEvents: prepare: %w", err)
+		return 0, 0, fmt.Errorf("store.InsertTokenEvents: prepare: %w", err)
 	}
 	defer stmt.Close()
 
-	var inserted int
+	var inserted, removed int
 	hasCopilotCLI := false
+	cursorSessions := make(map[string]struct{})
 	hasMsgIDBearing := false
 	hasClaudeCode := false
 	hasCodex := false
 	for _, e := range events {
+		if e.Tool == models.ToolCursor {
+			cursorSessions[e.SessionID] = struct{}{}
+			// Native request IDs survive copies and diagnostic-log relocation.
+			// Reuse the first source path so the regular UPSERT also heals model
+			// context without counting a recovered copy as another request.
+			if e.Source == models.TokenSourceJSONL && e.MessageID != "" && e.SourceEventID == "cursor-cli-outcome:"+e.MessageID {
+				var sourceFile string
+				err := tx.QueryRowContext(ctx, `SELECT source_file FROM token_usage
+					WHERE tool = 'cursor' AND session_id = ? AND source = 'jsonl'
+					AND source_event_id = ? ORDER BY id LIMIT 1`, e.SessionID, e.SourceEventID).Scan(&sourceFile)
+				if err == nil {
+					e.SourceFile = sourceFile
+				} else if !errors.Is(err, sql.ErrNoRows) {
+					return inserted, removed, fmt.Errorf("store.InsertTokenEvents: cursor source identity: %w", err)
+				}
+			}
+		}
 		if e.Tool == models.ToolCopilotCLI {
 			hasCopilotCLI = true
 		}
@@ -993,6 +1624,40 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 		}
 		if e.MessageID != "" {
 			hasMsgIDBearing = true
+		}
+		if e.Restates != "" {
+			// An adapter-PROVEN restatement is never written; a row
+			// already squatting its key is removed only while it still
+			// carries exactly the restated usage.
+			n, err := removeProvenRestatement(ctx, tx, e)
+			if err != nil {
+				return inserted, removed, fmt.Errorf("store.InsertTokenEvents: %w", err)
+			}
+			removed += n
+			continue
+		}
+		if e.Tool == models.ToolCursor && e.Source == models.TokenSourceHook {
+			// Cursor's mislabelled stop, acted on only as a proven pair
+			// (the block above cursorStopRestatesEarlierSQL). Checked
+			// BEFORE the upsert: a restatement inserted under the NEXT
+			// generation's key would squat it, and the next request's
+			// REAL usage would then MAX-merge into it.
+			switch e.HookEvent {
+			case cursorHookStop:
+				dup, err := cursorStopRestatesEarlier(ctx, tx, e)
+				if err != nil {
+					return inserted, removed, fmt.Errorf("store.InsertTokenEvents: %w", err)
+				}
+				if dup {
+					continue
+				}
+			case cursorHookAfterAgentResponse:
+				n, err := evictCursorSquatter(ctx, tx, e)
+				if err != nil {
+					return inserted, removed, fmt.Errorf("store.InsertTokenEvents: %w", err)
+				}
+				removed += n
+			}
 		}
 		s.stamper.Stamp(tokenOrgRow{&e}) // no-op unless enrolled
 		res, err := stmt.ExecContext(
@@ -1019,12 +1684,33 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 			nullableString(e.OrgID),
 			nullableString(e.UserEmail),
 			boolToInt(e.Fast),
+			boolToInt(e.IsSidechain),
+			genMsOrNull(e),
+			genBasisOrNull(e),
+			genTimingVOrNull(e),
 		)
 		if err != nil {
-			return inserted, fmt.Errorf("store.InsertTokenEvents: exec: %w", err)
+			return inserted, removed, fmt.Errorf("store.InsertTokenEvents: exec: %w", err)
 		}
 		n, _ := res.RowsAffected()
 		inserted += int(n)
+	}
+
+	// A headless CLI outcome is the complete reported request aggregate.
+	// Some Cursor builds also emit hooks for its individual model generations
+	// (<request UUID>-<step>-<suffix>). Prefer the aggregate for that request
+	// only, in either arrival order; preserve hooks from other turns/attempts.
+	for sessionID := range cursorSessions {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM token_usage
+			WHERE tool = 'cursor' AND session_id = ? AND source = 'hook' AND EXISTS (
+			 SELECT 1 FROM token_usage c WHERE c.tool = 'cursor'
+			 AND c.source = 'jsonl' AND c.session_id = token_usage.session_id
+			 AND c.source_event_id = 'cursor-cli-outcome:' || c.message_id
+			 AND (token_usage.message_id = c.message_id
+			 OR substr(token_usage.message_id, 1, length(c.message_id) + 1) = c.message_id || '-')
+			)`, sessionID); err != nil {
+			return inserted, removed, fmt.Errorf("store.InsertTokenEvents: cursor usage dedup: %w", err)
+		}
 	}
 
 	// copilot-cli emits a Tier-3 (events.jsonl, OutputTokens only) row
@@ -1055,7 +1741,7 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 			   )`,
 			models.ToolCopilotCLI, models.TokenSourceJSONL, models.TokenSourceOTel,
 		); err != nil {
-			return inserted, fmt.Errorf("store.InsertTokenEvents: dedup: %w", err)
+			return inserted, removed, fmt.Errorf("store.InsertTokenEvents: dedup: %w", err)
 		}
 
 		// Tier 0 (`source='session_summary'`, derived from
@@ -1118,7 +1804,7 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 			models.ToolCopilotCLI, models.TokenSourceSessionSummary,
 			models.ToolCopilotCLI, models.TokenSourceOTel,
 		); err != nil {
-			return inserted, fmt.Errorf("store.InsertTokenEvents: session_summary dedup: %w", err)
+			return inserted, removed, fmt.Errorf("store.InsertTokenEvents: session_summary dedup: %w", err)
 		}
 	}
 
@@ -1188,7 +1874,7 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 			   )`,
 			models.ToolClaudeCode, models.ToolCodex,
 		); err != nil {
-			return inserted, fmt.Errorf("store.InsertTokenEvents: tuple dedup: %w", err)
+			return inserted, removed, fmt.Errorf("store.InsertTokenEvents: tuple dedup: %w", err)
 		}
 	}
 
@@ -1270,18 +1956,20 @@ func (s *Store) InsertTokenEvents(ctx context.Context, events []models.TokenEven
 			   )`,
 			models.ToolClaudeCode,
 		); err != nil {
-			return inserted, fmt.Errorf("store.InsertTokenEvents: snapshot-drift dedup: %w", err)
+			return inserted, removed, fmt.Errorf("store.InsertTokenEvents: snapshot-drift dedup: %w", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return inserted, fmt.Errorf("store.InsertTokenEvents: commit: %w", err)
+		return inserted, removed, fmt.Errorf("store.InsertTokenEvents: commit: %w", err)
 	}
-	return inserted, nil
+	return inserted, removed, nil
 }
 
 // IngestOptions parameterizes Ingest.
 type IngestOptions struct {
+	// ToolAccounts is node-local login evidence; processed independently of action dedup.
+	ToolAccounts []models.ToolAccountObservation
 	// IsNativeTool decides whether a ToolEvent's raw tool name maps to a
 	// native tool (drives actions.is_native_tool). Defaults to always false.
 	IsNativeTool func(rawToolName string) bool
@@ -1320,6 +2008,35 @@ type IngestOptions struct {
 	// SetSessionLineage after the sessions are upserted. NODE-LOCAL —
 	// never on the org-push wire. Empty/nil is a clean no-op.
 	SessionLineages []models.SessionLineage
+	// SessionSurfaces carries capture-surface attribution (migration
+	// 094). Ingest persists each onto its session row via
+	// SetSessionSurface after the sessions are upserted, FIRST-WINS-
+	// UNLESS-EMPTY per column (the first grounded stamp sticks; a later
+	// parse only fills still-empty columns). Applied best-effort: a
+	// rejected or failing stamp is counted in
+	// IngestResult.SessionSurfacesSkipped, never returned as an error —
+	// the actions and tokens have already landed by then. NODE-LOCAL —
+	// never on the org-push wire. Empty/nil is a clean no-op.
+	SessionSurfaces []models.SessionSurface
+	// SessionToolVersions carries captured tool/CLI versions (migration
+	// 125). Ingest persists each onto its session row via
+	// SetSessionToolVersion after the sessions are upserted, FIRST-WINS-
+	// UNLESS-EMPTY (the first grounded stamp sticks; a later parse only
+	// fills a still-empty column). Applied best-effort: a rejected
+	// (malformed) or failing stamp is counted in
+	// IngestResult.SessionToolVersionsSkipped, never returned as an
+	// error. NODE-LOCAL — never on the org-push wire. Empty/nil is a
+	// clean no-op.
+	SessionToolVersions []models.SessionToolVersion
+	// OutcomeUpdates carries outcomes for actions inserted by an
+	// EARLIER Ingest call: a tool_result an adapter parsed in a later
+	// watcher tick than the tool_use that created the row (see
+	// adapter.ParseResult.OutcomeUpdates). Applied after the batch
+	// insert via UpdateActionOutcome's merge rules, using this options
+	// struct's Indexer for the FTS excerpt. An entry matching no row is
+	// silently tolerated, and a per-entry error is non-fatal — a late
+	// outcome must never fail an ingest.
+	OutcomeUpdates []models.ActionOutcomeUpdate
 }
 
 // fileActionTypes is the set of normalized actions whose target is a file
@@ -1334,8 +2051,14 @@ var fileActionTypes = map[string]struct{}{
 type IngestResult struct {
 	ActionsInserted int
 	TokensInserted  int
-	ProjectsTouched int
-	SessionsTouched int
+	// TokenRestatementsRemoved counts stored token rows a PROVEN
+	// restatement rule removed in this batch (Cursor's mislabelled stop:
+	// an adapter-proven restatement's squatter, or a squatter evicted by
+	// its own generation's authoritative afterAgentResponse). Never a
+	// counter-equality sweep (review finding F3, 2026-09-26).
+	TokenRestatementsRemoved int
+	ProjectsTouched          int
+	SessionsTouched          int
 	// CacheObservationsSeen is the count of cache observations the
 	// caller supplied in IngestOptions.CacheObservations. C6 plumbs
 	// the count through so the watcher → Ingest path is testable
@@ -1346,6 +2069,32 @@ type IngestResult struct {
 	// post-hoc guard seam persisted for this batch (0 when no guard
 	// is wired — see SetGuard).
 	GuardEventsRecorded int
+	// MessageContentRows is the count of otel_content rows the
+	// adapter-side message-content producer inserted for this batch —
+	// always 0 unless the node opted into content sharing (see
+	// SetContentCapture / internal/store/messagecontent.go). Re-parsing an
+	// already-captured window inserts nothing, so a steady 0 on a
+	// content-capturing node means "nothing new", not "not wired".
+	MessageContentRows int
+	// SessionSurfacesSkipped counts the IngestOptions.SessionSurfaces
+	// entries this batch did NOT persist: an out-of-vocabulary kind
+	// (the emitting adapter leaked a raw vendor token instead of
+	// resolving it through its table) or a write error. The stamp is
+	// best-effort — it runs AFTER actions and tokens have landed, so
+	// failing the whole ingest over it would discard real captured work
+	// — but the store has no logger, so the count is how the failure
+	// stays visible instead of vanishing. A steady non-zero here on a
+	// given adapter is a bug in that adapter's surface table.
+	SessionSurfacesSkipped int
+	// SessionToolVersionsSkipped counts the
+	// IngestOptions.SessionToolVersions entries this batch did NOT
+	// persist because of a store WRITE ERROR. A malformed value returns
+	// (false, nil) from SetSessionToolVersion and is silently skipped
+	// (not counted here) — the version column is best-effort. Best-effort
+	// like SessionSurfacesSkipped: it runs AFTER actions and tokens have
+	// landed, so the count is how a write failure stays visible without a
+	// logger the store does not have.
+	SessionToolVersionsSkipped int
 }
 
 // Ingest is the high-level batch API used by the watcher and scan commands.
@@ -1360,6 +2109,10 @@ func (s *Store) Ingest(
 	tokens []models.TokenEvent,
 	opts IngestOptions,
 ) (IngestResult, error) {
+	return s.ingest(ctx, events, tokens, opts, false)
+}
+
+func (s *Store) ingest(ctx context.Context, events []models.ToolEvent, tokens []models.TokenEvent, opts IngestOptions, usageOnly bool) (IngestResult, error) {
 	if opts.IsNativeTool == nil {
 		opts.IsNativeTool = func(string) bool { return false }
 	}
@@ -1375,9 +2128,17 @@ func (s *Store) Ingest(
 	projectIDs := map[string]int64{}
 	sessionsSeen := map[string]struct{}{}
 	sessionExistsCache := map[string]bool{}
+	// Sessions whose batch carried a lifecycle action (session_end /
+	// session_start / user_prompt): their ended_at is recomputed once the
+	// batch's actions are in (refreshSessionEnded).
+	lifecycleSessions := map[string]struct{}{}
 	var result IngestResult
 
-	actions := make([]models.Action, 0, len(events))
+	actionCapacity := len(events)
+	if usageOnly {
+		actionCapacity = 0
+	}
+	actions := make([]models.Action, 0, actionCapacity)
 
 	// Guard post-hoc seam (guard spec §7): collect evaluation inputs
 	// in EVENT ORDER as actions insert (order matters — taint marks
@@ -1391,6 +2152,13 @@ func (s *Store) Ingest(
 		batchIdx int
 	}
 	var pendingGuard []guardPending
+
+	// Batch indices of actions whose tool call has no observed outcome
+	// yet (models.ToolEvent.OutcomePending). Their success=true is an
+	// optimistic placeholder, so failure-context bookkeeping is held
+	// back until the matching ActionOutcomeUpdate arrives — see the
+	// RecordFailures loops below.
+	outcomePending := map[int]bool{}
 
 	for _, e := range events {
 		if e.SessionID == "" || e.ProjectRoot == "" {
@@ -1425,27 +2193,42 @@ func (s *Store) Ingest(
 		pid, ok := projectIDs[e.ProjectRoot]
 		if !ok {
 			var err error
-			pid, err = s.UpsertProject(ctx, e.ProjectRoot, "")
+			pid, err = s.UpsertProjectWithIdentity(ctx, e.ProjectRoot, e.GitRemote, ProjectIdentity{
+				UpstreamRemote:     e.GitUpstreamRemote,
+				RemoteOwner:        e.GitRemoteOwner,
+				UpstreamOwner:      e.GitUpstreamOwner,
+				RootCommitSHA:      e.RootCommitSHA,
+				ContentFingerprint: e.ContentFingerprint,
+			})
 			if err != nil {
 				return result, err
 			}
 			projectIDs[e.ProjectRoot] = pid
 			result.ProjectsTouched++
+			s.maybeRunLazyRootCommit(ctx, e.ProjectRoot)
 		}
 		if _, ok := sessionsSeen[e.SessionID]; !ok {
 			err := s.UpsertSession(ctx, models.Session{
-				ID:        e.SessionID,
-				ProjectID: pid,
-				Tool:      e.Tool,
-				Model:     e.Model,
-				GitBranch: e.GitBranch,
-				StartedAt: e.Timestamp,
+				ID:         e.SessionID,
+				ProjectID:  pid,
+				Tool:       e.Tool,
+				Model:      e.Model,
+				GitBranch:  e.GitBranch,
+				StartedAt:  e.Timestamp,
+				Workspace:  e.Workspace,
+				IsWorktree: e.IsWorktree,
 			})
 			if err != nil {
 				return result, err
 			}
 			sessionsSeen[e.SessionID] = struct{}{}
 			result.SessionsTouched++
+		}
+		if usageOnly {
+			continue
+		}
+		if sessionend.RoleOf(e.ActionType) != sessionend.RoleNone {
+			lifecycleSessions[e.SessionID] = struct{}{}
 		}
 		act := models.Action{
 			SessionID:          e.SessionID,
@@ -1470,6 +2253,7 @@ func (s *Store) Ingest(
 			IsSidechain:        e.IsSidechain,
 			MessageID:          e.MessageID,
 			Metadata:           e.Metadata,
+			UserAttachments:    e.UserAttachments,
 		}
 
 		// File-typed actions with a classifier go through a per-event
@@ -1533,6 +2317,9 @@ func (s *Store) Ingest(
 		}
 
 		actions = append(actions, act)
+		if e.OutcomePending {
+			outcomePending[len(actions)-1] = true
+		}
 		if s.guard != nil {
 			pendingGuard = append(pendingGuard, guardPending{
 				batchIdx: len(actions) - 1,
@@ -1545,13 +2332,23 @@ func (s *Store) Ingest(
 					Timestamp:   e.Timestamp,
 					TurnIndex:   e.TurnIndex,
 					Success:     e.Success,
+					PromptText:  guardPromptText(e.ActionType, e.RawToolInput),
 				},
 			})
 		}
 	}
 
+	if usageOnly {
+		// Session bootstrap above uses the original events. The remaining
+		// action/content/LOC stages must not replay historical tool work during
+		// a budget catchup; the ordinary watcher still owns those stages.
+		events = nil
+	}
+
 	// Upsert sessions referenced only by TokenEvents (e.g. subagent
 	// compaction turns that have usage but no tool_use blocks).
+	// S10-SPEED: stamp-only re-emissions never insert (gentiming.go).
+	tokens, genStamps := splitGenStamps(tokens)
 	validTokens := make([]models.TokenEvent, 0, len(tokens))
 	for _, tk := range tokens {
 		if tk.SessionID == "" {
@@ -1587,20 +2384,29 @@ func (s *Store) Ingest(
 		pid, ok := projectIDs[tk.ProjectRoot]
 		if !ok {
 			var err error
-			pid, err = s.UpsertProject(ctx, tk.ProjectRoot, "")
+			pid, err = s.UpsertProjectWithIdentity(ctx, tk.ProjectRoot, tk.GitRemote, ProjectIdentity{
+				UpstreamRemote:     tk.GitUpstreamRemote,
+				RemoteOwner:        tk.GitRemoteOwner,
+				UpstreamOwner:      tk.GitUpstreamOwner,
+				RootCommitSHA:      tk.RootCommitSHA,
+				ContentFingerprint: tk.ContentFingerprint,
+			})
 			if err != nil {
 				return result, err
 			}
 			projectIDs[tk.ProjectRoot] = pid
 			result.ProjectsTouched++
+			s.maybeRunLazyRootCommit(ctx, tk.ProjectRoot)
 		}
 		err := s.UpsertSession(ctx, models.Session{
-			ID:        tk.SessionID,
-			ProjectID: pid,
-			Tool:      tk.Tool,
-			Model:     tk.Model,
-			GitBranch: tk.GitBranch,
-			StartedAt: tk.Timestamp,
+			ID:         tk.SessionID,
+			ProjectID:  pid,
+			Tool:       tk.Tool,
+			Model:      tk.Model,
+			GitBranch:  tk.GitBranch,
+			StartedAt:  tk.Timestamp,
+			Workspace:  tk.Workspace,
+			IsWorktree: tk.IsWorktree,
 		})
 		if err != nil {
 			return result, err
@@ -1610,16 +2416,34 @@ func (s *Store) Ingest(
 		validTokens = append(validTokens, tk)
 	}
 
+	// Transfer previously captured transcript rows before replay can collide
+	// with their stable source keys. Sessions have been upserted above.
+	for _, lin := range opts.SessionLineages {
+		if err := s.reassignSessionSource(ctx, lin); err != nil {
+			return result, err
+		}
+	}
 	n, err := s.InsertActions(ctx, actions)
 	if err != nil {
 		return result, err
 	}
 	result.ActionsInserted += n
+	if err := s.refreshSessionEnded(ctx, lifecycleSessions); err != nil {
+		return result, err
+	}
 
 	if opts.RecordFailures {
 		for i := range actions {
 			a := &actions[i]
 			if a.ID == 0 || a.ActionType != models.ActionRunCommand {
+				continue
+			}
+			if outcomePending[i] {
+				// Outcome not observed yet. Filing it now would record
+				// an unobserved success and wrongly flip every prior
+				// failure of the same command to eventually_succeeded.
+				// The OutcomeUpdate loop below files it for real once
+				// the tool_result lands.
 				continue
 			}
 			if err := s.recordCommandOutcome(ctx, a); err != nil {
@@ -1644,11 +2468,71 @@ func (s *Store) Ingest(
 		}
 	}
 
-	tn, err := s.InsertTokenEvents(ctx, validTokens)
+	// Cross-tick outcomes: a tool_result whose tool_use was inserted by
+	// an earlier Ingest call, which the action upsert can only partly
+	// express (its ON CONFLICT success rule is a one-way 1 → 0 repair
+	// and needs the corrected event re-emitted in one window). Applied
+	// AFTER the batch insert so an update targeting a row created in
+	// THIS same batch still lands. Tool name / target are empty by
+	// design — the adapter no longer knows them cross-tick — so the
+	// FTS excerpt indexes on output alone.
+	//
+	// Errors are COLLECTED, not swallowed: this record is the only
+	// carrier of the outcome, and the watcher advances its cursor past
+	// it as soon as Ingest returns nil. The realistic error class is
+	// transient (SQLITE_BUSY against a concurrent hook process), so
+	// failing the tick — exactly as an InsertActions error would — is
+	// what makes the watcher retry the window whole. Re-processing is
+	// idempotent (upserts plus idempotent updates). A zero-row update
+	// is NOT an error: the row may be unknown or pruned.
+	var updateErrs []error
+	for _, up := range opts.OutcomeUpdates {
+		if up.SourceFile == "" || up.SourceEventID == "" {
+			continue
+		}
+		n, err := s.updateActionOutcome(ctx, up.SourceFile, up.SourceEventID,
+			up.SuccessKnown, up.Success, up.ErrorMessage, up.DurationMs, up.ToolOutput, "", "",
+			opts.Indexer)
+		if err != nil {
+			updateErrs = append(updateErrs, fmt.Errorf("%s#%s: %w", up.SourceFile, up.SourceEventID, err))
+			continue
+		}
+		if n > 0 && opts.RecordFailures && up.SuccessKnown {
+			// The moment the outcome is actually known is the moment
+			// failure_context may be written — the insert-time call
+			// above deliberately skipped this row. Non-fatal, mirroring
+			// that call site.
+			if err := s.recordOutcomeUpdateFailureContext(ctx, up); err != nil {
+				fmt.Fprintf(os.Stderr,
+					"store.Ingest: outcome recordCommandOutcome non-fatal err for source_file=%s source_event_id=%s: %v\n",
+					up.SourceFile, up.SourceEventID, err)
+			}
+		}
+	}
+
+	tn, removed, err := s.insertTokenEvents(ctx, validTokens)
 	if err != nil {
 		return result, err
 	}
 	result.TokensInserted = tn
+	result.TokenRestatementsRemoved = removed
+	if err := s.stampGenTiming(ctx, genStamps); err != nil {
+		return result, err
+	}
+
+	// sessions.model rollup (IDE-13 / plan C8): several adapters (codex,
+	// cursor, cline, cowork, ...) emit ToolEvents with no Model, leaving
+	// sessions.model permanently empty even though the same session's
+	// token_usage rows carry it. Best-effort like the cache/pid seams
+	// below — a rollup failure is a cosmetic gap in a summary column,
+	// never a reason to fail the token insert that already landed.
+	if len(validTokens) > 0 {
+		rollupIDs := make([]string, 0, len(validTokens))
+		for _, tk := range validTokens {
+			rollupIDs = append(rollupIDs, tk.SessionID)
+		}
+		_ = s.rollupSessionModels(ctx, rollupIDs)
+	}
 
 	// Cache observations Tier-2 wiring. C6 plumbed the count;
 	// C10 (this commit) feeds the slice into the engine. The
@@ -1712,6 +2596,66 @@ func (s *Store) Ingest(
 		if _, err := s.SetSessionLineage(ctx, lin); err != nil {
 			return result, err
 		}
+		if err := s.reconcileSourceAPITurns(ctx, lin); err != nil {
+			return result, err
+		}
+	}
+
+	// Capture-surface attribution (migration 107): stamp the normalized
+	// surface kind + host an adapter resolved at its boundary onto the
+	// sessions upserted above. NODE-LOCAL; a missing session id matches
+	// zero rows (silent no-op).
+	//
+	// BEST-EFFORT, like the pidbridge / cache-observation seams above.
+	// SetSessionSurface stays strict for direct callers (an
+	// out-of-vocabulary kind is a programming error in the emitting
+	// adapter and is refused loudly), but this seam runs AFTER the
+	// actions and token rows have already been written — propagating
+	// the error here would report a failed ingest for work that
+	// actually landed, and the watcher would then retry the whole file
+	// forever on a stamp it can never satisfy. So a rejected or failing
+	// stamp is counted, not returned: SessionSurfacesSkipped is how the
+	// failure stays visible without a logger the store does not have.
+	for _, sf := range opts.SessionSurfaces {
+		if sf.SessionID == "" {
+			continue
+		}
+		if _, err := s.SetSessionSurface(ctx, sf); err != nil {
+			result.SessionSurfacesSkipped++
+		}
+	}
+
+	// Captured tool/CLI version (migration 125): stamp the free-form
+	// version an adapter resolved at its boundary onto the sessions
+	// upserted above. FIRST-WINS-UNLESS-EMPTY. Not node-local: since
+	// 2026-09-22 the column ships to the org as unconditional session
+	// metadata (server migration 161, orgpush.go). Same
+	// best-effort posture as the surface seam above — it runs AFTER the
+	// actions/tokens landed, so a write error is counted, not returned.
+	// A malformed value returns (false, nil) and is skipped silently
+	// inside SetSessionToolVersion.
+	for _, tv := range opts.SessionToolVersions {
+		if tv.SessionID == "" {
+			continue
+		}
+		if _, err := s.SetSessionToolVersion(ctx, tv); err != nil {
+			result.SessionToolVersionsSkipped++
+		}
+	}
+
+	// Adapter-side message-content capture (enterprise ruling 2026-08-28):
+	// feed the conversation text the adapters already parsed into
+	// otel_content, so the org admin's Messages panel is populated for EVERY
+	// tool, not only a native-OTel Claude Code. Gated at the producer on the
+	// node's own content-sharing posture — see SetContentCapture — so a
+	// metadata-only node writes nothing and stays byte-identical to the
+	// pre-producer build. Best-effort like the cache/pid seams above: a
+	// content-store failure is reported on stderr and never fails the
+	// user-visible ingest.
+	n, cerr := s.captureMessageContent(ctx, events)
+	result.MessageContentRows = n
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "store.Ingest: message-content capture non-fatal err (%d written): %v\n", n, cerr)
 	}
 
 	// Guard post-hoc evaluation (guard spec §7), last so the
@@ -1751,6 +2695,42 @@ func (s *Store) Ingest(
 				s.guard.MaybeAlert(verdicts[i])
 			}
 		}
+	}
+
+	// Lines-of-code capture (docs/plans/lines-of-code-tracking-plan-2026-09-07.md
+	// §3.2). ONE call, here, after every action row exists: the LOC seam
+	// resolves each edit/write event back to its stored row and counts the
+	// authored lines from the raw_tool_input the store already holds. It
+	// owns its own table (internal/store/loc.go) and threads no type back
+	// through Ingest. Failure-isolated like the guard stage above — a
+	// counting problem must never cost the operator an ingest.
+	if _, lerr := s.RecordFileChanges(ctx, events); lerr != nil {
+		warnLOC("record", lerr)
+	}
+
+	// Task-tracking post-hoc decode (internal/store/taskflow.go, migration
+	// 109): re-reads the todo_update / task_complete / post_tool_batch rows
+	// ACTUALLY INSERTED above into per-item task_items/task_transitions.
+	// Best-effort like the cache/guard seams above — a decode error is a
+	// bug in one tool's payload shape, never a reason to fail the
+	// user-visible ingest that already landed. No-ops entirely when
+	// [tasks].enabled is false (SetTasksEnabled default).
+	if _, terr := s.applyTaskEvents(ctx, actions); terr != nil {
+		fmt.Fprintf(os.Stderr, "store.Ingest: task-tracking decode non-fatal err: %v\n", terr)
+	}
+
+	if err := s.RecordToolAccounts(ctx, opts.ToolAccounts); err != nil {
+		updateErrs = append(updateErrs, err)
+	}
+	// Outcome-update failures are reported LAST, after every other
+	// stage has run. Returning earlier would make a failed late outcome
+	// cost the batch its guard evaluation and cache observations too:
+	// the actions are already inserted by then, so the retry re-inserts
+	// them as duplicates with ID == 0 and the guard stage drops them
+	// (only genuinely-inserted rows evaluate). Retrying the updates
+	// alone is idempotent, so this is the cheapest honest failure.
+	if len(updateErrs) > 0 {
+		return result, fmt.Errorf("store.Ingest: outcome update: %w", errors.Join(updateErrs...))
 	}
 
 	return result, nil
@@ -1865,7 +2845,10 @@ func (s *Store) indexOutputs(
 		if isMCPToolName(e.RawToolName) {
 			continue
 		}
-		if err := idx.Index(ctx, a.ID, e.RawToolName, a.Target, e.ToolOutput, a.ErrorMessage); err != nil {
+		// a.ID != 0 only for a row InsertActions TRULY inserted in this
+		// batch (an upsert onto an existing row leaves it 0), so no prior
+		// excerpt can carry this id: skip the replace-delete (T-412).
+		if err := idx.IndexNew(ctx, a.ID, e.RawToolName, a.Target, e.ToolOutput, a.ErrorMessage); err != nil {
 			return err
 		}
 	}
@@ -1938,6 +2921,66 @@ func (s *Store) recordCommandOutcome(ctx context.Context, a *models.Action) erro
 	return nil
 }
 
+// recordOutcomeUpdateFailureContext files failure_context for a
+// run_command row whose real outcome arrived cross-tick, after the
+// insert-time pass deliberately skipped it (models.ToolEvent.
+// OutcomePending). It reloads the identifying columns the bookkeeping
+// needs — the update carries only the key plus the outcome — and hands
+// recordCommandOutcome an Action bearing the NEW success/error, so a
+// failure files with the right retry_count and a success flips prior
+// failures of the same command at the moment it is actually observed.
+//
+// A non-run_command row, or a key that matches nothing, is a silent
+// no-op.
+//
+// Unlike the insert-time call site, this one needs its own replay
+// guard. There, a duplicate insert leaves Action.ID == 0 and the row is
+// skipped; here the update MATCHES on every replay (RowsAffected counts
+// matched rows, not changed ones), failure_context has no uniqueness on
+// action_id, and recordCommandOutcome's failure branch is a plain
+// INSERT — so a retried window (which an outcome-update error now
+// deliberately causes) or a duplicate result record would re-file the
+// same failure with an inflated retry_count. The success branch needs
+// no guard: its UPDATE is already scoped WHERE eventually_succeeded = 0.
+func (s *Store) recordOutcomeUpdateFailureContext(ctx context.Context, up models.ActionOutcomeUpdate) error {
+	var (
+		a  models.Action
+		ts string
+	)
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT id, session_id, project_id, timestamp, action_type, COALESCE(target, '')
+		   FROM actions WHERE source_file = ? AND source_event_id = ?`,
+		up.SourceFile, up.SourceEventID,
+	).Scan(&a.ID, &a.SessionID, &a.ProjectID, &ts, &a.ActionType, &a.Target)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("store.recordOutcomeUpdateFailureContext: load: %w", err)
+	}
+	if a.ActionType != models.ActionRunCommand {
+		return nil
+	}
+	if !up.Success {
+		var exists int
+		if err := s.db.QueryRowContext(
+			ctx,
+			`SELECT EXISTS(SELECT 1 FROM failure_context WHERE action_id = ?)`,
+			a.ID,
+		).Scan(&exists); err != nil {
+			return fmt.Errorf("store.recordOutcomeUpdateFailureContext: replay check: %w", err)
+		}
+		if exists != 0 {
+			return nil
+		}
+	}
+	a.Timestamp = parseStamp(ts)
+	a.Success = up.Success
+	a.ErrorMessage = up.ErrorMessage
+	return s.recordCommandOutcome(ctx, &a)
+}
+
 // insertSingleAction is the per-row path used for file-typed actions so the
 // freshness pipeline can read and write file_state between adjacent events in
 // the same batch. Returns (true, nil) when a new row was inserted;
@@ -1990,7 +3033,7 @@ func (s *Store) insertSingleAction(ctx context.Context, a *models.Action) (bool,
 		nullableString(a.PrecedingReasoning),
 		nullableString(a.RawToolName),
 		nullableString(a.RawToolInput),
-		nullableString(a.RawToolOutput),
+		nullableString(capToolOutput(a.RawToolOutput)),
 		a.Tool,
 		a.SourceFile,
 		sha256HexOrEmpty(a.SourceFile),
@@ -2001,6 +3044,7 @@ func (s *Store) insertSingleAction(ctx context.Context, a *models.Action) (bool,
 		nullableString(a.OrgID),
 		nullableString(a.UserEmail),
 		nullableInt64(a.ContentBytes),
+		marshalUserAttachments(a.UserAttachments),
 	)
 	if err != nil {
 		return false, fmt.Errorf("store.insertSingleAction: %w", err)
@@ -2064,6 +3108,11 @@ func (s *Store) CountActions(ctx context.Context) (int, error) {
 // a zero-token error row with empty model is still useful for
 // surfacing the failure.
 func (s *Store) InsertAPITurn(ctx context.Context, t models.APITurn) (int64, error) {
+	var ownerErr error
+	t.SessionID, ownerErr = s.transcriptChildForRequest(ctx, t.SessionID, t.RequestID)
+	if ownerErr != nil {
+		return 0, ownerErr
+	}
 	if t.Provider == "" {
 		return 0, errors.New("store.InsertAPITurn: Provider is required")
 	}
@@ -2086,8 +3135,10 @@ func (s *Store) InsertAPITurn(ctx context.Context, t models.APITurn) (int64, err
 			compression_original_bytes, compression_compressed_bytes,
 			compression_count, compression_dropped_count, compression_marker_count,
 			http_status, error_class, error_message,
-			org_id, user_email, fast, source
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			org_id, user_email, fast, source,
+			route, routing_generation, authority_source,
+			prompt_id, request_class
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullableString(t.SessionID),
 		nullableInt64(t.ProjectID),
 		timestamp(t.Timestamp),
@@ -2120,6 +3171,11 @@ func (s *Store) InsertAPITurn(ctx context.Context, t models.APITurn) (int64, err
 		nullableString(t.UserEmail),
 		boolToInt(t.Fast),
 		nullableString(t.Source),
+		nullableString(t.Route),
+		nullableInt64(t.RoutingGeneration),
+		nullableString(t.AuthoritySource),
+		nullableString(t.PromptID),
+		nullableString(t.RequestClass),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("store.InsertAPITurn: %w", err)
@@ -2383,10 +3439,10 @@ func (s *Store) UpsertClaudecodeEffort(ctx context.Context, sessionID, toolUseID
 		ctx,
 		`UPDATE actions
 		   SET metadata = json_set(COALESCE(metadata, '{}'), '$.effort_level', ?)
-		 WHERE session_id     = ?
+		 WHERE (session_id = ? OR session_id IN (SELECT id FROM sessions WHERE parent_thread_id = ?))
 		   AND source_event_id = ?
 		   AND tool            = 'claude-code'`,
-		effortLevel, sessionID, toolUseID,
+		effortLevel, sessionID, sessionID, toolUseID,
 	); err != nil {
 		return fmt.Errorf("store.UpsertClaudecodeEffort: stamp action: %w", err)
 	}

@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/advisor"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // advisorSessionDigest returns the ≤400-token advisory digest for
@@ -29,15 +31,19 @@ func advisorSessionDigest(ctx context.Context) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Observer advisor — top cost-saving notes for this machine (")
+	b.WriteString("Observer advisor - top cost-saving notes for this machine (")
+	// no-bare-usd:allow (masked below with costtext.MaskDollars under the developer cost display)
 	fmt.Fprintf(&b, "last %dd, ~$%.0f avoidable):\n", rep.WindowDays, rep.TotalSavingsUSD)
 	for i, s := range rep.Suggestions {
 		if i >= 3 {
 			break
 		}
-		fmt.Fprintf(&b, "- %s — %s\n", s.Title, s.Nudge)
+		fmt.Fprintf(&b, "- %s - %s\n", s.Title, s.Nudge)
 	}
-	out := b.String()
+	// The digest is injected into the developer's session, so it follows the
+	// developer cost display (T-204): under token usage the dollar amounts in
+	// the notes are hidden, never converted.
+	out := costtext.MaskDollars(newCostDisplayResolver(store.New(database)).Mode(), b.String())
 	// Hard cap ≈400 tokens (~1,600 chars) so the injection can never
 	// meaningfully tax the session it's trying to save money for.
 	if len(out) > 1600 {

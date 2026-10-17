@@ -213,7 +213,7 @@ func (s *SessionStore) restore() {
 	defer cancel()
 	gen, rows, err := s.persister.LoadAll(ctx)
 	if err != nil {
-		slog.Error("remoteauth: failed to load persisted device sessions — starting with none (remote devices must re-pair)", "error", err)
+		slog.Error("remoteauth: failed to load persisted device sessions - starting with none (remote devices must re-pair)", "error", err)
 		return
 	}
 	s.gen = gen
@@ -253,7 +253,7 @@ func (s *SessionStore) restore() {
 				slog.Warn("remoteauth: failed to prune an over-cap persisted device session (it stays out of memory; the cap is re-applied at next restore)", "error", derr)
 			}
 		}
-		slog.Warn("remoteauth: persisted device sessions exceeded max_sessions — kept the most recently seen and pruned the rest",
+		slog.Warn("remoteauth: persisted device sessions exceeded max_sessions - kept the most recently seen and pruned the rest",
 			"loaded", len(live), "max", s.params.Max, "pruned", len(live)-s.params.Max)
 		live = live[:s.params.Max]
 	}

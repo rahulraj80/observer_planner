@@ -1,14 +1,48 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { HeroStat, PageHeader, Pill, SegmentedControl } from "@/components/primitives";
-import { HelpInd } from "@/components/HelpInd";
+import {
+  ChartShell,
+  EmptyState,
+  StatCard,
+  InlineLoading,
+  Icon,
+  ModelId,
+  ModelMark,
+  PageHeader,
+  Pill,
+  SegmentedControl,
+  StatStrip,
+  ComboChip,
+  TabPanel,
+  TabStrip,
+  Table,
+  useTabVisited,
+  type TabDef,
+} from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { ROUTING_TABS, defaultTab, type RoutingTab } from "@/lib/nodePageTabs";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable } from "@/components/DataTable";
+import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
-import { CompassIcon } from "@/components/icons";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { markRestartPending } from "@/lib/restartPending";
 import { useFilters, windowDaysApprox, windowLabel } from "@/lib/filters";
-import { fmtInt, fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtClock, fmtDateTime, fmtInt, fmtUSD, maskDollarAmounts, withoutDollars } from "@/lib/format";
+
+// Routing's economics (realized / would-have savings, $ per decision, cache
+// forfeits, per-move estimates) are decision-time dollar estimates with no
+// token form: in the org's token-usage view (format.ts cost affordances) they
+// drop, and the decision counts, reroutes and quality evidence stay.
+import { Check, X } from "lucide-react";
+import { VocabPill } from "@shared/lib/vocabPill";
+import { POLICY_MODE } from "@/lib/vocabTones";
+import { navIcon } from "@/lib/nav";
+import { MetricIcon } from "@/components/MetricIcon";
 
 // Routing page (model-routing spec §R17.1–17.2): live policy with the
 // EXPANDED rule table (never a black box), decisions feed with
@@ -205,32 +239,33 @@ type ApplyPreview = {
 // daemon) degrades to the bare code, never a guess.
 const REASON_DOCS: Record<string, string> = {
   overpowered_read: "a read-only exploration turn ran on a tier above the policy's floor for that work",
-  overpowered_housekeeping: "commits / summaries / titles on a flagship tier — weak-model work",
+  overpowered_housekeeping: "commits / summaries / titles on a flagship tier - weak-model work",
   overpowered_subagent: "a sidechain turn on a tier the sub-agent's observed profile doesn't need",
   overpowered_test_run: "build / test / lint command turns on a flagship tier",
   phase_pin: "a phase rule pinned the tier (opusplan-style)",
-  cache_hold: "switching would forfeit a warm prompt cache worth more than the switch saves — the decision is stay",
-  stickiness_hold: "the proposed switch landed inside the min-turns-between-switches coherence floor — held",
+  cache_hold: "switching would forfeit a warm prompt cache worth more than the switch saves - the decision is stay",
+  stickiness_hold: "the proposed switch landed inside the min-turns-between-switches coherence floor - held",
   budget_band_50: "the budget modifier demoted the max allowed tier at the 50% burn band",
   budget_band_80: "the budget modifier demoted the max allowed tier at the 80% burn band",
   budget_band_95: "the budget modifier demoted the max allowed tier at the 95% burn band",
-  availability_fallback: "the target model is health-degraded — the fallback chain engaged",
+  availability_fallback: "the target model is health-degraded - the fallback chain engaged",
   rate_limit_window: "subscription-window headroom preservation demoted a soft turn-kind",
-  entitlement_hold: "subscription traffic outside the plan's native model set — advise-only",
+  entitlement_hold: "subscription traffic outside the plan's native model set - advise-only",
   escalation: "a downshifted turn failed; the session escalated back to the pre-downshift tier",
-  fail_open: "an engine error or timeout — the original model passed through untouched",
+  fail_open: "an engine error or timeout - the original model passed through untouched",
   unknown_turn_kind: "the classifier degraded to unknown, so no routing applies",
   unclassified_model: "the original model isn't in the tier table; the engine refuses to reason about it",
   no_candidate: "a rule matched but no same-provider-shape candidate exists in the target tier",
-  no_route: "an explicit exemption rule matched — this turn is exempt from routing",
-  insufficient_evidence: "the move lacks calibration parity evidence — surfaced as a quality-risk flag",
+  no_route: "an explicit exemption rule matched - this turn is exempt from routing",
+  insufficient_evidence: "the move lacks calibration parity evidence - surfaced as a quality-risk flag",
   custom_rule: "a user-defined [[routing.rules]] row fired without declaring its own reason code",
   privacy_hold: "a privacy rule constrained the candidate set",
-  quality_floor_hold: "the quality floor denied the proposed target — the turn stays on its model",
+  quality_floor_hold: "the quality floor denied the proposed target - the turn stays on its model",
   capability_hold: "the capability basis denied the switch (provider shape, context window, tool support)",
-  effort_downshift: "effort / thinking lowered instead of switching model — zero cache loss",
+  context_window_unknown: "the target's context window isn't in the pricing data yet, so the prompt could not be checked against it",
+  effort_downshift: "effort / thinking lowered instead of switching model - zero cache loss",
   budget_exhausted: "a budget scope hit 100% and its configured exhaustion behavior fired",
-  calibration_demoted: "calibration graded this rule's downshift as regressing — logged, never applied until evidence clears",
+  calibration_demoted: "calibration graded this rule's downshift as regressing - logged, never applied until evidence clears",
 };
 
 const TIER_ORDER = ["opus-class", "sonnet-class", "haiku-class", "free", "local", "unclassified"];
@@ -238,13 +273,177 @@ const TIER_ORDER = ["opus-class", "sonnet-class", "haiku-class", "free", "local"
 type AppliedFilter = "" | "true" | "false";
 
 const SELECT_CLASS =
-  "rounded-2 border border-line-2 bg-bg-1 px-2 py-1 text-[11.5px] text-fg-1 outline-none focus:border-accent/60";
+  "rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-[11.5px] text-fg-1 outline-none focus:border-accent/60";
+
+// RuleRow is a policy rule plus its walk position and any live demotion
+// note, resolved before the table so the columns stay module-level.
+type RuleRow = RoutingRule & { pos: number; demoted?: string };
+
+// The rule table is walked top-down (first match wins), so its order is
+// the policy's and sorting is disabled.
+const RULE_COLUMNS: ColumnDef<RuleRow, unknown>[] = [
+  {
+    id: "pos",
+    header: "#",
+    accessorKey: "pos",
+    enableSorting: false,
+    cell: ({ row }) => <span className="tabular-nums text-fg-3">{row.original.pos}</span>,
+  },
+  {
+    id: "name",
+    header: "Rule",
+    accessorKey: "name",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-[11px] text-fg-1">
+        {row.original.name}
+        {row.original.demoted !== undefined && (
+          <>
+            {" "}
+            <Pill variant="warn" title={row.original.demoted}>
+              demoted
+            </Pill>
+          </>
+        )}
+      </span>
+    ),
+  },
+  {
+    id: "when",
+    header: "When",
+    accessorKey: "when",
+    enableSorting: false,
+    cell: ({ row }) => <span className="font-mono text-[11px] text-fg-2">{row.original.when}</span>,
+  },
+  {
+    id: "action",
+    header: "Action",
+    accessorKey: "action",
+    enableSorting: false,
+    cell: ({ row }) => <span className="text-fg-2">{row.original.action}</span>,
+  },
+  {
+    id: "reason",
+    header: "Reason",
+    accessorKey: "reason",
+    enableSorting: false,
+    cell: ({ row }) => <Pill variant="neutral">{row.original.reason}</Pill>,
+  },
+];
+
+const numCell = (v: string) => <span className="tabular-nums text-fg-2">{v}</span>;
+
+const SAVINGS_COLUMNS: ColumnDef<SavingsGroup, unknown>[] = [
+  {
+    id: "key",
+    header: "Group",
+    accessorKey: "key",
+    cell: ({ row }) => <span className="font-mono text-[11px] text-fg-1">{row.original.key}</span>,
+  },
+  {
+    id: "decisions",
+    header: "n",
+    accessorFn: (g) => g.decisions,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtInt(row.original.decisions)),
+  },
+  {
+    id: "reroutes",
+    header: "Reroutes",
+    accessorFn: (g) => g.reroutes,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtInt(row.original.reroutes)),
+  },
+  {
+    id: "realized",
+    header: "Realized (est.)",
+    accessorFn: (g) => g.realized_usd,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtUSD(row.original.realized_usd)),
+  },
+  {
+    id: "would_have",
+    header: "Would-have",
+    accessorFn: (g) => g.would_have_usd,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtUSD(row.original.would_have_usd)),
+  },
+  {
+    id: "per_decision",
+    header: "$/decision ± CI95",
+    accessorFn: (g) => g.mean_per_decision_usd,
+    meta: { align: "right" },
+    cell: ({ row }) =>
+      numCell(
+        `${row.original.mean_per_decision_usd.toFixed(4)} ± ${row.original.ci95_per_decision_usd.toFixed(4)}`,
+      ),
+  },
+];
+
+const HEALTH_COLUMNS: ColumnDef<HealthRow, unknown>[] = [
+  {
+    id: "model",
+    header: "Model",
+    accessorKey: "model",
+    cell: ({ row }) => (
+      <span className="text-[11px]">
+        <ModelId model={row.original.model} className="min-w-0" />
+      </span>
+    ),
+  },
+  {
+    id: "turns_1h",
+    header: "Turns 1h",
+    accessorFn: (h) => h.turns_1h,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtInt(row.original.turns_1h)),
+  },
+  {
+    id: "errors_1h",
+    header: "Errors 1h",
+    accessorFn: (h) => h.errors_1h,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtInt(row.original.errors_1h)),
+  },
+  {
+    id: "turns_24h",
+    header: "Turns 24h",
+    accessorFn: (h) => h.turns_24h,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtInt(row.original.turns_24h)),
+  },
+  {
+    id: "errors_24h",
+    header: "Errors 24h",
+    accessorFn: (h) => h.errors_24h,
+    meta: { align: "right" },
+    cell: ({ row }) => numCell(fmtInt(row.original.errors_24h)),
+  },
+  {
+    id: "error_rate_24h",
+    header: "Error rate 24h",
+    accessorFn: (h) => h.error_rate_24h,
+    meta: { align: "right" },
+    cell: ({ row }) => {
+      const pct = `${(row.original.error_rate_24h * 100).toFixed(1)}%`;
+      return row.original.error_rate_24h >= 0.25 ? <Pill variant="danger">{pct}</Pill> : numCell(pct);
+    },
+  },
+];
 
 export function RoutingPage() {
   // Global window (TopBar) drives every windowed query; "all" maps to
   // the same far horizon as sibling pages. Reason/applied stay local —
   // they're feed filters, not data scopes.
-  const { win, customRange } = useFilters();
+  const { win, customRange, model, tool, project } = useFilters();
+  // The global Model, Tool and Project filters narrow the decision feed,
+  // savings, shadow grading and the health board (a decision is in a model
+  // when it asked for it OR ran on it; it is in a tool / project when its
+  // session ran there, T-521). The policy / tier map / simulate / apply views
+  // are configuration, not data, and stay whole.
+  const modelArg = model !== "all" ? model : undefined;
+  const toolArg = tool !== "all" ? tool : undefined;
+  const projectArg = project !== "all" ? project : undefined;
   // Routing surfaces are day-centric: the savings / shadow / apply
   // endpoints replay over a whole-day count and echo `window_days`,
   // so sub-day / custom windows round up to a day count here rather
@@ -273,35 +472,73 @@ export function RoutingPage() {
   };
   const [expanded, setExpanded] = useState<number | null>(null);
 
+  // Page tabs (platform tabs plan §2.2): Overview / Decisions / Policy /
+  // Shadow & apply, lazy per tab and kept mounted. Status + savings feed
+  // the strip (every tab); each tab's own reads run on its first open.
+  const pageTabs = usePageTabs("routing", ROUTING_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const overviewVisited = useTabVisited<RoutingTab>("overview", tab);
+  const decisionsVisited = useTabVisited<RoutingTab>("decisions", tab);
+  const policyVisited = useTabVisited<RoutingTab>("policy", tab);
+  const shadowVisited = useTabVisited<RoutingTab>("shadow", tab);
+
   const status = useApi<RoutingStatus>("/api/routing/status");
-  const savings = useApi<SavingsResponse>("/api/routing/savings", { days }, [days]);
-  const decisions = useApi<DecisionsResponse>(
-    "/api/routing/decisions",
-    { days, limit: 50, reason: reason || undefined, applied: appliedFilter || undefined },
-    [days, reason, appliedFilter],
+  const savings = useApi<SavingsResponse>(
+    "/api/routing/savings",
+    { days, model: modelArg, tool: toolArg, project: projectArg },
+    [days, modelArg, toolArg, projectArg],
   );
-  const tiers = useApi<TiersResponse>("/api/routing/tiers");
-  const health = useApi<HealthResponse>("/api/routing/health");
-  const shadow = useApi<ShadowReport>("/api/routing/shadow", { days }, [days]);
+  const decisions = useApi<DecisionsResponse>(
+    decisionsVisited ? "/api/routing/decisions" : null,
+    {
+      days,
+      limit: 50,
+      reason: reason || undefined,
+      applied: appliedFilter || undefined,
+      model: modelArg,
+      tool: toolArg,
+      project: projectArg,
+    },
+    [days, reason, appliedFilter, modelArg, toolArg, projectArg],
+  );
+  const tiers = useApi<TiersResponse>(policyVisited ? "/api/routing/tiers" : null);
+  const health = useApi<HealthResponse>(
+    overviewVisited ? "/api/routing/health" : null,
+    { model: modelArg, tool: toolArg, project: projectArg },
+    [modelArg, toolArg, projectArg],
+  );
+  const shadow = useApi<ShadowReport>(
+    shadowVisited ? "/api/routing/shadow" : null,
+    { days, model: modelArg, tool: toolArg, project: projectArg },
+    [days, modelArg, toolArg, projectArg],
+  );
 
   const st = status.data;
   const sv = savings.data;
   const sh = shadow.data;
   const decisionRows = decisions.data?.decisions ?? [];
 
+  // Badges only from the page-level status read: Policy carries a dot when
+  // the active policy has lint errors (danger) or warnings / demoted rules.
+  const lintErrors = (st?.lint ?? []).some((l) => l.severity === "error");
+  const policyNotice = (st?.lint ?? []).length > 0 || Object.keys(st?.demoted_rules ?? {}).length > 0;
+  const tabDefs: TabDef<RoutingTab>[] = pageTabs.ids.map((id) => ({
+    id,
+    label: ROUTING_TABS.labels[id],
+    dot: id === "policy" ? (lintErrors ? "danger" : policyNotice ? "warn" : null) : null,
+  }));
+
   return (
-    <div className="space-y-4 p-5">
+    <div className="p-4 sm:p-6">
       <PageHeader
+        className="mb-6"
+        icon={navIcon("routing")}
         title="Routing"
         helpId="tab.routing"
         sub={
           st ? (
             <span className="inline-flex flex-wrap items-center gap-1.5">
-              {st.enabled ? (
-                <Pill variant={st.mode === "enforce" ? "warn" : "info"}>{st.mode}</Pill>
-              ) : (
-                <Pill variant="neutral">disabled</Pill>
-              )}
+              <VocabPill vocab="guardMode" table={POLICY_MODE} value={st.enabled ? st.mode : "disabled"} />
               <span>
                 policy <span className="font-semibold text-fg-1">{st.policy}</span> @{" "}
                 <code className="rounded-1 bg-bg-2 px-1 font-mono text-[11px]">{st.policy_hash}</code> · stickiness{" "}
@@ -309,59 +546,85 @@ export function RoutingPage() {
               </span>
             </span>
           ) : (
-            "Model-routing decisions, savings, and policy transparency"
+            costLabel("Model-routing decisions, savings, and policy transparency", "Model-routing decisions and policy transparency")
           )
         }
       />
 
-      {st && !st.enabled && <RoutingPreviewCard />}
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <HeroStat
-          label="Decisions — all time"
+      <StatStrip cols={dollarsShown() ? 4 : 2} ariaLabel="Routing summary">
+        <StatCard
+          label="Decisions - all time"
           helpId="tile.routing.decisions"
-          icon={<CompassIcon />}
+          icon={<MetricIcon metric="routingDecisions" />}
           loading={status.loading}
-          value={st ? fmtInt(st.decisions) : "—"}
+          value={st ? fmtInt(st.decisions) : "-"}
           sub={
             st?.last_decision_at
-              ? `last ${new Date(st.last_decision_at).toLocaleString()}`
-              : "none yet — routing is opt-in (Settings → Routing, or the preview above)"
+              ? `last ${fmtDateTime(st.last_decision_at)}`
+              : "none yet - routing is opt-in (Settings → Routing, or the preview on Overview)"
           }
         />
-        <HeroStat
-          label={`Realized — ${winLabel}`}
-          helpId="tile.routing.realized"
-          loading={savings.loading}
-          value={sv ? fmtUSD(sv.realized_usd) : "—"}
-          sub="decision-time estimates on applied rewrites (enforce mode)"
-        />
-        <HeroStat
-          label={`Would-have — ${winLabel}`}
-          helpId="tile.routing.would_have"
-          loading={savings.loading}
-          value={sv ? fmtUSD(sv.would_have_usd) : "—"}
-          sub="the same estimates on unapplied advise decisions"
-        />
-        <HeroStat
+        {dollarsShown() && (
+          <>
+            <StatCard
+              label={`Realized - ${winLabel}`}
+              icon={<MetricIcon metric="savings" />}
+              helpId="tile.routing.realized"
+              loading={savings.loading}
+              stale={savings.isStale}
+              value={sv ? fmtUSD(sv.realized_usd) : "-"}
+              sub="decision-time estimates on applied rewrites (enforce mode)"
+            />
+            <StatCard
+              label={`Would-have - ${winLabel}`}
+              icon={<MetricIcon metric="counterfactualSavings" />}
+              helpId="tile.routing.would_have"
+              loading={savings.loading}
+              stale={savings.isStale}
+              value={sv ? fmtUSD(sv.would_have_usd) : "-"}
+              sub="the same estimates on unapplied advise decisions"
+            />
+          </>
+        )}
+        <StatCard
           label="Calibration cells"
+          icon={<MetricIcon metric="calibrationCells" />}
           helpId="tile.routing.calibration"
           loading={status.loading}
-          value={st ? fmtInt(st.calibration_rows) : "—"}
+          stale={status.isStale}
+          value={st ? fmtInt(st.calibration_rows) : "-"}
           sub={
             <>
-              <code className="rounded-1 bg-bg-2 px-1 font-mono text-[10.5px]">
-                observer model-value --save-calibration
-              </code>{" "}
-              feeds the §R7.2 evidence gate
+              built from your own turns; the evidence check uses these
+              <CommandJobButton
+                job="calibration"
+                className="mt-1.5"
+                outputLines={2}
+                confirmLabel="Save calibration?"
+                armedNote="Aggregates the last 30 days of your turns into calibration cells. Local only."
+                runningLabel="Saving…"
+                doneText="Calibration saved."
+                onDone={() => status.reload()}
+              >
+                Save calibration now
+              </CommandJobButton>
             </>
           }
         />
-      </div>
+      </StatStrip>
 
-      <Section
-        title={`Advise shadow — ${winLabel}`}
-        helpId="chart.routing_shadow"
+      <TabStrip
+        tabs={tabDefs}
+        value={tab}
+        onChange={setTab}
+        idPrefix="routing"
+        ariaLabel="Routing sections"
+        className="mb-4"
+      />
+
+      <TabPanel id="shadow" active={tab} idPrefix="routing" className="space-y-6">
+      <ChartShell
+        title={<TitleWithHelp text={`Advise shadow - ${winLabel}`} helpId="chart.routing_shadow" />}
         right={
           sh ? (
             sh.ready_to_promote ? (
@@ -372,20 +635,25 @@ export function RoutingPage() {
           ) : null
         }
       >
-        {shadow.loading ? (
-          <Loading />
+        {shadow.loading || (!shadow.data && !shadow.error) ? (
+          <InlineLoading block />
         ) : st && !st.enabled ? (
           <p className="py-2 text-[12px] text-fg-3">
-            Routing is off — the shadow accrues once advise mode runs (every advise decision is a recorded
-            counterfactual; requests stay untouched). Preview savings above answers "is it worth enabling?" without
-            turning anything on.
+            Routing is off - the shadow accrues once advise mode runs (every advise decision is a recorded
+            counterfactual; requests stay untouched). The savings preview on the Overview tab answers "is it worth
+            enabling?" without turning anything on.
           </p>
         ) : sh ? (
           <>
             <p className="text-[12px] leading-relaxed text-fg-2">
-              {fmtInt(sh.advise_decisions)} advise decisions; {fmtInt(sh.would_reroute)} would have rerouted, saving{" "}
-              <span className="font-semibold text-fg-1">{fmtUSD(sh.would_save_usd)}</span> (net of{" "}
-              {fmtUSD(sh.cache_forfeit_usd)} cache forfeits) with{" "}
+              {fmtInt(sh.advise_decisions)} advise decisions; {fmtInt(sh.would_reroute)} would have rerouted
+              {dollarsShown() && (
+                <>
+                  , saving <span className="font-semibold text-fg-1">{fmtUSD(sh.would_save_usd)}</span> (net of{" "}
+                  {fmtUSD(sh.cache_forfeit_usd)} cache forfeits)
+                </>
+              )}{" "}
+              with{" "}
               <span className="font-semibold text-fg-1">{fmtInt(sh.quality_flags)}</span> quality-flag events (
               {fmtInt(sh.evidence_backed_moves)} moves evidence-backed).
             </p>
@@ -407,115 +675,145 @@ export function RoutingPage() {
             {st?.enabled && st.mode === "advise" && <PromoteControl sh={sh} />}
             {st?.enabled && st.mode === "enforce" && (
               <p className="mt-2 text-[11.5px] text-fg-3">
-                Enforce is live — applied rewrites land in the decisions feed below; realized savings on the tile
+                Enforce is live - applied rewrites land in the Decisions tab's feed; realized savings on the tile
                 above.
               </p>
             )}
             <p className="mt-2 text-[11px] leading-snug text-fg-3">{sh.note}</p>
           </>
         ) : null}
-      </Section>
+      </ChartShell>
 
       <RoutingApplyCard days={days} />
+      </TabPanel>
 
+      <TabPanel id="policy" active={tab} idPrefix="routing" className="space-y-6">
       {st && Object.keys(st.demoted_rules ?? {}).length > 0 && (
-        <Section
-          title="Calibration demotions"
-          helpId="chart.routing_demotions"
-          sub="Rules the calibration job graded as regressing — their decisions log but never apply until the evidence clears (§R18.3)."
+        <ChartShell
+          title={<TitleWithHelp text="Calibration demotions" helpId="chart.routing_demotions" />}
+          sub="Rules the calibration job graded as regressing - their decisions log but never apply until the evidence clears."
         >
           <div className="space-y-1.5">
             {Object.entries(st.demoted_rules).map(([rule, why]) => (
               <div key={rule} className="flex flex-wrap items-center gap-1.5 text-[12px] text-fg-2">
                 <Pill variant="warn">demoted</Pill>
                 <code className="font-mono text-[11px] text-fg-1">{rule}</code>
-                <span>— {why}</span>
+                <span>- {why}</span>
               </div>
             ))}
           </div>
           <p className="mt-2 text-[11px] leading-snug text-fg-3">
             Demotions are in-memory: a daemon restart clears them and the next calibration pass (hourly) re-detects
             anything still regressing. Affected decisions carry the{" "}
-            <code className="font-mono">calibration_demoted</code> reason code in the feed below.
+            <code className="font-mono">calibration_demoted</code> reason code in the Decisions feed.
           </p>
-        </Section>
+        </ChartShell>
       )}
 
       {st && st.lint.length > 0 && (
-        <Section title="Policy lint findings">
+        <ChartShell title="Policy lint findings">
           <div className="space-y-1.5">
             {st.lint.map((l, i) => (
               <div key={i} className="flex flex-wrap items-center gap-1.5 text-[12px] text-fg-2">
                 <Pill variant={l.severity === "error" ? "danger" : "warn"}>{l.severity}</Pill>
                 <code className="font-mono text-[11px] text-fg-1">{l.check}</code>
                 {l.rule ? <code className="font-mono text-[11px] text-fg-3">({l.rule})</code> : null}
-                <span>— {l.message}</span>
+                <span>- {l.message}</span>
               </div>
             ))}
           </div>
-        </Section>
+        </ChartShell>
       )}
 
-      <Section
-        title="Policy rule table"
-        helpId="chart.routing_rules"
+      <ChartShell
+        title={<TitleWithHelp text="Policy rule table" helpId="chart.routing_rules" />}
         sub={`Walked top-down, first match wins. Bases: ${st ? st.bases.join(" → ") : "…"}`}
       >
         {status.loading ? (
-          <Loading />
+          <InlineLoading block />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                  <th className="py-1.5 pr-3 font-semibold">#</th>
-                  <th className="py-1.5 pr-3 font-semibold">Rule</th>
-                  <th className="py-1.5 pr-3 font-semibold">When</th>
-                  <th className="py-1.5 pr-3 font-semibold">Action</th>
-                  <th className="py-1.5 font-semibold">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(st?.rules ?? []).map((r, i) => (
-                  <tr key={r.name} className="border-b border-line-1/60 align-top">
-                    <td className="py-1.5 pr-3 tabular-nums text-fg-3">{i + 1}</td>
-                    <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">
-                      {r.name}
-                      {st?.demoted_rules?.[r.name] !== undefined && (
-                        <>
-                          {" "}
-                          <Pill variant="warn" title={st.demoted_rules[r.name]}>
-                            demoted
-                          </Pill>
-                        </>
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-2">{r.when}</td>
-                    <td className="py-1.5 pr-3 text-fg-2">{r.action}</td>
-                    <td className="py-1.5">
-                      <Pill variant="neutral">{r.reason}</Pill>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <DataTable<RuleRow>
+            data={(st?.rules ?? []).map((r, i) => ({ ...r, pos: i + 1, demoted: st?.demoted_rules?.[r.name] }))}
+            columns={RULE_COLUMNS}
+            rowKey={(r) => r.name}
+            rowClassName={() => "align-top"}
+            minWidth={640}
+            emptyMessage="No rules in the active policy."
+          />
+        )}
+      </ChartShell>
+
+      <ChartShell
+        title={<TitleWithHelp text="Tier map" helpId="chart.routing_tiers" />}
+        sub="Pills with counts carry observed calibration evidence (hover for per-kind error rates). Evidence is correlational - deltas act only past the evidence thresholds."
+      >
+        {tiers.loading || (!tiers.data && !tiers.error) ? (
+          <InlineLoading block />
+        ) : (
+          <div className="space-y-2">
+            {TIER_ORDER.map((tier) => {
+              const models = tiers.data?.tiers?.[tier] ?? [];
+              if (models.length === 0) return null;
+              return (
+                <div key={tier} className="flex items-baseline gap-2">
+                  <span className="w-28 shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+                    {tier}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {models.map((m) => {
+                      const cal = (tiers.data?.calibration ?? []).filter(
+                        (c) => c.model === m && c.project_id === 0,
+                      );
+                      return (
+                        <Pill
+                          key={m}
+                          variant={cal.length > 0 ? "info" : "neutral"}
+                          title={
+                            cal.length > 0
+                              ? cal
+                                  .map((c) => `${c.turn_kind}: n=${c.n} err=${(c.error_rate * 100).toFixed(1)}%`)
+                                  .join("; ")
+                              : "no calibration evidence yet"
+                          }
+                        >
+                          <ModelMark model={m} size={11} tooltip={false} />
+                          {m}
+                          {cal.length > 0 ? ` (${cal.reduce((a, c) => a + c.n, 0)})` : ""}
+                        </Pill>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-      </Section>
+      </ChartShell>
+      </TabPanel>
 
-      <Section
-        title="Decisions feed"
-        helpId="chart.routing_decisions"
+      <TabPanel id="decisions" active={tab} idPrefix="routing" className="space-y-6">
+      <ChartShell
+        title={<TitleWithHelp text="Decisions feed" helpId="chart.routing_decisions" />}
         right={
-          <>
-            <select value={reason} onChange={(e) => setParam("reason", e.target.value)} className={SELECT_CLASS}>
-              <option value="">all reasons</option>
-              {(decisions.data?.reasons ?? []).map((rc) => (
-                <option key={rc} value={rc} title={REASON_DOCS[rc]}>
-                  {rc}
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Reason codes are short ids with a long meaning: the meaning
+                rides as the popover row's second line. */}
+            <ComboChip
+              label="Reason"
+              value={reason}
+              onChange={(v) => setParam("reason", v)}
+              placeholder="Filter reasons…"
+              popoverWidth={380}
+              options={[
+                { value: "", label: "all reasons", searchable: "all reasons" },
+                ...(decisions.data?.reasons ?? []).map((rc) => ({
+                  value: rc,
+                  label: <span className="font-mono">{rc}</span>,
+                  detail: REASON_DOCS[rc],
+                  searchable: `${rc} ${REASON_DOCS[rc] ?? ""}`.toLowerCase(),
+                })),
+              ]}
+            />
             <SegmentedControl<AppliedFilter>
               size="sm"
               options={[
@@ -529,65 +827,76 @@ export function RoutingPage() {
             <span className="text-[11px] text-fg-3">
               {decisions.data ? `${fmtInt(decisions.data.total)} decisions ${winLabel}` : ""}
             </span>
-          </>
+          </div>
         }
       >
-        {decisions.loading ? (
-          <Loading />
+        {decisions.loading || (!decisions.data && !decisions.error) ? (
+          <InlineLoading block />
         ) : decisionRows.length === 0 ? (
-          <div className="py-8 text-center text-[12px] text-fg-3">
-            No routing decisions in this window. Routing is opt-in and advise-first — preview the value first (the
-            card above, while routing is off), enable advise via Settings → Routing, route traffic through the proxy,
-            then watch decisions land here (<code className="rounded-1 bg-bg-2 px-1">observer routing advise</code>{" "}
-            for the CLI view).
-          </div>
+          <EmptyState
+            variant="inline"
+            illustration="inbox"
+            title="No routing decisions in this window"
+            body={
+              <>
+                Routing is opt-in and advise-first - preview the value first (the Overview tab, while routing is
+                off), enable advise via Settings → Routing, route traffic through the proxy, then watch decisions
+                land here (<code className="rounded-1 bg-bg-3 px-1">observer routing advise</code> for the CLI
+                view).
+              </>
+            }
+          />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                  <th className="py-1.5 pr-3 font-semibold">When</th>
-                  <th className="py-1.5 pr-3 font-semibold">Kind</th>
-                  <th className="py-1.5 pr-3 font-semibold">Route</th>
-                  <th className="py-1.5 pr-3 font-semibold">Mode</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Est. savings</th>
-                  <th className="py-1.5 font-semibold">Reasons</th>
-                </tr>
-              </thead>
-              <tbody>
+          <Table
+            size="md"
+            minWidth={680}
+            head={
+              <tr>
+                <th className="py-1.5 pr-3 font-medium">When</th>
+                <th className="py-1.5 pr-3 font-medium">Kind</th>
+                <th className="py-1.5 pr-3 font-medium">Route</th>
+                <th className="py-1.5 pr-3 font-medium">Mode</th>
+                {dollarsShown() && <th className="py-1.5 pr-3 text-right font-medium">Est. savings</th>}
+                <th className="py-1.5 font-medium">Reasons</th>
+              </tr>
+            }
+          >
                 {decisionRows.map((d) => (
                   <Fragment key={d.ID}>
                     <tr
                       onClick={() => setExpanded(expanded === d.ID ? null : d.ID)}
-                      className="cursor-pointer border-b border-line-1/60 transition-colors hover:bg-bg-2/60"
+                      className="cursor-pointer border-b border-line-1/60"
                     >
                       <td className="whitespace-nowrap py-1.5 pr-3 text-fg-3">
-                        {new Date(d.Timestamp).toLocaleString()}
+                        {fmtClock(d.Timestamp)}
                       </td>
                       <td className="py-1.5 pr-3">
                         <Pill variant="neutral">{d.TurnKind}</Pill>
                       </td>
-                      <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-2">
-                        {d.OriginalModel}
-                        {d.SelectedModel !== d.OriginalModel ? (
-                          <>
-                            {" "}
-                            <span className="text-fg-3">→</span>{" "}
-                            <span className="text-fg-1">{d.SelectedModel}</span>
-                          </>
-                        ) : null}
+                      <td className="py-1.5 pr-3 text-[11px] text-fg-2">
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                          <ModelId model={d.OriginalModel} className="min-w-0" />
+                          {d.SelectedModel !== d.OriginalModel ? (
+                            <>
+                              <span className="text-fg-3">→</span>
+                              <ModelId model={d.SelectedModel} className="min-w-0" />
+                            </>
+                          ) : null}
+                        </span>
                       </td>
                       <td className="py-1.5 pr-3">
                         {d.Applied ? <Pill variant="warn">applied</Pill> : <Pill variant="info">{d.Mode}</Pill>}
                       </td>
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
-                        {fmtUSD(d.EstSavingsUSD)}
-                      </td>
+                      {dollarsShown() && (
+                        <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
+                          {fmtUSD(d.EstSavingsUSD)}
+                        </td>
+                      )}
                       <td className="py-1.5 text-[11px] text-fg-3">{(d.ReasonCodes ?? []).join(", ")}</td>
                     </tr>
                     {expanded === d.ID && (
                       <tr className="border-b border-line-1/60">
-                        <td colSpan={6} className="rounded-1 bg-bg-2 px-3 py-2 text-[11px] leading-relaxed text-fg-2">
+                        <td colSpan={dollarsShown() ? 6 : 5} className="rounded-1 bg-bg-3 px-3 py-2 text-[11px] leading-relaxed text-fg-2">
                           <div className="space-y-1.5">
                             <div>
                               decision <code className="font-mono">{d.ID}</code> · session{" "}
@@ -622,20 +931,25 @@ export function RoutingPage() {
                                 {(d.ReasonCodes ?? []).map((rc) => (
                                   <li key={rc}>
                                     <code className="font-mono text-fg-1">{rc}</code>
-                                    {REASON_DOCS[rc] ? <span className="text-fg-3"> — {REASON_DOCS[rc]}</span> : null}
+                                    {REASON_DOCS[rc] ? <span className="text-fg-3"> - {REASON_DOCS[rc]}</span> : null}
                                   </li>
                                 ))}
                               </ul>
                             )}
                             <div>
                               policy <code className="font-mono">{d.PolicyName}</code> @{" "}
-                              <code className="font-mono">{d.PolicyHash}</code> · economics: est. savings{" "}
-                              <span className="font-semibold text-fg-1">{fmtUSD(d.EstSavingsUSD)}</span> net of cache
-                              forfeit {fmtUSD(d.CacheForfeitUSD)}{" "}
-                              <span className="text-fg-3">
-                                (what abandoning the warm prompt-cache prefix would cost — already deducted;{" "}
-                                {d.EstimateVersion})
-                              </span>
+                              <code className="font-mono">{d.PolicyHash}</code>
+                              {dollarsShown() && (
+                                <>
+                                  {" "}· economics: est. savings{" "}
+                                  <span className="font-semibold text-fg-1">{fmtUSD(d.EstSavingsUSD)}</span> net of cache
+                                  forfeit {fmtUSD(d.CacheForfeitUSD)}{" "}
+                                  <span className="text-fg-3">
+                                    (what abandoning the warm prompt-cache prefix would cost - already deducted;{" "}
+                                    {d.EstimateVersion})
+                                  </span>
+                                </>
+                              )}
                             </div>
                             <div className="text-fg-3">
                               CLI: <code className="font-mono">observer routing explain {d.ID}</code>
@@ -646,148 +960,68 @@ export function RoutingPage() {
                     )}
                   </Fragment>
                 ))}
-              </tbody>
-            </table>
-          </div>
+          </Table>
         )}
-      </Section>
+      </ChartShell>
+      </TabPanel>
 
-      <Section title={`Savings by tier — ${winLabel}`} helpId="chart.routing_savings" sub={sv?.note}>
+      <TabPanel id="overview" active={tab} idPrefix="routing" className="space-y-6">
+      {/* Routing off: the content-free preview answers "is it worth
+          enabling?" first. */}
+      {st && !st.enabled && <RoutingPreviewCard />}
+
+      <ChartShell
+        title={<TitleWithHelp text={`${costLabel("Savings by tier", "Decisions by tier")} - ${winLabel}`} helpId="chart.routing_savings" />}
+        sub={sv?.note ? maskDollarAmounts(sv.note) : undefined}
+      >
         {savings.loading ? (
-          <Loading />
+          <InlineLoading block />
         ) : (sv?.by_tier ?? []).length === 0 ? (
           <div className="py-6 text-center text-[12px] text-fg-3">
-            No graded savings yet — rows appear once decisions land in this window.
+            No graded savings yet - rows appear once decisions land in this window.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                  <th className="py-1.5 pr-3 font-semibold">Group</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">n</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Reroutes</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Realized (est.)</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Would-have</th>
-                  <th className="py-1.5 text-right font-semibold">$/decision ± CI95</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(sv?.by_tier ?? []).map((g) => (
-                  <tr key={g.key} className="border-b border-line-1/60">
-                    <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">{g.key}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtInt(g.decisions)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtInt(g.reroutes)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtUSD(g.realized_usd)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtUSD(g.would_have_usd)}</td>
-                    <td className="py-1.5 text-right tabular-nums text-fg-2">
-                      {g.mean_per_decision_usd.toFixed(4)} ± {g.ci95_per_decision_usd.toFixed(4)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<SavingsGroup>
+            data={sv?.by_tier ?? []}
+            columns={withoutDollars(SAVINGS_COLUMNS, (c) => c.id === "realized" || c.id === "would_have" || c.id === "per_decision")}
+            rowKey={(g) => g.key}
+            minWidth={640}
+          />
         )}
-      </Section>
+      </ChartShell>
 
-      <Section
-        title="Tier map"
-        helpId="chart.routing_tiers"
-        sub="Pills with counts carry observed calibration evidence (hover for per-kind error rates). Evidence is correlational — deltas act only past the §R7.2 thresholds."
+      <ChartShell
+        title={<TitleWithHelp text="Health board (observed)" helpId="chart.routing_health" />}
+        sub="429/5xx rates from the node's own api_turns stream - the observations the circuit breakers act on."
       >
-        {tiers.loading ? (
-          <Loading />
-        ) : (
-          <div className="space-y-2">
-            {TIER_ORDER.map((tier) => {
-              const models = tiers.data?.tiers?.[tier] ?? [];
-              if (models.length === 0) return null;
-              return (
-                <div key={tier} className="flex items-baseline gap-2">
-                  <span className="w-28 shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-fg-3">
-                    {tier}
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {models.map((m) => {
-                      const cal = (tiers.data?.calibration ?? []).filter(
-                        (c) => c.model === m && c.project_id === 0,
-                      );
-                      return (
-                        <Pill
-                          key={m}
-                          variant={cal.length > 0 ? "info" : "neutral"}
-                          title={
-                            cal.length > 0
-                              ? cal
-                                  .map((c) => `${c.turn_kind}: n=${c.n} err=${(c.error_rate * 100).toFixed(1)}%`)
-                                  .join("; ")
-                              : "no calibration evidence yet"
-                          }
-                        >
-                          {m}
-                          {cal.length > 0 ? ` (${cal.reduce((a, c) => a + c.n, 0)})` : ""}
-                        </Pill>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Section>
-
-      <Section
-        title="Health board (observed)"
-        helpId="chart.routing_health"
-        sub="429/5xx rates from the node's own api_turns stream — the observations the §R12.3 circuit breakers act on."
-      >
-        {health.loading ? (
-          <Loading />
+        {health.loading || (!health.data && !health.error) ? (
+          <InlineLoading block />
         ) : (health.data?.models ?? []).length === 0 ? (
           <div className="py-6 text-center text-[12px] text-fg-3">no proxied turns observed yet</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
-              <thead>
-                <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                  <th className="py-1.5 pr-3 font-semibold">Model</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Turns 1h</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Errors 1h</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Turns 24h</th>
-                  <th className="py-1.5 pr-3 text-right font-semibold">Errors 24h</th>
-                  <th className="py-1.5 text-right font-semibold">Error rate 24h</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(health.data?.models ?? []).map((h) => (
-                  <tr key={h.model} className="border-b border-line-1/60">
-                    <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-1">{h.model || "(unknown)"}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtInt(h.turns_1h)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtInt(h.errors_1h)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtInt(h.turns_24h)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">{fmtInt(h.errors_24h)}</td>
-                    <td className="py-1.5 text-right tabular-nums">
-                      {h.error_rate_24h >= 0.25 ? (
-                        <Pill variant="danger">{(h.error_rate_24h * 100).toFixed(1)}%</Pill>
-                      ) : (
-                        <span className="text-fg-2">{(h.error_rate_24h * 100).toFixed(1)}%</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<HealthRow>
+            data={health.data?.models ?? []}
+            columns={HEALTH_COLUMNS}
+            rowKey={(h) => h.model}
+            minWidth={640}
+          />
         )}
-      </Section>
+      </ChartShell>
+      </TabPanel>
     </div>
   );
 }
 
+// InheritedModel renders a frontmatter `model:` value: an empty one means
+// the file inherits the session model (not "no model reported"), so it keeps
+// the literal "(inherited)" copy; a set one renders through ModelId.
+function InheritedModel({ model }: { model?: string }) {
+  if (!model) return <span>(inherited)</span>;
+  return <ModelId model={model} className="min-w-0" />;
+}
+
 const actionBtn =
-  "rounded-2 border border-line-1 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-1 hover:border-line-2 hover:text-fg-0 disabled:opacity-50";
+  "rounded-2 border border-line-2 bg-bg-3 px-2.5 py-1 text-[11px] text-fg-1 hover:border-line-3 hover:text-fg-0 disabled:opacity-50";
 
 // ReadinessLadder — the R1.3 explanation of ready_to_promote: the four
 // mechanical criteria the §R22 gate checks (the backend computes the
@@ -803,36 +1037,41 @@ function ReadinessLadder({ sh }: { sh: ShadowReport }) {
   const rungs: { ok: boolean; label: string; next?: string }[] = [
     {
       ok: sh.advise_decisions >= sh.min_decisions,
-      label: `Evidence volume — ${fmtInt(sh.advise_decisions)} of ${fmtInt(sh.min_decisions)} advise decisions`,
+      label: `Evidence volume - ${fmtInt(sh.advise_decisions)} of ${fmtInt(sh.min_decisions)} advise decisions`,
       next: `keep advise mode running: ${fmtInt(Math.max(0, sh.min_decisions - sh.advise_decisions))} more decisions needed`,
     },
     {
       ok: sh.would_reroute > 0,
-      label: `Reroutes proposed — ${fmtInt(sh.would_reroute)} in the window`,
-      next: "the policy never proposed a reroute here — there is nothing enforce would change; try a different template via Preview or widen the window",
+      label: `Reroutes proposed - ${fmtInt(sh.would_reroute)} in the window`,
+      next: "the policy never proposed a reroute here - there is nothing enforce would change; try a different template via Preview or widen the window",
     },
     {
       ok: sh.would_save_usd > 0,
-      label: `Net savings positive — ${fmtUSD(sh.would_save_usd)} after cache forfeits`,
-      next: "proposed moves don't pay for their cache forfeits in this window — enforce would not help",
+      label: `Net savings positive - ${fmtUSD(sh.would_save_usd)} after cache forfeits`,
+      next: "proposed moves don't pay for their cache forfeits in this window - enforce would not help",
     },
     {
       ok: sh.quality_flags === 0,
       label:
         sh.quality_flags === 0
-          ? "Zero quality flags — every proposed move is evidence-backed"
-          : `Quality flags — ${fmtInt(sh.quality_flags)} proposed moves lack parity evidence${flaggedKinds ? ` (${flaggedKinds})` : ""}`,
-      next: "investigate the flagged kinds and grow calibration evidence: observer model-value --save-calibration",
+          ? "Zero quality flags - every proposed move is evidence-backed"
+          : `Quality flags - ${fmtInt(sh.quality_flags)} proposed moves lack parity evidence${flaggedKinds ? ` (${flaggedKinds})` : ""}`,
+      next: "investigate the flagged kinds and grow calibration evidence: Save calibration now (the Calibration cells tile)",
     },
   ];
   return (
     <ul className="mt-3 space-y-1">
       {rungs.map((r) => (
         <li key={r.label} className="flex items-baseline gap-2 text-[11.5px]">
-          <span className={r.ok ? "text-success" : "text-danger"}>{r.ok ? "✓" : "✗"}</span>
+          <Icon
+            icon={r.ok ? Check : X}
+            size="xs"
+            label={r.ok ? "passed" : "not yet"}
+            className={`mt-[2px] shrink-0 self-start ${r.ok ? "text-success" : "text-danger"}`}
+          />
           <span className="text-fg-2">
             {r.label}
-            {!r.ok && r.next && <span className="text-fg-3"> — {r.next}</span>}
+            {!r.ok && r.next && <span className="text-fg-3"> - {r.next}</span>}
           </span>
         </li>
       ))}
@@ -857,11 +1096,7 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
     try {
       const cfg = await fetchJSON<{ config: { Routing: Record<string, unknown> } }>("/api/config");
       const sec = { ...cfg.config.Routing, Enabled: true, Mode: "enforce" };
-      await fetchJSON("/api/config/section/routing", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sec),
-      });
+      await saveConfigSection("routing", sec);
       markRestartPending("routing");
       setSaved(true);
       setConfirming(false);
@@ -875,24 +1110,25 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
   if (saved) {
     return (
       <div className="mt-3">
-        <Pill variant="warn">saved: enforce mode — restart the daemon to apply</Pill>
+        <Pill variant="warn">saved: enforce mode - restart the daemon to apply</Pill>
       </div>
     );
   }
   return (
     <div className="mt-3">
       {confirming ? (
-        <div className="rounded-2 border border-line-1 bg-bg-2 p-3 text-[11.5px]">
+        <div className="rounded-2 border border-line-2 bg-bg-3 p-3 text-[11.5px]">
           {!sh.ready_to_promote && (
             <p className="mb-2 font-semibold text-danger">
-              The §R22 gate is NOT met — the rungs above show what's missing. Promoting now goes against the
+              The promotion check is NOT met - the rungs above show what's missing. Promoting now goes against the
               evidence; the decision is yours.
             </p>
           )}
           <p className="text-fg-2">
             Enforce rewrites the model on proxied requests (same provider shape, fail-open on any internal error).
             The shadow says: {fmtInt(sh.would_reroute)} reroutes would have applied over {sh.window_days} days,
-            saving {fmtUSD(sh.would_save_usd)} net, {fmtInt(sh.quality_flags)} quality flags. You can demote back
+            {dollarsShown() ? `saving ${fmtUSD(sh.would_save_usd)} net, ` : "with "}
+            {fmtInt(sh.quality_flags)} quality flags. You can demote back
             to advise at any time in Settings → Routing.
           </p>
           <div className="mt-2 flex items-center gap-2">
@@ -915,14 +1151,14 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
   );
 }
 
-// DeltaLines renders the §R7.2 parity rows for a target model — honest
+// DeltaLines renders the §R7.2 parity rows for a target model - honest
 // about absence: no graded rows means the observed profile is the
 // whole basis, stated rather than invented.
 function DeltaLines({ deltas }: { deltas: ApplyDelta[] | null | undefined }) {
   if (!deltas || deltas.length === 0) {
     return (
       <p className="text-[11px] text-fg-3">
-        No graded parity deltas for the target model in this window — the observed profile above is the whole basis.
+        No graded parity deltas for the target model in this window - the observed profile above is the whole basis.
       </p>
     );
   }
@@ -931,7 +1167,8 @@ function DeltaLines({ deltas }: { deltas: ApplyDelta[] | null | undefined }) {
       {deltas.map((d) => (
         <li key={`${d.turn_kind}|${d.baseline_model}`} className="font-mono">
           {d.turn_kind}: Δerr {d.delta_error_rate_pp >= 0 ? "+" : ""}
-          {d.delta_error_rate_pp.toFixed(1)}pp ± {d.error_ci95_pp.toFixed(1)}pp vs {d.baseline_model} (n{" "}
+          {d.delta_error_rate_pp.toFixed(1)}pp ± {d.error_ci95_pp.toFixed(1)}pp vs{" "}
+          <ModelId model={d.baseline_model} markSize={11} className="align-middle" /> (n{" "}
           {fmtInt(d.n_candidate)} vs {fmtInt(d.n_baseline)}; {d.verdict}
           {d.verdict_basis ? `, ${d.verdict_basis}` : ""})
         </li>
@@ -940,7 +1177,7 @@ function DeltaLines({ deltas }: { deltas: ApplyDelta[] | null | undefined }) {
   );
 }
 
-// ApplyChangeRow — one planned claude-code edit with its evidence and
+// ApplyChangeRow - one planned claude-code edit with its evidence and
 // the per-write consent flow (wizard semantics: this row's Apply
 // confirms exactly ONE file write; the server re-validates against a
 // fresh plan before touching disk).
@@ -971,7 +1208,7 @@ function ApplyChangeRow({ tool, days, change }: { tool: string; days: number; ch
   const ev = change.evidence;
   const failurePct = ev.actions > 0 ? ((ev.failures / ev.actions) * 100).toFixed(0) : "0";
   return (
-    <div className="rounded-2 border border-line-1 bg-bg-2/40 p-3">
+    <div className="rounded-2 border border-line-2 bg-bg-3/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <code className="font-mono text-[11px] text-fg-1">{change.path}</code>
         {backup ? (
@@ -982,24 +1219,24 @@ function ApplyChangeRow({ tool, days, change }: { tool: string; days: number; ch
           </button>
         )}
       </div>
-      <p className="mt-1 font-mono text-[11px] text-fg-2">
-        model: {change.from_model || "(inherited)"} <span className="text-fg-3">→</span>{" "}
-        <span className="text-fg-1">{change.to_model}</span>
+      <p className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-fg-2">
+        model: <InheritedModel model={change.from_model} /> <span className="text-fg-3">→</span>
+        <ModelId model={change.to_model} className="min-w-0" />
       </p>
       <p className="mt-1 text-[11.5px] text-fg-2">{change.rationale}</p>
       <p className="mt-1.5 text-[11px] text-fg-3">
-        evidence: {fmtInt(ev.actions)} sidechain actions / {fmtInt(ev.sessions)} session(s) — {fmtInt(ev.reads)}{" "}
+        evidence: {fmtInt(ev.actions)} sidechain actions / {fmtInt(ev.sessions)} session(s) - {fmtInt(ev.reads)}{" "}
         reads, {fmtInt(ev.mutations)} mutations, {fmtInt(ev.commands)} commands, {failurePct}% failures
       </p>
       <div className="mt-1">
         <DeltaLines deltas={change.deltas} />
       </div>
       {confirming && !backup && (
-        <div className="mt-2 rounded-2 border border-line-1 bg-bg-2 p-3 text-[11.5px]">
+        <div className="mt-2 rounded-2 border border-line-2 bg-bg-3 p-3 text-[11.5px]">
           <p className="text-fg-2">
-            Writes <code className="font-mono">model: {change.to_model}</code> into this file's frontmatter — every
+            Writes <code className="font-mono">model: {change.to_model}</code> into this file's frontmatter - every
             other byte preserved. A <code className="font-mono">.bak-observer-&lt;stamp&gt;</code> backup lands next
-            to the file; Revert restores it. claude-code picks the change up at the next session spawn — no observer
+            to the file; Revert restores it. claude-code picks the change up at the next session spawn - no observer
             restart.
           </p>
           <div className="mt-2 flex items-center gap-2">
@@ -1022,7 +1259,7 @@ function ApplyChangeRow({ tool, days, change }: { tool: string; days: number; ch
   );
 }
 
-// ApplyBackupRow — one restorable observer backup with the per-file
+// ApplyBackupRow - one restorable observer backup with the per-file
 // revert consent flow.
 function ApplyBackupRow({ backup }: { backup: ApplyBackup }) {
   const [confirming, setConfirming] = useState(false);
@@ -1075,7 +1312,7 @@ function ApplyBackupRow({ backup }: { backup: ApplyBackup }) {
   );
 }
 
-// RoutingApplyCard — the R2.1 Channel A surface (§R10): per-tool
+// RoutingApplyCard - the R2.1 Channel A surface (§R10): per-tool
 // dry-run preview from /api/routing/apply, one consent per file write
 // for claude-code, copyable native-config snippets for paste-emission
 // tools, and the honest advisory-only answer for cursor/copilot.
@@ -1094,7 +1331,7 @@ function RoutingApplyCard({ days }: { days: number }) {
     try {
       const r = await fetchJSON<ApplyPreview>("/api/routing/apply", { tool, days });
       setPreview(r);
-      // The audit trail rides along with writable previews — "what
+      // The audit trail rides along with writable previews - "what
       // did observer change?" (R2.5). Best-effort: a ledger fetch
       // failure never blocks the preview.
       if (r.mode === "writable") {
@@ -1117,12 +1354,11 @@ function RoutingApplyCard({ days }: { days: number }) {
   const backups = preview?.backups ?? [];
 
   return (
-    <Section
-      title="Apply to tools (Channel A)"
-      helpId="card.routing_apply"
-      sub="Turn the observed sub-agent evidence into each tool's native config — dry-run preview first; claude-code writes are per-file, consented, backed up, and revertable. CLI: observer routing apply --tool <tool>."
+    <ChartShell
+      title={<TitleWithHelp text="Apply to tools (Channel A)" helpId="card.routing_apply" />}
+      sub="Turn the observed sub-agent evidence into each tool's native config - dry-run preview first; claude-code writes are per-file, consented, backed up, and revertable. CLI: observer routing apply --tool <tool>."
       right={
-        <>
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={tool}
             onChange={(e) => {
@@ -1140,12 +1376,12 @@ function RoutingApplyCard({ days }: { days: number }) {
           <button type="button" className={actionBtn} disabled={busy} onClick={run}>
             {busy ? "Planning…" : preview ? "Re-run preview" : "Preview"}
           </button>
-        </>
+        </div>
       }
     >
       {!preview && !busy && !error && (
         <p className="text-[12px] text-fg-3">
-          Pick a tool and run the preview — a dry run over the §R10.3 evidence (which sub-agent personas ran
+          Pick a tool and run the preview - a dry run over the sub-agent evidence (which sub-agent personas ran
           read-shaped work on bigger models than their observed profile needs). Nothing is written without a per-file
           confirmation.
         </p>
@@ -1155,11 +1391,11 @@ function RoutingApplyCard({ days }: { days: number }) {
       {preview?.mode === "snippet" && (
         <div className="space-y-2">
           <p className="text-[12px] text-fg-2">
-            Evidence-backed weak model: <code className="font-mono text-fg-1">{preview.weak_model}</code> — paste the
+            Evidence-backed weak model: <ModelId model={preview.weak_model} className="align-middle" /> - paste the
             block into the tool's own config (observer does not write this tool's files):
           </p>
           <CopyOnClick value={preview.snippet ?? ""} title="Copy the snippet">
-            <pre className="overflow-x-auto rounded-2 border border-line-1 bg-bg-2 p-3 text-left font-mono text-[11px] leading-relaxed text-fg-2">
+            <pre className="overflow-x-auto rounded-2 border border-line-2 bg-bg-3 p-3 text-left font-mono text-[11px] leading-relaxed text-fg-2">
               {preview.snippet}
             </pre>
           </CopyOnClick>
@@ -1171,8 +1407,8 @@ function RoutingApplyCard({ days }: { days: number }) {
         <div className="space-y-3">
           {changes.length === 0 ? (
             <p className="text-[12px] text-fg-3">
-              No actionable per-subagent changes — every evidence-backed persona is already at its target (or no
-              sidechain evidence has cleared the §R7.2 floor yet).
+              No actionable per-subagent changes - every evidence-backed persona is already at its target (or no
+              sidechain evidence has cleared the evidence threshold yet).
             </p>
           ) : (
             <div className="space-y-2">
@@ -1204,23 +1440,23 @@ function RoutingApplyCard({ days }: { days: number }) {
           {ledger && ledger.events.length > 0 && (
             <div className="space-y-1">
               <h3 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
-                Change history — what observer changed
+                Change history - what observer changed
               </h3>
               {ledger.events.map((ev, i) => (
                 <div key={`${ev.time}-${i}`} className="flex flex-wrap items-center gap-1.5 text-[11px] text-fg-3">
-                  <span className="whitespace-nowrap">{new Date(ev.time).toLocaleString()}</span>
+                  <span className="whitespace-nowrap">{fmtDateTime(ev.time)}</span>
                   <Pill variant={ev.kind === "revert" ? "neutral" : "info"}>{ev.kind}</Pill>
                   <code className="font-mono text-fg-2">{ev.path}</code>
                   {ev.kind === "write" && (
-                    <span className="font-mono">
-                      {ev.from_model || "(inherited)"} → {ev.to_model}
+                    <span className="inline-flex items-center gap-1.5 font-mono">
+                      <InheritedModel model={ev.from_model} /> → <ModelId model={ev.to_model} className="min-w-0" />
                     </span>
                   )}
                   <span>({ev.source})</span>
                 </div>
               ))}
               <p className="text-[10.5px] text-fg-3">
-                Append-only node-local ledger ({ledger.path}) — records both CLI and dashboard writes/reverts. CLI
+                Append-only node-local ledger ({ledger.path}) - records both CLI and dashboard writes/reverts. CLI
                 view: <code className="font-mono">observer routing apply --history</code>.
               </p>
             </div>
@@ -1228,11 +1464,11 @@ function RoutingApplyCard({ days }: { days: number }) {
           <p className="text-[11px] leading-snug text-fg-3">{preview.note}</p>
         </div>
       )}
-    </Section>
+    </ChartShell>
   );
 }
 
-// RevertAllControl — the R2.5 unified revert: one consented operation
+// RevertAllControl - the R2.5 unified revert: one consented operation
 // restoring EVERY agent file that has an observer backup (the CLI
 // --revert contract).
 function RevertAllControl({ count }: { count: number }) {
@@ -1284,9 +1520,9 @@ function RevertAllControl({ count }: { count: number }) {
   );
 }
 
-// RoutingPreviewCard — the R1.2 adoption-funnel CTA, shown only while
+// RoutingPreviewCard - the R1.2 adoption-funnel CTA, shown only while
 // routing is OFF. One click POSTs /api/routing/simulate (a read-only
-// counterfactual replay of recorded turns — no restart, no traffic
+// counterfactual replay of recorded turns - no restart, no traffic
 // touched) and renders the breakdown; from the result, an explicit
 // consent flow can enable advise mode through the one config seam
 // (restart-honest, mirroring the Security page's mode control).
@@ -1326,11 +1562,7 @@ function RoutingPreviewCard() {
       // other file-only shape survive server-side regardless.
       const cfg = await fetchJSON<{ config: { Routing: Record<string, unknown> } }>("/api/config");
       const sec = { ...cfg.config.Routing, Enabled: true, Mode: "advise", Policy: template };
-      await fetchJSON("/api/config/section/routing", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sec),
-      });
+      await saveConfigSection("routing", sec);
       markRestartPending("routing");
       setEnabled(true);
       setConfirming(false);
@@ -1345,12 +1577,11 @@ function RoutingPreviewCard() {
   const topMoves = (rep?.moves ?? []).slice(0, 6);
 
   return (
-    <Section
-      title="Preview savings"
-      helpId="card.routing_preview"
-      sub="Routing is off. Preview what a policy would have saved over your last 30 days — a read-only replay of recorded turns. No restart, no traffic touched, nothing persisted."
+    <ChartShell
+      title={<TitleWithHelp text="Preview savings" helpId="card.routing_preview" />}
+      sub="Routing is off. Preview what a policy would have saved over your last 30 days - a read-only replay of recorded turns. No restart, no traffic touched, nothing persisted."
       right={
-        <>
+        <div className="flex flex-wrap items-center gap-2">
           <select value={template} onChange={(e) => setTemplate(e.target.value)} className={SELECT_CLASS}>
             {SIM_TEMPLATES.map((p) => (
               <option key={p} value={p}>
@@ -1361,12 +1592,12 @@ function RoutingPreviewCard() {
           <button type="button" className={actionBtn} disabled={busy} onClick={preview}>
             {busy ? "Replaying…" : rep ? "Re-run preview" : "Preview savings"}
           </button>
-        </>
+        </div>
       }
     >
       {!rep && !busy && !error && (
         <p className="text-[12px] text-fg-3">
-          Pick a policy template and run the preview — the answer comes from your own recorded traffic, not a
+          Pick a policy template and run the preview - the answer comes from your own recorded traffic, not a
           brochure.
         </p>
       )}
@@ -1376,43 +1607,48 @@ function RoutingPreviewCard() {
           <p className="text-[12px] leading-relaxed text-fg-2">
             Over the last {result!.window_days} days, the <span className="font-semibold text-fg-1">{rep.policy_name}</span>{" "}
             policy would have rerouted <span className="font-semibold text-fg-1">{fmtInt(rep.would_reroute)}</span> of{" "}
-            {fmtInt(rep.turns_evaluated)} turns, saving an estimated{" "}
-            <span className="font-semibold text-fg-1">{fmtUSD(rep.est_savings_usd)}</span> net (cache forfeits of{" "}
-            {fmtUSD(rep.cache_forfeit_usd)} already deducted), with{" "}
+            {fmtInt(rep.turns_evaluated)} turns
+            {dollarsShown() && (
+              <>
+                , saving an estimated{" "}
+                <span className="font-semibold text-fg-1">{fmtUSD(rep.est_savings_usd)}</span> net (cache forfeits of{" "}
+                {fmtUSD(rep.cache_forfeit_usd)} already deducted)
+              </>
+            )}
+            , with{" "}
             <span className="font-semibold text-fg-1">{fmtInt(rep.quality_risk_flags)}</span> quality-risk flags
             (reroutes lacking parity evidence).
           </p>
           {topMoves.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-auto text-left text-[12px]">
-                <thead>
-                  <tr className="border-b border-line-1 text-[10.5px] uppercase tracking-[0.06em] text-fg-3">
-                    <th className="py-1 pr-4 font-semibold">From</th>
-                    <th className="py-1 pr-4 font-semibold">To</th>
-                    <th className="py-1 pr-4 text-right font-semibold">Turns</th>
-                    <th className="py-1 text-right font-semibold">Est. $</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <Table
+              fit
+              tableClassName="text-[12px]"
+              head={
+                <tr>
+                  <th className="py-1 pr-4 font-medium">From</th>
+                  <th className="py-1 pr-4 font-medium">To</th>
+                  <th className="py-1 pr-4 text-right font-medium">Turns</th>
+                  {dollarsShown() && <th className="py-1 text-right font-medium">Est. $</th>}
+                </tr>
+              }
+            >
                   {topMoves.map((m) => (
-                    <tr key={`${m.from}→${m.to}`} className="border-b border-line-1/60">
+                    <tr key={`${m.from}→${m.to}`} className="border-b border-line-1/60 last:border-0">
                       <td className="py-1 pr-4 font-mono text-[11px] text-fg-2">{m.from}</td>
                       <td className="py-1 pr-4 font-mono text-[11px] text-fg-1">{m.to}</td>
                       <td className="py-1 pr-4 text-right tabular-nums text-fg-2">{fmtInt(m.count)}</td>
-                      <td className="py-1 text-right tabular-nums text-fg-2">{fmtUSD(m.est_savings_usd)}</td>
+                      {dollarsShown() && <td className="py-1 text-right tabular-nums text-fg-2">{fmtUSD(m.est_savings_usd)}</td>}
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+            </Table>
           )}
-          <p className="text-[11px] leading-snug text-fg-3">{result!.note}</p>
+          <p className="text-[11px] leading-snug text-fg-3">{maskDollarAmounts(result!.note)}</p>
           {enabled ? (
-            <Pill variant="warn">saved: advise mode ({template}) — restart the daemon to apply</Pill>
+            <Pill variant="warn">saved: advise mode ({template}) - restart the daemon to apply</Pill>
           ) : confirming ? (
-            <div className="rounded-2 border border-line-1 bg-bg-2 p-3 text-[11.5px]">
+            <div className="rounded-2 border border-line-2 bg-bg-3 p-3 text-[11.5px]">
               <p className="text-fg-2">
-                Advise mode only <strong className="font-semibold">records</strong> what routing would have done —
+                Advise mode only <strong className="font-semibold">records</strong> what routing would have done -
                 decision rows accrue on this page, requests are untouched. Promotion to enforce stays a separate,
                 evidence-gated step on the Shadow card. Saves <code className="font-mono">[routing]</code> in this
                 node's config.toml; the daemon binds it at next restart.
@@ -1433,45 +1669,7 @@ function RoutingPreviewCard() {
           )}
         </div>
       )}
-    </Section>
+    </ChartShell>
   );
 }
 
-// Section mirrors the Security page's card shape (the house pattern
-// for non-chart sections: bg-bg-1 cards with a 13px semibold title
-// row and optional right-side controls). helpId renders the inline
-// help indicator next to the title, drawer-linked like every other
-// page's section titles.
-function Section({
-  title,
-  helpId,
-  sub,
-  right,
-  children,
-}: {
-  title: ReactNode;
-  helpId?: string;
-  sub?: ReactNode;
-  right?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-3 border border-line-1 bg-bg-1 p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold text-fg-0">
-            {title}
-            {helpId && <HelpInd id={helpId} />}
-          </h2>
-          {sub && <p className="mt-0.5 max-w-3xl text-[11.5px] leading-snug text-fg-3">{sub}</p>}
-        </div>
-        {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Loading() {
-  return <div className="py-8 text-center text-[12px] text-fg-3">Loading…</div>;
-}

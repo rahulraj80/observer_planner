@@ -66,15 +66,6 @@ func stageFixture(t *testing.T, fixture string) (adapter.ParseResult, string) {
 	return res, path
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolCommandCode {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolCommandCode)
-	}
-	if got := New().Name(); got != "command-code" {
-		t.Fatalf("Name() = %q, want command-code", got)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := "/home/u/.commandcode/projects"
 	a := NewWithOptions(nil, root)

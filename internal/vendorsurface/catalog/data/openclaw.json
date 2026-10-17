@@ -1,0 +1,2647 @@
+{
+ "group": "openclaw",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/openclaw-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "clawhub.managed_mcp",
+   "vendor_group": "openclaw",
+   "vendor": "clawhub",
+   "plane": "clawhub.managed_mcp",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "ClawHub admin with OpenClaw publisher access"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "versioned",
+   "per_user_doc": "registry-wide",
+   "mechanism_doc": "`clawhub-admin managed-mcp publish/get/unpublish`; admin HTTP GET /api/v1/packages/-/managed-mcp/<id> and POST publication",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (registry publisher only; not a per-org allow-list)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/clawhub/managed-mcp",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "clawrouter.admin_api",
+   "vendor_group": "openclaw",
+   "vendor": "clawrouter",
+   "plane": "clawrouter.admin_api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Cloudflare Access admin session or `Authorization: Bearer <admin-token>` (CLAWROUTER_ADMIN_TOKEN_SHA256); Docker profile bearer only"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live (Durable Object ledgers; queue delivery retried)",
+   "lookback_doc": "30-day accounted spend in UI; ledger bounds not stated",
+   "per_user_doc": "per principal, per policy, per tenant",
+   "mechanism_doc": "REST: GET /v1/admin/{bootstrap,overview,tenants,usage,content?tenant&ref,policies,credentials,connections,access-users,policy-bindings,provider-status,provider-health,upstream-grants,assignment-rules,fusion}; PUT /v1/admin/access-users/<email>, /v1/admin/access-user-grants/<email>, /v1/admin/policy-bindings, /v1/admin/policies/<id>; POST /v1/admin/policies/<id>/revoke; POST/PUT /v1/admin/credentials[/<id>], POST .../rotate, .../revoke; PUT/PATCH /v1/admin/connections/<provider> (global kill switch); upstream-grants put/revoke/refresh/quota-refresh/authorize; PUT /v1/admin/assignment-rules/<id>, POST .../reconcile; POST /v1/admin/usage/recovery",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Groups, Projects, Credentials, Usage, Cost, Limits, Audit, Content, Retention, Policy",
+   "grain_doc": "Snapshot / PerCall (recent audit)",
+   "build": "buildable",
+   "build_doc": "Driverable (operator must run ClawRouter)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "snapshot",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitGroup",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitOrg",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/openclaw/clawrouter/blob/main/docs/api-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/openclaw/clawrouter/blob/main/docs/agent-spend-control.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "clawrouter.client_api",
+   "vendor_group": "openclaw",
+   "vendor": "clawrouter",
+   "plane": "clawrouter.client_api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "clawrouter- key bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live; UTC calendar month budget",
+   "lookback_doc": "month",
+   "per_user_doc": "per key / principal",
+   "mechanism_doc": "GET /v1/usage (policy or principal budget, request/token/spend totals, daily totals, recent usage.events for caller), /v1/catalog, /v1/models, /v1/me, /v1/key/inspect, /v1/health; OpenClaw bundled `clawrouter` plugin feeds these into usage.status",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Limits, Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/providers/clawrouter",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/openclaw/clawrouter/blob/main/docs/api-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "clawrouter.request_headers",
+   "vendor_group": "openclaw",
+   "vendor": "clawrouter",
+   "plane": "clawrouter.request_headers",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call",
+   "mechanism_doc": "OpenClaw sends X-ClawRouter-Agent-Id, X-ClawRouter-Session-Id, X-Request-ID = `<run-id>:model:<n>`, optional X-ClawRouter-Project-Id; W3C trace ids kept in usage metadata",
+   "read_write_doc": "n/a",
+   "class_doc": "Sessions (join)",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (join key)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/providers/clawrouter",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oce.audit_log",
+   "vendor_group": "openclaw",
+   "vendor": "oce",
+   "plane": "oce.audit_log",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "DB access only"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "not configurable",
+   "per_user_doc": "per actor",
+   "mechanism_doc": "Audit events in the controller PostgreSQL (bootstrap, mutation, authorization_denial, access for runtime log views); \"no console view or public HTTP API to browse or export\"; retention and export not implemented",
+   "read_write_doc": "R via DB only",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs-enterprise.openclaw.org/guides/topics/audit-log/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oce.metrics",
+   "vendor_group": "openclaw",
+   "vendor": "oce",
+   "plane": "oce.metrics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "network isolation only"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "16 connections"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "scrape",
+   "lookback_doc": "scraper",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "GET /metrics on a private listener (OCC_METRICS_ENABLED): occ_http_requests_total, occ_reconciliation_*, occ_agents, occ_work_*, occ_sign_in_unmatched_callbacks_total; no tenant/agent/actor labels",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry",
+   "grain_doc": "aggregate",
+   "build": "buildable",
+   "build_doc": "Driverable (operational only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs-enterprise.openclaw.org/reference/metrics/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oce.occ_api",
+   "vendor_group": "openclaw",
+   "vendor": "oce",
+   "plane": "oce.occ_api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "human session or service API key; permission = action x resourceKind via IAM Role + AccessBinding"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "audit in PostgreSQL",
+   "per_user_doc": "per account / namespace",
+   "mechanism_doc": "OCC HTTP API: /api/auth/accounts (create, disable, enable, enrol, revoke sessions, attach GitHub/Google/OIDC), /api/auth/service-keys (POST, DELETE /{keyId}), /namespaces (CRUD), /namespaces/{ns}/agents (create, deploy, stop, delete, revisions, deployments, runtime logs), /namespaces/{ns}/iam/roles, /iam/access-bindings, /service-accounts (+ /credentials), /secrets, /credential-sources, /presets, /configurations, GET /installation, /installation/deployment-inventory, GET /observability",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Projects, ServiceAccounts, Credentials, Roles, Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (pre-1.0, pilot only)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs-enterprise.openclaw.org/reference/cheatsheets/api/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs-enterprise.openclaw.org/reference/cheatsheets/permissions/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://openclaw.ai/blog/openclaw-enterprise",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oce.otel_collector",
+   "vendor_group": "openclaw",
+   "vendor": "oce",
+   "plane": "oce.otel_collector",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "collector config"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "export",
+   "lookback_doc": "backend",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "Optional OTel Collector exporting predefined operational events over OTLP/HTTP; does not carry audit",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (operational only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs-enterprise.openclaw.org/guides/observability/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.fleet",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.fleet",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "host operator"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per tenant cell",
+   "mechanism_doc": "CLI `openclaw fleet create/list/status` (cells = one Gateway container per tenant); experimental, no stability promise",
+   "read_write_doc": "R/W via CLI",
+   "class_doc": "Projects",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (experimental CLI)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/cli/fleet",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/multi-tenant-hosting",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.agents_plugins",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.read / operator.admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "gateway",
+   "mechanism_doc": "RPC `agents.list/create/update/delete`, `plugins.list/setEnabled/install/uninstall`, `tools.effective`, `models.list` (view default respects modelPolicy.allow)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/operator-methods",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/rpc-system-and-channels",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.approvals",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.approvals / operator.admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "approval rows (owner-native)",
+   "per_user_doc": "per request",
+   "mechanism_doc": "RPC `exec.approvals.get/set`, `exec.approvals.node.get/set`, `exec.approval.list`, `approval.history`, `plugin.approval.*`",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Event / Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/rpc-devices-nodes-and-approvals",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.audit",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.read"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "async writer, best-effort",
+   "lookback_doc": "30 days, 100,000 rows (identity contexts 30 d / 100k; decision facts 250k)",
+   "per_user_doc": "per run / tool action / message (pseudonymized ids)",
+   "mechanism_doc": "Gateway RPC `audit.activity.list` (V1 activity union, newest first, sequence cursor), legacy `audit.list`, `audit.run.inspect`; CLI `openclaw audit`; config logging.audit.enabled (default true), executionIdentity (default false), messages off/direct/all",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/audit",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/ledgers",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/config-observability",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.config_rpc",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "read operator.read; mutation operator.admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "30 writes / 60 s per method per device+IP"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "hot reload",
+   "lookback_doc": "n/a",
+   "per_user_doc": "gateway-wide",
+   "mechanism_doc": "Gateway RPC `config.get` (snapshot + hash), `config.patch` (JSON merge patch, baseHash, replacePaths), `config.apply`, `config.schema.lookup`; covers gateway.roles, gateway.auth.identityScopes, tools.*, mcp.servers.*, plugins.allow, agents.defaults.modelPolicy.allow, session.maintenance, logging.audit, diagnostics.otel",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, Roles, Retention",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MCPAllowList",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/configuration/config-rpc",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/operator-scopes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.devices",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.pairing / operator.admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per device",
+   "mechanism_doc": "RPC `device.pair.list/approve/reject/remove`, `device.token.rotate`, `device.token.revoke`; `secrets.store.list/set/delete`",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/rpc-devices-nodes-and-approvals",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/rpc-talk-config-and-agents",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.logs",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.read"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "5 archives",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "RPC `logs.tail`; JSON log file (logging.consoleStyle json, 100 MB rotation x5); OTLP logs exporter",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/config-observability",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/logging",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.otel",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator collector headers"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "flushIntervalMs (5 s default)",
+   "lookback_doc": "collector",
+   "per_user_doc": "aggregate (no session, request or trace ids in metric attrs)",
+   "mechanism_doc": "diagnostics-otel plugin, OTLP/HTTP protobuf only: metrics openclaw.tokens (token, channel, provider, model, agent), openclaw.cost.usd (channel, provider, model), gen_ai.client.token.usage, openclaw.model_call.duration_ms, session/queue/tool/webhook metrics; spans openclaw.model.call under openclaw.harness.run; logs; content only with diagnostics.otel.captureContent",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry, Usage, Cost, Content",
+   "grain_doc": "PerCall / aggregate metric",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/opentelemetry/model-calls-and-metrics",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/config-observability",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.prometheus",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Authorization: Bearer gateway token; operator.read"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "scrape",
+   "lookback_doc": "scraper",
+   "per_user_doc": "aggregate",
+   "mechanism_doc": "HTTP GET /api/diagnostics/prometheus on the Gateway: openclaw_model_tokens_total, openclaw_model_cost_usd_total (agent, channel, model, provider), openclaw_gen_ai_client_token_usage, RPC metrics",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry, Usage, Cost",
+   "grain_doc": "aggregate",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "usd_micros",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/prometheus",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.rate_limits",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "config"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "gateway.auth.rateLimit (auth failures), fixed control-plane write backstop 30/60 s, ACP 120 sessions/10 s; security limits, not model quotas",
+   "read_write_doc": "R/W via config",
+   "class_doc": "RateLimits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly for model rate limits (none)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/security/rate-limiting",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.rpc_usage",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "gateway token/password or device token; operator.read"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "session list limits"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "none for reads"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "aggregate cache, may be partial (reports cache state)",
+   "lookback_doc": "all retained session logs (1y / All ranges in UI)",
+   "per_user_doc": "per session; Control UI groups by session creator (\"Started by\")",
+   "mechanism_doc": "Gateway WS RPC `usage.cost` (date range, agentId or agentScope all, IANA timeZone), `sessions.usage`, `sessions.usage.timeseries`, `sessions.usage.logs`; CLI `openclaw gateway usage-cost --json`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerSession / OrgDay",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/concepts/usage-tracking",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/rpc-system-and-channels",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/cli/gateway/query",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.rpc_usage_status",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.read"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "provider limits"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live, cached",
+   "lookback_doc": "provider side",
+   "per_user_doc": "per provider credential",
+   "mechanism_doc": "Gateway RPC `usage.status`: provider quota windows, balances, plan; with ANTHROPIC_ADMIN_KEY / OPENAI_ADMIN_KEY the Control UI Usage page shows provider-reported org cost history (passthrough of those vendors' admin APIs)",
+   "read_write_doc": "R",
+   "class_doc": "RateLimits, Cost",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/concepts/usage-tracking",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.sessions_rpc",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "operator.read (reads), operator.write (mutations)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursors"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live events",
+   "lookback_doc": "session.maintenance.pruneAfter (30 d default archive)",
+   "per_user_doc": "per session with creator/owner/participants",
+   "mechanism_doc": "Gateway RPC `sessions.list/get/describe/preview/search`, `chat.history`, `transcripts.list/get`, `sessions.messages.subscribe`, `sessions.github.status/publish` (linked PR per session), `artifacts.list`",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Content, Commits",
+   "grain_doc": "PerSession / Event",
+   "build": "buildable",
+   "build_doc": "Driverable (PR linkage payload shape not fully documented in pages read)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/protocol/rpc-session-control",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/cli/transcripts",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.gw.users",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.gw",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "list operator.read; changes operator.admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Load more"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "write backstop 30/min/method"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "durable",
+   "per_user_doc": "per person",
+   "mechanism_doc": "Gateway RPC: users list (CLI `openclaw users list`), `users.setRole`, `users.linkEmail`, `users.merge`, `users.linkAuthProfile` / `users.unlinkAuthProfile`, `sessions.assignOwner`",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Roles, Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/cli/users",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/gateway/team-server",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/concepts/multi-user",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.node.state",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file access"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local",
+   "per_user_doc": "per session",
+   "mechanism_doc": "Observer's existing capture: ~/.openclaw agents sqlite / jsonl / trajectory files",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Usage, Cost, Content",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (node, Observer adapter)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "repo_path": "docs/openclaw-adapter.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "observer_repo_doc",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.policy_plugin",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.policy_plugin",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local CLI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per workspace",
+   "mechanism_doc": "Bundled Policy plugin: policy.jsonc conformance (channels, MCP servers, providers, SSRF, sandbox, data handling, governed tools), scoped overlays, attestation hash, `policy watch` drift, `doctor --lint` exit codes; not runtime enforcement",
+   "read_write_doc": "R",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (CLI JSON)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/cli/policy",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.openclaw.ai/cli/policy/scopes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: client config, env or policy file the vendor documents",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "openclaw.vendor.update_telemetry",
+   "vendor_group": "openclaw",
+   "vendor": "openclaw",
+   "plane": "openclaw.vendor",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "n/a",
+   "per_user_doc": "global aggregate, not per org",
+   "mechanism_doc": "Daily GET https://telemetry.openclaw.ai/api/latest-version (opt-in feature stats); public anonymous aggregates on telemetry.openclaw.ai",
+   "read_write_doc": "R (public page)",
+   "class_doc": "Adoption",
+   "grain_doc": "OrgDay (public aggregate)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.openclaw.ai/gateway/telemetry",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

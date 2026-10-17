@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "pool": "VerifiedOfficial",
+    "pool.contractEndDate": "VerifiedOfficial",
+    "pool.contractStartDate": "VerifiedOfficial",
+    "pool.limitCents": "VerifiedOfficial",
+    "pool.remainingCents": "VerifiedOfficial",
+    "pool.usedCents": "VerifiedOfficial",
+    "teams": "VerifiedOfficial",
+    "teams[]": "VerifiedOfficial",
+    "teams[].budgetLimitCents": "VerifiedOfficial",
+    "teams[].teamId": "VerifiedOfficial",
+    "teams[].usedCents": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7c67605f8f9527509c660fabe8201c19f6fe0a0e23242f4ae33197f6b1a77575",
+  "http": {
+    "method": "POST",
+    "path": "/organizations/pooled-usage",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get Pooled Usage\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Organization API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "afeeece4ca452a084d847ce76824665e6f720b39acdad55c2233e4ad51b7c5b1",
+  "source_url": "https://cursor.com/docs/account/organizations/organization-admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.org.pooled_usage"
+}

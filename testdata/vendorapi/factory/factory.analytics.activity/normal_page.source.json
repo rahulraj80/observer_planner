@@ -1,0 +1,41 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].daily_active_users": "VerifiedOfficial",
+    "data[].daily_active_users_by_client": "VerifiedOfficial",
+    "data[].daily_active_users_by_client.non-interactive-cli": "VerifiedOfficial",
+    "data[].daily_active_users_by_client.terminal-ui": "VerifiedOfficial",
+    "data[].daily_active_users_by_client.web": "VerifiedOfficial",
+    "data[].date": "VerifiedOfficial",
+    "data[].messages": "VerifiedOfficial",
+    "data[].monthly_active_users": "VerifiedOfficial",
+    "data[].sessions": "VerifiedOfficial",
+    "data[].user_messages": "VerifiedOfficial",
+    "data[].weekly_active_users": "VerifiedOfficial",
+    "meta": "VerifiedOfficial",
+    "meta.end_date": "VerifiedOfficial",
+    "meta.org_id": "VerifiedOfficial",
+    "meta.start_date": "VerifiedOfficial"
+  },
+  "fixture_sha256": "abb18c5881207a91a6c50753f5bf86a158600cc1dba1945205244ebbce64678e",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/analytics/activity",
+    "query": {
+      "startDate": "2026-01-15",
+      "endDate": "2026-01-15"
+    },
+    "status": 200
+  },
+  "notes": "The documented /activity response example (ungrouped), values verbatim; the elided org id shortened to a placeholder.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Factory Analytics API reference (analytics.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "fa4729614fa5faadaedb2e0514cc8d9969bb76f15924387dcadd77cea8f1ee4b",
+  "source_url": "https://docs.factory.com/api-reference/analytics.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.analytics.activity"
+}

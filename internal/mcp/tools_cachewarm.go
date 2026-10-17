@@ -31,7 +31,7 @@ func newCacheStatusTool(db *sql.DB, engine *cost.Engine, cacheWarm config.CacheW
 func (*cacheStatusTool) Name() string { return "cache_status" }
 
 func (*cacheStatusTool) Description() string {
-	return "Report which prompt caches are live and how soon they expire, with the dollars at risk if each goes cold and (when keep-warm is enabled) the cheapest content-free way to keep it warm. Call this to decide whether to keep a session's cache warm — e.g. by continuing promptly, or by switching to the 1h cache tier on Anthropic. Read-only; node-local."
+	return "Report which prompt caches are live and how soon they expire, with the dollars at risk if each goes cold and (when keep-warm is enabled) the cheapest content-free way to keep it warm. Call this to decide whether to keep a session's cache warm - e.g. by continuing promptly, or by switching to the 1h cache tier on Anthropic. Read-only; node-local."
 }
 
 func (*cacheStatusTool) InputSchema() map[string]any {

@@ -2,12 +2,27 @@
 
 > Read this first if a session is interrupted. It records where we are, what is pending, and the exact next action so work can resume without re-deriving context.
 
-**Repository:** `observer_planner` (individual repo), `/home/ubuntu/scripts/observer_planner`
+**Repository:** `observer_planner` (individual repo). Checkouts: `/mnt/scripts/observer_planner` on sup (azure-box, `testubuntu20`, where reporterd also runs) and `/home/ubuntu/scripts/observer_planner` on autobots.
 **Branch:** `main`
-**Head commit:** `839ef37 chore(build): stop tracking web dist bundles; CI builds them as artifacts`
-**Working tree:** clean (as of the CONTINUATION write) — two new planning files exist under `docs/plans/`.
 **Plan home:** `docs/plans/baseline-telemetry-implementation-plan.md`
 **Plan index:** `docs/plans/index.md`
+
+## Status update — 2026-10-17 (sup session)
+
+Rahul re-ordered the work:
+
+1. **Sync from upstream first, then change.** Both forks merge their upstreams before any further telemetry or copy work:
+   - `observer_planner` ← `superbasedapp/observer` (public; remote `upstream`, push disabled). Merged on branch `sync/upstream-2026-10-17`: v1.27.0 → the 2026-10-14 public snapshot (after v1.36.0). Follows upstream's repo split: the org server (`internal/orgserver`, `cmd/observer-org`, `web2`) is gone from this repo, and with it the fork's org-side Briefing (org rollup, org digest, `briefing_aggregates` / `virtuous_cycle` push). Porting the org Briefing to `superbased-observer-private` is a follow-up. The fork's migrations 078–085 collided with upstream's; they are now 164–170 (085 dropped: upstream 074 has the same index) and `internal/db/forklineage.go` repairs stores written by older fork builds.
+   - `superbased-observer-private` ← `marmutapp/superbased-observer-private` (private). Upstream `main` is fetched by commit hash through the fork's own deploy key (`git fetch origin <sha>`), kept on local branch `upstream-main`. Next after the planner merge; Rahul ruled: keep and rewire the four org-enrichment features (salience extractor, manual re-fire, context-resend, bounded/thorough modes) onto upstream's evidence store; renumber the colliding agent (148/149) and org PG (0058–0061) migrations with the same lineage repair.
+2. **Remove the "No telemetry" claims now** (was step 5.10, "last"): after both merges, replace every absolute no-telemetry / nothing-leaves claim across both repos and their published surfaces with truthful copy, kept in sync everywhere. Wording and publishing (website deploy, package listings) need Rahul's go-ahead.
+3. Then resume at Step 5.2 below.
+
+**Follow-ups opened by the 2026-10-17 planner merge:**
+- Briefing / LLM-prompt / routing-benefit prose formats dollars directly (`internal/briefing/compose.go`, `justify.go`, `internal/llmrun/prompts.go`, `internal/routing/benefit.go`). They are allow-listed in `cmd/observer/no_bare_usd_test.go` as a known gap: route them through `internal/costtext` so the developer token display masks them.
+- Port the org-side Briefing (org rollup, org digest, `briefing_aggregates` / `virtuous_cycle` push) into `superbased-observer-private`, where the org server now lives.
+- The fork's nav pages (briefing, guide, modelfit, apiexplorer, licenses) and the LLM settings card are outside the org-governance vocabulary (adding them would bump `nodegov.CurrentVocabLevel`, a contract with the org server). Their API routes are governed through the Cost / Analysis / Settings>intelligence sections.
+
+On sup, reads AND writes to `observer_reporter` work directly (the old "no sup write access" blocker below no longer applies when working on sup). GitHub access here is per-repo SSH deploy keys (`~/.ssh/config` aliases), not `gh`.
 
 ## Why this exists
 

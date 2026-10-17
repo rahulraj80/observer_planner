@@ -120,7 +120,7 @@ func TestSMTPSenderDeliversMultipart(t *testing.T) {
 		Enabled: true, Host: host, From: "obs@example.com",
 		Username: "user", Cred: "pw", TLSMode: TLSNone, Auth: AuthPlain,
 	}
-	// port() reads Config.Port; set it to the listener's port.
+	// EffectivePort() reads Config.Port; set it to the listener's port.
 	cfg.Port = atoiOr(t, port)
 
 	s := NewSMTPSender(cfg.Resolve())

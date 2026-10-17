@@ -2,12 +2,14 @@ package kimicode
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/tooltax"
 )
 
 const (
@@ -55,15 +57,6 @@ func countAction(res adapter.ParseResult, action string) int {
 		}
 	}
 	return n
-}
-
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolKimiCode {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolKimiCode)
-	}
-	if got := New().Name(); got != "kimi-code" {
-		t.Fatalf("Name() = %q, want kimi-code", got)
-	}
 }
 
 func TestIsSessionFile(t *testing.T) {
@@ -328,5 +321,186 @@ func TestReadTranscriptByWalk(t *testing.T) {
 	}
 	if len(msgs) == 0 {
 		t.Fatal("no messages from walk-resolved transcript")
+	}
+}
+
+// TestToolResultCrossTickEmitsOutcomeUpdate pins the parser half of the
+// store outcome-update seam. A tool.call and its tool.result are separate
+// wire records; when a poll tick ends between them the call row is
+// already persisted optimistically successful and the next parse window
+// resumes with an empty pendingCall map. The outcome must leave as an
+// ActionOutcomeUpdate keyed by the same "tool:<id>" SourceEventID
+// emitToolCall built — the store's action upsert cannot flip success /
+// error_message, so a dropped update is permanent.
+//
+// The emit side keys on toolCallId||uuid and the result side on
+// toolCallId||parentUuid; the cases below cover both the agreeing
+// (toolCallId present) shape and the parentUuid fallback.
+func TestToolResultCrossTickEmitsOutcomeUpdate(t *testing.T) {
+	const (
+		metaLine = `{"type": "metadata", "protocol_version": "1.4", "created_at": 1783573417212}`
+		callLine = `{"type": "context.append_loop_event", "event": {"type": "tool.call", "uuid": "call_xt", "turnId": "0", "step": 1, "toolCallId": "call_xt", "name": "Bash", "args": {"command": "go test ./..."}, "display": {"kind": "command", "command": "go test ./...", "cwd": "/home/dev/proj", "language": "bash"}}, "time": 1783573418000}`
+	)
+
+	cases := []struct {
+		name       string
+		resultLine string
+		wantOK     bool
+		wantErrMsg bool
+	}{
+		{
+			name:       "failed call keyed by toolCallId",
+			resultLine: `{"type": "context.append_loop_event", "event": {"type": "tool.result", "parentUuid": "call_xt", "toolCallId": "call_xt", "result": {"error": "exit status 1: FAIL", "isError": true}}, "time": 1783573418200}`,
+			wantErrMsg: true,
+		},
+		{
+			name:       "successful call keyed by toolCallId",
+			resultLine: `{"type": "context.append_loop_event", "event": {"type": "tool.result", "parentUuid": "call_xt", "toolCallId": "call_xt", "result": {"output": "ok 12 tests"}}, "time": 1783573418200}`,
+			wantOK:     true,
+		},
+		{
+			// No toolCallId: the result side falls back to parentUuid,
+			// which the emit side wrote as the call's own uuid.
+			name:       "failed call keyed by parentUuid fallback",
+			resultLine: `{"type": "context.append_loop_event", "event": {"type": "tool.result", "parentUuid": "call_xt", "result": {"error": "exit status 1: FAIL", "isError": true}}, "time": 1783573418200}`,
+			wantErrMsg: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dst := filepath.Join(root, "wd_proj_ab12cd34ef56",
+				"session_99999999-9999-4999-8999-999999999999", "agents", "main", "wire.jsonl")
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			a := NewWithOptions(nil, root)
+
+			// Window 1: the wire log ends right after the tool.call.
+			if err := os.WriteFile(dst, []byte(metaLine+"\n"+callLine+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res1, err := a.ParseSessionFile(context.Background(), dst, 0)
+			if err != nil {
+				t.Fatalf("first parse: %v", err)
+			}
+			var call *models.ToolEvent
+			for i := range res1.ToolEvents {
+				if res1.ToolEvents[i].SourceEventID == "tool:call_xt" {
+					call = &res1.ToolEvents[i]
+				}
+			}
+			if call == nil {
+				t.Fatalf("first parse produced no tool:call_xt event: %+v", res1.ToolEvents)
+			}
+			if !call.Success {
+				t.Error("first parse: call should be optimistically successful")
+			}
+			if !call.OutcomePending {
+				t.Error("first parse: an unanswered call must be flagged OutcomePending, or the store files failure-context bookkeeping on an outcome nobody observed")
+			}
+			if len(res1.OutcomeUpdates) != 0 {
+				t.Errorf("first parse emitted %d outcome updates, want 0", len(res1.OutcomeUpdates))
+			}
+
+			// Window 2: the result lands, cursor resumes past the call.
+			if err := os.WriteFile(dst, []byte(metaLine+"\n"+callLine+"\n"+tc.resultLine+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res2, err := a.ParseSessionFile(context.Background(), dst, res1.NewOffset)
+			if err != nil {
+				t.Fatalf("second parse: %v", err)
+			}
+			// The same transcript parsed WHOLE resolves the pair
+			// in-window, so nothing is left pending.
+			resFull, err := a.ParseSessionFile(context.Background(), dst, 0)
+			if err != nil {
+				t.Fatalf("full parse: %v", err)
+			}
+			var fullCall *models.ToolEvent
+			for i := range resFull.ToolEvents {
+				if resFull.ToolEvents[i].SourceEventID == "tool:call_xt" {
+					fullCall = &resFull.ToolEvents[i]
+				}
+			}
+			if fullCall == nil || fullCall.OutcomePending {
+				t.Errorf("in-window pairing left OutcomePending set: %+v", resFull.ToolEvents)
+			}
+			if len(res2.OutcomeUpdates) != 1 {
+				t.Fatalf("OutcomeUpdates: got %d want 1 (%+v)", len(res2.OutcomeUpdates), res2.OutcomeUpdates)
+			}
+			up := res2.OutcomeUpdates[0]
+			if up.SourceFile != dst {
+				t.Errorf("SourceFile = %q, want %q", up.SourceFile, dst)
+			}
+			if up.SourceEventID != "tool:call_xt" {
+				t.Errorf("SourceEventID = %q, want tool:call_xt", up.SourceEventID)
+			}
+			if up.Success != tc.wantOK {
+				t.Errorf("Success = %v, want %v", up.Success, tc.wantOK)
+			}
+			if tc.wantErrMsg && up.ErrorMessage == "" {
+				t.Error("ErrorMessage empty on an isError result")
+			}
+			if !tc.wantErrMsg && up.ErrorMessage != "" {
+				t.Errorf("ErrorMessage = %q on a clean result, want empty", up.ErrorMessage)
+			}
+			if up.ToolOutput == "" {
+				t.Error("ToolOutput empty, want the result body")
+			}
+			if up.DurationMs != 0 {
+				t.Errorf("DurationMs = %d, want 0 (the call lived in the prior window)", up.DurationMs)
+			}
+		})
+	}
+}
+
+// TestMapKimiTool_V211Builtins pins the kimi-code 2.1.1 built-in tool
+// names added 2026-09-28 (R2-TOOLMAP), spelled exactly as the shipped
+// bundle registers them (@moonshot-ai/kimi-code 2.1.1 dist/main.mjs,
+// `name = "..."`; source github.com/MoonshotAI/kimi-code
+// packages/agent-core-v2). One case per new mapping, and each must agree
+// with internal/tooltax through Resolve's normalized pass.
+func TestMapKimiTool_V211Builtins(t *testing.T) {
+	cases := []struct{ native, want string }{
+		{"AskUserQuestion", models.ActionAskUser},
+		{"EnterPlanMode", models.ActionPermissionMode},
+		{"ExitPlanMode", models.ActionPermissionMode},
+		{"Skill", models.ActionSkillInvoke},
+		{"CronCreate", models.ActionSchedule},
+		{"CronList", models.ActionSchedule},
+		{"CronDelete", models.ActionSchedule},
+		{"TaskList", models.ActionAgentControl},
+		{"TaskOutput", models.ActionAgentControl},
+		{"TaskStop", models.ActionAgentControl},
+		{"WaitFor", models.ActionSubagentWait},
+		{"NotifyUser", models.ActionNotification},
+		{"CreateGoal", models.ActionHarnessCall},
+		{"GetGoal", models.ActionHarnessCall},
+		{"SetGoalBudget", models.ActionHarnessCall},
+		{"UpdateGoal", models.ActionHarnessCall},
+		{"TowerInit", models.ActionHarnessCall},
+		{"TowerPlan", models.ActionTodoUpdate},
+		{"TowerSpawn", models.ActionSpawnSubagent},
+		{"TowerMerge", models.ActionHarnessCall},
+		{"TowerTeardown", models.ActionWorktreeRemove},
+		{"TowerSend", models.ActionAgentMessage},
+		{"TowerInbox", models.ActionAgentControl},
+		{"TowerFinding", models.ActionAgentMessage},
+		{"TowerReview", models.ActionAgentMessage},
+		{"TowerMission", models.ActionTodoUpdate},
+		{"TowerStatus", models.ActionAgentControl},
+	}
+	for _, tc := range cases {
+		t.Run(tc.native, func(t *testing.T) {
+			if got := mapKimiTool(tc.native); got != tc.want {
+				t.Errorf("mapKimiTool(%q) = %q, want %q", tc.native, got, tc.want)
+			}
+			e, ok := tooltax.Resolve(models.ToolKimiCode, tc.native)
+			if !ok || e.Tool != models.ToolKimiCode || e.ActionType != tc.want {
+				t.Errorf("tooltax.Resolve(kimi-code, %q) = %+v (ok=%v), want a kimi-code %q row", tc.native, e, ok, tc.want)
+			}
+		})
 	}
 }

@@ -1,0 +1,28 @@
+{
+  "groups": [
+    {
+      "id": "team_group_01k2ja2000e0080000000000n2",
+      "name": "Engineering",
+      "memberCount": 12,
+      "monthlySpendingLimitDollars": 500,
+      "createdAt": "2026-01-15T10:30:00.000Z",
+      "updatedAt": "2026-01-20T14:22:00.000Z"
+    },
+    {
+      "id": "team_group_01k2jb4000e0080000000000p7",
+      "name": "Design",
+      "memberCount": 8,
+      "monthlySpendingLimitDollars": null,
+      "createdAt": "2026-01-16T09:00:00.000Z",
+      "updatedAt": "2026-01-16T09:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "pageSize": 50,
+    "totalCount": 2,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  }
+}

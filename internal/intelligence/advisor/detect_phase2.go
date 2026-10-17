@@ -39,6 +39,7 @@ func detectCacheHitRate(f *Facts, t Thresholds) []Suggestion {
 			hint = fmt.Sprintf("cachetrack attributes most misses to %q.", cause)
 		}
 		out = append(out, Suggestion{
+			// no-bare-usd:allow (advisor prose; masked on every surface under the token display)
 			DedupKey: "cache_hit_rate|" + s.ID, Detector: "cache_hit_rate",
 			Category: CategoryCost, Scope: ScopeSession, ScopeID: s.ID, Severity: SeverityAdvice,
 			Title: fmt.Sprintf("Cache hit rate %.0f%% (healthy ≥ %.0f%%)", rate*100, t.HealthyCacheHitRate*100),
@@ -104,7 +105,7 @@ func detectCacheWriteWaste(f *Facts, t Thresholds) []Suggestion {
 			Category: CategoryCost, Scope: ScopeSession, ScopeID: s.ID, Severity: SeverityInfo,
 			Title: fmt.Sprintf("%dK tokens of cache writes were barely read back", written/1000),
 			Nudge: fmt.Sprintf(
-				"This session paid the cache-write premium on %dK tokens but read back only %dK — short or one-shot sessions don't amortize cache writes. The unamortized premium is about $%.2f.",
+				"This session paid the cache-write premium on %dK tokens but read back only %dK - short or one-shot sessions don't amortize cache writes. The unamortized premium is about $%.2f.",
 				written/1000, read/1000, premium,
 			),
 			SavingsUSD: round2(premium), Confidence: 0.6,
@@ -191,7 +192,7 @@ func detectReadHeavyExpensiveModel(f *Facts, t Thresholds) []Suggestion {
 			Category: CategoryCost, Scope: ScopeSession, ScopeID: s.ID, Severity: SeverityInfo,
 			Title: fmt.Sprintf("%.0f%% of this Opus session was read/search work", share*100),
 			Nudge: fmt.Sprintf(
-				"%d of %d actions here were reads/searches — exploration a cheaper model handles fine. Routing exploration-heavy sessions to %s would have saved about $%.2f.",
+				"%d of %d actions here were reads/searches - exploration a cheaper model handles fine. Routing exploration-heavy sessions to %s would have saved about $%.2f.",
 				s.Mix.Reads, s.Mix.Total, t.RoutingTargetModel, saving,
 			),
 			SavingsUSD: round2(saving), Confidence: 0.5,
@@ -228,7 +229,7 @@ func detectEffortOverprovisioning(f *Facts, t Thresholds) []Suggestion {
 			Category: CategoryCost, Scope: ScopeSession, ScopeID: s.ID, Severity: SeverityInfo,
 			Title: fmt.Sprintf("%d high-effort actions spent %dK reasoning tokens", s.Mix.EffortHigh, reasoning/1000),
 			Nudge: fmt.Sprintf(
-				"This session ran %d actions at xhigh/max effort; reasoning tokens (billed at the output rate) reached %d%% of output volume (≈$%.2f). Lower effort is typically sufficient for routine edits — roughly $%.2f avoidable.",
+				"This session ran %d actions at xhigh/max effort; reasoning tokens (billed at the output rate) reached %d%% of output volume (≈$%.2f). Lower effort is typically sufficient for routine edits - roughly $%.2f avoidable.",
 				s.Mix.EffortHigh, 100*reasoning/max64(outT, 1), rCost, saving,
 			),
 			SavingsUSD: round2(saving), Confidence: 0.5,
@@ -271,7 +272,7 @@ func detectFastTierPremium(f *Facts, _ Thresholds) []Suggestion {
 			Category: CategoryLatency, Scope: ScopeSession, ScopeID: s.ID, Severity: SeverityInfo,
 			Title: fmt.Sprintf("$%.2f fast-tier premium across %d turns", premium, fastTurns),
 			Nudge: fmt.Sprintf(
-				"%d turns ran in the provider's fast/priority tier at 2–2.5× rates (≈$%.2f premium over standard). Worth it for interactive work — for batch or background sessions, standard tier produces the same output.",
+				"%d turns ran in the provider's fast/priority tier at 2-2.5× rates (≈$%.2f premium over standard). Worth it for interactive work - for batch or background sessions, standard tier produces the same output.",
 				fastTurns, premium,
 			),
 			SavingsUSD: round2(premium), Confidence: 0.5,
@@ -310,7 +311,7 @@ func detectUnrecoveredFailures(f *Facts, t Thresholds) []Suggestion {
 			Category: CategoryQuality, Scope: ScopeProject, ScopeID: ff.Project, Severity: SeverityWarning,
 			Title: fmt.Sprintf("`%s` failed %d times and never passed", truncateStr(ff.Command, 48), ff.Fails),
 			Nudge: fmt.Sprintf(
-				"`%s` failed %d times in this window (%d retries) and never succeeded — a recurring time sink (~%.0f minutes). Worth fixing the root cause once.",
+				"`%s` failed %d times in this window (%d retries) and never succeeded - a recurring time sink (~%.0f minutes). Worth fixing the root cause once.",
 				truncateStr(ff.Command, 64), ff.Fails, ff.Retries, minutes,
 			),
 			SavingsMin: minutes, Confidence: 0.8,
@@ -397,7 +398,7 @@ func detectCompressionOff(f *Facts, _ Thresholds) []Suggestion {
 		Category: CategoryHygiene, Scope: ScopeGlobal, Severity: SeverityInfo,
 		Title: fmt.Sprintf("%d proxied sessions ran with compression off", proxied),
 		Nudge: fmt.Sprintf(
-			"Your traffic routes through the proxy but conversation compression never engaged ($%.2f of spend at full size). Enabling the compression pipeline historically saves 7–10%% on tool-result-heavy sessions — roughly $%.2f here.",
+			"Your traffic routes through the proxy but conversation compression never engaged ($%.2f of spend at full size). Enabling the compression pipeline historically saves 7-10%% on tool-result-heavy sessions - roughly $%.2f here.",
 			inputCost, saving,
 		),
 		SavingsUSD: round2(saving), Confidence: 0.5,
@@ -439,7 +440,7 @@ func detectNotProxied(f *Facts, _ Thresholds) []Suggestion {
 		Category: CategoryHygiene, Scope: ScopeGlobal, Severity: SeverityInfo,
 		Title: fmt.Sprintf("$%.0f of spend isn't routed through the proxy", spend),
 		Nudge: fmt.Sprintf(
-			"%d sessions ($%.2f) ran outside the proxy this window — without it you miss exact token accounting, conversation compression (~7%%, ≈$%.2f here), and prompt-cache tracking. `observer init` wires the routing.",
+			"%d sessions ($%.2f) ran outside the proxy this window - without it you miss exact token accounting, conversation compression (~7%%, ≈$%.2f here), and prompt-cache tracking. `observer init` wires the routing.",
 			unproxied, spend, saving,
 		),
 		SavingsUSD: round2(saving), Confidence: 0.5,

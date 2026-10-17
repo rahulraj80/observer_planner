@@ -1,0 +1,48 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].ending_at": "VerifiedOfficial",
+    "data[].results": "VerifiedOfficial",
+    "data[].results[]": "VerifiedOfficial",
+    "data[].results[].account_id": "VerifiedOfficial",
+    "data[].results[].api_key_id": "VerifiedOfficial",
+    "data[].results[].cache_creation": "VerifiedOfficial",
+    "data[].results[].cache_creation.ephemeral_1h_input_tokens": "VerifiedOfficial",
+    "data[].results[].cache_creation.ephemeral_5m_input_tokens": "VerifiedOfficial",
+    "data[].results[].cache_read_input_tokens": "VerifiedOfficial",
+    "data[].results[].context_window": "VerifiedOfficial",
+    "data[].results[].inference_geo": "VerifiedOfficial",
+    "data[].results[].model": "VerifiedOfficial",
+    "data[].results[].output_tokens": "VerifiedOfficial",
+    "data[].results[].server_tool_use": "VerifiedOfficial",
+    "data[].results[].server_tool_use.web_search_requests": "VerifiedOfficial",
+    "data[].results[].service_account_id": "VerifiedOfficial",
+    "data[].results[].service_tier": "VerifiedOfficial",
+    "data[].results[].uncached_input_tokens": "VerifiedOfficial",
+    "data[].results[].workspace_id": "VerifiedOfficial",
+    "data[].starting_at": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "8865c75f7120dbd8759c434a79aaa03ec42f08342fd99be22a8a336134649e88",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/usage_report/messages",
+    "query": {
+      "bucket_width": "1d",
+      "starting_at": "2025-08-01T00:00:00Z"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.usage_messages"
+}

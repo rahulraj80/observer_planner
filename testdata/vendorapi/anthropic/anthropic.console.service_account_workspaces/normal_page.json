@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "created_by_actor_id": "created_by_actor_id",
+      "implicit": true,
+      "service_account_id": "service_account_id",
+      "type": "service_account_workspace_member",
+      "workspace_id": "workspace_id",
+      "workspace_role": "workspace_admin"
+    }
+  ],
+  "next_page": "next_page"
+}

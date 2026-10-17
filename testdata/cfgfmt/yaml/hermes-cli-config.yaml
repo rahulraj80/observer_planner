@@ -1,0 +1,401 @@
+# Hermes Agent CLI Configuration
+# Copy settings from this example into ~/.hermes/config.yaml, or use
+# `hermes config set <section.key> <value>` to update the active profile.
+# This file configures CLI behavior; only documented secret environment
+# variables in .env take precedence over their corresponding settings.
+
+# Schema version of this file. The installers copy it to seed config.yaml, and
+# `hermes update` uses it to know which one-time migrations the file already
+# has. Hermes manages it: do not copy it into another config.
+_config_version: 49
+
+# =============================================================================
+# Database Configuration
+# =============================================================================
+# WAL is the normal default. Hermes automatically falls back to DELETE when
+# SQLite reports that WAL is incompatible with the filesystem. Set this to
+# "delete" explicitly for deployments whose backing filesystem is not WAL
+# crash-safe, such as Linux containers bind-mounted through macOS virtiofs,
+# NFS, or SMB. Hermes will not live-downgrade a database already open in WAL.
+database:
+  journal_mode: "wal"  # Supported values: "wal", "delete"
+  # Optional WAL sizing pragmas (integers). Unset = SQLite defaults.
+  # wal_autocheckpoint: 1000     # pages between automatic checkpoints
+  # journal_size_limit: 67108864 # cap the WAL/journal file size in bytes
+  #
+  # Durability level for every state.db connection: OFF, NORMAL, FULL, EXTRA
+  # (or 0-3). Unset leaves SQLite's default, which is baked in at compile time
+  # (SQLITE_DEFAULT_WAL_SYNCHRONOUS) and therefore differs between the bundled
+  # interpreter, a distro python3 and a Homebrew one. Set it if you need to
+  # know which one you are running rather than infer it. On macOS this is a
+  # floor, not a pin: values below FULL are refused because Darwin's fsync()
+  # does not guarantee write ordering, while EXTRA is honored normally.
+  # synchronous: FULL
+
+# =============================================================================
+# Runtime Limits
+# =============================================================================
+# Long-running Hermes server processes raise their RLIMIT_NOFILE soft limit to
+# this value when the operating system permits it. The value is clamped to the
+# hard limit and never lowers an already higher soft limit. Set to 0, false, or
+# null to disable the adjustment. Default: 4096.
+runtime:
+  nofile_soft_limit: 4096
+
+# =============================================================================
+# Attachments
+# =============================================================================
+# Where the TUI/Desktop gateway stages session file attachments (file uploads and
+# pasted text). Read per profile: a session bound to profile X follows X's own
+# config.yaml, so each agent's attachments stay with its workspace.
+#   hermes-home  (default) <profile home>/attachments — the directory container
+#                 backends bind-mount, so @file: refs resolve inside the sandbox.
+#   workspace    <session workspace>/.hermes/attachments — staging lands inside
+#                 the allowed reference root, so the profile's agent can always
+#                 read its own attachments back. A remote (ssh) workspace keeps
+#                 the profile home directory either way.
+attachments:
+  storage: "hermes-home"
+
+# =============================================================================
+# Plugin Installation
+# =============================================================================
+plugins:
+  # Deadline for each Git clone, fetch or checkout during plugin install. Default: 300
+  # seconds. Subdirectory installs download only that folder.
+  # Raise this for large repositories or slow connections. Maximum: 3600.
+  clone_timeout_seconds: 300
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
+model:
+  # Default model to use (can be overridden with --model flag)
+  # Both "default" and "model" work as the key name here.
+  default: "anthropic/claude-opus-4.6"
+  
+  # Inference provider selection:
+  #   "auto"         - Auto-detect from credentials (default)
+  #   "openrouter"   - OpenRouter (requires: OPENROUTER_API_KEY or OPENAI_API_KEY)
+  #   "nous"         - Nous Portal OAuth (requires: hermes auth add nous)
+  #   "nous-api"     - Nous Portal API key (requires: NOUS_API_KEY)
+  #   "anthropic"    - Direct Anthropic API (requires: ANTHROPIC_API_KEY)
+  #   "openai-codex" - OpenAI Codex (requires: hermes auth)
+  #   "copilot"      - GitHub Copilot / GitHub Models (requires: GITHUB_TOKEN)
+  #   "gemini"      - Use Google AI Studio direct (requires: GOOGLE_API_KEY or GEMINI_API_KEY)
+  #   "zai"         - Use z.ai / ZhipuAI GLM models (requires: GLM_API_KEY)
+  #   "kimi-coding"  - Kimi / Moonshot AI (requires: KIMI_API_KEY)
+  #   "minimax"      - MiniMax global (requires: MINIMAX_API_KEY)
+  #   "minimax-cn"   - MiniMax China (requires: MINIMAX_CN_API_KEY)
+  #   "huggingface"  - Hugging Face Inference (requires: HF_TOKEN)
+  #   "nvidia"       - NVIDIA NIM / build.nvidia.com (requires: NVIDIA_API_KEY)
+  #   "xiaomi"       - Xiaomi MiMo (requires: XIAOMI_API_KEY)
+  #   "arcee"        - Arcee AI Trinity models (requires: ARCEEAI_API_KEY)
+  #   "ollama-cloud" - Ollama Cloud (requires: OLLAMA_API_KEY — https://ollama.com/settings)
+  #   "deepinfra"    - DeepInfra (requires: DEEPINFRA_API_KEY)
+  #   "kilocode"     - KiloCode gateway (requires: KILOCODE_API_KEY)
+  #   "ai-gateway"   - Vercel AI Gateway (requires: AI_GATEWAY_API_KEY)
+  #   "azure-foundry" - Microsoft Foundry / Azure OpenAI (API key or Entra ID)
+  #   "lmstudio"     - LM Studio local server (optional: LM_API_KEY, defaults to http://127.0.0.1:1234/v1)
+  #
+  # Local servers (LM Studio, Ollama, vLLM, llama.cpp):
+  #   "custom"       - Any other OpenAI-compatible endpoint. Set base_url below.
+  #   Aliases: "ollama", "vllm", "llamacpp" all map to "custom".
+  #   LM Studio is first-class and uses provider: "lmstudio".
+  #   It works with both no-auth and auth-enabled server modes.
+  #
+  # Can also be overridden for a single invocation with the --provider flag.
+  provider: "auto"
+  
+  # API configuration (falls back to OPENROUTER_API_KEY env var)
+  # api_key: "your-key-here"  # Uncomment to set here instead of .env
+  base_url: "https://openrouter.ai/api/v1"
+
+  # Stream API responses from the provider (default: true). The agent core
+  # prefers streaming for every turn — subagents included — for liveness
+  # health-checking. Set false to force non-streaming requests for the whole
+  # session (persists across mid-session model switches). Escape hatch for
+  # self-hosted OpenAI-compatible servers whose streaming tool-call path is
+  # broken (e.g. vLLM with --tool-call-parser qwen3_xml + a reasoning parser
+  # can leak tool calls into plain text instead of returning tool_calls —
+  # #72901). Orthogonal to display.streaming, which controls token rendering
+  # only.
+  # streaming: true
+
+  # Azure Foundry keyless auth example:
+  # provider: "azure-foundry"
+  # base_url: "https://<resource>.openai.azure.com/openai/v1"
+  # auth_mode: "entra_id"      # DefaultAzureCredential: az login, managed identity, workload identity, etc.
+  # default: "gpt-4o"          # Deployment/model name
+  # entra:
+  #   scope: "https://ai.azure.com/.default"  # Optional; this is the default.
+
+  # ── Token limits — two settings, easy to confuse ──────────────────────────
+  #
+  # context_length: TOTAL context window (input + output tokens combined).
+  #   Controls when Hermes compresses history and validates requests.
+  #   Leave unset — Hermes auto-detects the correct value from the provider.
+  #   Set manually only when auto-detection is wrong (e.g. a local server with
+  #   a custom num_ctx, or a proxy that doesn't expose /v1/models).
+  #
+  # context_length: 131072
+  #
+  # ollama_num_ctx: Ollama only — the num_ctx sent on every chat request.
+  #   Hermes auto-detects the model's window and sends it (Ollama otherwise
+  #   defaults to 2048); context_length, if set, caps the detected value.
+  #   An explicit ollama_num_ctx is sent as-is (never capped) — set it to
+  #   pin VRAM use.
+  #
+  # ollama_num_ctx: 32768
+  #
+  # Output-token limits are provider-owned, not user configuration. Native
+  # protocols requiring a limit receive an internal value from Hermes.
+
+  # ── Custom request headers (optional) ─────────────────────────────────────
+  #
+  # default_headers: extra HTTP headers sent on every request to an
+  #   OpenAI-compatible endpoint. User values take precedence over the
+  #   provider/SDK defaults, so this is the supported way to override the
+  #   OpenAI Python SDK's identifying headers (User-Agent: OpenAI/Python ...,
+  #   X-Stainless-*) when a custom provider sits behind a gateway/WAF that
+  #   rejects them — e.g. an upstream that returns "502 Upstream access
+  #   forbidden" for the SDK default User-Agent but accepts a plain one.
+  #   Applies on the OpenAI wire only (not native Anthropic / Bedrock).
+  #
+  # default_headers:
+  #   User-Agent: "curl/8.7.1"
+  #
+  # extra_headers: accepted as an alias of default_headers (merged, with
+  #   extra_headers winning when both are set) — matches the per-provider
+  #   extra_headers key below.
+  #
+  # Per-provider variant: named providers / custom_providers entries accept an
+  # extra_headers dict scoped to that endpoint only — for reverse proxies,
+  # gateways, or custom auth (e.g. Cloudflare Access service tokens).
+  # Merged onto SDK/provider defaults with the entry's values winning.
+  # Header values are treated as secrets and are never logged.
+  #
+  # providers:
+  #   my-proxy:
+  #     base_url: "https://llm.internal.example.com/v1"
+  #     key_env: "MY_PROXY_API_KEY"
+  #     extra_headers:
+  #       CF-Access-Client-Id: "xxxx.access"
+  #       CF-Access-Client-Secret: "${CF_ACCESS_SECRET}"
+  #       X-Client-Name: "hermes-agent"
+  #
+  # session_affinity_header: NAME of a header that carries Hermes' conversation
+  # id on every request to that provider (all api_modes + auxiliary calls). Off
+  # unless set. For session-aware proxies that otherwise treat each agent-loop
+  # request as a new conversation and replay the whole history upstream.
+  #
+  # providers:
+  #   my-proxy:
+  #     base_url: "http://127.0.0.1:4000/v1"
+  #     session_affinity_header: x-litellm-session-id
+# providers:
+#   meta:
+#     base_url: https://api.meta.ai/v1
+#     api_key: ${MODEL_API_KEY}
+#     # api_mode auto-detected as codex_responses for api.meta.ai; no need to set
+#     # (the bundled meta-ai provider covers this — a named custom provider is
+#     # only needed for a non-default Meta-compatible endpoint)
+# Fast/priority tier behind an OpenAI-compatible gateway or proxy: agent.service_tier
+# (`/fast`) only reaches first-party endpoints; ask a gateway for its own tier via
+# extra_body, which is merged into every request routed to that provider.
+# providers:
+#   my-gateway:
+#     base_url: https://gateway.example.com/v1
+#     api_key: ${MY_GATEWAY_KEY}
+#     extra_body:
+#       service_tier: priority   # whatever tier value your gateway documents
+# providers:
+#   router:
+#     base_url: https://api.router.com/v1
+#     api_key: ${RAMP_ROUTER_API_KEY}
+#     # api_mode auto-detected as codex_responses for api.router.com — the
+#     # Responses API is Router's native wire (chat/completions is only a
+#     # compatibility shim). The bundled router provider covers this; a named
+#     # custom provider is only needed for a non-default Router-compatible
+#     # endpoint.
+
+
+# Command-minted credentials (optional): key_cmd
+# ------------------------------------------------------------------
+# Enterprise gateways often issue SHORT-LIVED bearers (SSO/OIDC brokers, cloud
+# IAM, internal auth proxies) rather than static API keys, so a value copied
+# into .env via `key_env` is stale within the hour and every later request 401s.
+# `key_cmd` names a command that PRINTS a token instead: Hermes runs it per
+# request (cached until shortly before expiry), so long sessions keep working
+# with no restart.
+#
+# Contract: print ONLY the token on stdout, either bare or as JSON with an
+# "access_token" field ("expires_in" is honoured). Same shape as OAuth 2.0
+# token endpoints, Claude Code's `apiKeyHelper`, `gcloud auth
+# print-access-token`, and `aws ecr get-login-password`.
+#
+# Precedence: an explicit --api-key still wins; otherwise key_cmd is preferred
+# over inline api_key / key_env on that entry.
+#
+# Applies to the main agent turn and to auxiliary tasks (title generation,
+# context compression, vision, embedding) alike.
+#
+# Not to be confused with `secrets.command`, which is a different mechanism:
+# that one runs a helper ONCE at startup to populate env vars for many secrets
+# at the process level. Use it for a vault or keychain helper that hands back a
+# KEY=VALUE blob. Use `key_cmd` when ONE provider needs a credential refreshed
+# DURING a session, because a startup-time env var cannot be re-minted after it
+# expires.
+#
+# providers:
+#   my-gateway:
+#     base_url: "https://gateway.internal.example.com/v1"
+#     api_mode: chat_completions
+#     key_cmd: "my-auth-cli print-token --profile prod"
+#
+# Worked example — an AI gateway that routes by model family, so one entry per
+# wire format shares the same credential helper:
+#
+# providers:
+#   dbx:                             # OpenAI-compatible (MLflow) route
+#     base_url: "https://<workspace>.cloud.databricks.com/ai-gateway/mlflow/v1"
+#     api_mode: chat_completions
+#     model: databricks-claude-sonnet-4-6
+#     key_cmd: "databricks auth token -p MY-PROFILE"
+#   dbx-gpt:                         # OpenAI Responses route
+#     base_url: "https://<workspace>.cloud.databricks.com/ai-gateway/openai/v1"
+#     api_mode: codex_responses
+#     model: databricks-gpt-5-5
+#     key_cmd: "databricks auth token -p MY-PROFILE"
+#   dbx-claude:                      # Anthropic Messages route
+#     base_url: "https://<workspace>.cloud.databricks.com/ai-gateway/anthropic"
+#     api_mode: anthropic_messages
+#     model: databricks-claude-fable-5
+#     key_cmd: "databricks auth token -p MY-PROFILE"
+
+# Named provider overrides (optional)
+# Use this for per-provider request timeouts, non-stream stale timeouts,
+# and per-model exceptions.
+# Applies to the primary turn client on every api_mode (OpenAI-wire, native
+# Anthropic, and Anthropic-compatible providers), the fallback chain, and
+# client rebuilds during credential rotation.  For OpenAI-wire chat
+# completions (streaming and non-streaming) the configured value is also
+# used as the per-request ``timeout=`` kwarg so it wins over the legacy
+# HERMES_API_TIMEOUT env var (which still applies when no config is set).
+# ``stale_timeout_seconds`` controls the non-streaming stale-call detector and
+# wins over the legacy HERMES_API_CALL_STALE_TIMEOUT env var. Leaving these
+# unset keeps the legacy defaults (HERMES_API_TIMEOUT=1800s,
+# HERMES_API_CALL_STALE_TIMEOUT=90s, native Anthropic 900s). The
+# implicit non-stream stale detector is auto-disabled for local endpoints
+# and can scale upward for very large contexts.
+#
+# Not currently wired for AWS Bedrock (bedrock_converse + AnthropicBedrock
+# SDK paths) — those use boto3 with its own timeout configuration.
+#
+# providers:
+#   ollama-local:
+#     request_timeout_seconds: 300   # Longer timeout for local cold-starts
+#     stale_timeout_seconds: 900     # Explicitly re-enable stale detection on local endpoints
+#   anthropic:
+#     request_timeout_seconds: 30    # Fast-fail cloud requests
+#     models:
+#       claude-opus-4.6:
+#         timeout_seconds: 600       # Longer timeout for extended-thinking Opus calls
+#   openai-codex:
+#     models:
+#       gpt-5.4:
+#         stale_timeout_seconds: 1800  # Longer non-stream stale timeout for slow large-context turns
+
+# =============================================================================
+# Unified Timeouts (operation deadlines)
+# =============================================================================
+# One place to override Hermes's internal operation deadlines (seconds).
+# Keys are dotted paths resolved by agent/deadline.py:resolve_timeout().
+# Precedence: this section > legacy HERMES_* env var (back-compat) > built-in
+# default. 0 or a negative value disables the bound (unbounded); very large
+# values are clamped to a platform-safe maximum automatically.
+#
+# Currently resolved keys (more paths migrate here over time — see issue #85125):
+#
+# timeouts:
+#   tools:
+#     concurrent_batch: 420   # Deadline for a parallel tool-call batch
+#                             # (legacy env: HERMES_CONCURRENT_TOOL_TIMEOUT_S)
+#     sequential_call: 420    # Deadline for one sequentially-executed tool call.
+#                             # Defaults to concurrent_batch's value so the two
+#                             # executor paths stay in sync; human waits
+#                             # (approval prompts, clarify) never count against it.
+
+# =============================================================================
+# OpenRouter Provider Routing (only applies when using OpenRouter)
+# =============================================================================
+# Control how requests are routed across providers on OpenRouter.
+# See: https://openrouter.ai/docs/guides/routing/provider-selection
+#
+# provider_routing:
+#   # Sort strategy: "price" (default), "throughput", or "latency"
+#   # Append :nitro to model name for a shortcut to throughput sorting.
+#   sort: "throughput"
+#
+#   # Only allow these providers (provider slugs from OpenRouter)
+#   # only: ["anthropic", "google"]
+#
+#   # Skip these providers entirely
+#   # ignore: ["deepinfra", "fireworks"]
+#
+#   # Try providers in this order (overrides default load balancing)
+#   # order: ["anthropic", "google", "together"]
+#
+#   # Require providers to support all parameters in your request
+#   # require_parameters: true
+#
+#   # Data policy: "allow" (default) or "deny" to exclude providers that may store data
+#   # data_collection: "deny"
+#
+#   # Per-model overrides: same keys, applied only when the agent is on that model
+#   # (spelling-tolerant match; unset keys fall through to the flat values above).
+#   # models:
+#   #   "openai/gpt-6-astra":
+#   #     only: ["openai"]
+#   #   "anthropic/claude-fable-5.1":
+#   #     only: ["anthropic"]
+
+# =============================================================================
+# OpenRouter Response Caching (only applies when using OpenRouter)
+# =============================================================================
+# Cache identical API responses at the OpenRouter edge for free instant replays.
+# When enabled, identical requests (same model, messages, parameters) return
+# cached responses with zero billing. Separate from Anthropic prompt caching.
+# See: https://openrouter.ai/docs/guides/features/response-caching
+#
+# openrouter:
+#   response_cache: true         # Enable response caching (default: true)
+#   response_cache_ttl: 300      # Cache TTL in seconds, 1-86400 (default: 300)
+
+# =============================================================================
+# Git Worktree Isolation
+# =============================================================================
+# When enabled, each CLI session creates an isolated git worktree so multiple
+# agents can work on the same repo concurrently without file collisions.
+# Equivalent to always passing --worktree / -w on the command line.
+#
+# worktree: true    # Always create a worktree when in a git repo
+# worktree: false   # Default — only create when -w flag is passed
+#
+# By default a new worktree branches from the freshly-fetched remote tip
+# (the current branch's upstream, else the remote's default branch) so it
+# starts current with the project instead of from the local clone's
+# (possibly stale) HEAD. Set worktree_sync: false to branch from local HEAD
+# instead — useful when offline or when you deliberately want the clone's
+# exact current state as the base.
+#
+# worktree_sync: true   # Default — branch from the fetched remote tip
+# worktree_sync: false  # Branch from local HEAD (offline / pinned base)
+
+# =============================================================================
+# Kanban Review Dispatch
+# =============================================================================
+# First-class review tasks are dispatched automatically by default. The worker
+# is spawned with the bundled sdlc-review skill and can approve, request changes
+# back to the original implementer, or escalate a genuine external blocker.
+# Disable this only when every review is performed manually from the dashboard.

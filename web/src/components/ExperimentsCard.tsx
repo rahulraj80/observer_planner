@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { ChartShell, Pill } from "@/components/primitives";
+import { CircleStop, LoaderCircle, type LucideIcon } from "lucide-react";
+import { ChartShell, Pill, SinglePicker, Table, Tooltip } from "@/components/primitives";
+import { useToolOptions } from "@/lib/usePickerSources";
+import type { Tone } from "@shared/lib/tone";
 import { TitleWithHelp } from "@/components/HelpInd";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
-import { fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   ConfigResponse,
   ExperimentDef,
@@ -12,12 +15,33 @@ import type {
 
 // ExperimentsCard — productized profile A/B (P6.4), on the
 // Compression page where the evidence lives. Start/stop write
-// [[experiments]] through the dashboard API (shared config-write
-// owner + hot reload); reports recompute arm membership from the
+// [[experiments]] through the dashboard API (the one config save
+// pipeline + hot reload), each at the config_etag the list was read
+// from (`?base_etag=`, T-639) so a file changed since is refused with
+// 409 instead of overwritten; reports recompute arm membership from the
 // session hash, so the numbers here and `observer experiment report`
 // can never disagree.
+// EXPERIMENT_STATE - an A/B experiment's state: running is in flight
+// (spinning LoaderCircle), stopped is neutral.
+const EXPERIMENT_STATE: Readonly<
+  Record<"running" | "stopped", { tone: Tone; icon: LucideIcon; spin: boolean }>
+> = {
+  running: { tone: "success", icon: LoaderCircle, spin: true },
+  stopped: { tone: "neutral", icon: CircleStop, spin: false },
+};
+
+function ExperimentStatePill({ state }: { state: "running" | "stopped" }) {
+  const row = EXPERIMENT_STATE[state];
+  return (
+    <Pill variant={row.tone} icon={row.icon} spin={row.spin}>
+      {state}
+    </Pill>
+  );
+}
+
 export function ExperimentsCard() {
-  const list = useApi<{ experiments: ExperimentDef[] }>("/api/experiments");
+  const list = useApi<{ experiments: ExperimentDef[]; config_etag?: string }>("/api/experiments");
+  const baseEtag = list.data?.config_etag ?? "";
   const [showStart, setShowStart] = useState(false);
   const [reportFor, setReportFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +50,7 @@ export function ExperimentsCard() {
   const stop = async (name: string) => {
     setError(null);
     try {
-      await fetchJSON("/api/experiments/stop", undefined, {
+      await fetchJSON("/api/experiments/stop", { base_etag: baseEtag }, {
         method: "POST",
         body: JSON.stringify({ name }),
       });
@@ -39,12 +63,12 @@ export function ExperimentsCard() {
   return (
     <ChartShell
       title={<TitleWithHelp text="Profile experiments" helpId="card.experiments" />}
-      sub="A/B two profiles on one traffic class — sessions split by hash, both arms live simultaneously"
+      sub="A/B two profiles on one traffic class - sessions split by hash, both arms live simultaneously"
       right={
         <button
           type="button"
           onClick={() => setShowStart((s) => !s)}
-          className="rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-[11px] text-fg-2 hover:bg-bg-3"
+          className="rounded-2 border border-line-2 bg-bg-3 px-2 py-0.5 text-caption text-fg-2 hover:bg-bg-4"
         >
           {showStart ? "close" : "new experiment"}
         </button>
@@ -53,6 +77,7 @@ export function ExperimentsCard() {
       {error && <p className="mb-2 text-[11px] text-danger">{error}</p>}
       {showStart && (
         <StartForm
+          baseEtag={baseEtag}
           onStarted={() => {
             setShowStart(false);
             list.reload();
@@ -62,7 +87,7 @@ export function ExperimentsCard() {
       {exps.length === 0 && !showStart ? (
         <p className="py-3 text-center text-[12px] text-fg-3">
           No experiments yet. Try a candidate profile against its control on
-          live traffic — the report gives $/session, CV, turns, cache causes,
+          live traffic - the report gives $/session, CV, turns, cache causes,
           and compression savings per arm.
         </p>
       ) : (
@@ -71,9 +96,7 @@ export function ExperimentsCard() {
             <li key={e.name} className="rounded-2 border border-line-1 p-2.5">
               <div className="flex flex-wrap items-center gap-2 text-[12px]">
                 <span className="font-mono font-medium text-fg-1">{e.name}</span>
-                <Pill variant={!e.stopped_at ? "success" : "neutral"}>
-                  {!e.stopped_at ? "running" : "stopped"}
-                </Pill>
+                <ExperimentStatePill state={!e.stopped_at ? "running" : "stopped"} />
                 <Pill>{e.class}</Pill>
                 <span className="text-[11px] text-fg-3">
                   {e.control} vs {e.candidate}
@@ -84,7 +107,7 @@ export function ExperimentsCard() {
                   onClick={() =>
                     setReportFor(reportFor === e.name ? null : e.name)
                   }
-                  className="rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-[10.5px] text-fg-2 hover:bg-bg-3"
+                  className="rounded-2 border border-line-2 bg-bg-3 px-2 py-0.5 text-[10.5px] text-fg-2 hover:bg-bg-4"
                 >
                   {reportFor === e.name ? "hide report" : "report"}
                 </button>
@@ -110,11 +133,13 @@ export function ExperimentsCard() {
   );
 }
 
-function StartForm({ onStarted }: { onStarted: () => void }) {
+function StartForm({ baseEtag, onStarted }: { baseEtag: string; onStarted: () => void }) {
   const cfg = useApi<ConfigResponse>("/api/config");
   const [name, setName] = useState("");
   const [klass, setKlass] = useState("anthropic");
   const [toolName, setToolName] = useState("");
+  // D-571: the one-tool class picks from the tools this build knows.
+  const tools = useToolOptions(klass === "tool");
   const [control, setControl] = useState("");
   const [candidate, setCandidate] = useState("");
   const [note, setNote] = useState("");
@@ -126,7 +151,7 @@ function StartForm({ onStarted }: { onStarted: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      await fetchJSON("/api/experiments", undefined, {
+      await fetchJSON("/api/experiments", { base_etag: baseEtag }, {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -145,9 +170,9 @@ function StartForm({ onStarted }: { onStarted: () => void }) {
   };
 
   const sel =
-    "rounded-2 border border-line-2 bg-bg-1 px-2 py-1 text-[11.5px] text-fg-1 outline-none focus:border-accent/60";
+    "rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-[11.5px] text-fg-1 outline-none focus:border-accent/60";
   return (
-    <div className="mb-3 space-y-2 rounded-2 border border-line-1 bg-bg-1 p-3 text-[12px]">
+    <div className="mb-3 space-y-2 rounded-2 border border-line-2 bg-bg-3/40 p-3 text-small">
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={name}
@@ -161,11 +186,14 @@ function StartForm({ onStarted }: { onStarted: () => void }) {
           <option value="tool">one tool…</option>
         </select>
         {klass === "tool" && (
-          <input
+          <SinglePicker
+            className="min-w-[12rem]"
+            options={tools.options}
             value={toolName}
-            onChange={(e) => setToolName(e.target.value)}
-            placeholder="tool name (e.g. cline)"
-            className={sel + " font-mono"}
+            onChange={setToolName}
+            loading={tools.loading}
+            placeholder="Pick a tool…"
+            ariaLabel="Tool"
           />
         )}
         <select value={control} onChange={(e) => setControl(e.target.value)} className={sel}>
@@ -226,58 +254,66 @@ function ReportView({ name }: { name: string }) {
   const r = rep.data;
   return (
     <div className="mt-2 space-y-2 border-t border-line-1 pt-2">
-      <table className="w-full text-left text-[11.5px]">
-        <thead className="text-[10px] uppercase tracking-[0.06em] text-fg-3">
+      <Table
+        minWidth={620}
+        head={
           <tr>
             <th className="py-1 font-medium">Arm</th>
             <th className="py-1 font-medium">Profile</th>
             <th className="py-1 text-right font-medium">Sessions</th>
-            <th className="py-1 text-right font-medium">Mean $</th>
+            {/* The dollar column is dollars-only (T-204): the token-usage
+                view keeps the arms' turns, cache and compression figures. */}
+            {dollarsShown() && <th className="py-1 text-right font-medium">Mean $</th>}
             <th className="py-1 text-right font-medium">CV</th>
             <th className="py-1 text-right font-medium">Turns</th>
             <th className="py-1 text-right font-medium">Cache r/w</th>
             <th className="py-1 text-right font-medium">Comp. saved</th>
           </tr>
-        </thead>
-        <tbody>
-          {[r.control, r.candidate].map((a) => (
-            <tr key={a.arm} className="border-t border-line-1">
-              <td className="py-1">{a.arm}</td>
-              <td className="py-1 font-mono text-[10.5px]">{a.profile}</td>
-              <td className="py-1 text-right tabular-nums">{fmtInt(a.sessions)}</td>
-              <td className="py-1 text-right tabular-nums">{fmtUSD(a.mean_cost_usd)}</td>
-              <td className="py-1 text-right tabular-nums">
-                {a.sessions >= 2 ? a.cv_pct.toFixed(1) + "%" : "—"}
-              </td>
-              <td className="py-1 text-right tabular-nums">{a.mean_turns.toFixed(1)}</td>
-              <td className="py-1 text-right tabular-nums">
-                {a.cache_write_tokens > 0
-                  ? (a.cache_read_tokens / a.cache_write_tokens).toFixed(1) + "×"
-                  : "—"}
-              </td>
-              <td
-                className="py-1 text-right tabular-nums"
-                title="Genuine, retrievable compression only. Lossy-evicted (dropped) bytes are excluded and shown separately; that content stays recoverable via search_past_outputs markers."
-              >
-                {fmtCompact(a.compression_saved_bytes)}B
-                {(a.compression_evicted_bytes ?? 0) > 0 && (
-                  <span className="block text-[10px] text-fg-3">
-                    +{fmtCompact(a.compression_evicted_bytes ?? 0)}B evicted
-                  </span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        }
+      >
+        {[r.control, r.candidate].map((a) => (
+          <tr key={a.arm} className="border-t border-line-1">
+            <td className="py-1">{a.arm}</td>
+            <td className="py-1 font-mono text-[10.5px]">{a.profile}</td>
+            <td className="py-1 text-right tabular-nums">{fmtInt(a.sessions)}</td>
+            {dollarsShown() && <td className="py-1 text-right tabular-nums">{fmtUSD(a.mean_cost_usd)}</td>}
+            <td className="py-1 text-right tabular-nums">
+              {a.sessions >= 2 ? a.cv_pct.toFixed(1) + "%" : "-"}
+            </td>
+            <td className="py-1 text-right tabular-nums">{a.mean_turns.toFixed(1)}</td>
+            <td className="py-1 text-right tabular-nums">
+              {a.cache_write_tokens > 0
+                ? (a.cache_read_tokens / a.cache_write_tokens).toFixed(1) + "×"
+                : "-"}
+            </td>
+            <Tooltip content="Genuine, retrievable compression only. Lossy-evicted (dropped) bytes are excluded and shown separately; that content stays recoverable via search_past_outputs markers.">
+            <td
+              tabIndex={0}
+              className="cursor-help py-1 text-right tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+            >
+              {fmtCompact(a.compression_saved_bytes)}B
+              {(a.compression_evicted_bytes ?? 0) > 0 && (
+                <span className="block text-[10px] text-fg-3">
+                  +{fmtCompact(a.compression_evicted_bytes ?? 0)}B evicted
+                </span>
+              )}
+            </td>
+            </Tooltip>
+          </tr>
+        ))}
+      </Table>
       {r.control.sessions > 0 && r.candidate.sessions > 0 && (
         <p className="text-[11px] text-fg-2">
           candidate vs control:{" "}
-          <span className="font-medium tabular-nums">
-            {r.delta_cost_pct > 0 ? "+" : ""}
-            {r.delta_cost_pct.toFixed(1)}% $/session
-          </span>
-          {" · "}
+          {dollarsShown() && (
+            <>
+              <span className="font-medium tabular-nums">
+                {r.delta_cost_pct > 0 ? "+" : ""}
+                {r.delta_cost_pct.toFixed(1)}% $/session
+              </span>
+              {" · "}
+            </>
+          )}
           <span className="tabular-nums">
             {r.delta_turns_pct > 0 ? "+" : ""}
             {r.delta_turns_pct.toFixed(1)}% turns
@@ -288,7 +324,7 @@ function ReportView({ name }: { name: string }) {
       <CauseLine label="candidate" causes={r.candidate.cache_events_by_cause} />
       <p className="text-[10.5px] leading-relaxed text-fg-3">
         Decision guidance: believe deltas at n≥8 sessions per arm and CV under
-        ~10–13%. A candidate that wins on cost but adds invalidation-class
+        ~10-13%. A candidate that wins on cost but adds invalidation-class
         cache events (tools_changed, system_changed) or inflates turns fails.
       </p>
     </div>

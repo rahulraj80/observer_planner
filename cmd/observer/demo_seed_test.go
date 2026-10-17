@@ -1,3 +1,5 @@
+//go:build !sbo_omit_demo
+
 package main
 
 import (
@@ -12,6 +14,7 @@ import (
 // dashboard (sessions, actions, token rows, FTS excerpts, at least
 // one recorded failure) and that cleanup is error-free.
 func TestDemoSeeder(t *testing.T) {
+	requireAdapter(t, "claude-code")
 	seed := demoSeeder(slog.Default())
 	database, cleanup, err := seed(context.Background())
 	if err != nil {
@@ -44,9 +47,9 @@ func TestDemoSeeder(t *testing.T) {
 		t.Error("token_usage is empty")
 	}
 	if counts["action_excerpts"] == 0 {
-		t.Error("action_excerpts is empty — demo search would return nothing")
+		t.Error("action_excerpts is empty - demo search would return nothing")
 	}
 	if counts["failure_context"] == 0 {
-		t.Error("failure_context is empty — the failures surface would be blank in demo mode")
+		t.Error("failure_context is empty - the failures surface would be blank in demo mode")
 	}
 }

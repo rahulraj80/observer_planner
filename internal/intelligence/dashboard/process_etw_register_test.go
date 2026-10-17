@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs && !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -39,7 +41,7 @@ func etwRegisterServer(t *testing.T, lm LaunchManager, etwEnabled bool, env func
 	if err := config.WriteToml(cfgPath, cfg); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -129,7 +131,7 @@ func TestETWRegisterSpawnsPlannerArgv(t *testing.T) {
 	script := argv[4]
 	// The elevation itself.
 	if !strings.Contains(script, "-Verb RunAs") {
-		t.Error("script must elevate via -Verb RunAs — that IS the UAC consent step")
+		t.Error("script must elevate via -Verb RunAs - that IS the UAC consent step")
 	}
 	// The measured quoting reaches the child untouched: the script must embed
 	// the planner's own schtasks args, single-quoted /TR and all.
@@ -175,7 +177,7 @@ func TestETWRegisterIgnoresRequestBody(t *testing.T) {
 		argvs = append(argvs, lm.lastSetupSpec.Argv)
 	}
 	if !reflect.DeepEqual(argvs[0], argvs[1]) {
-		t.Fatalf("request body changed the argv — the body must never be read:\nclean=%#v\npoisoned=%#v",
+		t.Fatalf("request body changed the argv - the body must never be read:\nclean=%#v\npoisoned=%#v",
 			argvs[0], argvs[1])
 	}
 	joined := strings.Join(argvs[1], " ")
@@ -259,7 +261,7 @@ func TestETWRegisterBlockedNamesThePathTried(t *testing.T) {
 	if err := config.WriteToml(cfgPath, cfg); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
-	database, err := db.Open(context.Background(), db.Options{Path: cfg.Observer.DBPath})
+	database, err := openTestDB(context.Background(), db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -328,7 +330,7 @@ func TestETWRegisterSpawnBoundaryRecheck(t *testing.T) {
 		t.Fatalf("raced registration = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 	if calls < 2 {
-		t.Errorf("the plan was resolved %d time(s) — the spawn boundary must re-check, not reuse the advisory pass", calls)
+		t.Errorf("the plan was resolved %d time(s) - the spawn boundary must re-check, not reuse the advisory pass", calls)
 	}
 	if lm.lastSetupSpec.Argv != nil {
 		t.Errorf("a task that appeared mid-request must not be clobbered, got spawn %#v", lm.lastSetupSpec.Argv)
@@ -393,7 +395,7 @@ func TestETWRegisterConfirmAndMethod(t *testing.T) {
 	}
 
 	if probes != 0 {
-		t.Errorf("a rejected request ran %d probe(s) — the confirm gate must come first", probes)
+		t.Errorf("a rejected request ran %d probe(s) - the confirm gate must come first", probes)
 	}
 	if lm.lastSetupSpec.Argv != nil {
 		t.Error("a rejected request must spawn nothing")

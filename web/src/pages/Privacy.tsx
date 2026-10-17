@@ -1,11 +1,25 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ChartShell, PageHeader, Pill } from "@/components/primitives";
+import { ChartShell, PageHeader, Pill, Table } from "@/components/primitives";
 import { TitleWithHelp } from "@/components/HelpInd";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
-import { fmtBytes, fmtInt } from "@/lib/format";
+import { fmtBytes, fmtDateTime, fmtInt } from "@/lib/format";
+import {
+  type GovernanceShareKey,
+  type GovernancePricing,
+  GOVERNANCE_SOURCE,
+  shareSourceLabel,
+  shareSourceOf,
+  useGovernance,
+} from "@/lib/governance";
+import { VocabPill } from "@shared/lib/vocabPill";
 import type { ConfigResponse } from "@/lib/types";
+import { navIcon } from "@/lib/nav";
+import { PageVisibilityCard } from "@/components/PageVisibilityCard";
+import { orgDisplayLabelSentence } from "@/lib/orgName";
+import { pricingFeedFromConfig } from "@/lib/pricingFeed";
 
 // Privacy center (P6.5): one page answering "what does the observer
 // capture, what never leaves this machine, and how do I verify it?".
@@ -19,12 +33,17 @@ export function PrivacyPage() {
     ?.Observer?.Secrets;
   const retention = (cfg.data?.config as Record<string, any> | undefined)
     ?.Observer?.Retention;
+  // T-470 / D-007: an organization-managed machine ships full content by its
+  // enrolment grant, so the individual "node-side opt-in" sentence is false
+  // there.
+  const managed = !!useGovernance().data?.managed;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 sm:p-6">
       <PageHeader
+        icon={navIcon("privacy")}
         title="Privacy"
-        sub="What the observer captures, what never leaves this machine, and the tools to verify both — the live scrub tester and the byte-for-byte view of anything shared with a Teams server."
+        sub="What the observer captures, what never leaves this machine, and the tools to verify both - the live scrub tester and the byte-for-byte view of anything shared with a Teams server."
         helpId="tab.privacy"
       />
 
@@ -44,20 +63,29 @@ export function PrivacyPage() {
             <p className="font-medium text-fg-1">Never stored</p>
             <ul className="list-disc space-y-1 pl-4 text-fg-2">
               <li>Full file contents and full command outputs (paths and excerpts only)</li>
-              <li>Credentials — secret-shaped strings are scrubbed before any row lands</li>
+              <li>Credentials - secret-shaped strings are scrubbed before any row lands</li>
             </ul>
           </div>
           <div className="space-y-1.5">
             <p className="font-medium text-fg-1">Network posture</p>
             <ul className="list-disc space-y-1 pl-4 text-fg-2">
-              <li>The observer and watcher make no network calls — everything is local</li>
+              <li>The observer and watcher make no network calls - everything is local</li>
               <li>The proxy only forwards your AI tool's own traffic to its provider</li>
-              <li>
-                Teams push happens only after explicit enrolment, hash-only by
-                default; raw content requires the node-side{" "}
-                <span className="font-mono text-[11px]">share.full_content</span>{" "}
-                opt-in that no server can flip remotely
-              </li>
+              {managed ? (
+                <li>
+                  This machine is managed by your organization: its pushes
+                  carry full content (raw commands, prose and paths) by the
+                  organization&apos;s enrolment grant, unless the organization
+                  has deliberately lowered it
+                </li>
+              ) : (
+                <li>
+                  Teams push happens only after explicit enrolment, hash-only by
+                  default; raw content requires the node-side{" "}
+                  <span className="font-mono text-[11px]">share.full_content</span>{" "}
+                  opt-in that no server can flip remotely
+                </li>
+              )}
             </ul>
             <p className="mt-2 font-medium text-fg-1">This install</p>
             <div className="flex flex-wrap gap-1.5 pt-1">
@@ -89,6 +117,8 @@ export function PrivacyPage() {
       </ChartShell>
 
       <ScrubTesterCard scrubbingEnabled={secrets?.EnableScrubbing ?? true} />
+      <SharingSourceCard config={cfg.data?.config as Record<string, any> | undefined} />
+      <PageVisibilityCard />
       <OrgPushCard />
     </div>
   );
@@ -124,7 +154,7 @@ function ScrubTesterCard({ scrubbingEnabled }: { scrubbingEnabled: boolean }) {
   return (
     <ChartShell
       title={<TitleWithHelp text="Scrub tester" helpId="card.privacy_scrub_tester" />}
-      sub="Paste anything — see exactly what the scrubber would redact. Processed in memory only; nothing you paste here is logged or stored."
+      sub="Paste anything - see exactly what the scrubber would redact. Processed in memory only; nothing you paste here is logged or stored."
     >
       <div className="space-y-2">
         <textarea
@@ -145,7 +175,7 @@ function ScrubTesterCard({ scrubbingEnabled }: { scrubbingEnabled: boolean }) {
           </button>
           {!scrubbingEnabled && (
             <Pill variant="warn">
-              scrubbing is currently OFF — this shows what it would do once enabled
+              scrubbing is currently OFF - this shows what it would do once enabled
             </Pill>
           )}
           {result && (
@@ -156,7 +186,7 @@ function ScrubTesterCard({ scrubbingEnabled }: { scrubbingEnabled: boolean }) {
         </div>
         {error && <p className="text-[11px] text-danger">{error}</p>}
         {result && (
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-2 border border-line-1 bg-bg-1 p-2.5 font-mono text-[11px] leading-relaxed text-fg-2">
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-2 border border-line-2 bg-bg-3 p-2.5 font-mono text-caption leading-relaxed text-fg-2">
             {result.scrubbed}
           </pre>
         )}
@@ -165,9 +195,266 @@ function ScrubTesterCard({ scrubbingEnabled }: { scrubbingEnabled: boolean }) {
   );
 }
 
+// SHARE_ROWS is the sharing posture this page explains, one row per
+// [org_client.share] key, paired with the wire key the org rail names it by.
+//
+// It is a display table, not a vocabulary: the organization's own vocabulary
+// is served by the org server, and SharingSourceCard renders ANY key the
+// governance endpoint reports that is missing here rather than dropping it.
+// So a new org-side key is visible on day one, worst case without a friendly
+// label - never invisible.
+const SHARE_ROWS: { key: string; field: string; label: string; help: string; list?: true }[] = [
+  {
+    key: "full_content",
+    field: "FullContent",
+    label: "Full file paths and command text",
+    help: "Off means only sha256 hashes and counts cross the wire.",
+  },
+  {
+    key: "target_action_allowlist",
+    field: "TargetActionAllowlist",
+    label: "Action types allowed to ship a raw target",
+    help: "A per-action exception to the hash-only default.",
+    list: true,
+  },
+  {
+    key: "routing_summary",
+    field: "RoutingSummary",
+    label: "Routing summary rollup",
+    help: "Counts and dollars by tier and reason. Never the decision rows.",
+  },
+  {
+    key: "policy_state",
+    field: "PolicyState",
+    label: "Effective-policy-state reports",
+    help: "Which policy version this machine is running. Content-free.",
+  },
+];
+
+// shareValueText renders a share value for the table without ever printing
+// "true"/"false" at a developer. A list-shaped key reads "none" when empty,
+// because "not shared" would describe the key itself rather than its
+// contents.
+function shareValueText(v: unknown, list?: boolean): string {
+  if (Array.isArray(v)) return v.length ? v.join(", ") : "none";
+  if (typeof v === "boolean") return v ? "shared" : "not shared";
+  if (v === undefined || v === null) return list ? "none" : "not shared";
+  return String(v);
+}
+
+// SharingSourceCard is the Privacy page's Source column: for every sharing
+// key, what this machine's own config asks for, what is actually in force,
+// and which of the two decided it.
+//
+// The direction depends on the tenancy, and this card says WHICH ONE this
+// machine is on rather than making one claim for both:
+//
+//   Individual / BYO - one-way by construction. An organization can reduce
+//   what this machine shares, or lock it at the level the operator already
+//   chose. It cannot raise it: the raise no-ops without managed enrolment.
+//
+//   Managed (Enterprise-Managed Tenancy) - the organization can also turn
+//   sharing ON remotely, for the tiers it was granted at enrolment. That is
+//   the deal a managed enrolment makes, and a row it raised is labelled as
+//   its decision, not the developer's.
+function SharingSourceCard({ config }: { config: Record<string, any> | undefined }) {
+  const gov = useGovernance();
+  const enrol = useApi<EnrolStatus>("/api/enrolment/status");
+  const local = config?.OrgClient?.Share as Record<string, unknown> | undefined;
+  const orgKeys = Object.keys(gov.data?.share ?? {});
+  const known = new Set(SHARE_ROWS.map((r) => r.key));
+  const extra = orgKeys.filter((k) => !known.has(k));
+
+  const rows: {
+    key: string;
+    label: string;
+    help: string;
+    list?: boolean;
+    local: unknown;
+    row: GovernanceShareKey | null;
+  }[] = [
+    ...SHARE_ROWS.map((r) => ({
+      key: r.key,
+      label: r.label,
+      help: r.help,
+      list: r.list,
+      local: local?.[r.field],
+      row: shareSourceOf(gov.data, r.key),
+    })),
+    ...extra.map((k) => ({
+      key: k,
+      label: k,
+      help: "This sharing key is newer than this dashboard build, so it has no description here yet.",
+      local: undefined,
+      row: shareSourceOf(gov.data, k),
+    })),
+  ];
+
+  return (
+    <ChartShell
+      title={<TitleWithHelp text="Sharing keys and their source" helpId="card.privacy_share_source" />}
+      sub={
+        gov.data?.managed
+          ? "Each sharing switch, what it is set to, and who decided. This machine is managed by your organization, so it can reduce, lock, or increase what is shared - every row it decided is marked below."
+          : "Each sharing switch, what it is set to, and who decided. An organization can reduce or lock what this machine shares; on an unmanaged machine like this one it cannot increase it."
+      }
+    >
+      {enrol.data && !enrol.data.enrolled && (
+        <p className="pb-2 text-[11.5px] text-fg-2">
+          This machine is not enrolled in any organization, so nothing below is shared with anyone. The settings are
+          what would apply if you enrolled.
+        </p>
+      )}
+      <Table
+        head={
+          <tr className="text-left">
+            <th className="py-1.5 pr-3 font-medium">Setting</th>
+            <th className="py-1.5 pr-3 font-medium">Your setting</th>
+            <th className="py-1.5 pr-3 font-medium">In force</th>
+            <th className="py-1.5 font-medium">Source</th>
+          </tr>
+        }
+      >
+            {rows.map((r) => {
+              const effective = r.row ? r.row.effective : r.local;
+              const governed = !!r.row && r.row.source !== "you";
+              return (
+                <tr key={r.key} className="border-t border-line-1 first:border-t-0">
+                  <td className="py-1.5 pr-3 align-top">
+                    <div className="text-fg-1">{r.label}</div>
+                    <div className="font-mono text-[10.5px] text-fg-3">{r.key}</div>
+                    <div className="text-[11px] text-fg-3">{r.help}</div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top text-fg-2">{shareValueText(r.local, r.list)}</td>
+                  <td className="py-1.5 pr-3 align-top text-fg-2">{shareValueText(effective, r.list)}</td>
+                  <td className="py-1.5 align-top">
+                    {governed ? (
+                      // A raise is the one direction that shares MORE than
+                      // the operator asked for, so it does not read as
+                      // routine policy the way a reduce or a lock does.
+                      <VocabPill
+                        vocab="governanceSource"
+                        table={GOVERNANCE_SOURCE}
+                        value={r.row?.source}
+                        tone={r.row ? undefined : "info"}
+                      >
+                        {shareSourceLabel(r.row)}
+                      </VocabPill>
+                    ) : (
+                      <span className="text-fg-2">{shareSourceLabel(null)}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+      </Table>
+      <PricingSourceRow pricing={gov.data?.pricing} />
+      <PricingFeedEgressRow config={config} />
+      <p className="pt-2 text-[11px] text-fg-3">
+        Change your own settings in{" "}
+        <Link to="/settings?section=org" className="font-medium text-accent hover:text-accent-strong">
+          Settings &rarr; Organization
+        </Link>
+        . A row sourced to your organization is applied on this machine and its control there is read-only; leaving the
+        organization in{" "}
+        <Link to="/settings?section=enrolment" className="font-medium text-accent hover:text-accent-strong">
+          Settings &rarr; Enrolment
+        </Link>{" "}
+        removes it.
+      </p>
+      {gov.error && (
+        <p
+          className="pt-1 text-[11px] text-fg-3"
+          title="GET /api/governance did not answer, so any organization directive cannot be shown."
+        >
+          The governance posture could not be read, so every row shows your own setting as the source. Reload to try
+          again.
+        </p>
+      )}
+    </ChartShell>
+  );
+}
+
+// PricingSourceRow says WHICH PRICE TABLE this machine is using.
+//
+// It sits on the sharing card because it answers the same question every other
+// row here answers: what did my organization decide for this machine, and how
+// do I know? An organization that distributes negotiated rates changes every
+// dollar figure on every screen of this dashboard, and before this arc no
+// surface said so anywhere.
+//
+// An ABSENT block renders nothing at all. "Not reported" and "using the
+// built-in table" are different facts, and this page's whole discipline is
+// that an absence never renders as a verdict.
+function PricingSourceRow({ pricing }: { pricing: GovernancePricing | undefined }) {
+  if (!pricing) return null;
+  const version = pricing.org_version ?? 0;
+  const feedVersion = pricing.feed_version ?? 0;
+  const label =
+    pricing.source === "org_authoritative"
+      ? `Your organization's negotiated rates (v${version}) price every turn on this machine, above any rate you set yourself.`
+      : pricing.source === "org"
+        ? `Your organization's negotiated rates (v${version}) price every turn on this machine, below any rate you set yourself.`
+        : pricing.source === "feed"
+          ? `Market list prices from the Tokenomics pricing feed (v${feedVersion}) price every turn on this machine, below any rate you set yourself.`
+          : "This machine prices every turn from its own table: the built-in rates plus anything you set in Settings.";
+  return (
+    <div className="pt-2 text-[11px] text-fg-3">
+      <span className="font-medium text-fg-2">Pricing:</span> {label}
+      {(pricing.warnings ?? []).length > 0 && (
+        <ul className="pt-1 pl-4 list-disc">
+          {(pricing.warnings ?? []).map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// PricingFeedEgressRow states the public pricing feed's OUTBOUND posture
+// honestly (plan §G): off (no feed fetch), manual-only, or auto on a cadence.
+// It reads [pricing.feed] from the node's own config (a local egress decision,
+// never an org directive) and renders nothing when the block is absent (an
+// older build), so an absence never reads as a verdict.
+function PricingFeedEgressRow({
+  config,
+}: {
+  config: Record<string, any> | undefined;
+}) {
+  const feed = pricingFeedFromConfig(config);
+  if (!feed) return null;
+  const hours = feed.pollIntervalHours;
+  const posture = !feed.enabled
+    ? "off - no background request is made. A standalone node can still fetch it once with Fetch prices now."
+    : feed.auto
+      ? `auto - this node fetches the public pricing feed about every ${hours}h (plus on demand). Enrolled nodes never consult it.`
+      : "manual only - fetched only when you click Fetch prices now. No background request is made.";
+  return (
+    <div className="pt-2 text-[11px] text-fg-3">
+      <span className="font-medium text-fg-2">Pricing feed egress:</span> {posture}
+      {/* `observer pricing sync` as a dashboard job: one user-started fetch,
+          verified against the vendor key before anything is applied. The CLI
+          itself refuses on an enrolled node (prices come from the org). */}
+      <CommandJobButton
+        job="pricing-sync"
+        className="mt-1.5"
+        outputLines={3}
+        confirmLabel="Fetch now?"
+        armedNote={`Makes one outbound request to ${feed.url || "the public pricing feed"}. A body that does not verify is never applied.`}
+        runningLabel="Fetching…"
+        doneText="Done. A running daemon applies new prices on its next start or auto-sync poll."
+      >
+        Fetch prices now
+      </CommandJobButton>
+    </div>
+  );
+}
+
 type EnrolStatus = {
   enrolled: boolean;
   org_name?: string;
+  org_display?: string;
   org_server_url?: string;
   user_email?: string;
   last_push?: {
@@ -207,21 +494,24 @@ function OrgPushCard() {
     >
       {!st?.enrolled ? (
         <p className="py-3 text-[12px] text-fg-2">
-          Not enrolled in any org — nothing is shared, ever. Enrolment is an
-          explicit <span className="font-mono text-[11px]">observer enroll</span>{" "}
-          action; until then the observer has no outbound channel at all.
+          Not enrolled in any org - nothing is shared, ever. Enrolment is an
+          explicit action in{" "}
+          <Link to="/settings?section=enrolment" className="font-medium text-accent hover:text-accent-strong">
+            Settings &rarr; Enrolment
+          </Link>
+          ; until then the observer has no outbound channel at all.
         </p>
       ) : (
         <div className="space-y-2 text-[12px]">
           <div className="flex flex-wrap items-center gap-1.5">
             <Pill variant="info">enrolled</Pill>
             <span className="text-fg-2">
-              {st.org_name ?? "org"} · {st.org_server_url}
+              {orgDisplayLabelSentence(st.org_display)} · {st.org_server_url}
             </span>
             {st.last_push && (
               <span className="text-[11px] text-fg-3">
                 last push {st.last_push.status} · {fmtInt(st.last_push.row_count)}{" "}
-                rows · {fmtBytes(st.last_push.bytes)} · {st.last_push.pushed_at}
+                rows · {fmtBytes(st.last_push.bytes)} · {fmtDateTime(st.last_push.pushed_at)}
               </span>
             )}
           </div>
@@ -242,7 +532,7 @@ function OrgPushCard() {
             </Link>
           </div>
           {payload && (
-            <pre className="max-h-64 overflow-auto rounded-2 border border-line-1 bg-bg-1 p-2.5 font-mono text-[10.5px] leading-relaxed text-fg-2">
+            <pre className="max-h-64 overflow-auto rounded-2 border border-line-2 bg-bg-3 p-2.5 font-mono text-[10.5px] leading-relaxed text-fg-2">
               {payload}
             </pre>
           )}

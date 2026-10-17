@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // Process-observability persistence (docs/process-observability.md §10).
@@ -28,9 +29,9 @@ import (
 // tests/invariant/privacy_test.go alongside the cachetrack / router tables.
 //
 // MODULE-BOUNDARY NOTE — this file is the seam where processobs DOMAIN
-// types (processobs.ProcessRun) are translated into the store's own SQL
+// types (procmodel.ProcessRun) are translated into the store's own SQL
 // shape. The processobs package never imports internal/store; it persists
-// through the processobs.Sink interface, which *(*Store).PersistRuns
+// through the procmodel.Sink interface, which *(*Store).PersistRuns
 // implements. Domain types do not leak into the SQL, exactly as the
 // cachetrack engine's ObserveResult is translated in cachetrack.go.
 
@@ -91,7 +92,7 @@ type ProcessRunRow struct {
 	WriteOps        int64
 	ThreadCount     int32
 	HandleCount     int32
-	MetricSamples   []processobs.MetricSample
+	MetricSamples   []procmodel.MetricSample
 }
 
 // ProcessNetworkBodyRow is the optional diagnostic body row attached to a
@@ -262,7 +263,7 @@ ON CONFLICT(process_key) DO UPDATE SET
     handle_count           = COALESCE(excluded.handle_count, process_runs.handle_count),
     metric_samples_json    = COALESCE(excluded.metric_samples_json, process_runs.metric_samples_json)`
 
-// PersistRuns implements [processobs.Sink]. It upserts a batch of process
+// PersistRuns implements [procmodel.Sink]. It upserts a batch of process
 // runs by process_key in one transaction: the exec snapshot inserts the
 // row, the exit snapshot (same key) updates the runtime/resource columns.
 // Immutable identity (process_key, pid, start_time, started_at, parent) is
@@ -280,7 +281,7 @@ ON CONFLICT(process_key) DO UPDATE SET
 //
 // Returns the count of rows processed. A failure aborts the whole batch
 // (txn rollback); the observer records this as a non-fatal sink-error drop.
-func (s *Store) PersistRuns(ctx context.Context, runs []processobs.ProcessRun) (int, error) {
+func (s *Store) PersistRuns(ctx context.Context, runs []procmodel.ProcessRun) (int, error) {
 	if len(runs) == 0 {
 		return 0, nil
 	}
@@ -308,12 +309,36 @@ func (s *Store) PersistRuns(ctx context.Context, runs []processobs.ProcessRun) (
 	return len(runs), nil
 }
 
-// PersistProcessEvents implements [processobs.EventSink]. It inserts
+// ClassifySinkError implements [procmodel.SinkErrorClassifier]: it tells the
+// process observer whether a PersistRuns failure is worth retrying.
+//
+// It exists because processobs is a pure package that performs no I/O and must
+// never learn what SQLite is — so the only place that can read the DRIVER's
+// structured result code is here, at the seam that owns the driver. That
+// matters: SQLITE_BUSY is the single most common failure on a box with a
+// competing writer, and its message text has been reworded across driver
+// versions, so classifying it by substring alone is a bet on wording. A
+// structured code is a fact.
+//
+// Anything the code check cannot answer falls through to the shared
+// processobs table, so the string half has ONE owner rather than a copy here
+// that drifts (CLAUDE.md rule 4).
+func (s *Store) ClassifySinkError(err error) procmodel.SinkErrorClass {
+	if err == nil {
+		return procmodel.SinkErrorUnknown
+	}
+	if db.IsTransientWriteError(err) {
+		return procmodel.SinkErrorTransient
+	}
+	return procmodel.ClassifySinkError(err)
+}
+
+// PersistProcessEvents implements [procmodel.EventSink]. It inserts
 // high-signal process events and their optional network-body detail rows in one
 // transaction. The process_events row is the source of truth for attribution;
 // process_network_bodies carries capped/scrubbed body excerpts only when a
 // plaintext capture source produced them.
-func (s *Store) PersistProcessEvents(ctx context.Context, events []processobs.ProcessEvent) (int, error) {
+func (s *Store) PersistProcessEvents(ctx context.Context, events []procmodel.ProcessEvent) (int, error) {
 	if len(events) == 0 {
 		return 0, nil
 	}
@@ -357,7 +382,7 @@ func (s *Store) PersistProcessEvents(ctx context.Context, events []processobs.Pr
 			e.Timestamp = time.Now().UTC()
 		}
 		if e.Type == "" {
-			e.Type = processobs.EventNetworkConnect
+			e.Type = procmodel.EventNetworkConnect
 		}
 		if e.TargetHash == "" && e.Target != "" {
 			e.TargetHash = sha256Hex(e.Target)
@@ -443,7 +468,7 @@ func (s *Store) PersistProcessEvents(ctx context.Context, events []processobs.Pr
 // scrubbing/capping already happened in processobs; here we only map domain
 // values to nullable SQL values. P4 envelope groups (security/isolation/
 // resources) are zero in P1 and land as NULL.
-func processRunArgs(r *processobs.ProcessRun) []any {
+func processRunArgs(r *procmodel.ProcessRun) []any {
 	a := r.Attribution
 
 	var exitedAt, exitCode, exitSignal, durationMs any
@@ -576,7 +601,7 @@ func (s *Store) NetworkEventsForSession(ctx context.Context, sessionID string, l
 		  LEFT JOIN process_runs pr ON pr.id = pe.process_run_id
 		 WHERE pe.session_id = ? AND pe.event_type = ?
 		 ORDER BY pe.timestamp DESC, pe.id DESC
-		 LIMIT ?`, sessionID, string(processobs.EventNetworkConnect), limit)
+		 LIMIT ?`, sessionID, string(procmodel.EventNetworkConnect), limit)
 	if err != nil {
 		return nil, fmt.Errorf("store.NetworkEventsForSession: query: %w", err)
 	}
@@ -639,7 +664,7 @@ func (s *Store) NetworkSummaryForSession(ctx context.Context, sessionID string) 
 		      LEFT JOIN process_network_bodies pnb ON pnb.process_event_id = pe.id
 		     WHERE pe.session_id = ? AND pe.event_type = ?
 		  ) e`,
-		sessionID, string(processobs.EventNetworkConnect)).
+		sessionID, string(procmodel.EventNetworkConnect)).
 		Scan(&out.ProxiedCalls, &out.RequestBytes, &out.ResponseBytes, &out.OSConnections)
 	if err != nil {
 		return NetworkSummary{}, fmt.Errorf("store.NetworkSummaryForSession: %w", err)
@@ -673,7 +698,7 @@ func (s *Store) NetworkEventDetail(ctx context.Context, eventID int64) (ProcessN
 		  FROM process_events pe
 		  LEFT JOIN process_network_bodies pnb ON pnb.process_event_id = pe.id
 		  LEFT JOIN process_runs pr ON pr.id = pe.process_run_id
-		 WHERE pe.id = ? AND pe.event_type = ?`, eventID, string(processobs.EventNetworkConnect))
+		 WHERE pe.id = ? AND pe.event_type = ?`, eventID, string(procmodel.EventNetworkConnect))
 	if err != nil {
 		return ProcessNetworkEventRow{}, fmt.Errorf("store.NetworkEventDetail: query: %w", err)
 	}
@@ -718,7 +743,7 @@ func (s *Store) CorrelateProcessActions(ctx context.Context, sessionID string) (
 		return 0, nil
 	}
 
-	links := processobs.CorrelateActions(runs, actions, 0)
+	links := procmodel.CorrelateActions(runs, actions, 0)
 	if len(links) == 0 {
 		return 0, nil
 	}
@@ -751,6 +776,37 @@ func (s *Store) CorrelateProcessActions(ctx context.Context, sessionID string) (
 	return n, nil
 }
 
+// SessionActionCursor returns a cheap change-detector for a session's
+// process/action correlation inputs, so a background sweeper can skip the
+// expensive CorrelateProcessActions pass when nothing new has arrived since
+// its last look.
+//
+// unlinkedRuns is the COUNT of the session's process_runs that still lack an
+// action_id — deliberately a count, not MAX(started_at). It advances when a
+// new process becomes part of the session's turn-unlinked set by EITHER path:
+// a fresh INSERT, OR the cross-OS sweep's UPDATE that stamps session_id onto an
+// already-captured (hence earlier-started) row. A MAX(started_at) mark would
+// miss the latter — the cross-OS-attributed row carries an OLD started_at, so
+// the mark wouldn't move and the sweep would skip the very row that just gained
+// a session_id, defeating the same-tick turn-link the sweep is ordered for. The
+// count also self-heals: a linking pass lowers it, which registers as a change
+// and triggers exactly one more pass that converges (the remaining ambiguous
+// residue links nothing, the count holds, and the session is then skipped).
+// actionMark is the highest actions.id for the session's run_command actions,
+// advancing only when a new run_command action is ingested. A caller comparing
+// consecutive (unlinkedRuns, actionMark) pairs can tell "nothing new" from
+// "worth a correlate pass" without loading process_runs/actions rows.
+func (s *Store) SessionActionCursor(ctx context.Context, sessionID string) (unlinkedRuns int64, actionMark int64, err error) {
+	err = s.db.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM process_runs WHERE session_id = ? AND action_id IS NULL),
+		       COALESCE((SELECT MAX(id) FROM actions WHERE session_id = ? AND action_type = ?), 0)`,
+		sessionID, sessionID, models.ActionRunCommand).Scan(&unlinkedRuns, &actionMark)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store.SessionActionCursor: %w", err)
+	}
+	return unlinkedRuns, actionMark, nil
+}
+
 // CorrelateCrossOS runs the §5.5 deferred cross-OS pass for one session: it
 // matches the Windows AI-tool root process (exe basename in the tool's set, cwd
 // == the session's project root, started within a bounded window) to the
@@ -770,29 +826,39 @@ func (s *Store) CorrelateCrossOS(ctx context.Context, sessionID string) (int, er
 	if err != nil || !ok {
 		return 0, err
 	}
+	n, _, err := s.correlateCrossOSPass(ctx, sess)
+	return n, err
+}
+
+// correlateCrossOSPass is one full cross-OS pass for an already-loaded
+// session: it loads the candidate pool, correlates it and writes the
+// attributions. It also returns the pool it loaded, which the background
+// sweeper keeps to decide when the next pass can be skipped (crossossweep.go).
+func (s *Store) correlateCrossOSPass(ctx context.Context, sess procmodel.CrossOSSessionRef) (int, []procmodel.CrossOSProcRef, error) {
+	sessionID := sess.SessionID
 	// Bound the candidate set to an anchor window around the session start (a
 	// generous ±CrossOSWindow superset of the correlator's own match window);
 	// loadCrossOSProcRefs adds this session's existing rows and pulls the full
 	// subtree of every seed. This keeps the load to the AI subtree instead of
 	// scanning every unattributed row in the table (the drawer-slowdown cause).
-	lo := timestamp(sess.StartedAt.Add(-processobs.CrossOSWindow))
-	hi := timestamp(sess.StartedAt.Add(processobs.CrossOSWindow))
+	lo := timestamp(sess.StartedAt.Add(-procmodel.CrossOSWindow))
+	hi := timestamp(sess.StartedAt.Add(procmodel.CrossOSWindow))
 	runs, err := s.loadCrossOSProcRefs(ctx, sessionID, lo, hi)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if len(runs) == 0 {
-		return 0, nil
+		return 0, runs, nil
 	}
 
-	attrs := processobs.CorrelateCrossOS([]processobs.CrossOSSessionRef{sess}, runs, nil, 0)
+	attrs := procmodel.CorrelateCrossOS([]procmodel.CrossOSSessionRef{sess}, runs, nil, 0)
 	if len(attrs) == 0 {
-		return 0, nil
+		return 0, runs, nil
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("store.CorrelateCrossOS: begin: %w", err)
+		return 0, nil, fmt.Errorf("store.CorrelateCrossOS: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -804,7 +870,7 @@ func (s *Store) CorrelateCrossOS(ctx context.Context, sessionID string) (int, er
 		    SET session_id = ?, project_id = ?, tool = ?, attribution_source = ?, attribution_confidence = ?
 		  WHERE process_key = ? AND attribution_confidence != ? AND (session_id IS NULL OR session_id != ?)`)
 	if err != nil {
-		return 0, fmt.Errorf("store.CorrelateCrossOS: prepare: %w", err)
+		return 0, nil, fmt.Errorf("store.CorrelateCrossOS: prepare: %w", err)
 	}
 	defer stmt.Close()
 
@@ -812,35 +878,35 @@ func (s *Store) CorrelateCrossOS(ctx context.Context, sessionID string) (int, er
 	for _, a := range attrs {
 		res, err := stmt.ExecContext(ctx,
 			a.SessionID, a.ProjectID, a.Tool, string(a.Source), string(a.Confidence),
-			a.ProcessKey, string(processobs.ConfHigh), a.SessionID)
+			a.ProcessKey, string(procmodel.ConfHigh), a.SessionID)
 		if err != nil {
-			return 0, fmt.Errorf("store.CorrelateCrossOS: exec: %w", err)
+			return 0, nil, fmt.Errorf("store.CorrelateCrossOS: exec: %w", err)
 		}
 		c, _ := res.RowsAffected()
 		n += int(c)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("store.CorrelateCrossOS: commit: %w", err)
+		return 0, nil, fmt.Errorf("store.CorrelateCrossOS: commit: %w", err)
 	}
-	return n, nil
+	return n, runs, nil
 }
 
 // loadCrossOSSession reads one session's (tool, project_id, project root_path,
 // started_at) for the cross-OS match. The root_path is the Windows-shaped
 // project root recorded from the hook payload's cwd.
-func (s *Store) loadCrossOSSession(ctx context.Context, sessionID string) (processobs.CrossOSSessionRef, bool, error) {
+func (s *Store) loadCrossOSSession(ctx context.Context, sessionID string) (procmodel.CrossOSSessionRef, bool, error) {
 	const q = `
 		SELECT s.tool, s.project_id, COALESCE(p.root_path, ''), s.started_at
 		FROM sessions s JOIN projects p ON s.project_id = p.id
 		WHERE s.id = ?`
-	var ref processobs.CrossOSSessionRef
+	var ref procmodel.CrossOSSessionRef
 	var started string
 	err := s.db.QueryRowContext(ctx, q, sessionID).Scan(&ref.Tool, &ref.ProjectID, &ref.ProjectRoot, &started)
 	if errors.Is(err, sql.ErrNoRows) {
-		return processobs.CrossOSSessionRef{}, false, nil
+		return procmodel.CrossOSSessionRef{}, false, nil
 	}
 	if err != nil {
-		return processobs.CrossOSSessionRef{}, false, fmt.Errorf("store.loadCrossOSSession: %w", err)
+		return procmodel.CrossOSSessionRef{}, false, fmt.Errorf("store.loadCrossOSSession: %w", err)
 	}
 	ref.SessionID = sessionID
 	ref.StartedAt = parseStamp(started)
@@ -867,7 +933,7 @@ func (s *Store) loadCrossOSSession(ctx context.Context, sessionID string) (proce
 // slowed the Processes drawer. Both walks are indexed: the child-walk by
 // idx_process_runs_parent (migration 046), the ancestor-walk by the process_key
 // primary key.
-func (s *Store) loadCrossOSProcRefs(ctx context.Context, sessionID, lo, hi string) ([]processobs.CrossOSProcRef, error) {
+func (s *Store) loadCrossOSProcRefs(ctx context.Context, sessionID, lo, hi string) ([]procmodel.CrossOSProcRef, error) {
 	const q = `
 		WITH RECURSIVE seeds(process_key, parent_process_key) AS (
 			SELECT process_key, parent_process_key FROM process_runs
@@ -896,22 +962,22 @@ func (s *Store) loadCrossOSProcRefs(ctx context.Context, sessionID, lo, hi strin
 		return nil, fmt.Errorf("store.loadCrossOSProcRefs: query: %w", err)
 	}
 	defer rows.Close()
-	var out []processobs.CrossOSProcRef
+	var out []procmodel.CrossOSProcRef
 	for rows.Next() {
-		var r processobs.CrossOSProcRef
+		var r procmodel.CrossOSProcRef
 		var started, src, conf string
 		if err := rows.Scan(&r.ProcessKey, &r.ParentProcessKey, &r.ExeBasename, &r.CWD, &started, &src, &conf); err != nil {
 			return nil, fmt.Errorf("store.loadCrossOSProcRefs: scan: %w", err)
 		}
 		r.StartedAt = parseStamp(started)
-		r.Source = processobs.AttributionSource(src)
-		r.Confidence = processobs.Confidence(conf)
+		r.Source = procmodel.AttributionSource(src)
+		r.Confidence = procmodel.Confidence(conf)
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
-func (s *Store) loadProcessRunRefs(ctx context.Context, sessionID string) ([]processobs.ProcRunRef, error) {
+func (s *Store) loadProcessRunRefs(ctx context.Context, sessionID string) ([]procmodel.ProcRunRef, error) {
 	const q = `
 		SELECT process_key, COALESCE(parent_process_key, ''), started_at,
 		       COALESCE(argv_preview, ''), COALESCE(exe_basename, ''),
@@ -922,9 +988,9 @@ func (s *Store) loadProcessRunRefs(ctx context.Context, sessionID string) ([]pro
 		return nil, fmt.Errorf("store.loadProcessRunRefs: query: %w", err)
 	}
 	defer rows.Close()
-	var out []processobs.ProcRunRef
+	var out []procmodel.ProcRunRef
 	for rows.Next() {
-		var r processobs.ProcRunRef
+		var r procmodel.ProcRunRef
 		var started string
 		var linked int
 		if err := rows.Scan(&r.ProcessKey, &r.ParentProcessKey, &started, &r.ArgvPreview, &r.ExeBasename, &linked); err != nil {
@@ -937,7 +1003,7 @@ func (s *Store) loadProcessRunRefs(ctx context.Context, sessionID string) ([]pro
 	return out, rows.Err()
 }
 
-func (s *Store) loadRunCommandActions(ctx context.Context, sessionID string) ([]processobs.ActionRef, error) {
+func (s *Store) loadRunCommandActions(ctx context.Context, sessionID string) ([]procmodel.ActionRef, error) {
 	const q = `
 		SELECT id, turn_index, COALESCE(target, ''), timestamp, COALESCE(duration_ms, 0), COALESCE(success, 1)
 		FROM actions
@@ -947,9 +1013,9 @@ func (s *Store) loadRunCommandActions(ctx context.Context, sessionID string) ([]
 		return nil, fmt.Errorf("store.loadRunCommandActions: query: %w", err)
 	}
 	defer rows.Close()
-	var out []processobs.ActionRef
+	var out []procmodel.ActionRef
 	for rows.Next() {
-		var a processobs.ActionRef
+		var a procmodel.ActionRef
 		var turn sql.NullInt64
 		var ts string
 		var durationMs int64
@@ -963,7 +1029,7 @@ func (s *Store) loadRunCommandActions(ctx context.Context, sessionID string) ([]
 		}
 		a.Timestamp = parseStamp(ts)
 		// codex logs the action at command END with a duration; widen the
-		// link back-skew by it (see processobs.ActionRef.Duration).
+		// link back-skew by it (see procmodel.ActionRef.Duration).
 		if durationMs > 0 {
 			a.Duration = time.Duration(durationMs) * time.Millisecond
 		}
@@ -985,7 +1051,7 @@ func (s *Store) loadOSAnchoredActionIDs(ctx context.Context, sessionID string) (
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT action_id FROM process_runs
 		 WHERE session_id = ? AND action_id IS NOT NULL AND attribution_source != ?`,
-		sessionID, string(processobs.AttrActionCorrelation))
+		sessionID, string(procmodel.AttrActionCorrelation))
 	if err != nil {
 		return nil, fmt.Errorf("store.loadOSAnchoredActionIDs: query: %w", err)
 	}
@@ -1004,7 +1070,7 @@ func (s *Store) loadOSAnchoredActionIDs(ctx context.Context, sessionID string) (
 // DeriveProcessRunsFromActions materializes the §9.2.4 action-derived command
 // rows for one session: every run_command action that the OS-capture backend
 // never observed gets a synthesized process_runs row carrying its deterministic
-// message link (see processobs.DeriveCommandRuns for the why). It is the second
+// message link (see procmodel.DeriveCommandRuns for the why). It is the second
 // feed path into the single process_runs owner (PersistRuns) — capture is the
 // first — and runs in the same lazy/debounced pass as the correlators, AFTER
 // CorrelateProcessActions has had a chance to anchor any captured OS process to
@@ -1039,7 +1105,7 @@ func (s *Store) DeriveProcessRunsFromActions(ctx context.Context, sessionID stri
 		return 0, err
 	}
 
-	runs := processobs.DeriveCommandRuns(sessionID, tool, projectID, actions, osLinked)
+	runs := procmodel.DeriveCommandRuns(sessionID, tool, projectID, actions, osLinked)
 	if len(runs) > 0 {
 		if _, err := s.PersistRuns(ctx, runs); err != nil {
 			return 0, fmt.Errorf("store.DeriveProcessRunsFromActions: persist: %w", err)
@@ -1073,7 +1139,7 @@ func (s *Store) deleteSupersededDerivedRuns(ctx context.Context, sessionID strin
 	}
 	defer stmt.Close()
 	for id := range osLinked {
-		if _, err := stmt.ExecContext(ctx, sessionID, string(processobs.AttrActionCorrelation), id); err != nil {
+		if _, err := stmt.ExecContext(ctx, sessionID, string(procmodel.AttrActionCorrelation), id); err != nil {
 			return fmt.Errorf("store.deleteSupersededDerivedRuns: exec: %w", err)
 		}
 	}
@@ -1107,9 +1173,9 @@ func (s *Store) sessionToolProject(ctx context.Context, sessionID string) (strin
 // run then falls back to the medium CorrelateCrossOS pass. This is the token
 // counterpart of the pidbridge SeedLookup, keyed on the session id directly so
 // it is namespace-independent across the OS boundary.
-func (s *Store) SessionSeedByID(ctx context.Context, id string) (processobs.Seed, bool, error) {
+func (s *Store) SessionSeedByID(ctx context.Context, id string) (procmodel.Seed, bool, error) {
 	if id == "" {
-		return processobs.Seed{}, false, nil
+		return procmodel.Seed{}, false, nil
 	}
 	var tool string
 	var projectID sql.NullInt64
@@ -1117,17 +1183,17 @@ func (s *Store) SessionSeedByID(ctx context.Context, id string) (processobs.Seed
 		`SELECT COALESCE(tool, ''), project_id FROM sessions WHERE id = ?`, id).
 		Scan(&tool, &projectID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return processobs.Seed{}, false, nil
+		return procmodel.Seed{}, false, nil
 	}
 	if err != nil {
-		return processobs.Seed{}, false, fmt.Errorf("store.SessionSeedByID: %w", err)
+		return procmodel.Seed{}, false, fmt.Errorf("store.SessionSeedByID: %w", err)
 	}
-	return processobs.Seed{
+	return procmodel.Seed{
 		SessionID:  id,
 		Tool:       tool,
 		ProjectID:  projectID.Int64,
-		Source:     processobs.AttrEnvToken,
-		Confidence: processobs.ConfHigh,
+		Source:     procmodel.AttrEnvToken,
+		Confidence: procmodel.ConfHigh,
 	}, true, nil
 }
 
@@ -1162,7 +1228,7 @@ func (s *Store) ProcessStats(ctx context.Context) (ProcessStats, error) {
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(session_id IS NOT NULL), 0),
 		        COALESCE(SUM(attribution_source = ?), 0)
-		 FROM process_runs`, string(processobs.AttrActionCorrelation)).
+		 FROM process_runs`, string(procmodel.AttrActionCorrelation)).
 		Scan(&st.Total, &st.Attributed, &st.Derived); err != nil {
 		return st, fmt.Errorf("store.ProcessStats: totals: %w", err)
 	}
@@ -1238,7 +1304,7 @@ func (s *Store) ActionMessageIDsForSession(ctx context.Context, sessionID string
 
 // ProcessFindingRow is a derived observe-only process finding for the CLI /
 // dashboard (docs/process-observability.md §14). It is computed ON READ from
-// the process_runs envelope via the pure processobs.DeriveFindings engine —
+// the process_runs envelope via the pure procmodel.DeriveFindings engine -
 // NOT stored: a finding is a pure function of the (post-exec immutable) run
 // facts, so deriving keeps it always consistent with the rows and needs no
 // write path or idempotency. Backend-emitted high-signal events
@@ -1269,7 +1335,7 @@ type findingRunMeta struct {
 	turnIndex   *int
 }
 
-// findingFactsCols is the column list loaded into processobs.RunFacts (+ the
+// findingFactsCols is the column list loaded into procmodel.RunFacts (+ the
 // display meta). euid is read directly here because selectProcessRunCols (the
 // tree/list reader) does not carry it.
 const findingFactsCols = `
@@ -1278,11 +1344,11 @@ const findingFactsCols = `
 	COALESCE(uid, 0), COALESCE(euid, 0), COALESCE(tool, ''),
 	started_at, action_id, turn_index`
 
-func scanFindingFacts(rows *sql.Rows, who string) ([]processobs.RunFacts, map[string]findingRunMeta, error) {
-	var facts []processobs.RunFacts
+func scanFindingFacts(rows *sql.Rows, who string) ([]procmodel.RunFacts, map[string]findingRunMeta, error) {
+	var facts []procmodel.RunFacts
 	meta := make(map[string]findingRunMeta)
 	for rows.Next() {
-		var f processobs.RunFacts
+		var f procmodel.RunFacts
 		var source, tool, started string
 		var actionID, turnIndex sql.NullInt64
 		if err := rows.Scan(&f.ProcessKey, &f.SessionID, &source,
@@ -1290,7 +1356,7 @@ func scanFindingFacts(rows *sql.Rows, who string) ([]processobs.RunFacts, map[st
 			&started, &actionID, &turnIndex); err != nil {
 			return nil, nil, fmt.Errorf("store.%s: scan: %w", who, err)
 		}
-		f.Attributed = source != "" && source != string(processobs.AttrNone)
+		f.Attributed = source != "" && source != string(procmodel.AttrNone)
 		m := findingRunMeta{tool: tool, exeBasename: f.ExeBasename, startedAt: parseStamp(started)}
 		if actionID.Valid {
 			v := actionID.Int64
@@ -1306,8 +1372,8 @@ func scanFindingFacts(rows *sql.Rows, who string) ([]processobs.RunFacts, map[st
 	return facts, meta, rows.Err()
 }
 
-func buildFindingRows(facts []processobs.RunFacts, meta map[string]findingRunMeta) []ProcessFindingRow {
-	findings := processobs.DeriveFindings(facts)
+func buildFindingRows(facts []procmodel.RunFacts, meta map[string]findingRunMeta) []ProcessFindingRow {
+	findings := procmodel.DeriveFindings(facts)
 	out := make([]ProcessFindingRow, 0, len(findings))
 	for _, f := range findings {
 		m := meta[f.ProcessKey]
@@ -1571,7 +1637,7 @@ func (s *Store) PruneProcessRows(ctx context.Context, retentionDays int) (int, e
 //
 // SCHEMA NOTE — no migration is needed to extend a sample. metric_samples_json
 // is a TEXT column holding a JSON array (migration 045), so adding a field to
-// processobs.MetricSample is purely additive at the storage layer: rows written
+// procmodel.MetricSample is purely additive at the storage layer: rows written
 // by an older build simply lack the key and decode with the new field at its
 // zero value (encoding/json ignores absent keys), and rows written by a newer
 // build are still valid JSON to an older reader (which ignores unknown keys).
@@ -1582,7 +1648,7 @@ func (s *Store) PruneProcessRows(ctx context.Context, retentionDays int) (int, e
 // (processobs.Attributor.SnapshotForPersist): the in-memory buffer runs at the
 // live sample rate, while only a bounded, evenly-spaced subset is stored, so
 // this column's size is independent of how fast the daemon samples.
-func marshalMetricSamples(s []processobs.MetricSample) string {
+func marshalMetricSamples(s []procmodel.MetricSample) string {
 	if len(s) == 0 {
 		return ""
 	}
@@ -1616,11 +1682,11 @@ func boolInt(v bool) int {
 // those fields zero/false, which reads as "network was not measured for this
 // sample" — exactly the honest interpretation. A malformed value yields nil
 // rather than an error, so one bad row can never break a listing.
-func parseMetricSamples(s string) []processobs.MetricSample {
+func parseMetricSamples(s string) []procmodel.MetricSample {
 	if s == "" {
 		return nil
 	}
-	var out []processobs.MetricSample
+	var out []procmodel.MetricSample
 	if err := json.Unmarshal([]byte(s), &out); err != nil {
 		return nil
 	}
@@ -1642,16 +1708,16 @@ func marshalEnvPosture(m map[string]string) string {
 
 // orNone defaults an empty attribution source to "none" (the column is
 // NOT NULL and an unattributed run still has a source of record).
-func orNone(s processobs.AttributionSource) processobs.AttributionSource {
+func orNone(s procmodel.AttributionSource) procmodel.AttributionSource {
 	if s == "" {
-		return processobs.AttrNone
+		return procmodel.AttrNone
 	}
 	return s
 }
 
-func orNoneConf(c processobs.Confidence) processobs.Confidence {
+func orNoneConf(c procmodel.Confidence) procmodel.Confidence {
 	if c == "" {
-		return processobs.ConfNone
+		return procmodel.ConfNone
 	}
 	return c
 }

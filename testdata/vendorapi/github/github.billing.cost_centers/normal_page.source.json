@@ -1,0 +1,40 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "costCenters": "VerifiedOfficial",
+    "costCenters[]": "VerifiedOfficial",
+    "costCenters[].ai_credit_pool_enabled": "VerifiedOfficial",
+    "costCenters[].ai_credit_pool_state": "VerifiedOfficial",
+    "costCenters[].ai_credit_pool_state.current_amount": "VerifiedOfficial",
+    "costCenters[].ai_credit_pool_state.target_amount": "VerifiedOfficial",
+    "costCenters[].azure_subscription": "VerifiedOfficial",
+    "costCenters[].id": "VerifiedOfficial",
+    "costCenters[].name": "VerifiedOfficial",
+    "costCenters[].resources": "VerifiedOfficial",
+    "costCenters[].resources[]": "VerifiedOfficial",
+    "costCenters[].resources[].name": "VerifiedOfficial",
+    "costCenters[].resources[].type": "VerifiedOfficial",
+    "costCenters[].state": "VerifiedOfficial"
+  },
+  "fixture_sha256": "060b45e15b1a5b867d41040566f7ea4f54468fe6a8627be5a81ff65aa2fddf59",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/settings/billing/cost-centers",
+    "query": {
+      "state": "active"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/settings/billing/cost-centers (operationId billing/get-all-cost-centers).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.billing.cost_centers"
+}

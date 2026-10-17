@@ -75,7 +75,7 @@ func lintUniqueRuleNames(p Policy) []LintIssue {
 		if r.Name == "" {
 			out = append(out, LintIssue{
 				Check: "unique_rule_names", Severity: LintError,
-				Message: "rule with empty name — decision rows cannot attribute it",
+				Message: "rule with empty name - decision rows cannot attribute it",
 			})
 			continue
 		}
@@ -313,14 +313,14 @@ func lintDownshiftOnly(p Policy) []LintIssue {
 		if r.When.TierAtLeast == "" {
 			out = append(out, LintIssue{
 				Check: "downshift_only", RuleName: r.Name, Severity: LintWarning,
-				Message: "route_to_tier without tier_at_least — the rule will no-op (fail open) on models at or below the target tier",
+				Message: "route_to_tier without tier_at_least - the rule will no-op (fail open) on models at or below the target tier",
 			})
 			continue
 		}
 		if r.Action.RouteToTier.Rank() >= r.When.TierAtLeast.Rank() {
 			out = append(out, LintIssue{
 				Check: "downshift_only", RuleName: r.Name, Severity: LintError,
-				Message: fmt.Sprintf("route_to_tier %q does not sit below tier_at_least %q — not a downshift",
+				Message: fmt.Sprintf("route_to_tier %q does not sit below tier_at_least %q - not a downshift",
 					r.Action.RouteToTier, r.When.TierAtLeast),
 			})
 		}

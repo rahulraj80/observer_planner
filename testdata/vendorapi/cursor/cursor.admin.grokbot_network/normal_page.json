@@ -1,0 +1,10 @@
+{
+  "egressMode": "network_settings_only",
+  "allowlist": [
+    "linkedin.com",
+    "*.crunchbase.com",
+    "10.0.0.0/8",
+    "54.85.223.0/24:3306"
+  ],
+  "locked": true
+}

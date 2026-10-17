@@ -1,0 +1,52 @@
+{
+  "categories": [
+    "Model",
+    "Credit Source"
+  ],
+  "data": [
+    {
+      "start_time": 1746057600,
+      "end_time": 1746144000,
+      "results": [
+        {
+          "user_email": "alice@example.com",
+          "count": 900,
+          "by_categories": {
+            "Model": [
+              {
+                "category": "claude-opus-4-8",
+                "count": 900
+              }
+            ],
+            "Credit Source": [
+              {
+                "category": "paid",
+                "count": 900
+              }
+            ]
+          }
+        },
+        {
+          "user_email": "bob@example.com",
+          "count": 500,
+          "by_categories": {
+            "Model": [
+              {
+                "category": "claude-sonnet-4-6",
+                "count": 500
+              }
+            ],
+            "Credit Source": [
+              {
+                "category": "promo",
+                "count": 500
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "eyJwayI6ICJPUkcjLi4uIn0="
+}

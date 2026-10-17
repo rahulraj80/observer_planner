@@ -112,8 +112,8 @@ type SessionRef struct {
 	Tool    string            `json:"tool,omitempty"`
 	Turns   int               `json:"turns"`
 	CostUSD float64           `json:"cost_usd"`
-	Errors  int               `json:"errors,omitempty"`             // error turns in the session
-	Models  []SessionModelRef `json:"models,omitempty"`             // model mix, name-sorted, content-free
+	Errors  int               `json:"errors,omitempty"` // error turns in the session
+	Models  []SessionModelRef `json:"models,omitempty"` // model mix, name-sorted, content-free
 }
 
 // SessionModelRef is one model's share of a top session (content-free: model
@@ -215,9 +215,9 @@ type SessionFacts struct {
 	Tool       string
 	Turns      int
 	CostUSD    float64
-	Errors     int                       // error turns in the session
+	Errors     int                         // error turns in the session
 	Models     map[string]cost.TokenBundle // model -> aggregated token bundle for that session
-	ModelTurns map[string]int            // model -> turn count for that session
+	ModelTurns map[string]int              // model -> turn count for that session
 }
 
 // ShadowFacts is a routing advise-shadow report (yesterday's would-have-done

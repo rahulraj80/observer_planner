@@ -1,0 +1,25 @@
+{
+  "users": [
+    {
+      "id": "user_01HSYNTH0001",
+      "email": "ada@example.com",
+      "firstName": "Ada",
+      "lastName": "Admin",
+      "createdAt": "2026-01-02T10:00:00.000Z",
+      "lastSignInAt": "2026-10-01T09:30:00.000Z",
+      "metadata": {}
+    },
+    {
+      "id": "user_01HSYNTH0002",
+      "email": "dev@example.com",
+      "firstName": "Dev",
+      "lastName": "One",
+      "createdAt": "2026-02-03T11:00:00.000Z",
+      "metadata": {}
+    }
+  ],
+  "pagination": {
+    "hasMore": true,
+    "nextCursor": "synthcursor0002"
+  }
+}

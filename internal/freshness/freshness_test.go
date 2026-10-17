@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
@@ -16,7 +18,7 @@ func setupDB(t *testing.T) *sql.DB {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "fresh.db")
-	d, err := db.Open(ctx, db.Options{Path: path})
+	d, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

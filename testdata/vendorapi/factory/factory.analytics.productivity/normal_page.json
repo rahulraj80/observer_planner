@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "date": "2026-01-15",
+      "files_created": 245,
+      "files_edited": 1820,
+      "by_extension": [
+        {
+          "extension": ".ts",
+          "count": 890
+        },
+        {
+          "extension": ".tsx",
+          "count": 420
+        },
+        {
+          "extension": ".py",
+          "count": 310
+        }
+      ],
+      "by_language": [
+        {
+          "language": "TypeScript",
+          "count": 1310
+        },
+        {
+          "language": "Python",
+          "count": 310
+        }
+      ],
+      "git_commits": 156,
+      "git_prs_created": 42
+    }
+  ],
+  "meta": {
+    "org_id": "org_01HPMQ6ABCDE",
+    "start_date": "2026-01-15",
+    "end_date": "2026-01-15"
+  }
+}

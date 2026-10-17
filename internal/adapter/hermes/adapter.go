@@ -56,6 +56,16 @@ func (a *Adapter) WithSessionHookChecker(check SessionHookChecker) *Adapter {
 	return a
 }
 
+// ConfigureHookDedup implements adapter.HookDedupConfigurer: the watcher
+// builder hands the store's source-file probe and the adapter binds it to
+// its own hook marker (SourceFileHook), the same gate WithSessionHookChecker
+// installs.
+func (a *Adapter) ConfigureHookDedup(hasRows func(ctx context.Context, sessionID, sourceFile string) (bool, error)) {
+	a.WithSessionHookChecker(func(ctx context.Context, sessionID string) (bool, error) {
+		return hasRows(ctx, sessionID, SourceFileHook)
+	})
+}
+
 // New returns an Adapter with platform-default cross-mount roots and a
 // default scrubber.
 func New() *Adapter {

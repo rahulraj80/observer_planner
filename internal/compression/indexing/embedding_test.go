@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -53,7 +55,7 @@ func TestCosine_Similar(t *testing.T) {
 
 func TestEmbedAndSearch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "e.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +92,7 @@ func TestEmbedAndSearch(t *testing.T) {
 
 func TestEmbed_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "e.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

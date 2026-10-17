@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.innerError": "VerifiedOfficial",
+    "error.innerError.code": "VerifiedOfficial",
+    "error.innerError.date": "VerifiedOfficial",
+    "error.innerError.message": "VerifiedOfficial",
+    "error.innerError.request-id": "VerifiedOfficial",
+    "error.innerError.status": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial"
+  },
+  "fixture_sha256": "600922d20f59914ad9be33ace9b38b9da96d395e2c23795fe1b99ab23f223a24",
+  "http": {
+    "headers": {
+      "retry-after": "10"
+    },
+    "method": "GET",
+    "path": "/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D7')",
+    "query": {
+      "$format": "application/json"
+    },
+    "status": 429
+  },
+  "notes": "Verbatim documented throttling response with Retry-After: 10.",
+  "scenario": "error_429",
+  "sdk_or_spec_version_or_commit": "microsoftgraph/microsoft-graph-docs-contrib main, concepts/throttling.md (ms.date 01/14/2025), fetched 2026-10-08",
+  "source_kind": "api_reference_example",
+  "source_sha256": "bcf59f10c6daad493751931665811baab232eb9be8e8aa201ae3f72233068e42",
+  "source_url": "https://raw.githubusercontent.com/microsoftgraph/microsoft-graph-docs-contrib/main/concepts/throttling.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "microsoft.m365.reports_usage_user_detail"
+}

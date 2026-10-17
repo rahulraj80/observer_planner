@@ -1,0 +1,73 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "audit_log-SYNTH0001",
+      "type": "api_key.created",
+      "effective_at": 1730419200,
+      "actor": {
+        "type": "session",
+        "session": {
+          "user": {
+            "id": "user-SYNTH01",
+            "email": "admin@example.com"
+          },
+          "ip_address": "192.0.2.10"
+        }
+      },
+      "project": {
+        "id": "proj_SYNTHabc123",
+        "name": "Codex rollout"
+      },
+      "api_key.created": {
+        "id": "key_SYNTH01",
+        "data": {
+          "scopes": [
+            "/v1/*"
+          ]
+        }
+      }
+    },
+    {
+      "id": "audit_log-SYNTH0002",
+      "type": "project.created",
+      "effective_at": 1730419300,
+      "actor": {
+        "type": "api_key",
+        "api_key": {
+          "id": "key_SYNTHadmin",
+          "type": "service_account",
+          "service_account": {
+            "id": "svc_acct_SYNTH01"
+          }
+        }
+      },
+      "project.created": {
+        "id": "proj_SYNTHdef456",
+        "data": {
+          "name": "Platform",
+          "title": "Platform"
+        }
+      }
+    },
+    {
+      "id": "audit_log-SYNTH0003",
+      "type": "login.succeeded",
+      "effective_at": 1730419400,
+      "actor": {
+        "type": "session",
+        "session": {
+          "user": {
+            "id": "user-SYNTH02",
+            "email": "dev@example.com"
+          },
+          "ip_address": "192.0.2.11"
+        }
+      },
+      "login.succeeded": {}
+    }
+  ],
+  "first_id": "audit_log-SYNTH0001",
+  "last_id": "audit_log-SYNTH0003",
+  "has_more": true
+}

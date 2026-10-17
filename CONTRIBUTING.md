@@ -15,19 +15,19 @@ needs to go a different direction.
 
 ## How this project is developed
 
-Day-to-day development happens on a private mainline — it interleaves
+Day-to-day development happens on a private mainline; it interleaves
 implementation work with operational and planning material that isn't
 meant for a public history, so that full history isn't published. What
 you see in this public repository is a sanitized snapshot taken at
 each release. As of this writing, each new release snapshot is parented
 on the previous public commit, so history accumulates from here
-forward (earlier releases appeared as a single replaced commit — that
+forward (earlier releases appeared as a single replaced commit; that
 was a pipeline gap, since fixed).
 
 External pull requests are reviewed publicly on GitHub like any other
 project. When a PR is self-contained and touches only public-safe
 paths, a maintainer can merge it **directly onto public `main`**, where
-it stays — the release snapshot now parents on the public head, so a
+it stays; the release snapshot now parents on the public head, so a
 direct-merged commit is carried forward, not overwritten. When a change
 instead has to be integrated with work that lives only on the private
 mainline, the maintainer folds it in there and it ships in the next
@@ -49,14 +49,14 @@ three-tier ladder, in order of preference:
 1. **Direct-merge (contributors graph).** When your PR is
    self-contained and touches only public-safe paths, a maintainer
    merges it **directly onto public `main`**. This is the *only* path
-   that puts you on the repository's GitHub contributors graph — your
+   that puts you on the repository's GitHub contributors graph: your
    commits land in the public history under your own name. We prefer
    this route whenever it's feasible, so keeping a PR focused and clear
    of private-only paths is the single best thing you can do to be
    credited this way.
 
 2. **Co-authored-by (provenance trailer).** Some changes can't be
-   merged directly — they touch paths that can't be public, or they
+   merged directly: they touch paths that can't be public, or they
    have to be integrated with work that lives only on the private
    mainline. Those flow through the private mainline, and we record your
    authorship with a `Co-authored-by: Your Name <you@example.com>`
@@ -67,13 +67,13 @@ three-tier ladder, in order of preference:
    public history. It's durable provenance we keep, and it would surface
    publicly only if the project ever moves to a public day-to-day
    mainline. So for a change that takes this route, your guaranteed
-   *public* credit today is the CHANGELOG line below — not a public
+   *public* credit today is the CHANGELOG line below, not a public
    avatar or a contributors-graph entry (only a direct-merge does that).
 
 3. **CHANGELOG credit (always).** Regardless of which path your change
    takes, every external contribution gets a named credit line in
    `CHANGELOG.md` and the release notes. This is the guaranteed-visible
-   floor — you're credited even when neither of the routes above
+   floor: you're credited even when neither of the routes above
    applies.
 
 If you'd like to be credited under a specific name/email or a GitHub
@@ -84,8 +84,8 @@ case-by-case.
 
 ## Development setup
 
-Requirements: **Go 1.22+**. Observer uses `modernc.org/sqlite` (pure
-Go, no CGO) — no C toolchain needed.
+Requirements: **Go 1.26+**. Observer uses `modernc.org/sqlite` (pure
+Go, no CGO). No C toolchain needed.
 
 ```bash
 git clone https://github.com/superbasedapp/observer.git
@@ -117,7 +117,7 @@ make build
   `fmt.Errorf("store.InsertAction: %w", err)`.
 - No `panic()` outside `main.go`; no `log.Fatal()` / `os.Exit()`
   outside `main.go` either.
-- Don't hardcode paths — use `os.UserHomeDir()`, `os.UserConfigDir()`,
+- Don't hardcode paths; use `os.UserHomeDir()`, `os.UserConfigDir()`,
   `filepath.Join()`.
 
 ## What we especially welcome
@@ -126,7 +126,7 @@ make build
   if yours isn't one of them, this is the highest-leverage
   contribution you can make. Look at an existing adapter under
   `internal/adapter/` for the shape.
-- **Sanitized test fixtures** — anonymized real session logs that
+- **Sanitized test fixtures**: anonymized real session logs that
   exercise an edge case we don't have coverage for.
 - **Windows / WSL fixes.** Cross-platform path handling and
   cross-OS hook bridging are an ongoing source of edge cases.
@@ -137,7 +137,7 @@ make build
 ## Pull request expectations
 
 - `make test` and `make lint` pass locally.
-- Diffs are focused — one logical change per PR. Large refactors are
+- Diffs are focused: one logical change per PR. Large refactors are
   easier to review (and land) if you flag them in an issue first.
 - No secrets, real file paths from your own machine, or private data
   in the diff or in any test fixtures.
@@ -145,5 +145,5 @@ make build
   test.
 
 We'll review as promptly as we can and will always leave a comment
-even if the answer is "not right now" — silence isn't the intended
+even if the answer is "not right now"; silence isn't the intended
 experience here.

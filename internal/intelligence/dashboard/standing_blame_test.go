@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -69,7 +71,7 @@ func TestStandingDenialBlameClassification(t *testing.T) {
 		rc.ReloadStandingTerminalSecret("", false)
 		ok, denial := rc.VerifyStandingTerminalControlReason(secret, dev, handle)
 		if ok {
-			t.Fatal("standing access is disabled but the verify succeeded — the master gate must still deny")
+			t.Fatal("standing access is disabled but the verify succeeded - the master gate must still deny")
 		}
 		if denial != termlease.StandingDenialUnavailable {
 			t.Fatalf("denial = %v, want Unavailable (a disabled master gate never compared the secret, and the toggle can flip back)", denial)
@@ -137,7 +139,7 @@ func TestStandingDenialBlameClassification(t *testing.T) {
 			}
 		}
 		if !sawThrottle {
-			t.Skip("the rate limiter never throttled at 1/min — nothing to assert")
+			t.Skip("the rate limiter never throttled at 1/min - nothing to assert")
 		}
 	})
 }
@@ -172,7 +174,7 @@ func TestAuthorizeStandingSurfacesTheTransientSentinel(t *testing.T) {
 	rc.ReloadStandingTerminalSecret("", false)
 	g2, err2 := termlease.AuthorizeStanding(req, rc, allowAllLaunchPolicy{}, rc)
 	if g2.Authorized() {
-		t.Fatal("a disabled standing gate still authorized — the denial must be absolute")
+		t.Fatal("a disabled standing gate still authorized - the denial must be absolute")
 	}
 	if !errors.Is(err2, termlease.ErrStandingUnavailable) {
 		t.Fatalf("denial = %v, want ErrStandingUnavailable (a credential rejection here wipes the device's secret)", err2)

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package main
 
 import (
@@ -91,7 +93,7 @@ func TestRemoteEnableProvisionsSecretAndConfig(t *testing.T) {
 		t.Errorf("tailnet host not added to trusted_hosts: %+v", cfg.Remote.TrustedHosts)
 	}
 	if cfg.Remote.AllowTerminal {
-		t.Error("allow_terminal turned ON without --allow-terminal — execute tier must stay a separate opt-in")
+		t.Error("allow_terminal turned ON without --allow-terminal - execute tier must stay a separate opt-in")
 	}
 	if err := config.Validate(cfg); err != nil {
 		t.Errorf("armed config fails validation: %v", err)
@@ -196,13 +198,14 @@ func TestRemoteEnableRoundTripsSecretVerification(t *testing.T) {
 // controller (secret + allow-list + rate limit assembled) — and after
 // `disable`, it returns nil (fail closed) again.
 func TestRemoteEnableSatisfiesSubstratePredicate(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	cfgPath, _ := writeRemoteTestConfig(t)
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if rc := buildRemoteController(cfg, nil); rc != nil {
-		t.Fatal("controller non-nil before enable — must stay fail-closed by default")
+		t.Fatal("controller non-nil before enable - must stay fail-closed by default")
 	}
 
 	if _, err := runRemote(t, "enable", "--tailscale", "--host", "box.ts.net", "--config", cfgPath); err != nil {
@@ -214,7 +217,7 @@ func TestRemoteEnableSatisfiesSubstratePredicate(t *testing.T) {
 	}
 	rc := buildRemoteController(cfg, nil)
 	if rc == nil || !rc.Ready() {
-		t.Fatal("controller not Ready() after enable — Phase 2 must satisfy the §4.6 predicate")
+		t.Fatal("controller not Ready() after enable - Phase 2 must satisfy the §4.6 predicate")
 	}
 	found := false
 	for _, h := range rc.AllowedHosts() {
@@ -233,7 +236,7 @@ func TestRemoteEnableSatisfiesSubstratePredicate(t *testing.T) {
 		t.Fatalf("reload after disable: %v", err)
 	}
 	if rc := buildRemoteController(cfg, nil); rc != nil {
-		t.Error("controller non-nil after disable — must fail closed again")
+		t.Error("controller non-nil after disable - must fail closed again")
 	}
 }
 
@@ -241,6 +244,7 @@ func TestRemoteEnableSatisfiesSubstratePredicate(t *testing.T) {
 // runtime-init default-on trap without opening a listener: both the default true
 // and an explicit false must reach the controller before any dashboard toggle.
 func TestBuildRemoteControllerCopiesAllowRemoteTerminalTakeover(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	cfgPath, dataDir := writeRemoteTestConfig(t)
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})
 	if err != nil {

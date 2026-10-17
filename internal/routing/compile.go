@@ -123,7 +123,7 @@ func Compile(spec PolicySpec) (Policy, []LintIssue) {
 		if !ok {
 			issues = append(issues, LintIssue{
 				Check: "known_template", Severity: LintError,
-				Message: "unknown policy template " + spec.Policy + " — compiled with an empty rule table (fail-open)",
+				Message: "unknown policy template " + spec.Policy + " - compiled with an empty rule table (fail-open)",
 			})
 			p = Policy{Name: spec.Policy, Bases: defaultBases(), Floors: defaultFloors()}
 		} else {

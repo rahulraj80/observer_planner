@@ -16,6 +16,15 @@ func TestKnownWarnings_AreStable(t *testing.T) {
 		"index_stale":                         true,
 		"index_changed_mid_query":             true,
 		"regex_fallback_language_unsupported": true,
+		// Corpus archival P2.3: the project's code index moved to cold
+		// storage. Its own tag, not a flavour of index_unavailable —
+		// "missing" and "one rehydrate away" lead an agent to different
+		// next actions.
+		"project_archived": true,
+		// D-307: code intelligence is off by choice (the default). Rides
+		// WITH index_unavailable, so an agent that only knows the older
+		// tag still degrades correctly.
+		"codeintel_disabled": true,
 	}
 	got := allKnownWarnings()
 	if len(got) != len(want) {

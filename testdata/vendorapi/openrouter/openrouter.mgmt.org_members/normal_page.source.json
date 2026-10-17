@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].email": "VerifiedOfficial",
+    "data[].first_name": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].last_name": "VerifiedOfficial",
+    "data[].role": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "41dfa509d143404fae7f3b6a662bb9e01454628f2ff8260421f0a389fab89f58",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/organization/members",
+    "query": {
+      "limit": "100",
+      "offset": "0"
+    },
+    "status": 200
+  },
+  "notes": "The first member is the reference's response example verbatim; the second (null names, the documented org:admin role) and total_count 3 are synthesized so the page set spans two offset pages.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "OpenRouter API 1.0.0 (openapi.yaml as rendered on the reference page), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "65a87caddba8001863ef270e094c9f2d76ae3905ca73737d0aea573b7cba8b47",
+  "source_url": "https://openrouter.ai/docs/api/api-reference/organization/list-organization-members.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openrouter.mgmt.org_members"
+}

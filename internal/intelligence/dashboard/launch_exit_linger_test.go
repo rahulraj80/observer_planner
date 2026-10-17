@@ -98,6 +98,10 @@ func (a *svcManagerAdapter) CreateResume(ResumeLaunchSpec) (string, string, erro
 	return "", "", nil
 }
 func (a *svcManagerAdapter) CreateSetup(SetupSpec) (string, error) { return "", nil }
+func (a *svcManagerAdapter) CreateGUI(GUILaunchSpec) (GUILaunchResult, error) {
+	return GUILaunchResult{}, ErrLaunchGUIUnsupported
+}
+func (a *svcManagerAdapter) GUIRuns() []GUIRunInfo { return nil }
 func (a *svcManagerAdapter) Subscribe(handle string) (LaunchSubscription, error) {
 	return a.mgr.Subscribe(handle)
 }
@@ -207,7 +211,7 @@ func TestAttachExitLingerStaysRemoteSensitive(t *testing.T) {
 	adapter := &svcManagerAdapter{svc: svc, mgr: mgr}
 
 	tdir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: tdir + "/d.db"})
+	database, err := openTestDB(context.Background(), db.Options{Path: tdir + "/d.db"})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -248,7 +252,7 @@ func TestAttachExitLingerStaysRemoteSensitive(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if _, live := svc.RunIDForHandle(handle); live {
-		t.Fatal("EndRunByHandle never fired — the live-run map is still present")
+		t.Fatal("EndRunByHandle never fired - the live-run map is still present")
 	}
 
 	// The handle is still in the Manager (lingering, exited).
@@ -303,7 +307,7 @@ func TestAttachExitLingerStaysRemoteSensitive(t *testing.T) {
 	defer func() { _ = c.CloseNow() }()
 	_, _, rerr := c.Read(ctx)
 	if rerr == nil {
-		t.Fatal("F1: remote WS read succeeded for a lingering attach handle — it must be refused")
+		t.Fatal("F1: remote WS read succeeded for a lingering attach handle - it must be refused")
 	}
 	if cs := websocket.CloseStatus(rerr); cs != websocket.StatusPolicyViolation {
 		t.Fatalf("F1: remote WS close status = %v, want policy-violation (1008)", cs)
@@ -317,3 +321,4 @@ type nopSvcRecorder struct{}
 func (nopSvcRecorder) RecordRun(context.Context, termrun.Run) error                 { return nil }
 func (nopSvcRecorder) EndRun(context.Context, string, time.Time, int, string) error { return nil }
 func (nopSvcRecorder) RecordCorrelation(context.Context, termrun.Correlation) error { return nil }
+func (nopSvcRecorder) RecordGUISpawn(context.Context, termrun.Run) error            { return nil }

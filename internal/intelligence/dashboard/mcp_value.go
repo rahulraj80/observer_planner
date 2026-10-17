@@ -2,8 +2,6 @@ package dashboard
 
 import (
 	"net/http"
-	"strconv"
-	"time"
 )
 
 // MCP value meter (usability arc P4.10 / review §8.1): turns the E1
@@ -20,19 +18,16 @@ const (
 	mcpWorthItCallsPer100  = 3.0
 )
 
-// handleMCPValue serves GET /api/mcp/value?days=N (default 30).
+// handleMCPValue serves GET /api/mcp/value?days=N (default 30), or the
+// closed custom range since/until through windowRange (T-550).
 func (s *Server) handleMCPValue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "GET only", http.StatusMethodNotAllowed)
 		return
 	}
-	days := 30
-	if v := r.URL.Query().Get("days"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 365 {
-			days = n
-		}
-	}
-	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
+	days := intArg(r, "days", 30, 1, 365)
+	since, until := windowRange(r, 30, 1, 365)
+	cutoff, upper := windowBoundStrings(since, until)
 	ctx := r.Context()
 
 	// Audit-off honesty: with [intelligence.mcp.audit] disabled the
@@ -55,10 +50,11 @@ func (s *Server) handleMCPValue(w http.ResponseWriter, r *http.Request) {
 		// verdict below treats missing data honestly.
 		_ = s.db().QueryRowContext(ctx,
 			`SELECT COUNT(*), COALESCE(SUM(response_ok), 0), COALESCE(SUM(response_size_bytes), 0)
-			 FROM mcp_audit WHERE ts >= ?`, cutoff).Scan(&calls, &okCalls, &bytesReturned)
+			 FROM mcp_audit WHERE ts >= ? AND (? = '' OR ts < ?)`, cutoff, upper, upper).Scan(&calls, &okCalls, &bytesReturned)
 		rows, err := s.db().QueryContext(ctx,
 			`SELECT tool_name, COUNT(*), COALESCE(SUM(response_size_bytes), 0)
-			 FROM mcp_audit WHERE ts >= ? GROUP BY tool_name ORDER BY COUNT(*) DESC`, cutoff)
+			 FROM mcp_audit WHERE ts >= ? AND (? = '' OR ts < ?)
+			 GROUP BY tool_name ORDER BY COUNT(*) DESC`, cutoff, upper, upper)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -78,9 +74,11 @@ func (s *Server) handleMCPValue(w http.ResponseWriter, r *http.Request) {
 	var apiTurns, tokenRows int64
 	if s.db() != nil {
 		_ = s.db().QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM api_turns WHERE timestamp >= ?`, cutoff).Scan(&apiTurns)
+			`SELECT COUNT(*) FROM api_turns WHERE timestamp >= ? AND (? = '' OR timestamp < ?)`,
+			cutoff, upper, upper).Scan(&apiTurns)
 		_ = s.db().QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM token_usage WHERE timestamp >= ?`, cutoff).Scan(&tokenRows)
+			`SELECT COUNT(*) FROM token_usage WHERE timestamp >= ? AND (? = '' OR timestamp < ?)`,
+			cutoff, upper, upper).Scan(&tokenRows)
 	}
 	turns := max(apiTurns, tokenRows)
 
@@ -104,6 +102,8 @@ func (s *Server) handleMCPValue(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{
 		"window_days":              days,
+		"since":                    windowMetaSince(since, until),
+		"until":                    windowMetaUntil(since, until),
 		"audit_enabled":            auditEnabled,
 		"calls":                    calls,
 		"ok_calls":                 okCalls,

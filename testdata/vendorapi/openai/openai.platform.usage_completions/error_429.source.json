@@ -1,0 +1,28 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "Inferred",
+    "error.message": "Inferred",
+    "error.param": "VerifiedOfficial",
+    "error.type": "Inferred"
+  },
+  "fixture_sha256": "321d96da3e6c8c1b07909f0c096c671bcdee7bbf0a15c2346d2897071f46dfe5",
+  "http": {
+    "headers": {
+      "retry-after": "20"
+    },
+    "method": "GET",
+    "path": "/v1/organization/usage/completions",
+    "status": 429
+  },
+  "notes": "Envelope from the official openai-openapi ErrorResponse schema (error.code, message, param, type required); the code, type and message values are synthesized. The error-codes guide says to honour Retry-After when present.",
+  "scenario": "error_429",
+  "sdk_or_spec_version_or_commit": "openai-openapi master (ErrorResponse schema), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.usage_completions"
+}

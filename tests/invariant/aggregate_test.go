@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/aggregate"
 	"github.com/marmutapp/superbased-observer/internal/aggregateclient"
 	"github.com/marmutapp/superbased-observer/internal/aggregatesource"
@@ -195,7 +197,7 @@ func finalizedTestTS() time.Time { return time.Date(2020, 6, 15, 12, 0, 0, 0, ti
 
 func newAggregateStore(t *testing.T) (*store.Store, *sql.DB, func()) {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "agg.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "agg.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

@@ -1,0 +1,13 @@
+{
+  "events": [
+    {
+      "eventTime": "2025-01-15T11:00:00Z",
+      "eventId": "6a1f0c52-7b3d-4e8a-9c1d-2f4e5a6b7c8d",
+      "description": "Team member invited",
+      "user": {
+        "userId": "user-456",
+        "email": ""
+      }
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -145,12 +147,62 @@ func TestProcessHealthRecord(t *testing.T) {
 				TransportUnavailableReason: "processobs/bridge: listen 127.0.0.1:8823: bind: address already in use",
 			},
 		},
+		{
+			// Task 9d: the capture-yield half. These counters live in the
+			// daemon's memory and used to stop there, which left every
+			// out-of-process surface unable to tell an idle box from one
+			// discarding every batch. Attributed is DERIVED from the
+			// per-tool breakdown, so the two can never disagree.
+			name: "drop/attribution counters cross the boundary, with Attributed derived",
+			in: processobs.HealthSnapshot{
+				BackendName: "poll", BackendUp: true,
+				NetworkAccountingMode: processobs.NetworkAccountingOff,
+				Unattributed:          412,
+				SinkRetained:          250,
+				AttributedByTool:      map[string]int64{"claude-code": 9, "codex": 3},
+				Dropped: map[processobs.DropReason]int64{
+					processobs.DropSinkError:          250,
+					processobs.DropSinkRetryExhausted: 500,
+					processobs.DropSelfExcluded:       18,
+				},
+			},
+			want: diag.ProcessHealth{
+				Backend: "poll", BackendUp: true,
+				NetworkAccountingMode: processobs.NetworkAccountingOff,
+				Unattributed:          412,
+				SinkRetained:          250,
+				Attributed:            12,
+				AttributedByTool:      map[string]int64{"claude-code": 9, "codex": 3},
+				Dropped: map[string]int64{
+					"sink_error":           250,
+					"sink_retry_exhausted": 500,
+					"self_excluded":        18,
+				},
+			},
+		},
+		{
+			// Absence stays absence: empty maps must not become empty-but-
+			// present maps on the record, or a reader cannot distinguish
+			// "never reported" from "reported nothing".
+			name: "empty counter maps contribute no map at all",
+			in: processobs.HealthSnapshot{
+				BackendName:           "poll",
+				NetworkAccountingMode: processobs.NetworkAccountingOff,
+				Dropped:               map[processobs.DropReason]int64{},
+				AttributedByTool:      map[string]int64{},
+			},
+			want: diag.ProcessHealth{
+				Backend:               "poll",
+				NetworkAccountingMode: processobs.NetworkAccountingOff,
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := processHealthRecord(tc.in)
-			if got != tc.want {
+			// DeepEqual, not ==: the record carries counter MAPS since 9d.
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("processHealthRecord() = %+v, want %+v", got, tc.want)
 			}
 		})
@@ -192,7 +244,7 @@ func TestPublishProcessHealth_WritesAndCleansUp(t *testing.T) {
 
 	stop()
 	if _, ok := diag.LatestProcessHealth(dir); ok {
-		t.Error("record survived stop() — a dead daemon would look live to doctor")
+		t.Error("record survived stop() - a dead daemon would look live to doctor")
 	}
 	stop() // idempotent
 }
@@ -461,7 +513,7 @@ func TestSelectProcessBackendPreservesBackendCapabilities(t *testing.T) {
 			t.Fatal("the requested-but-missing transport must still carry its reason")
 		}
 		if !requiresUnattributed(b) {
-			t.Fatal("the cross-OS baseline lost UnattributedCapturer — Windows process rows would stop being persisted, silently")
+			t.Fatal("the cross-OS baseline lost UnattributedCapturer - Windows process rows would stop being persisted, silently")
 		}
 	})
 
@@ -606,7 +658,7 @@ func assertNoBackendWrapper(t *testing.T, b processobs.Backend) {
 	// literal "main" silently never matches. localPkgMarker pins the right
 	// value without hardcoding the module path.
 	if ty.PkgPath() == reflect.TypeOf(localPkgMarker{}).PkgPath() {
-		t.Fatalf("selectProcessBackend wrapped the backend in %s — a main-declared decorator over an "+
+		t.Fatalf("selectProcessBackend wrapped the backend in %s - a main-declared decorator over an "+
 			"embedded Backend interface promotes only Backend's methods, so every optional capability "+
 			"(UnattributedCapturer, NetworkSampler, TransportStatsSource, and anything added later) "+
 			"becomes invisible to a type assertion. Return the fact beside the backend instead.", ty.String())

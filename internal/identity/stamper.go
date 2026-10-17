@@ -49,7 +49,7 @@ func NewStamper(ctx context.Context, db *sql.DB) (*Stamper, error) {
 	return s, nil
 }
 
-// OrgID returns the enrolled organisation id, or "" when not enrolled.
+// OrgID returns the enrolled organization id, or "" when not enrolled.
 func (s *Stamper) OrgID() string {
 	if s == nil {
 		return ""

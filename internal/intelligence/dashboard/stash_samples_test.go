@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/stash"
 )
 
@@ -45,7 +46,7 @@ func TestLoadStashedSamples(t *testing.T) {
 	}
 
 	srv := &Server{opts: Options{DB: database, StashDir: dir}}
-	got := srv.loadStashedSamples(context.Background(), 7, "", "", nil)
+	got := srv.loadStashedSamples(context.Background(), time.Now().UTC().AddDate(0, 0, -7), time.Time{}, dashapi.SpendScope{}, nil)
 	if len(got) != 1 {
 		t.Fatalf("samples = %d, want 1 (distinct body_hash)", len(got))
 	}
@@ -74,7 +75,7 @@ func TestLoadStashedSamples_NoStashDir(t *testing.T) {
 	database, cleanup := openForecastTestDB(t)
 	defer cleanup()
 	srv := &Server{opts: Options{DB: database}} // no StashDir
-	got := srv.loadStashedSamples(context.Background(), 7, "", "", nil)
+	got := srv.loadStashedSamples(context.Background(), time.Now().UTC().AddDate(0, 0, -7), time.Time{}, dashapi.SpendScope{}, nil)
 	if got == nil || len(got) != 0 {
 		t.Errorf("want empty non-nil slice, got %v", got)
 	}

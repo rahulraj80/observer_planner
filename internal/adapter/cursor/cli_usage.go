@@ -1,0 +1,327 @@
+package cursor
+
+import (
+	"bufio"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/user"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/adapter"
+	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/platform/sqlitedsn"
+)
+
+// The headless CLI writes these records and never runs stop or
+// afterAgentResponse. Counters match its final result. Input is ALREADY net of
+// both cache buckets. A retried turn retains only the final attempt's usage.
+// Interactive turn-outcome records carry no token fields and a tracker id that
+// is not the hook generation id, so they are never read for usage here (the
+// interactive usage arrives on the hooks; see cli_turns.go).
+const cliOutcomePrefix = "cursor-cli-outcome:"
+
+var cliLogName = regexp.MustCompile(`^session-[0-9T.Z-]+-[0-9]+-[0-9]+\.log$`)
+
+func matchesCLIUsageLog(path string) bool {
+	norm := strings.ReplaceAll(path, `\`, "/")
+	return strings.HasPrefix(filepath.Base(filepath.Dir(norm)), "cursor-agent-logs-") &&
+		cliLogName.MatchString(filepath.Base(norm))
+}
+
+// cliRootEnv is what cliUsageRootsFor reads about this process: the native
+// temp directory, the suffixes cursor-agent names the current user's log
+// directory with, and whether a path is owned by the current user.
+type cliRootEnv struct {
+	tempDir string
+	ids     []string
+	owned   func(path string) bool
+}
+
+// currentCLIRootEnv is the production cliRootEnv.
+func currentCLIRootEnv() cliRootEnv {
+	env := cliRootEnv{tempDir: os.TempDir(), owned: ownedByCurrentUser}
+	if u, err := user.Current(); err == nil {
+		if _, err := strconv.ParseUint(u.Uid, 10, 32); err == nil {
+			env.ids = append(env.ids, u.Uid)
+		}
+		name := strings.ReplaceAll(u.Username, `\`, "/")
+		if n := regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(filepath.Base(name), "_"); n != "" && n != "." {
+			env.ids = append(env.ids, n)
+		}
+	}
+	return env
+}
+
+func cliUsageRoots(homes []crossmount.HomeRoot) []string {
+	return cliUsageRootsFor(homes, currentCLIRootEnv())
+}
+
+// cliUsageRootsFor lists the cursor-agent log directories to watch.
+//
+// The native temp directory can be shared by every user of the machine
+// (/tmp on Linux), so it is NEVER globbed (U10, lane FIX-UPGRADE): only the
+// current user's own cursor-agent-logs-<uid|username> is watched, and an
+// existing one only when the current user owns it. Another user's directory
+// is never read. A Windows home's AppData\Local\Temp is that user's own, so
+// its cursor-agent-logs-* entries are still discovered there.
+func cliUsageRootsFor(homes []crossmount.HomeRoot, env cliRootEnv) []string {
+	var roots []string
+	for i, id := range env.ids {
+		p := filepath.Join(env.tempDir, "cursor-agent-logs-"+id)
+		fi, err := os.Stat(p)
+		switch {
+		case err == nil && fi.IsDir():
+			if env.owned != nil && env.owned(p) {
+				roots = append(roots, p)
+			}
+		case err != nil && i == 0:
+			// Watch the canonical directory before the first CLI run.
+			roots = append(roots, p)
+		}
+	}
+	for _, h := range homes {
+		if h.OS != crossmount.OSWindows {
+			continue
+		}
+		dir := filepath.Join(h.Path, "AppData", "Local", "Temp")
+		// Watch a known user's canonical directory before their first CLI run.
+		roots = append(roots, filepath.Join(dir, "cursor-agent-logs-"+filepath.Base(h.Path)))
+		matches, _ := filepath.Glob(filepath.Join(dir, "cursor-agent-logs-*"))
+		for _, path := range matches {
+			if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+				roots = append(roots, path)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	out := roots[:0]
+	for _, path := range roots {
+		if !seen[path] {
+			out = append(out, path)
+			seen[path] = true
+		}
+	}
+	return out
+}
+
+func (a *Adapter) parseCLIUsageLog(ctx context.Context, path string, fromOffset int64) (adapter.ParseResult, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return adapter.ParseResult{}, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return adapter.ParseResult{}, err
+	}
+	if fromOffset < 0 || fromOffset > fi.Size() {
+		fromOffset = 0
+	}
+	if _, err := f.Seek(fromOffset, io.SeekStart); err != nil {
+		return adapter.ParseResult{}, err
+	}
+	res := adapter.ParseResult{NewOffset: fromOffset}
+	r := bufio.NewReader(io.LimitReader(f, fi.Size()-fromOffset))
+	terminal := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		line, size, err := readCLIUsageLine(r)
+		if errors.Is(err, io.EOF) {
+			// Never advance past a partial final write.
+			break
+		}
+		if err != nil {
+			return res, err
+		}
+		res.NewOffset += size
+		if !terminal && cliLogHasTerminalMarker(line) {
+			terminal = true
+		}
+		ev, ok := parseCLIOutcome(line)
+		if !ok {
+			continue
+		}
+		ev.SourceFile = path
+		ev.Model, ev.ProjectRoot = a.cliUsageContext(ctx, ev.SessionID, ev.MessageID)
+		res.TokenEvents = append(res.TokenEvents, ev)
+	}
+	// A turn can only close on a terminal record, and its start and end can
+	// straddle polls, so the evidence fold (cli_turns.go) re-reads the whole
+	// process log only then. Its rows are keyed deterministically and dedup
+	// on a re-read.
+	if terminal {
+		evs, err := a.cliTurnEvents(ctx, path, res.NewOffset)
+		if err != nil {
+			return res, err
+		}
+		res.ToolEvents = append(res.ToolEvents, evs...)
+	}
+	return res, nil
+}
+
+// Discard oversized unrelated diagnostic lines without allocating their full
+// contents. Keep the offset before an unfinished line so a later append heals it.
+func readCLIUsageLine(r *bufio.Reader) (string, int64, error) {
+	const limit = 1024 * 1024
+	var line []byte
+	var size int64
+	for {
+		part, err := r.ReadSlice('\n')
+		size += int64(len(part))
+		if size <= limit {
+			line = append(line, part...)
+		} else {
+			line = nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return string(line), size, err
+	}
+}
+
+func parseCLIOutcome(line string) (models.TokenEvent, bool) {
+	const marker = "] structured-log.info "
+	i := strings.Index(line, marker)
+	if i < 2 || line[0] != '[' {
+		return models.TokenEvent{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, line[1:i])
+	if err != nil {
+		return models.TokenEvent{}, false
+	}
+	var record struct {
+		Key      string            `json:"key"`
+		Message  string            `json:"message"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	if json.Unmarshal([]byte(line[i+len(marker):]), &record) != nil || record.Key != "agent_cli" || record.Message != "agent_cli.turn.outcome" {
+		return models.TokenEvent{}, false
+	}
+	m := record.Metadata
+	if m["surface"] != "headless" || !validCLIUsageID(m["conversation_id"]) || !validCLIUsageID(m["request_id"]) {
+		return models.TokenEvent{}, false
+	}
+	var counts [4]int64
+	for i, key := range []string{"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"} {
+		n, err := strconv.ParseInt(m[key], 10, 64)
+		if err != nil || n < 0 {
+			return models.TokenEvent{}, false
+		}
+		counts[i] = n
+	}
+	reliability := models.ReliabilityAccurate
+	if m["retries_attempted"] != "0" || m["outcome"] != "success" {
+		reliability = models.ReliabilityUnreliable
+	}
+	return models.TokenEvent{
+		SourceEventID: cliOutcomePrefix + m["request_id"],
+		SessionID:     m["conversation_id"], MessageID: m["request_id"], TurnID: m["request_id"],
+		Timestamp: ts.UTC(), Tool: models.ToolCursor, Source: models.TokenSourceJSONL, Reliability: reliability,
+		InputTokens: counts[0], OutputTokens: counts[1], CacheReadTokens: counts[2], CacheCreationTokens: counts[3],
+	}, true
+}
+
+func validCLIUsageID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, c := range id {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return false
+		}
+	}
+	return true
+}
+
+// Resolve pricing context only from this conversation's native assistant
+// messages. The request's own answer (its requestId-tagged turn in the
+// store.db) wins: Cursor bills each Auto request at the routed model's list
+// price. Without it, ambiguous mixed-model history keeps its model unknown;
+// current account preferences must never be used to price historical
+// requests (so the live hook's "latest answer" rung is NOT used here - a log
+// can be read long after later turns were routed elsewhere).
+func (a *Adapter) cliUsageContext(ctx context.Context, sessionID, requestID string) (string, string) {
+	for _, root := range a.roots {
+		if filepath.Base(root) != "chats" {
+			continue
+		}
+		paths, _ := filepath.Glob(filepath.Join(root, "*", sessionID, "store.db"))
+		for _, path := range paths {
+			model := ""
+			if requestID != "" {
+				if turns, ok := readStoreTurnModels(path); ok {
+					model = generationModel(turns, requestID)
+				}
+			}
+			if model == "" {
+				model = cliUsageModel(ctx, path)
+			}
+			return model, a.projectRootForStoreDB(path, sessionID)
+		}
+	}
+	return "", ""
+}
+
+func cliUsageModel(ctx context.Context, path string) string {
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(1000)", sqlitedsn.Escape(path)))
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT data FROM blobs WHERE instr(CAST(data AS TEXT), '"modelName"') > 0`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	var model string
+	for rows.Next() {
+		var raw []byte
+		if rows.Scan(&raw) != nil {
+			return ""
+		}
+		var message struct {
+			Role    string `json:"role"`
+			Content []struct {
+				ProviderOptions struct {
+					Cursor struct {
+						ModelName string `json:"modelName"`
+					} `json:"cursor"`
+				} `json:"providerOptions"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(raw, &message) != nil || message.Role != "assistant" {
+			continue
+		}
+		for _, part := range message.Content {
+			name := part.ProviderOptions.Cursor.ModelName
+			if name == "" || name == "default" || name == "auto" {
+				continue
+			}
+			if model != "" && model != name {
+				return ""
+			}
+			model = name
+		}
+	}
+	if rows.Err() != nil {
+		return ""
+	}
+	return model
+}

@@ -1,29 +1,63 @@
-import clsx from "clsx";
-import { Info } from "lucide-react";
+import {
+  CircleAlert,
+  Download,
+  Info,
+  RefreshCw,
+  Server,
+  type LucideIcon,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import {
+  Button,
   ChartShell,
+  Icon,
   Pill,
+  Table,
   Tooltip,
   TruncatedPath,
 } from "@/components/primitives";
+import { useState } from "react";
 import { ChartState } from "@/components/ChartState";
+import { Summary } from "@/components/Summary";
 import { RestartOverlay } from "@/components/RestartOverlay";
+import { DoctorChecks } from "@/components/DoctorChecks";
+import { IntegrityCheckCard } from "./IntegrityCheckCard";
 import { useApi } from "@/lib/useApi";
+import { useTileVisible } from "@/lib/useComponents";
 import { useDaemonRestart } from "@/lib/useDaemonRestart";
-import type { DoctorReport, HealthFailuresResponse } from "@/lib/types";
+import { integrityHealthRow } from "@/lib/integrity";
+import { isUpdateAvailable, useUpdateCheck } from "@/lib/version";
+import { fmtDateTime } from "@/lib/format";
+import type {
+  DoctorReport,
+  HealthFailuresResponse,
+  IntegrityStatus,
+  StatusSnapshot,
+  UpdateStatusResponse,
+} from "@/lib/types";
 
 // HealthSection — the `observer doctor` checks in the dashboard
 // (usability arc P4.8 / review row D1). Read-only; the Details lines
 // carry each check's remediation hint, exactly as the CLI prints
 // them. Runs on open and on Re-run only (the DB integrity check is
-// not free on a large observer.db).
-export function HealthSection() {
+// not free on a large observer.db). `icon` is the section glyph from the
+// Settings SECTIONS table, drawn on the Health card title.
+export function HealthSection({ icon }: { icon?: LucideIcon }) {
   return (
     <>
-      <DaemonCard />
+      <div id="daemon">
+        <DaemonCard />
+      </div>
       <div className="mt-4">
-        <DoctorCard />
+        <UpdateCard />
+      </div>
+      <div className="mt-4">
+        <DoctorCard icon={icon} />
+      </div>
+      <div className="mt-4">
+        <div id="integrity">
+          <IntegrityCheckCard />
+        </div>
       </div>
       <div className="mt-4">
         <FailuresCard />
@@ -49,20 +83,20 @@ function DaemonCard() {
   return (
     <ChartShell
       title="Daemon"
-      sub="Restart the running daemon to load a freshly-built binary or apply saved config — without dropping to the CLI."
+      icon={Server}
+      sub="Restart the running daemon to load a freshly-built binary or apply saved config - without dropping to the CLI."
     >
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
+        <Button
+          variant="soft"
           onClick={() =>
             restart(
               "Restart the daemon now?\n\nReconnecting takes ~1s; an active proxied coding session may drop one in-flight request.",
             )
           }
-          className="rounded-2 border border-accent/50 bg-accent/15 px-3 py-1.5 text-[12px] font-medium text-accent hover:bg-accent/25"
         >
           Restart daemon
-        </button>
+        </Button>
         <span className="text-[11.5px] text-fg-3">
           Graceful shutdown + self re-exec (~1s). One in-flight proxied request
           may drop.
@@ -71,78 +105,297 @@ function DaemonCard() {
       {error && (
         <p className="mt-2 text-[11.5px] text-danger">
           {/http|501|not\s|unavailable/i.test(error)
-            ? "Restart isn’t available on this dashboard — it needs the full daemon started with `observer start` (the standalone `observer dashboard` can’t re-exec itself)."
-            : `Restart failed — ${error}`}
+            ? "Restart isn’t available on this dashboard - it needs the full daemon started with `observer start` (the standalone `observer dashboard` can’t re-exec itself)."
+            : `Restart failed - ${error}`}
         </p>
       )}
     </ChartShell>
   );
 }
 
-function DoctorCard() {
+// UpdateCard — the user-initiated update check (zero-network hardening
+// pass, 2026-07-30). Nothing here fetches on mount: the "Check for
+// updates" button is the only thing that ever contacts npm, and it
+// does so exactly once per click. See web/src/lib/version.ts and
+// `observer privacy` for the same claim verified from the CLI side.
+function UpdateCard() {
+  // Only the version is read; select it so the 5 s status poll does not
+  // re-render the card.
+  const status = useApi<StatusSnapshot, string | null>("/api/status", undefined, [], {
+    select: (s) => s.version ?? null,
+  });
+  const current = status.data ?? undefined;
+  const { latest, checking, error, lastCheckedAt, checkNow } =
+    useUpdateCheck();
+  const updateAvailable = isUpdateAvailable(current, latest);
+  // The org-served half reads /api/update: hidden when that component is not
+  // active here (T-670); the npm check above is core and always shown.
+  const showOrgUpdate = useTileVisible()({ route: "/api/update/status" });
+  return (
+    <ChartShell
+      title="Updates"
+      icon={Download}
+      sub="Checks npmjs.org only when you click below - never automatically, never in the background. No other page or timer triggers this request."
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-[11.5px] text-fg-3">
+          Running{" "}
+          <span className="font-mono text-fg-1">
+            v{current || "dev"}
+          </span>
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void checkNow()}
+          loading={checking}
+        >
+          {checking ? "Checking npm…" : "Check for updates"}
+        </Button>
+        {lastCheckedAt && !checking && (
+          <span className="text-[11px] text-fg-4">
+            last checked {fmtDateTime(new Date(lastCheckedAt).toISOString())}
+          </span>
+        )}
+      </div>
+      {error && (
+        <p className="mt-2 text-[11.5px] text-danger">
+          Couldn’t reach registry.npmjs.org - check your network and try
+          again.
+        </p>
+      )}
+      {!error && latest && (
+        <p className="mt-2 text-[11.5px]">
+          {updateAvailable ? (
+            <>
+              <span className="text-accent">v{latest} is available</span> -
+              update with <kbd>npm i -g @superbased/observer</kbd> or{" "}
+              <kbd>pipx upgrade superbased-observer</kbd>, or read the{" "}
+              <a
+                href={`https://github.com/superbasedapp/observer/releases/tag/v${latest}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline"
+              >
+                release notes
+              </a>
+              .
+            </>
+          ) : (
+            <span className="text-fg-3">
+              You’re on the latest published version.
+            </span>
+          )}
+        </p>
+      )}
+      {showOrgUpdate && <OrgUpdatePosture />}
+      {showOrgUpdate && <UpdateHistory />}
+    </ChartShell>
+  );
+}
+
+type UpdateHistoryEvent = {
+  id: number;
+  at: string;
+  from_version: string;
+  to_version: string;
+  state: string;
+  error_class?: string;
+  detail: string;
+};
+
+// UpdateHistory is `observer update history` (backlog item 6, sweep row 23):
+// every apply, rollback and refusal this node recorded, newest first, from
+// the node-local ledger. Loaded only when opened. A reason can name a local
+// path, which is why the read is owner-local and never leaves the machine.
+function UpdateHistory() {
+  const [open, setOpen] = useState(false);
+  const hist = useApi<{ events: UpdateHistoryEvent[] } | null>(open ? "/api/update/history" : null);
+  const events = hist.data?.events ?? [];
+  return (
+    <details
+      className="mt-3 border-t border-line-1 pt-3 text-[11.5px]"
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <Summary className="w-fit text-fg-3 hover:text-fg-2">Update history (this node)</Summary>
+      <div className="mt-2">
+        <ChartState
+          loading={hist.loading && !hist.data}
+          error={hist.error}
+          denied={hist.denied}
+          deniedPermission={hist.deniedPermission}
+          empty={!hist.loading && events.length === 0}
+          emptyHint="No update events recorded on this node."
+          height={80}
+        >
+          <Table
+            minWidth={560}
+            head={
+              <tr>
+                <th className="pb-1.5 pr-3 font-semibold">When</th>
+                <th className="pb-1.5 pr-3 font-semibold">From</th>
+                <th className="pb-1.5 pr-3 font-semibold">To</th>
+                <th className="pb-1.5 pr-3 font-semibold">State</th>
+                <th className="pb-1.5 font-semibold">Detail</th>
+              </tr>
+            }
+          >
+            {events.map((e) => (
+              <tr key={e.id} className="border-t border-line-1 align-top">
+                <td className="whitespace-nowrap py-1.5 pr-3 text-fg-2">{fmtDateTime(e.at)}</td>
+                <td className="py-1.5 pr-3 font-mono text-fg-2">{e.from_version || "-"}</td>
+                <td className="py-1.5 pr-3 font-mono text-fg-2">{e.to_version || "-"}</td>
+                <td className="py-1.5 pr-3">
+                  <span className={e.error_class ? "text-danger" : "text-fg-1"}>
+                    {e.state}
+                    {e.error_class ? ` (${e.error_class})` : ""}
+                  </span>
+                </td>
+                <td className="break-words py-1.5 text-fg-3">{e.detail}</td>
+              </tr>
+            ))}
+          </Table>
+        </ChartState>
+      </div>
+    </details>
+  );
+}
+
+// OrgUpdatePosture renders the ORG-SERVED half of the update answer, beside
+// the click-gated npm probe above (enterprise update management §3.10, W5).
+//
+// The two answers are different questions and the card shows both rather than
+// picking one: npm says what the public registry has published, the org says
+// what THIS fleet is allowed to run and how far this node has got. On an
+// enrolled node the org answer is the one that decides.
+//
+// It reads GET /api/update/status, a LOOPBACK read of state the daemon already
+// holds from the push cycle - it adds no outbound request and no timer.
+function OrgUpdatePosture() {
+  const st = useApi<UpdateStatusResponse>("/api/update/status");
+  const d = st.data;
+  if (!d) return null;
+  if (!d.enabled) {
+    return (
+      <p className="mt-3 border-t border-line-1 pt-3 text-[11.5px] text-fg-3">
+        Org-managed updates are turned off on this node ([update].enabled =
+        false), so nothing here is checked against an org server. The npm check
+        above is the only update signal.
+      </p>
+    );
+  }
+  const refusal = d.org_refusal;
+  return (
+    <div className="mt-3 border-t border-line-1 pt-3 text-[11.5px]">
+      {refusal && (
+        <p className="mb-2 rounded-2 border border-danger/30 bg-danger-soft px-2 py-1.5 text-danger">
+          Your org is not accepting this node's data:{" "}
+          {refusal.message}
+          {refusal.min_version ? (
+            <>
+              {" "}
+              Update to{" "}
+              <span className="font-mono">v{refusal.min_version.replace(/^v/, "")}</span>{" "}
+              or newer to start sharing again.
+            </>
+          ) : null}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-fg-3">
+        <span>
+          Org update state{" "}
+          <span className="font-mono text-fg-1">
+            {d.state === "unknown" || !d.state ? "not reported" : d.state}
+          </span>
+        </span>
+        {d.channel && (
+          <span>
+            channel <span className="font-mono text-fg-1">{d.channel}</span>
+          </span>
+        )}
+        {d.target_version && (
+          <span>
+            target <span className="font-mono text-fg-1">{d.target_version}</span>
+          </span>
+        )}
+        {d.install_method && (
+          <span>
+            installed via{" "}
+            <span className="font-mono text-fg-1">{d.install_method}</span>
+          </span>
+        )}
+        <span>auto-apply {d.auto_apply ? "on" : "off"}</span>
+        {d.window && <span>window {d.window}</span>}
+      </div>
+      {d.auto_apply_reason && (
+        <p className="mt-1 text-fg-4">{d.auto_apply_reason}</p>
+      )}
+      {!d.self_apply && d.advice && (
+        <p className="mt-1 text-warn">
+          This node cannot replace its own binary. {d.advice}
+        </p>
+      )}
+      {d.error_class && (
+        <p className="mt-1 text-danger">
+          Last update attempt failed at the {d.error_class} step. The update
+          history below has the local ledger.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DoctorCard({ icon }: { icon?: LucideIcon }) {
   const report = useApi<DoctorReport>("/api/health/doctor");
+  // Only the startup integrity verdict is read (select: see UpdateCard).
+  const status = useApi<StatusSnapshot, IntegrityStatus | null>("/api/status", undefined, [], {
+    select: (s) => s.integrity ?? null,
+  });
   const d = report.data;
+  // The daemon's persisted STARTUP `PRAGMA quick_check` verdict (RES-3,
+  // codebase audit 2026-09-16) is additive to the on-demand `db.integrity`
+  // check above: the doctor check above runs fresh right now; this one is
+  // the daemon's own background probe from when it opened the database.
+  // null when the daemon has never probed (nothing to show).
+  const integrityRow = integrityHealthRow(status.data ?? undefined);
+  const rows: DoctorReport["checks"] = integrityRow
+    ? [
+        {
+          name: "db.integrity.startup",
+          status: integrityRow.status,
+          message: integrityRow.message,
+        },
+        ...(d?.checks ?? []),
+      ]
+    : (d?.checks ?? []);
   return (
     <ChartShell
       title="Health"
+      icon={icon}
       sub="The `observer doctor` checks: database integrity, hook checksums and binary paths, MCP registrations, pidbridge, concurrent daemons, codex hook trust, org enrolment."
     >
       <ChartState
         loading={report.loading}
+        stale={report.isStale}
+        onRetry={report.reload}
         error={report.error}
-        empty={!report.loading && (d?.checks ?? []).length === 0}
+        denied={report.denied}
+        deniedPermission={report.deniedPermission}
+        empty={!report.loading && rows.length === 0}
         emptyHint="No checks returned."
       >
         {/* `=== true` on purpose: the field is absent on the local
             projection (Go `omitempty`) and on any daemon older than the
             feature, and `undefined` must render exactly like `false`. */}
         {d?.local_detail_withheld === true && <RedactionNotice />}
-        <div className="space-y-1.5">
-          {(d?.checks ?? []).map((c) => (
-            <div
-              key={c.name}
-              className="rounded-2 border border-line-1 bg-bg-2 px-3 py-2"
-            >
-              <div className="flex items-baseline gap-2">
-                <span
-                  className={clsx(
-                    "w-4 text-center text-[12px] font-bold",
-                    c.status === "ok"
-                      ? "text-success"
-                      : c.status === "warn"
-                        ? "text-warn"
-                        : "text-danger",
-                  )}
-                >
-                  {c.status === "ok" ? "✓" : c.status === "warn" ? "⚠" : "✗"}
-                </span>
-                <span className="font-mono text-[11.5px] text-fg-1">
-                  {c.name}
-                </span>
-                <span className="flex-1 text-[11.5px] text-fg-2">
-                  {c.message}
-                </span>
-              </div>
-              {c.details && c.details.length > 0 && (
-                <ul className="ml-6 mt-1 list-disc space-y-0.5 text-[11px] text-fg-3">
-                  {c.details.map((line, i) => (
-                    <li key={i} className="whitespace-pre-wrap">
-                      {line}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
-        </div>
+        <DoctorChecks
+          rows={rows}
+          muted={(c) => c.name === "db.integrity.startup" && c.status === "ok"}
+        />
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line-1 pt-3">
-          <button
-            type="button"
-            onClick={report.reload}
-            className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-[11px] text-fg-2 hover:bg-bg-3"
-          >
+          <Button variant="secondary" size="sm" iconLeft={RefreshCw} onClick={report.reload}>
             Re-run checks
-          </button>
+          </Button>
           {d && (
             <span className="text-[11.5px] text-fg-3">
               {d.ok} ok · {d.warn} warn · {d.fail} fail
@@ -178,12 +431,12 @@ function RedactionNotice() {
       data-testid="doctor-redaction-notice"
       className="mb-2 flex items-start gap-2 rounded-2 border border-line-1 bg-bg-2 px-3 py-2 text-[11.5px] leading-relaxed text-fg-3"
     >
-      <Info className="mt-[2px] h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <Icon icon={Info} size="sm" className="mt-[2px] shrink-0" />
       <p>
         This device is connected remotely, so machine-specific paths and user
-        names appear as placeholders — <code className={ph}>~</code>,{" "}
+        names appear as placeholders - <code className={ph}>~</code>,{" "}
         <code className={ph}>&lt;config&gt;</code>,{" "}
-        <code className={ph}>&lt;other-home&gt;</code> — standing in for real
+        <code className={ph}>&lt;other-home&gt;</code> - standing in for real
         locations on the host, and some machine detail can still come through.
         The checks and their results are unchanged; for the unredacted report,
         open this dashboard locally on the host or run{" "}
@@ -203,75 +456,80 @@ function FailuresCard() {
   return (
     <ChartShell
       title="Recent failures"
+      icon={CircleAlert}
       sub="Failed commands from the last 7 days, grouped. Recovered = a later attempt of the same command succeeded; unrecovered groups are the time sinks worth a root-cause fix."
     >
       <ChartState
         loading={failures.loading}
+        stale={failures.isStale}
+        onRetry={failures.reload}
         error={failures.error}
+        denied={failures.denied}
+        deniedPermission={failures.deniedPermission}
         empty={!failures.loading && (f?.failures ?? []).length === 0}
         emptyHint="No failures captured in the last 7 days."
       >
-        <table className="w-full border-collapse text-[11.5px]">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-[0.06em] text-fg-3">
+        <Table
+          minWidth={640}
+          head={
+            <tr className="text-left">
               <th className="pb-1.5 pr-3 font-semibold">Command</th>
               <th className="pb-1.5 pr-3 font-semibold">Fails</th>
               <th className="pb-1.5 pr-3 font-semibold">Outcome</th>
               <th className="pb-1.5 pr-3 font-semibold">Project</th>
               <th className="pb-1.5 font-semibold">Last session</th>
             </tr>
-          </thead>
-          <tbody>
-            {(f?.failures ?? []).map((g) => (
-              <tr key={g.command + g.last_at} className="border-t border-line-1">
-                <td className="max-w-[280px] py-1.5 pr-3">
-                  <Tooltip
-                    content={
-                      <span className="whitespace-pre-wrap break-all">
-                        {g.error_message
-                          ? `${g.command}\n\n${g.error_category || "error"}: ${g.error_message}`
-                          : g.command}
-                      </span>
-                    }
-                    maxWidth={460}
-                  >
-                    <code className="block cursor-help truncate font-mono text-fg-1">
-                      {g.command}
-                    </code>
-                  </Tooltip>
-                </td>
-                <td className="py-1.5 pr-3 text-fg-2">
-                  {g.fails}
-                  {g.retries > 0 && (
-                    <span className="text-fg-4"> (+{g.retries} retries)</span>
-                  )}
-                </td>
-                <td className="py-1.5 pr-3">
-                  {g.recovered ? (
-                    <Pill variant="success">recovered</Pill>
-                  ) : (
-                    <Pill variant="warn">unrecovered</Pill>
-                  )}
-                </td>
-                <td className="max-w-[200px] py-1.5 pr-3 text-fg-3">
-                  {g.project ? (
-                    <TruncatedPath value={g.project} className="text-[11px]" />
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="py-1.5">
-                  <Link
-                    to={`/sessions?session=${encodeURIComponent(g.session_id)}`}
-                    className="text-accent hover:underline"
-                  >
-                    open
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          }
+        >
+          {(f?.failures ?? []).map((g) => (
+            <tr key={g.command + g.last_at} className="border-t border-line-1">
+              <td className="max-w-[280px] py-1.5 pr-3">
+                <Tooltip
+                  content={
+                    <span className="whitespace-pre-wrap break-all">
+                      {g.error_message
+                        ? `${g.command}\n\n${g.error_category || "error"}: ${g.error_message}`
+                        : g.command}
+                    </span>
+                  }
+                  maxWidth={460}
+                >
+                  <code className="block cursor-help truncate font-mono text-fg-1">
+                    {g.command}
+                  </code>
+                </Tooltip>
+              </td>
+              <td className="py-1.5 pr-3 text-fg-2">
+                {g.fails}
+                {g.retries > 0 && (
+                  <span className="text-fg-4"> (+{g.retries} retries)</span>
+                )}
+              </td>
+              <td className="py-1.5 pr-3">
+                {g.recovered ? (
+                  <Pill variant="success">recovered</Pill>
+                ) : (
+                  <Pill variant="warn">unrecovered</Pill>
+                )}
+              </td>
+              <td className="max-w-[200px] py-1.5 pr-3 text-fg-3">
+                {g.project ? (
+                  <TruncatedPath value={g.project} className="text-[11px]" />
+                ) : (
+                  "-"
+                )}
+              </td>
+              <td className="py-1.5">
+                <Link
+                  to={`/sessions?session=${encodeURIComponent(g.session_id)}`}
+                  className="text-accent hover:underline"
+                >
+                  open
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </Table>
         {f && f.total > f.failures.length && (
           <p className="mt-2 text-[11px] text-fg-3">
             {f.total} failure events total in the window; showing the{" "}

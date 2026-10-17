@@ -1,3 +1,5 @@
+//go:build !sbo_omit_integration_mcp_server
+
 package main
 
 import (
@@ -9,18 +11,24 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/learn"
 	"github.com/marmutapp/superbased-observer/internal/mcp"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 	"github.com/marmutapp/superbased-observer/internal/stash"
 	"github.com/marmutapp/superbased-observer/internal/stashalign"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
+
+// serveToolCallTimeout is the MCP-side read-transaction watchdog. MCP tools
+// should be bounded queries; two minutes leaves headroom for large local
+// databases while preventing a wedged client/query from pinning WAL forever.
+const serveToolCallTimeout = 2 * time.Minute
 
 // newServeCmd implements `observer serve` — the stdio MCP server
 // entrypoint that AI tools spawn via their MCP configuration. Logs go to
@@ -57,25 +65,38 @@ func newServeCmd() *cobra.Command {
 				return fmt.Errorf("open db %s: %w", cfg.Observer.DBPath, err)
 			}
 			defer database.Close()
+			// `observer serve` can live for days under an MCP client. Keep a
+			// small idle pool (not zero — db.Open's ConnMaxIdleTime default
+			// already reaps genuinely idle connections, and SetMaxIdleConns(0)
+			// forces database/sql to close+reopen a connection after EVERY
+			// call, defeating the DSN-level pragmas applied at open) so an
+			// old process cannot retain a stale read snapshot and pin
+			// observer.db-wal between requests, while still amortizing the
+			// open cost across back-to-back tool calls.
+			database.SetMaxIdleConns(2)
 
 			// Stderr logger — stdout belongs to JSON-RPC.
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: logLevelFromString(cfg.Observer.LogLevel),
 			}))
 			mcpOpts := mcp.Options{
-				DB:             database,
-				Logger:         logger,
-				ServerName:     "observer",
-				ServerVersion:  version,
-				CostEngine:     cost.NewEngine(cfg.Intelligence),
-				CacheWarm:      cfg.CacheWarm,
-				SignalRecorder: learn.NewSignalRecorder(database),
+				DB:              database,
+				Logger:          logger,
+				ServerName:      "observer",
+				ServerVersion:   version,
+				ToolCallTimeout: serveToolCallTimeout,
+				CostEngine:      acquireProcessCostEngine(cmd.Context(), cfg, database, logger),
+				CacheWarm:       cfg.CacheWarm,
+				Tasks:           cfg.Tasks,
+				SignalRecorder:  learn.NewSignalRecorder(database),
 				// Session handoff (docs/session-handoff.md P2): the shared
 				// handoffsvc runner behind the continue_session tool.
 				BuildHandoff: handoffRunner(cfg, database),
 				// get_session_message: re-read one un-excerpted message of a
 				// source session on demand (message-addressable handoff).
 				GetSessionMessage: messageReader(cfg, database),
+				// Tool results follow the developer cost display (T-204).
+				CostDisplay: newCostDisplayResolver(store.New(database)).Mode,
 			}
 			if cfg.Compression.Conversation.Stash.Enabled {
 				st, err := stash.New(stash.Options{
@@ -111,7 +132,7 @@ func newServeCmd() *cobra.Command {
 						default:
 							ok, hint := stashalign.CompareDirs(cfg.Compression.Conversation.Stash.Dir, proxyDir)
 							if !ok {
-								logger.Warn("mcp: stash dir mismatch with proxy — retrieve_stashed will see misses",
+								logger.Warn("mcp: stash dir mismatch with proxy - retrieve_stashed will see misses",
 									"hint", hint,
 									"mcp_dir", cfg.Compression.Conversation.Stash.Dir,
 									"proxy_dir", proxyDir,
@@ -151,7 +172,7 @@ func newServeCmd() *cobra.Command {
 				auditCloser = w
 			} else {
 				mcpOpts.AuditWriter = audit.NewNoopWriter()
-				logger.Info("mcp: audit log disabled — V7-12 tool calls will not be recorded")
+				logger.Info("mcp: audit log disabled - V7-12 tool calls will not be recorded")
 			}
 			defer func() {
 				if auditCloser != nil {
@@ -180,8 +201,7 @@ func newServeCmd() *cobra.Command {
 			// Wire the code-intelligence provider into the MCP layer
 			// (get_symbols / get_relations / check_file_freshness +
 			// get_file_history structure enrichment). The NATIVE codeintel
-			// engine is the only provider (Phase 4 decommissioned the
-			// external code-graph dependency); it self-heals as projects
+			// engine is the only provider; it self-heals as projects
 			// are indexed. Best-effort: an unavailable provider just
 			// degrades enrichment.
 			mcpOpts.CodeIntel = buildCodeIntelProvider(cfg, database, logger)

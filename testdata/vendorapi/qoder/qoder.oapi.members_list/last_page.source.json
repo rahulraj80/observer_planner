@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "maxResults": "VerifiedOfficial",
+    "members": "VerifiedOfficial",
+    "members[]": "VerifiedOfficial",
+    "members[].email": "VerifiedOfficial",
+    "members[].id": "VerifiedOfficial",
+    "members[].joinedAt": "VerifiedOfficial",
+    "members[].name": "VerifiedOfficial",
+    "members[].role": "VerifiedOfficial",
+    "members[].status": "VerifiedOfficial",
+    "members[].userId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "de727db74b8153c870ec5a05ab99c487b0d664fceef4f6cd38653e5d1b12a411",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/{organization_id}/members",
+    "query": {
+      "maxResults": "100",
+      "nextToken": "eyJwYWdlIjogMn0="
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: nextToken omitted (documented: absent on the last page); DISABLED is a documented status.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Qoder Teams OpenAPI Member APIs (members.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "19c999222bbb35ac63d30aa9325578b2123c3f53d5eb353d4ffe786405fbbd10",
+  "source_url": "https://docs.qoder.com/account/teams/openapi/members.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "qoder.oapi.members_list"
+}

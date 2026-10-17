@@ -9,9 +9,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
+
+// wantWatcherRows derives the expected §6.5 watcher-row count from the
+// live default adapter roster instead of a literal that goes stale
+// every time an adapter joins EnabledAdapters (it has moved at least
+// three times: 37 -> 38 -> ...). Every enabled adapter gets a watcher
+// row except the *-web browser-extension rows (browserchat capture is
+// native-messaging, not a watched local store — no watcher channel).
+func wantWatcherRows() int {
+	n := 0
+	for _, tool := range config.Default().Observer.Watch.EnabledAdapters {
+		if !strings.HasSuffix(tool, "-web") {
+			n++
+		}
+	}
+	return n
+}
+
+// wantBlockerRows derives the expected §6.5 block-capable channel count
+// from the same guard.ConformanceMatrix() the endpoint serves, rather
+// than a literal that goes stale every time a block-capable hook lane
+// joins the matrix (it has moved from 4 — claude-code PreToolUse +
+// cursor before×3 — to include the whole prompt-submit intervention
+// set: UserPromptSubmit / beforeSubmitPrompt / BeforeAgent /
+// transformInput / pre_user_prompt across many clients). The check
+// still pins that every CanBlock channel survives the handler's copy
+// and the JSON round-trip.
+func wantBlockerRows() int {
+	n := 0
+	for _, e := range guard.ConformanceMatrix() {
+		if e.Caps.CanBlock {
+			n++
+		}
+	}
+	return n
+}
 
 // seedGuardEvents writes three verdict rows through the one-owner
 // store helper: two recent (one enforced deny), one old.
@@ -123,7 +160,7 @@ func TestAPIGuardRules(t *testing.T) {
 	var found bool
 	for _, r := range resp.Rules {
 		if r.Doc == "" {
-			t.Errorf("rule %s has empty doc — the definition is the endpoint's whole point", r.ID)
+			t.Errorf("rule %s has empty doc - the definition is the endpoint's whole point", r.ID)
 		}
 		if r.ID == "R-151" {
 			found = true
@@ -215,11 +252,11 @@ func TestAPIGuardConformance(t *testing.T) {
 			t.Errorf("%s/%s missing notes", e.Client, e.Channel)
 		}
 	}
-	if blockers != 4 {
-		t.Errorf("block-capable channels = %d, want 4 (claude-code PreToolUse + cursor before×3)", blockers)
+	if want := wantBlockerRows(); blockers != want {
+		t.Errorf("block-capable channels = %d, want %d (every guard.ConformanceMatrix CanBlock channel: claude-code PreToolUse + cursor before×3 + the prompt-submit intervention lanes)", blockers, want)
 	}
-	if watchers != 30 {
-		t.Errorf("watcher rows = %d, want 30 (every enabled adapter)", watchers)
+	if want := wantWatcherRows(); watchers != want {
+		t.Errorf("watcher rows = %d, want %d (every enabled non-browser adapter: %d EnabledAdapters minus the *-web browser-extension rows)", watchers, want, len(config.Default().Observer.Watch.EnabledAdapters))
 	}
 }
 
@@ -296,7 +333,7 @@ func TestAPIGuardSimulate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sum.Total != 0 {
-		t.Errorf("simulate persisted %d guard events — must persist none", sum.Total)
+		t.Errorf("simulate persisted %d guard events - must persist none", sum.Total)
 	}
 }
 
@@ -337,6 +374,9 @@ func TestAPIGuardBudget(t *testing.T) {
 		Sessions      int     `json:"sessions"`
 		SessionP95USD float64 `json:"session_p95_usd"`
 		DailyP95USD   float64 `json:"daily_p95_usd"`
+		// T-204: the token caps and their usage ride along for the token view.
+		DailyTokens *int64 `json:"daily_tokens"`
+		UsageToday  *int64 `json:"usage_today_tokens"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -352,6 +392,12 @@ func TestAPIGuardBudget(t *testing.T) {
 	}
 	if resp.SessionP95USD < 2.5-1e-9 || resp.DailyP95USD < 2.5-1e-9 {
 		t.Errorf("p95 session/daily = %.4f/%.4f, want >= 2.50", resp.SessionP95USD, resp.DailyP95USD)
+	}
+	if resp.DailyTokens == nil || *resp.DailyTokens != 0 {
+		t.Errorf("daily_tokens = %v, want the configured 0 (off)", resp.DailyTokens)
+	}
+	if resp.UsageToday == nil || *resp.UsageToday < 20 {
+		t.Errorf("usage_today_tokens = %v, want >= 20 (the seeded turn)", resp.UsageToday)
 	}
 }
 

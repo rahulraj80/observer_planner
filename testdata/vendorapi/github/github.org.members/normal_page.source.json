@@ -1,0 +1,43 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].avatar_url": "VerifiedOfficial",
+    "[].events_url": "VerifiedOfficial",
+    "[].followers_url": "VerifiedOfficial",
+    "[].following_url": "VerifiedOfficial",
+    "[].gists_url": "VerifiedOfficial",
+    "[].gravatar_id": "VerifiedOfficial",
+    "[].html_url": "VerifiedOfficial",
+    "[].id": "VerifiedOfficial",
+    "[].login": "VerifiedOfficial",
+    "[].node_id": "VerifiedOfficial",
+    "[].organizations_url": "VerifiedOfficial",
+    "[].received_events_url": "VerifiedOfficial",
+    "[].repos_url": "VerifiedOfficial",
+    "[].site_admin": "VerifiedOfficial",
+    "[].starred_url": "VerifiedOfficial",
+    "[].subscriptions_url": "VerifiedOfficial",
+    "[].type": "VerifiedOfficial",
+    "[].url": "VerifiedOfficial"
+  },
+  "fixture_sha256": "fc81ce82d1f40a14bdc7fa53261a6155205d3edf8641b4a363aab153868b7cf2",
+  "http": {
+    "headers": {
+      "link": "<https://api.github.com/orgs/{org}/members?page=2>; rel=\"next\"",
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/orgs/{org}/members",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /orgs/{org}/members (operationId orgs/list-members). Paging is the Link header (the header value is a synthesized example of the documented mechanism).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.org.members"
+}

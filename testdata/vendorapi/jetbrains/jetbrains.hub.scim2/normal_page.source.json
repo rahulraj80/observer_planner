@@ -1,0 +1,46 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "Resources": "Inferred",
+    "Resources[]": "VerifiedOfficial",
+    "Resources[].active": "VerifiedOfficial",
+    "Resources[].displayName": "VerifiedOfficial",
+    "Resources[].emails": "VerifiedOfficial",
+    "Resources[].emails[]": "VerifiedOfficial",
+    "Resources[].emails[].primary": "VerifiedOfficial",
+    "Resources[].emails[].type": "VerifiedOfficial",
+    "Resources[].emails[].value": "VerifiedOfficial",
+    "Resources[].id": "VerifiedOfficial",
+    "Resources[].meta": "VerifiedOfficial",
+    "Resources[].meta.created": "VerifiedOfficial",
+    "Resources[].meta.lastModified": "VerifiedOfficial",
+    "Resources[].meta.resourceType": "VerifiedOfficial",
+    "Resources[].name": "VerifiedOfficial",
+    "Resources[].name.formatted": "VerifiedOfficial",
+    "Resources[].schemas": "VerifiedOfficial",
+    "Resources[].userName": "VerifiedOfficial",
+    "itemsPerPage": "VerifiedOfficial",
+    "schemas": "VerifiedOfficial",
+    "startIndex": "VerifiedOfficial",
+    "totalResults": "VerifiedOfficial"
+  },
+  "fixture_sha256": "134a090c017692894d63626a8cc5ccd4f9227cef8bacf0d0421f1081c3741259",
+  "http": {
+    "method": "GET",
+    "path": "/api/rest/scim2/Users",
+    "query": {
+      "startIndex": "1",
+      "count": "100"
+    },
+    "status": 200
+  },
+  "notes": "The RFC 7644 3.4.2 ListResponse with the RFC's two user ids and userNames, the first user's attributes from the RFC 7643 8.2 full user example (reduced), a third user and the paging members synthesized. Hub documents the SCIM endpoint (<hub-base-url>/api/rest/scim2) and its token but no list response, so that Hub answers this standard shape is Inferred.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "RFC 7644 (SCIM 2.0 protocol) sections 3.4.2 and 3.12, with RFC 7643 section 8.2 user attributes",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b9078e016c98b86934a23c80926b74fc8b59885ab2943729ec2493c17488a09b",
+  "source_url": "https://www.rfc-editor.org/rfc/rfc7644.txt",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "jetbrains.hub.scim2"
+}

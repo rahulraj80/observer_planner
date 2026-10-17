@@ -1,0 +1,22 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "alert_abc123",
+      "object": "organization.spend_alert",
+      "threshold_amount": 100000,
+      "currency": "USD",
+      "interval": "month",
+      "notification_channel": {
+        "type": "email",
+        "recipients": [
+          "finance@example.com"
+        ],
+        "subject_prefix": "OpenAI spend alert"
+      }
+    }
+  ],
+  "first_id": "alert_abc123",
+  "last_id": "alert_abc123",
+  "has_more": true
+}

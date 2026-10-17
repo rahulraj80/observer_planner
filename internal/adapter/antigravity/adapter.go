@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
+	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/platform/oscrypt"
@@ -285,15 +287,19 @@ func (a *Adapter) WatchPaths() []string { return a.roots }
 // IsSessionFile implements adapter.Adapter. Matches conversation files
 // under either the desktop or CLI Antigravity layout:
 //
-//	.gemini/antigravity/conversations/<uuid>.pb         (desktop, encrypted)
-//	.gemini/antigravity-cli/conversations/<uuid>.pb     (older CLI: agy)
-//	.gemini/antigravity-cli/conversations/<uuid>.db     (newer CLI: agy — plaintext SQLite, see clidb.go)
+//	.gemini/antigravity/conversations/<uuid>.pb                                  (desktop, encrypted)
+//	.gemini/antigravity/brain/<uuid>/.system_generated/logs/transcript.jsonl     (desktop, PLAINTEXT — see transcript.go)
+//	.gemini/antigravity-cli/conversations/<uuid>.pb                              (older CLI: agy)
+//	.gemini/antigravity-cli/conversations/<uuid>.db                              (newer CLI: agy — plaintext SQLite, see clidb.go)
 //
 // Path-component string match — foreign-OS separators are normalised
 // so tests and WSL2 /mnt/c paths still match without host-OS
 // dependence. Other Antigravity .pb subdirs (implicit/,
-// user_settings.pb) are out of v1 scope. The under-WatchPaths
-// constraint enforces the v1.4.51 dispatch contract.
+// user_settings.pb) are out of v1 scope, as are the transcript's
+// siblings (`transcript_full.jsonl`, `chunks/*/00000000.jsonl`,
+// `steps/<n>/output.txt`) — matching those would double-ingest the
+// same steps. The under-WatchPaths constraint enforces the v1.4.51
+// dispatch contract.
 func (a *Adapter) IsSessionFile(path string) bool {
 	layout := classifyLayout(path)
 	if layout == LayoutUnknown {
@@ -304,11 +310,96 @@ func (a *Adapter) IsSessionFile(path string) bool {
 			return false
 		}
 	} else {
-		if layout != LayoutDesktop {
+		if layout != LayoutDesktop && layout != LayoutDesktopTranscript && layout != LayoutDesktopDB {
 			return false
 		}
 	}
 	return adapter.UnderAnyWatchRoot(path, a.WatchPaths())
+}
+
+// conversationOwner returns the plaintext sibling that pre-empts an
+// encrypted `.pb` for its conversation, or "" when `path` is not an
+// out-ranked file. The per-uuid model, in BOTH trees:
+//
+//	.db (agy plaintext SQLite)      → tokens + model id + surface, AND
+//	                                  text + actions synthesized from
+//	                                  the sibling transcript
+//	brain/…/transcript.jsonl        → text + actions (always parsed
+//	                                  when it is a session file)
+//	conversations/<uuid>.pb         → out-ranked by either of the above
+//
+// The .db and the transcript are NOT mutually exclusive: both may
+// synthesize the same text + action rows, but they key them
+// IDENTICALLY — SourceFile = the transcript path, SourceEventID =
+// "antigravity-transcript:<uuid>:step:<n>:<kind>" — so whichever lands
+// first wins and the store's UNIQUE index absorbs the other, in either
+// arrival order (the .db is born ~270 ms before the transcript on the
+// live extension run; a late .db must not re-list the conversation).
+// Only the .pb defers, and only to a sibling that exists on disk AND
+// this adapter serves as a session file (IsSessionFile): an adapter
+// whose watch roots exclude brain/ keeps the pre-cut-over behaviour,
+// and the CLI tree's transcript (never a session file) pre-empts
+// nothing.
+func (a *Adapter) conversationOwner(path string) string {
+	layout := classifyLayout(path)
+	conversationID := uuidFromFilename(path)
+	var candidates []string
+	switch layout {
+	case LayoutDesktop:
+		candidates = append(candidates,
+			desktopSiblingPath(path, conversationID, ".db"),
+			transcriptPathFor(path, conversationID))
+	case LayoutCLI:
+		if cliRoot, _ := cliRootsFor(path); cliRoot != "" {
+			candidates = append(candidates, filepath.Join(cliRoot, "conversations", conversationID+".db"))
+		}
+	}
+	for _, c := range candidates {
+		if c != "" && fileExists(c) && a.IsSessionFile(c) {
+			return c
+		}
+	}
+	return ""
+}
+
+// agyDBMainPath maps a .db / .db-wal / .db-shm path onto the main .db.
+func agyDBMainPath(path string) string {
+	switch {
+	case strings.HasSuffix(strings.ToLower(path), "-wal"):
+		return path[:len(path)-len("-wal")]
+	case strings.HasSuffix(strings.ToLower(path), "-shm"):
+		return path[:len(path)-len("-shm")]
+	}
+	return path
+}
+
+// agyDBWatermark is the cursor value for an agy .db: the max mtime
+// (unix milliseconds) of the main file and its -wal sidecar. A WAL-mode
+// turn bumps the -wal's mtime without touching the main file's size
+// or mtime, so neither a size cursor nor the main file's mtime alone
+// would re-fire the parse. Monotonic, so the store's MAX-cursor write
+// is safe; ≥ 1 so a fresh file never collides with the "unparsed"
+// zero.
+func agyDBWatermark(mainPath string) int64 {
+	var wm int64 = 1
+	for _, p := range []string{mainPath, mainPath + "-wal"} {
+		if fi, err := os.Stat(p); err == nil {
+			if ms := fi.ModTime().UnixMilli(); ms > wm {
+				wm = ms
+			}
+		}
+	}
+	return wm
+}
+
+// desktopSiblingPath returns <desktopRoot>/conversations/<uuid><ext> for
+// any file under the desktop tree, or "" outside it.
+func desktopSiblingPath(path, conversationID, ext string) string {
+	desktopRoot, _ := desktopRootFor(path)
+	if desktopRoot == "" {
+		return ""
+	}
+	return filepath.Join(desktopRoot, "conversations", conversationID+ext)
 }
 
 // Layout identifies which Antigravity install shape a session file
@@ -328,7 +419,51 @@ const (
 	// per-conversation .pb). No OSCrypt decryption or gRPC bridge is
 	// needed — the blobs are read directly (see clidb.go).
 	LayoutCLIDB
+	// LayoutDesktopTranscript is the desktop IDE's PLAINTEXT per-step
+	// trace, .gemini/antigravity/brain/<uuid>/.system_generated/logs/
+	// transcript.jsonl — a first-class session file since 2026-09-03
+	// (live-grounded on the operator's Windows box, Antigravity IDE
+	// signed in). It is the source of truth for a desktop conversation;
+	// the encrypted sibling conversations/<uuid>.pb defers to it (see
+	// parseSessionFile's guard). Parsed by transcript.go.
+	LayoutDesktopTranscript
+	// LayoutDesktopDB is an agy-backed conversation store in the DESKTOP
+	// tree: .gemini/antigravity/conversations/<uuid>.db, a plaintext-
+	// protobuf SQLite with the IDENTICAL schema to the CLI's .db
+	// (live-grounded 2026-09-03: written by the VS Code extension
+	// Google.google-antigravity, which bundles its own agy backend; the
+	// standalone IDE build of the same day wrote only .pb + transcript).
+	// Read by the same reader as LayoutCLIDB (clidb.go) — real tokens +
+	// model id, text + actions from the sibling brain/ transcript, and
+	// trajectory_meta.source as the surface discriminator. Takes
+	// precedence over both the transcript and the .pb for its uuid.
+	LayoutDesktopDB
 )
+
+// isAgyDBLayout reports whether a layout is one of the two plaintext
+// SQLite stores the agy backend writes (CLI tree or desktop tree).
+func isAgyDBLayout(l Layout) bool { return l == LayoutCLIDB || l == LayoutDesktopDB }
+
+// desktopTranscriptRe matches exactly the desktop IDE's per-conversation
+// transcript.jsonl on a lower-cased, forward-slashed path and captures
+// the conversation UUID. Anchored on both ends of the tail so the
+// siblings the IDE writes next to it (transcript_full.jsonl, the
+// chunks/transcript/00000000.jsonl rotation copy, steps/<n>/output.txt)
+// and the agy CLI's own brain/ tree (antigravity-cli/brain/…) never
+// match.
+var desktopTranscriptRe = regexp.MustCompile(
+	`/\.gemini/antigravity/brain/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/\.system_generated/logs/transcript\.jsonl$`)
+
+// desktopTranscriptConversationID returns the <uuid> segment of a
+// LayoutDesktopTranscript path, or "" when the path is not one.
+func desktopTranscriptConversationID(path string) string {
+	lower := strings.ReplaceAll(strings.ToLower(path), `\`, "/")
+	m := desktopTranscriptRe.FindStringSubmatch(lower)
+	if len(m) != 2 {
+		return ""
+	}
+	return m[1]
+}
 
 // classifyLayout returns the Antigravity layout for a path. CLI is
 // checked before desktop because the desktop substring
@@ -337,10 +472,31 @@ const (
 // would otherwise match CLI paths too if the order were reversed.
 func classifyLayout(path string) Layout {
 	lower := strings.ReplaceAll(strings.ToLower(path), `\`, "/")
-	// Newer CLI: plaintext-protobuf SQLite conversation store.
-	if strings.HasSuffix(lower, ".db") &&
-		strings.Contains(lower, "/.gemini/antigravity-cli/conversations/") {
-		return LayoutCLIDB
+	// Plaintext-protobuf SQLite conversation stores written by the agy
+	// backend — the CLI tree (agy itself) and the desktop tree (the VS
+	// Code extension's bundled agy). Same file shape, keyed on the tree
+	// exactly as the .pb classifier below is.
+	// The -wal / -shm sidecars are claimed too (the cline-cli precedent):
+	// a WAL-mode turn lands in the -wal without touching the main file,
+	// so the sidecar's fsnotify event is what re-fires the parse.
+	// parseSessionFile maps them back onto the main .db.
+	if strings.HasSuffix(lower, ".db") || strings.HasSuffix(lower, ".db-wal") || strings.HasSuffix(lower, ".db-shm") {
+		switch {
+		case strings.Contains(lower, "/.gemini/antigravity-cli/conversations/"):
+			return LayoutCLIDB
+		case strings.Contains(lower, "/.gemini/antigravity-acp/conversations/"):
+			// agy backend driven by the JetBrains antigravity-acp agent;
+			// identical .db schema, so it reuses the CLI-DB reader.
+			return LayoutCLIDB
+		case strings.Contains(lower, "/.gemini/antigravity/conversations/"):
+			return LayoutDesktopDB
+		}
+	}
+	// Desktop IDE plaintext per-step trace (exact tail match; the
+	// `antigravity/brain/` segment cannot collide with the CLI's
+	// `antigravity-cli/brain/`).
+	if strings.HasSuffix(lower, "/transcript.jsonl") && desktopTranscriptRe.MatchString(lower) {
+		return LayoutDesktopTranscript
 	}
 	if !strings.HasSuffix(lower, ".pb") {
 		return LayoutUnknown
@@ -491,6 +647,27 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 }
 
 func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset int64) (adapter.ParseResult, error) {
+	layout := classifyLayout(path)
+
+	// agy plaintext-protobuf SQLite conversation store (CLI tree, or the
+	// desktop tree when the VS Code extension's bundled agy wrote it),
+	// reached through the main .db OR its -wal / -shm sidecar. The
+	// cursor is a WATERMARK (max mtime of .db + .db-wal, unix ms), not a
+	// size: WAL mode absorbs whole turns without growing the main file.
+	// Parsed directly — none of the decrypt + gRPC-bridge machinery
+	// below applies (that's for the opaque/encrypted .pb path).
+	if isAgyDBLayout(layout) {
+		main := agyDBMainPath(path)
+		if _, err := os.Stat(main); err != nil {
+			return adapter.ParseResult{}, fmt.Errorf("antigravity.ParseSessionFile: stat: %w", err)
+		}
+		watermark := agyDBWatermark(main)
+		if fromOffset >= watermark {
+			return adapter.ParseResult{NewOffset: fromOffset}, nil
+		}
+		return a.parseCLIDB(ctx, main, fromOffset, watermark)
+	}
+
 	fi, err := os.Stat(path)
 	if err != nil {
 		return adapter.ParseResult{}, fmt.Errorf("antigravity.ParseSessionFile: stat: %w", err)
@@ -505,11 +682,28 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 		return res, nil
 	}
 
-	// Newer CLI conversation store: a plaintext-protobuf SQLite DB.
-	// Parsed directly — none of the decrypt + gRPC-bridge machinery
-	// below applies (that's for the opaque/encrypted .pb path).
-	if classifyLayout(path) == LayoutCLIDB {
-		return a.parseCLIDB(ctx, path, fi.Size())
+	// Per-conversation ownership guard (.db > transcript.jsonl > .pb, in
+	// both trees — see conversationOwner). A file that is out-ranked by
+	// a sibling this adapter already ingests emits nothing: every
+	// user_prompt / assistant_message / tool row it could produce — via
+	// decrypt, the gRPC bridge, or the transcript augmentation — is
+	// already emitted from the owner under a different source_file, and
+	// the UNIQUE(source_file, source_event_id) index cannot suppress a
+	// cross-file duplicate. Advance the cursor and stop; say so once.
+	if owner := a.conversationOwner(path); owner != "" {
+		res.NewOffset = fi.Size()
+		if fromOffset == 0 {
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"antigravity: %s is out-ranked by its sibling %s; the sibling owns this conversation, file skipped",
+				filepath.Base(path), filepath.Base(owner)))
+		}
+		return res, nil
+	}
+
+	// Desktop IDE plaintext per-step trace: parsed directly, no
+	// decrypt, no bridge (transcript.go).
+	if layout == LayoutDesktopTranscript {
+		return a.parseDesktopTranscript(ctx, path, fi, fromOffset)
 	}
 
 	// Unrecoverable-file short-circuit. If this path's last full
@@ -574,7 +768,8 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				// skips the merge).
 				conversationID := uuidFromFilename(path)
 				projectRoot := projectRootFromResult(&recRes, conversationID)
-				a.augmentResultFromHistory(path, conversationID, projectRoot, &recRes)
+				gitRemote := gitRemoteFromResult(&recRes, conversationID)
+				a.augmentResultFromHistory(path, conversationID, projectRoot, gitRemote, &recRes)
 				return recRes, nil
 			} else {
 				// Recovery failed too. Before falling back to the
@@ -651,7 +846,8 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	// logic at every event-producing exit so future flow refactors
 	// don't silently lose it.
 	projectRoot := projectRootFromResult(&res, conversationID)
-	a.augmentResultFromHistory(path, conversationID, projectRoot, &res)
+	gitRemote := gitRemoteFromResult(&res, conversationID)
+	a.augmentResultFromHistory(path, conversationID, projectRoot, gitRemote, &res)
 	return res, nil
 }
 
@@ -668,9 +864,9 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.FileInfo) (adapter.ParseResult, string, error) {
 	conversationID := uuidFromFilename(path)
 	idxEntry := a.lookupIndexEntry(path, conversationID)
-	projectRoot := "[antigravity]"
+	projectRoot, gitRemote, projectIdentity := "[antigravity]", "", git.Identity{}
 	if idxEntry != nil && idxEntry.workspaceURI != "" {
-		projectRoot = decodeFileURIToRoot(idxEntry.workspaceURI)
+		projectRoot, gitRemote, projectIdentity = decodeFileURIToRoot(idxEntry.workspaceURI)
 	}
 	ts := time.Now().UTC()
 	if idxEntry != nil && !idxEntry.created.IsZero() {
@@ -726,7 +922,7 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 				}
 				tracef("linux-native pid=%d %s OK (%d bytes, ws=%q match=%v)",
 					ls.PID, useEndpoint, len(md), ls.WorkspaceID, wsMatch)
-				enrichment := a.fetchStructuredEnrichmentNativeAt(ctx, ls, useEndpoint, conversationID, projectRoot, path)
+				enrichment := a.fetchStructuredEnrichmentNativeAt(ctx, ls, useEndpoint, conversationID, projectRoot, gitRemote, path)
 				if !enrichment.StartedAt.IsZero() {
 					ts = enrichment.StartedAt
 				}
@@ -744,7 +940,8 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 					tracef("linux-native pid=%d returned wrong-workspace stub (no structured payload); trying next server", ls.PID)
 					continue
 				}
-				res := parseMarkdownConversation(path, conversationID, projectRoot, ts, a.scrubber, md, skipInline, skipUserInputs, skipPlanner)
+				res := parseMarkdownConversation(path, conversationID, projectRoot, gitRemote, ts, a.scrubber, md, skipInline, skipUserInputs, skipPlanner)
+				adapter.ApplyProjectIdentity(&res, projectIdentity)
 				applyStructuredEnrichment(&res, enrichment)
 				// Project-root recovery: when idxEntry was nil
 				// (live in-progress conversation not yet in
@@ -798,7 +995,7 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 		// fetch via the same bridge, ~250ms. On failure we keep the
 		// markdown result unchanged — observer still records actions,
 		// just without model attribution or token rows.
-		enrichment := a.fetchStructuredEnrichmentWSL(ctx, conversationID, projectRoot, path)
+		enrichment := a.fetchStructuredEnrichmentWSL(ctx, conversationID, projectRoot, gitRemote, path)
 		if !enrichment.StartedAt.IsZero() {
 			tracef("structured ts override: %s -> %s", ts.Format(time.RFC3339), enrichment.StartedAt.Format(time.RFC3339))
 			ts = enrichment.StartedAt
@@ -818,7 +1015,8 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 		skipInline := len(enrichment.ToolEvents) > 0
 		skipUserInputs := hasStructuredUserPrompts(enrichment.ToolEvents)
 		skipPlanner := structuredAssistantTextCoverage(enrichment) >= AssistantTextCoverageThreshold
-		res := parseMarkdownConversation(path, conversationID, projectRoot, ts, a.scrubber, md, skipInline, skipUserInputs, skipPlanner)
+		res := parseMarkdownConversation(path, conversationID, projectRoot, gitRemote, ts, a.scrubber, md, skipInline, skipUserInputs, skipPlanner)
+		adapter.ApplyProjectIdentity(&res, projectIdentity)
 		applyStructuredEnrichment(&res, enrichment)
 		return res, "", nil
 	}
@@ -827,7 +1025,7 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 	// local language_servers and call them directly via Go's HTTP/2
 	// client. The discovered endpoints are on the same loopback as
 	// this process.
-	servers, discoveryErr := a.discoverLanguageServersCached()
+	servers, discoveryErr := a.discoverLanguageServersCached(ctx)
 	if discoveryErr != nil {
 		tracef("discovery_err=%v", discoveryErr)
 		return adapter.ParseResult{}, "", fmt.Errorf("language-server discovery failed: %w", discoveryErr)
@@ -851,7 +1049,7 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 			continue
 		}
 		tracef("grpc pid=%d %s OK (%d bytes, ws=%q match=%v)", ls.PID, useEndpoint, len(md), ls.WorkspaceID, wsMatch)
-		enrichment := a.fetchStructuredEnrichmentNativeAt(ctx, ls, useEndpoint, conversationID, projectRoot, path)
+		enrichment := a.fetchStructuredEnrichmentNativeAt(ctx, ls, useEndpoint, conversationID, projectRoot, gitRemote, path)
 		if !enrichment.StartedAt.IsZero() {
 			ts = enrichment.StartedAt
 		}
@@ -864,7 +1062,8 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 		skipInline := len(enrichment.ToolEvents) > 0
 		skipUserInputs := hasStructuredUserPrompts(enrichment.ToolEvents)
 		skipPlanner := structuredAssistantTextCoverage(enrichment) >= AssistantTextCoverageThreshold
-		res := parseMarkdownConversation(path, conversationID, projectRoot, ts, a.scrubber, md, skipInline, skipUserInputs, skipPlanner)
+		res := parseMarkdownConversation(path, conversationID, projectRoot, gitRemote, ts, a.scrubber, md, skipInline, skipUserInputs, skipPlanner)
+		adapter.ApplyProjectIdentity(&res, projectIdentity)
 		applyStructuredEnrichment(&res, enrichment)
 		if projectRoot == "[antigravity]" && ls.WorkspaceID != "" {
 			if resolved := a.resolveWorkspaceIDToPathCached(ls.WorkspaceID); resolved != "" {
@@ -1276,17 +1475,17 @@ func applyResolvedProjectRoot(res *adapter.ParseResult, resolved string) {
 // failure (originating agy.exe terminated, no live instance has
 // this conv) we fall back to the snapshot when one exists so token
 // rows that were ever captured stay visible across the gap.
-func (a *Adapter) fetchStructuredEnrichmentWSL(ctx context.Context, conversationID, projectRoot, path string) StructuredEnrichment {
+func (a *Adapter) fetchStructuredEnrichmentWSL(ctx context.Context, conversationID, projectRoot, gitRemote, path string) StructuredEnrichment {
 	raw, err := a.callBridgeStructuredCached(ctx, conversationID, path, 30*time.Second)
 	if err != nil {
 		tracef("structured bridge err: %v", err)
-		if cached, ok := a.loadSnapshotEnrichment(conversationID, projectRoot, path); ok {
+		if cached, ok := a.loadSnapshotEnrichment(conversationID, projectRoot, gitRemote, path); ok {
 			return cached
 		}
 		return StructuredEnrichment{}
 	}
 	tracef("structured bridge OK (%d bytes)", len(raw))
-	return a.reconcileWithSnapshot(conversationID, projectRoot, path, raw)
+	return a.reconcileWithSnapshot(conversationID, projectRoot, gitRemote, path, raw)
 }
 
 // fetchStructuredEnrichmentNativeAt is the endpoint-explicit variant
@@ -1295,7 +1494,7 @@ func (a *Adapter) fetchStructuredEnrichmentWSL(ctx context.Context, conversation
 // structured-trajectory call lands on the same endpoint that just
 // succeeded for ConvertTrajectoryToMarkdown — avoids re-iterating
 // failing protocols.
-func (a *Adapter) fetchStructuredEnrichmentNativeAt(ctx context.Context, ls LanguageServer, endpoint, conversationID, projectRoot, path string) StructuredEnrichment {
+func (a *Adapter) fetchStructuredEnrichmentNativeAt(ctx context.Context, ls LanguageServer, endpoint, conversationID, projectRoot, gitRemote, path string) StructuredEnrichment {
 	if endpoint == "" {
 		return StructuredEnrichment{}
 	}
@@ -1307,12 +1506,12 @@ func (a *Adapter) fetchStructuredEnrichmentNativeAt(ctx context.Context, ls Lang
 		// — typically because the originating language_server has
 		// terminated — surface the last successfully captured
 		// trajectory so token rows persist across the gap.
-		if cached, ok := a.loadSnapshotEnrichment(conversationID, projectRoot, path); ok {
+		if cached, ok := a.loadSnapshotEnrichment(conversationID, projectRoot, gitRemote, path); ok {
 			return cached
 		}
 		return StructuredEnrichment{}
 	}
-	en := a.reconcileWithSnapshot(conversationID, projectRoot, path, raw)
+	en := a.reconcileWithSnapshot(conversationID, projectRoot, gitRemote, path, raw)
 	tracef("structured grpc pid=%d %s OK (%d bytes, %d tools, %d tokens, model=%q)",
 		ls.PID, endpoint, len(raw), len(en.ToolEvents), len(en.TokenEvents), en.Model)
 	// Wire-shape mismatch warning (Issue #5). When the gRPC response
@@ -1327,7 +1526,7 @@ func (a *Adapter) fetchStructuredEnrichmentNativeAt(ctx context.Context, ls Lang
 	// sessions; an operator can grep for "structured_shape_mismatch"
 	// to find candidates for proto-path investigation.
 	if len(raw) >= 10*1024 && len(en.TokenEvents) == 0 && en.Model == "" {
-		tracef("structured_shape_mismatch pid=%d %s conversation=%s payload=%d_bytes — proto path mapping may need updating",
+		tracef("structured_shape_mismatch pid=%d %s conversation=%s payload=%d_bytes - proto path mapping may need updating",
 			ls.PID, endpoint, conversationID, len(raw))
 		// Optional debug dump (Issue #5 follow-up). Operator sets
 		// [observer.antigravity] dump_shape_mismatches_dir in
@@ -1452,14 +1651,14 @@ func tracef(format string, args ...any) {
 // running language_server processes at most once every 30s. The
 // underlying discovery shells out (PowerShell on WSL2; ps/lsof on
 // macOS) and is too expensive to run per file.
-func (a *Adapter) discoverLanguageServersCached() ([]LanguageServer, error) {
+func (a *Adapter) discoverLanguageServersCached(ctx context.Context) ([]LanguageServer, error) {
 	a.lsMu.Lock()
 	defer a.lsMu.Unlock()
 	now := time.Now().UnixNano()
 	if now < a.lsCacheValidUntil {
 		return a.lsCache, nil
 	}
-	servers, err := discoverLanguageServers()
+	servers, err := discoverLanguageServers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1522,32 +1721,49 @@ func contentHash(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// defaultRoots returns the conversations/ directory for every
+// defaultRoots returns the session-file directories for every
 // Antigravity layout (desktop + CLI) under every cross-mount-resolved
 // $HOME. Observer in WSL2 picks up Antigravity data on
 // /mnt/c/Users/<u>/.gemini (and vice versa); the CLI shape uses the
-// `antigravity-cli` subdir.
+// `antigravity-cli` subdir. The desktop layout has TWO roots: the
+// encrypted conversations/ store and the plaintext brain/ tree that
+// holds the per-conversation transcript.jsonl (LayoutDesktopTranscript).
 func defaultRoots() []string {
 	var roots []string
 	for _, h := range crossmount.AllHomes() {
 		roots = append(
 			roots,
 			filepath.Join(h.Path, ".gemini", "antigravity", "conversations"),
+			filepath.Join(h.Path, ".gemini", "antigravity", "brain"),
 			filepath.Join(h.Path, ".gemini", "antigravity-cli", "conversations"),
+			filepath.Join(h.Path, ".gemini", "antigravity-acp", "conversations"),
 		)
 	}
 	return roots
 }
 
-// defaultRootsForLayout returns the conversations/ directory for a specific
-// Antigravity layout ("desktop" or "cli") under every cross-mount-resolved $HOME.
+// defaultRootsForLayout returns the session-file directories for a
+// specific Antigravity layout ("desktop" or "cli") under every
+// cross-mount-resolved $HOME. "desktop" yields conversations/ AND
+// brain/ (see defaultRoots).
 func defaultRootsForLayout(layout string) []string {
 	var roots []string
 	for _, h := range crossmount.AllHomes() {
 		if layout == "desktop" {
-			roots = append(roots, filepath.Join(h.Path, ".gemini", "antigravity", "conversations"))
+			roots = append(roots,
+				filepath.Join(h.Path, ".gemini", "antigravity", "conversations"),
+				filepath.Join(h.Path, ".gemini", "antigravity", "brain"),
+			)
 		} else {
-			roots = append(roots, filepath.Join(h.Path, ".gemini", "antigravity-cli", "conversations"))
+			roots = append(roots,
+				filepath.Join(h.Path, ".gemini", "antigravity-cli", "conversations"),
+				// The JetBrains AI Assistant "antigravity-acp" agent drives
+				// the agy backend but writes a THIRD tree with the same
+				// plaintext-protobuf .db schema (grounded 2026-09-04:
+				// trajectory_meta.cascade_id == the conversation uuid ==
+				// the ACP pointer sid; source=0). Classified LayoutCLIDB.
+				filepath.Join(h.Path, ".gemini", "antigravity-acp", "conversations"),
+			)
 		}
 	}
 	return roots

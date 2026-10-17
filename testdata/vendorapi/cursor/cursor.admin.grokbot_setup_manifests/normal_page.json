@@ -1,0 +1,16 @@
+{
+  "manifest": {
+    "id": "toolchain",
+    "scripts": [
+      {
+        "id": "node",
+        "setup": "mise install node@22",
+        "check": "node --version"
+      },
+      {
+        "id": "pnpm",
+        "setup": "npm i -g pnpm"
+      }
+    ]
+  }
+}

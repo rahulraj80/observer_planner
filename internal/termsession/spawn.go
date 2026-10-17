@@ -26,12 +26,40 @@ const (
 	// local-writer-only. SetupArgv holds the full argv (argv[0] resolves via
 	// PATH).
 	SpecSetup
+	// SpecShell is a fresh PLAIN SHELL session — no AI agent, no OOB control
+	// channel semantics beyond what a normal fresh launch already carries.
+	// Unlike SpecSetup it is NOT local-writer-only and is NOT single-flighted
+	// — it behaves like SpecAgent for writer-lease/remote-view purposes (each
+	// "New terminal → Shell" click spawns a genuinely new PTY). ShellArgv
+	// holds the full argv (argv[0] resolves via PATH), server-derived from
+	// the child's $SHELL with a /bin/bash / /bin/sh fallback — never
+	// client-supplied.
+	SpecShell
+	// SpecSSH is an outbound SSH remote-system session
+	// (docs/plans/ssh-remote-profiles-plan-2026-08-27.md). SSHArgv holds the
+	// full, server-derived OpenSSH client argv composed by internal/sshprofile
+	// from an OPERATOR-AUTHORED config profile — the client supplies only a
+	// profile NAME and can never influence host/user/key/port/jump.
+	//
+	// It mirrors SpecShell's shape (fixed argv in its own field, not
+	// local-writer-only, not single-flighted) with ONE deliberate difference:
+	// it IGNORES WrapArgv. A bwrap sandbox blinds $HOME — no known_hosts, no
+	// key file, no SSH_AUTH_SOCK — so wrapping an SSH launch produces a
+	// confusing failure rather than isolation. See Spec.argv().
+	SpecSSH
 )
 
 // Spec is the fully server-derived launch specification. The Manager builds
 // the launch argv from these fields alone — a caller NEVER passes raw argv,
 // paths, or environment overrides sourced from the client. Every field is
 // validated at Create.
+//
+// ARGV CONTRACT: whatever shape argv() produces, argv[0] is the PROGRAM and is
+// resolved via PATH by the spawner (resolveSpawnArgv → exec.LookPath) before
+// exec. That is true on both platforms: on Windows the lookup is %PATHEXT%-aware
+// — needed because CreateProcess itself only ever appends ".exe" — and a
+// program that resolves solely in the daemon's own working directory is
+// refused, never launched.
 type Spec struct {
 	// Kind classifies the session (SpecAgent default / SpecSetup). It drives
 	// argv() and the local-writer-only pin — server-derived, never from a
@@ -51,6 +79,17 @@ type Spec struct {
 	// ignored for SpecAgent; an empty label disables single-flight for that
 	// setup session.
 	SetupLabel string
+	// ShellArgv is the complete, server-derived argv for a SpecShell session
+	// (the resolved $SHELL / /bin/bash / /bin/sh, with no arguments). Non-empty
+	// ONLY for SpecShell and NEVER client-supplied; ignored for every other
+	// Kind.
+	ShellArgv []string
+	// SSHArgv is the complete, server-derived argv for a SpecSSH session (the
+	// OpenSSH client invocation internal/sshprofile composed from a validated
+	// config profile). Non-empty ONLY for SpecSSH and NEVER client-supplied;
+	// ignored for every other Kind. argv[0] is "ssh", resolved via PATH like
+	// every other termsession spawn.
+	SSHArgv []string
 	// BinPath is the observer binary to exec, from os.Executable(),
 	// injected by cmd. Never client-supplied.
 	BinPath string
@@ -98,6 +137,12 @@ type Spec struct {
 	// out-of-band control channel's inherited FD (plan §2.1b / F1). nil for
 	// a launch with no OOB channel. termsession only plumbs them onto the
 	// spawn; it never reads or writes them (that is cmd/termsvc's job).
+	//
+	// UNIX ONLY (honest-zero gap): the Windows ConPTY backend does not inherit
+	// them — it starts the child with bInheritHandles=false — so on a
+	// native-Windows daemon the child sees OBSERVER_OOB_FD=3 with no handle
+	// behind it and OOB correlation never fires. See spawn_windows.go for what
+	// implementing it would take.
 	ExtraFiles []*os.File
 	// ExtraArgs are additional, server-derived argv tokens appended to the
 	// launch argv AFTER the subcommand (and after any handoff flags). Zero
@@ -111,6 +156,10 @@ type Spec struct {
 	// allow-listed, explicit set (flags observer understands + the `--`
 	// remainder), never a blind argv copy.
 	ExtraArgs []string
+	// WrapArgv is an optional isolation-wrapper argv prefix (e.g. bwrap
+	// flags ending in --); when non-empty argv() prepends it before
+	// [BinPath, Subcommand]. Empty = no wrapper (unchanged behaviour).
+	WrapArgv []string
 }
 
 // ArgvMode selects the launch argv SHAPE for a SpecAgent session. It is an
@@ -137,7 +186,11 @@ const (
 // argv builds the exec argv from the validated Spec. Server-derived only.
 // ArgvModeFresh is [bin, subcommand] + ExtraArgs; ArgvModeHandoff is
 // [bin, subcommand, "--continue-from", id] plus "--carry <c>" and
-// "--from-message <n>" when set, then ExtraArgs.
+// "--from-message <n>" when set, then ExtraArgs. When WrapArgv is non-empty
+// it is prepended before EVERYTHING — including BinPath — for SpecAgent and
+// SpecShell (a B9 sandbox wrap works for a plain shell for free). SpecSetup
+// is exempt: it runs a fixed, server-derived command verbatim and is never
+// wrapped.
 func (s Spec) argv() []string {
 	if s.Kind == SpecSetup {
 		// A SpecSetup session runs a fixed, server-derived command verbatim
@@ -145,11 +198,27 @@ func (s Spec) argv() []string {
 		// mutated through the returned value.
 		return append([]string(nil), s.SetupArgv...)
 	}
+	if s.Kind == SpecShell {
+		// Same copy-on-return discipline as SpecSetup above, with the wrap
+		// prefix prepended when present.
+		return append(append([]string(nil), s.WrapArgv...), s.ShellArgv...)
+	}
+	if s.Kind == SpecSSH {
+		// Copy-on-return like the two above, but WITHOUT the WrapArgv prefix:
+		// an isolation wrapper would blind the very things ssh needs (the
+		// operator's known_hosts, key file, and agent socket), so a sandboxed
+		// SSH launch is not a narrower launch — it is a broken one. See
+		// SpecSSH's doc comment.
+		return append([]string(nil), s.SSHArgv...)
+	}
 	switch s.ArgvMode {
 	case ArgvModeFresh:
-		return append([]string{s.BinPath, s.Subcommand}, s.ExtraArgs...)
+		a := append([]string(nil), s.WrapArgv...)
+		a = append(a, s.BinPath, s.Subcommand)
+		return append(a, s.ExtraArgs...)
 	default: // ArgvModeHandoff (zero value)
-		a := []string{s.BinPath, s.Subcommand, "--continue-from", s.SessionID}
+		a := append([]string(nil), s.WrapArgv...)
+		a = append(a, s.BinPath, s.Subcommand, "--continue-from", s.SessionID)
 		if s.Carry != "" {
 			a = append(a, "--carry", s.Carry)
 		}
@@ -209,10 +278,13 @@ func ptyPID(p PTY) int {
 	return 0
 }
 
-// ErrPlatformUnsupported is returned by the OS spawner on a platform where
-// an in-process PTY cannot be created (a native-Windows observer daemon).
-// The dashboard surfaces it as an honest terminal message, not a hang.
-var ErrPlatformUnsupported = errors.New("termsession: embedded terminal is not supported on this OS — run the observer daemon under WSL/Linux")
+// ErrPlatformUnsupported is returned by the OS spawner on a platform where an
+// in-process PTY cannot be created. Since 2026-07-04 a native-Windows daemon
+// IS supported (ConPTY), so the only remaining causes are a Windows host older
+// than 10 version 1809 (no CreatePseudoConsole in kernel32) and a platform with
+// no PTY backend at all. The dashboard surfaces it as an honest terminal
+// message, not a hang.
+var ErrPlatformUnsupported = errors.New("termsession: embedded terminal is not supported on this OS (Windows before 10 version 1809 has no ConPTY; other platforms need a PTY backend)")
 
 // NewOSSpawner returns the platform's real PTY spawner (creack/pty on
 // unix). Injected by cmd into NewManager; tests bypass it with a fake.

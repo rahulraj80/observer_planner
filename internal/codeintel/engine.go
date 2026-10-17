@@ -5,12 +5,12 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/archive"
 )
 
 // engine is the NATIVE [Provider] implementation: it answers from
-// codeintel's own store (codeintel_files / codeintel_nodes / …) instead
-// of the external codegraph DB. It is the strangler-fig target — the
-// codegraph wrapper is validated against it and then deleted.
+// codeintel's own store (codeintel_files / codeintel_nodes / …).
 //
 // Phase 1 surfaces symbols, spans, find, and staleness from
 // files+nodes. Edge-traversal methods (callers/callees/reachable),
@@ -23,6 +23,11 @@ type engine struct {
 	// skip the COUNT query. It only ever goes false→true during a
 	// daemon's life (the index grows), so caching the positive is safe.
 	availCached atomic.Bool
+	// disabled marks the provider built for an install whose
+	// [codeintel].enabled is false. It answers exactly like Unavailable();
+	// the flag only lets a surface say WHY ("off by choice") instead of
+	// the generic "index missing". See Disabled and IsDisabled.
+	disabled bool
 }
 
 // NewEngine builds the native provider over a store read surface.
@@ -38,7 +43,20 @@ func Unavailable() Provider {
 	return &engine{}
 }
 
-// engineStaleSlack mirrors the codegraph wrapper's tolerance: file-
+// Disabled returns the [Provider] for an install that has code
+// intelligence turned OFF ([codeintel].enabled = false, the default since
+// D-307). It behaves exactly like [Unavailable] (empty answers, fail open,
+// no store reads) and additionally reports IsDisabled(p) == true, so the
+// MCP tools and other surfaces can tell "the user has not turned this on"
+// apart from "the index is not built yet".
+func Disabled() Provider {
+	return &engine{disabled: true}
+}
+
+// CodeIntelDisabled is the optional-interface hook behind [IsDisabled].
+func (e *engine) CodeIntelDisabled() bool { return e != nil && e.disabled }
+
+// engineStaleSlack is the staleness tolerance: file-
 // system mtime jitter + index latency shouldn't flap Stale().
 const engineStaleSlack = 5 * time.Second
 
@@ -195,4 +213,16 @@ func (e *engine) LoadGraph(ctx context.Context, project string) (Graph, error) {
 
 // Close is a no-op: the native engine borrows the store's DB handle and
 // does not own it.
+// ArchivedProject passes the marker lookup through to the store. Nil-store
+// (the [Unavailable] provider) reports "not archived": a provider with no
+// index cannot honestly claim a project was archived, and guessing would put
+// a false "archived, last indexed <date>" in front of an operator whose
+// project was simply never indexed.
+func (e *engine) ArchivedProject(ctx context.Context, project string) (archive.Marker, bool, error) {
+	if e == nil || e.store == nil || project == "" {
+		return archive.Marker{}, false, nil
+	}
+	return e.store.CodeIntelArchivedProject(ctx, project)
+}
+
 func (e *engine) Close() error { return nil }

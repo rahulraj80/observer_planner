@@ -84,6 +84,10 @@ func (m *recordingLaunchManager) CreateResume(ResumeLaunchSpec) (string, string,
 	return "H", "R", nil
 }
 func (m *recordingLaunchManager) CreateSetup(SetupSpec) (string, error) { return "H", nil }
+func (m *recordingLaunchManager) CreateGUI(GUILaunchSpec) (GUILaunchResult, error) {
+	return GUILaunchResult{}, ErrLaunchGUIUnsupported
+}
+func (m *recordingLaunchManager) GUIRuns() []GUIRunInfo { return nil }
 func (m *recordingLaunchManager) Subscribe(string) (LaunchSubscription, error) {
 	m.subscribeLocalCalls.Add(1)
 	return m.sub, nil
@@ -238,7 +242,7 @@ func TestViewerFrameNeverReachesPTYWithoutLease(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	if n := lm.localCalls.Load(); n != 0 {
-		t.Errorf("AcquireWriterLocal called %d times on a REMOTE-exposed request — a remote principal must never take the owner-local writer", n)
+		t.Errorf("AcquireWriterLocal called %d times on a REMOTE-exposed request - a remote principal must never take the owner-local writer", n)
 	}
 	if lm.remoteCalls.Load() == 0 {
 		t.Error("expected the rejected acquire-writer frame to attempt AcquireWriterRemote (defence-in-depth)")
@@ -329,7 +333,7 @@ func TestRemotePrincipalCannotReadOrSeeSetupSession(t *testing.T) {
 		// Handshake accepted; the server then closes with a policy violation
 		// BEFORE streaming any bytes, so a read must fail.
 		if _, _, rerr := c.Read(ctx); rerr == nil {
-			t.Error("remote WS to a setup session streamed data — it must be refused before any output")
+			t.Error("remote WS to a setup session streamed data - it must be refused before any output")
 		}
 		_ = c.CloseNow()
 	}
@@ -390,7 +394,7 @@ func TestRemotePrincipalCannotReadAttachSession(t *testing.T) {
 	})
 	if err == nil {
 		if _, _, rerr := c.Read(ctx); rerr == nil {
-			t.Error("remote WS to an attach session streamed data — it must be refused before any output")
+			t.Error("remote WS to an attach session streamed data - it must be refused before any output")
 		}
 		_ = c.CloseNow()
 	}
@@ -452,7 +456,7 @@ func TestRemotePrincipalCannotReadResumeSession(t *testing.T) {
 	})
 	if err == nil {
 		if _, _, rerr := c.Read(ctx); rerr == nil {
-			t.Error("remote WS to a resume session streamed data — it must be refused before any output")
+			t.Error("remote WS to a resume session streamed data - it must be refused before any output")
 		}
 		_ = c.CloseNow()
 	}

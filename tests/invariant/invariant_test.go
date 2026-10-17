@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -37,7 +39,7 @@ var endpoints = []struct {
 func TestSingleUserDashboardInvariant(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "inv.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -173,6 +175,15 @@ func normalize(v any) any {
 			// rather than dropped.
 			if k == "host_os" {
 				x[k] = "<GOOS>"
+				continue
+			}
+			// host_name is os.Hostname (added to /api/status by T-425 so
+			// a remote node dashboard can always name the machine it
+			// shows; D-337). Machine-specific like host_os, so it is
+			// TOKENISED for the same reason: the value differs per host
+			// but the field's presence pins the T-425 contract.
+			if k == "host_name" {
+				x[k] = "<HOSTNAME>"
 				continue
 			}
 			x[k] = normalize(val)

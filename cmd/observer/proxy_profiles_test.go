@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
