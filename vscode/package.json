@@ -1,7 +1,7 @@
 {
   "name": "superbased-observer",
   "displayName": "SuperBased",
-  "description": "Local-first AI coding agent observability in your editor: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account, no telemetry.",
+  "description": "Local-first AI coding agent observability in your editor: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account; your prompts and code stay local.",
   "version": "1.36.0",
   "publisher": "superbased",
   "license": "Apache-2.0",
@@ -51,8 +51,7 @@
     "llm-observability",
     "spend",
     "observability",
-    "local-first",
-    "no-telemetry"
+    "local-first"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -185,7 +184,7 @@
           {
             "id": "welcome",
             "title": "Welcome to SuperBased",
-            "description": "SuperBased captures, normalises, and analyses every AI coding tool's activity, locally, with no telemetry.\n[Open Sidebar](command:workbench.view.extension.observer)",
+            "description": "SuperBased captures, normalises, and analyses every AI coding tool's activity, locally.\n[Open Sidebar](command:workbench.view.extension.observer)",
             "media": {
               "markdown": "walkthroughs/01-welcome.md"
             },

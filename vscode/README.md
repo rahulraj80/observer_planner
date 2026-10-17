@@ -17,7 +17,7 @@
 <p align="center">
   <strong>Track what every AI coding agent costs, inside your editor. See the limit coming.</strong><br>
   See what Claude Code, Codex, Cursor and 37 more AI coding tools cost, per session and per model,
-  from the tokens your provider actually billed. No account, no telemetry.
+  from the tokens your provider actually billed. No account; your prompts and code stay local.
 </p>
 
 <p align="center">
@@ -107,7 +107,7 @@ Click any session to open its detail view. Four of its tabs:
 
 ## Privacy
 
-No telemetry and no account. After the binary is in place, the extension talks only to
+No account. After the binary is in place, the extension talks only to
 `127.0.0.1` on your workspace host; it contacts GitHub Releases only if it finds neither a bundled
 nor a local binary. Remote-SSH, WSL, Dev Containers and Codespaces keep the data on the remote host.
 

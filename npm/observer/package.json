@@ -1,7 +1,7 @@
 {
   "name": "@superbased/observer",
   "version": "1.36.0",
-  "description": "Local-first AI coding agent observability: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account, no telemetry.",
+  "description": "Local-first AI coding agent observability: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account; your prompts and code stay local.",
   "keywords": [
     "ai",
     "observability",
@@ -22,8 +22,7 @@
     "cost-tracking",
     "prompt-caching",
     "spend",
-    "local-first",
-    "no-telemetry"
+    "local-first"
   ],
   "homepage": "https://superbased.app/",
   "repository": {

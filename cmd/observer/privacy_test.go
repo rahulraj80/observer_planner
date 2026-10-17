@@ -277,6 +277,7 @@ func TestBuildPrivacyEgressDefault(t *testing.T) {
 		"email / digest alerts":                false,
 		"remote-access notify":                 false,
 		"TLS pre-warm":                         true,
+		"pricing feed":                         true,
 		"guard cloud webhooks":                 false,
 		"guard cloud LLM judge":                false,
 		"guard cloud reputation lookup":        false,
@@ -608,6 +609,7 @@ func TestBuildPrivacyEgressGatedRowsFlipActive(t *testing.T) {
 	alwaysOn := map[string]bool{
 		"proxy forwarding": true,
 		"TLS pre-warm":     true,
+		"pricing feed":     true,
 	}
 
 	for _, tt := range tests {
@@ -643,8 +645,8 @@ func TestBuildPrivacyReportSchemaAndDocsURL(t *testing.T) {
 	if len(report.Sockets) == 0 {
 		t.Errorf("Sockets is empty")
 	}
-	if len(report.Egress) != 15 {
-		t.Errorf("Egress len = %d, want 15", len(report.Egress))
+	if len(report.Egress) != 16 {
+		t.Errorf("Egress len = %d, want 16", len(report.Egress))
 	}
 }
 
@@ -715,8 +717,8 @@ func TestPrivacyCmdTextOutput(t *testing.T) {
 		"guard cloud LLM judge",
 		"guard cloud reputation lookup",
 		"rolling conversation summarization",
-		"the one automatic call is",
-		"TLS pre-warm HEAD request",
+		"pricing feed",
+		"Automatic calls: the TLS pre-warm and the pricing feed above",
 		privacyDocsURL,
 	} {
 		if !strings.Contains(text, want) {
@@ -733,8 +735,13 @@ func TestPrivacyCmdTextOutput(t *testing.T) {
 // the qualification.
 func TestPrivacyCmdLongTextQualifiesPhoneHomeClaim(t *testing.T) {
 	cmd := newPrivacyCmd()
-	if !strings.Contains(cmd.Long, "one narrow exception") {
-		t.Errorf("Long help does not name the TLS pre-warm exception: %q", cmd.Long)
+	// Both on-by-default outbound calls are named; no absolute "no
+	// telemetry" claim (2026-10-17 copy change).
+	if !strings.Contains(cmd.Long, "[pricing.feed]") {
+		t.Errorf("Long help does not name the pricing feed: %q", cmd.Long)
+	}
+	if strings.Contains(strings.ToLower(cmd.Long), "no telemetry") {
+		t.Errorf("Long help still makes the absolute no-telemetry claim: %q", cmd.Long)
 	}
 	if !strings.Contains(cmd.Long, "TLS pre-warm") {
 		t.Errorf("Long help does not mention TLS pre-warm: %q", cmd.Long)
@@ -758,6 +765,17 @@ func TestPrivacyCmdLoadConfigError(t *testing.T) {
 
 	if err := cmd.Execute(); err == nil {
 		t.Fatalf("Execute: expected an error, got nil")
+	}
+}
+
+// TestPrivacyReportListsPricingFeedByDefault pins the second automatic
+// outbound call: the public model price table refresh is on by default and
+// must be listed (and active) in the report.
+func TestPrivacyReportListsPricingFeedByDefault(t *testing.T) {
+	report := buildPrivacyReport(config.Default())
+	row := findEgressRow(t, report.Egress, "pricing feed")
+	if !row.Active {
+		t.Errorf("pricing feed row inactive under the default config: %+v", row)
 	}
 }
 

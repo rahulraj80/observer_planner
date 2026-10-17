@@ -378,12 +378,21 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// F1: internal/proxy.Prewarm fires HEAD requests against
 			// [proxy].prewarm_targets at proxy startup (default non-empty:
 			// chatgpt.com + api.openai.com — see internal/config's
-			// Default()). This is the one automatic, on-by-default
-			// outbound call in the binary; see the qualified closing line.
+			// Default()). One of the two automatic, on-by-default outbound
+			// calls (with the pricing feed); see the closing line.
 			Name:   "TLS pre-warm",
 			Gate:   "[proxy].prewarm_targets is non-empty (default: chatgpt.com + api.openai.com) - fires automatically at proxy startup, no operator action needed",
 			Active: len(cfg.Proxy.PrewarmTargets) > 0,
 			Detail: fmt.Sprintf("HEAD requests fired at proxy startup against: %s - to warm the TLS connection so the first real request through the proxy doesn't pay the handshake. No session data, no request body, no headers beyond the bare HEAD; not driven by anything you typed or ran.", prewarmTargetsList(cfg.Proxy.PrewarmTargets)),
+		},
+		{
+			// The public model price table (internal/pricingfeed/client): a
+			// plain GET with Accept + If-None-Match only, on by default
+			// (config Default(): [pricing.feed] enabled + auto, 24 h).
+			Name:   "pricing feed",
+			Gate:   "[pricing.feed].enabled = true AND [pricing.feed].auto = true (default: on, every [pricing.feed].poll_interval_hours, 24 h)",
+			Active: cfg.Pricing.Feed.Enabled && cfg.Pricing.Feed.Auto,
+			Detail: fmt.Sprintf("GET of the public, signed model price table at %s, so cost estimates use current prices. Sends no identifier, session or usage data: only Accept and an If-None-Match cache tag. Opt out with [pricing.feed].enabled = false.", cfg.Pricing.Feed.URL),
 		},
 		{
 			// F2: internal/guard/notify/egress.go is the single egress
@@ -461,11 +470,12 @@ This command makes no network calls itself and reads no external state
 beyond your config file - it's a report on what the binary CAN do given
 its current configuration, not a live traffic capture.
 
-There is no telemetry, no analytics, and no automatic phone-home in this
-binary, with one narrow exception: an on-by-default TLS pre-warm HEAD
-request the proxy fires at startup against [proxy].prewarm_targets (no
-session data carried - see the "TLS pre-warm" row below). Every other
-outbound row below is either forwarding a request your own AI tool already
+Your prompts, code and AI responses stay on this machine unless you turn
+on a feature that sends them. Two outbound calls are on by default and
+carry no session data: the TLS pre-warm HEAD request the proxy fires at
+startup against [proxy].prewarm_targets, and the daily refresh of the
+public model price table ([pricing.feed]) - see their rows below. Every
+other outbound row is either forwarding a request your own AI tool already
 made, or something you explicitly configured or clicked.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -516,9 +526,9 @@ func writePrivacyText(w io.Writer, report privacyReport) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "No telemetry, no analytics, no crash reporting - the one automatic call is")
-	fmt.Fprintln(w, "the TLS pre-warm HEAD request above (no session data carried); everything")
-	fmt.Fprintln(w, "else needs an explicit opt-in or your own tool's request.")
+	fmt.Fprintln(w, "Automatic calls: the TLS pre-warm and the pricing feed above; neither carries")
+	fmt.Fprintln(w, "session data. Everything else needs your explicit opt-in or your own tool's")
+	fmt.Fprintln(w, "request.")
 	fmt.Fprintf(w, "Full detail: %s\n", report.DocsURL)
 }
 

@@ -58,8 +58,8 @@ and helps you control them.**
   Log-only trackers have to estimate those.
 - **Every coding agent in one place.** 40 adapters normalize Claude Code, Codex, Cursor, GitHub
   Copilot, Gemini CLI, Cline, Aider, Kiro, Devin, OpenCode, Junie and more into one local database.
-- **Local-first, no account.** No telemetry and no sign-in. The watcher, dashboard, MCP server and CLI
-  make no outbound calls on your behalf; everything lives in one SQLite file under `~/.observer/`.
+- **Local-first, no account.** No sign-in. Everything lives in one SQLite file under `~/.observer/`,
+  and your prompts, code and AI responses stay there unless you choose to share them.
 - **Know the next bill before it lands.** Prompt-cache tracking with expiry warnings, a low / typical
   / high cost band for your next message, and a 5-hour and weekly limit gauge for proxied sessions.
 - **Guardrails on your own agents.** The guard checks each agent action against built-in rules
@@ -82,7 +82,7 @@ and helps you control them.**
 | Provider-reported (not estimated) tokens | ✓ via local proxy | Partial (from logs) | Partial (from logs) | ✓ (SDK) | ✓ (proxy) | ✓ (proxy) |
 | Cache 5-min vs 1-hour write split | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Reasoning + long-context surcharge accounting | ✓ | Partial | Partial | Partial | Partial | Partial |
-| Runs 100% local, no cloud required | ✓ | ✓ | ✓ (opt-in team-sync preview) | Self-host a stack | Self-host or SaaS | Self-host |
+| Runs locally, no cloud required | ✓ | ✓ | ✓ (opt-in team-sync preview) | Self-host a stack | Self-host or SaaS | Self-host |
 | Agent-queryable memory over your history (MCP) | ✓ | ✓ (usage MCP) | ✓ | ✓ (trace MCP) | ✗ | ✗ |
 | Cross-tool session handoff | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | License | Apache-2.0 | MIT | MIT | MIT (core) | Apache-2.0 | MIT |
@@ -205,10 +205,12 @@ v1.36.0); everything else on this page describes the upstream product. The fork 
 
 ## Privacy
 
-SuperBased sends no telemetry and needs no account. It stores paths, commands and short excerpts,
+SuperBased runs locally and needs no account. Your prompts, code and AI responses stay on your
+machine unless you choose to share them. It stores paths, commands and short excerpts,
 scrubs secrets before anything is written, and binds the proxy and dashboard to `127.0.0.1` by
 default. The proxy forwards your own requests, unchanged, to the provider you already use. Remove
-everything with `observer uninstall --all --purge`. Details: [PRIVACY.md](PRIVACY.md).
+everything with `observer uninstall --all --purge`. [PRIVACY.md](PRIVACY.md) lists every network
+call the binary makes, including the ones it makes by default.
 
 ## Documentation
 

@@ -57,7 +57,7 @@
   installer names its pid and the safe restart order and never stops it,
   because the daemon IS the proxy (docs/daemon-restart-runbook.md).
 
-  No telemetry. The only hosts contacted are api.github.com (to resolve
+  The only hosts contacted are api.github.com (to resolve
   "latest") and github.com (the release assets), or your -BaseUrl. It takes
   no token or credential.
 

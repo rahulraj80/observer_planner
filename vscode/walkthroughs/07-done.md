@@ -32,6 +32,7 @@ You've got SuperBased wired into VS Code end-to-end:
 
 ### Local-first
 
-Everything SuperBased captures stays on your machine. No telemetry,
-no outbound network calls except a first-install binary download
-from GitHub Releases when no `observer` is found locally.
+Everything SuperBased captures stays on your machine unless you choose
+to share it. The extension itself makes no network calls except a
+first-install binary download from GitHub Releases when no `observer`
+is found locally.

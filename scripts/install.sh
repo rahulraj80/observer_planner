@@ -63,7 +63,7 @@
 # foreground `observer start` still running the old binary is named, never
 # signalled.
 #
-# No telemetry. The only hosts contacted are api.github.com (to resolve
+# The only hosts contacted are api.github.com (to resolve
 # "latest") and github.com (the release assets), or your --base-url. It
 # takes no token or credential. Uses curl, or wget when curl is absent.
 set -eu

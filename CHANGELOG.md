@@ -4,6 +4,18 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
+### Changed (observer_planner fork)
+
+- **Privacy copy states what leaves the machine instead of "no telemetry".** README, PRIVACY.md,
+  the npm / PyPI / VS Code listings and walkthroughs, and the installers no longer claim "no
+  telemetry", "zero outbound calls" or "nothing leaves your machine": two calls already run by
+  default (the daily public model price table refresh from superbased.app, and the proxy's TLS
+  warm-up HEAD request), neither carrying session data. The copy now says your prompts, code and AI
+  responses stay on your machine unless you choose to share them, and PRIVACY.md lists every network
+  call, including the default ones. `observer privacy` gains the missing "pricing feed" row and an
+  accurate closing line. `tests/invariant/privacy_claims_test.go` fails if an absolute claim returns
+  to a user-facing surface.
+
 ### Added (observer_planner fork)
 
 - **Daily Briefing (Phase A of `docs/design/standup-briefing.md`).** A

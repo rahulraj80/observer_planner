@@ -1,27 +1,32 @@
 # Privacy
 
-SuperBased Observer is **a local Go binary that stores everything on
-your machine**. There is no telemetry, no analytics, no remote
-reporting, no "anonymized usage" beacon, no crash uploader. The
-project's authors cannot see what you ran, what you typed, or whether
-you're running observer at all. The binary you install from npm is
-the same binary published with SLSA provenance to the public GitHub
-release: what you install is what runs.
+SuperBased Observer is **a local Go binary that stores what it captures on
+your machine**. Your prompts, code and AI responses are not sent anywhere
+unless you turn on a feature that sends them. The section
+[When observer DOES make a network call](#when-observer-does-make-a-network-call)
+is the complete list of network calls the binary makes, including the ones
+it makes by default; `observer privacy` prints the same list for your
+current configuration. The binary you install from npm is the same binary
+published with SLSA provenance to the public GitHub release: what you
+install is what runs.
 
 This document spells out exactly what observer touches and what it
 never touches.
 
 ## TL;DR
 
-- **Local-only.** Observer's database, logs, and stash live under
-  `~/.observer/` (per-user, per-platform). Nothing leaves your machine
-  unless **you** explicitly turn on a feature that requires the network.
-- **No telemetry.** Zero. The watcher, hook handler, dashboard, MCP
-  server, and CLI never make an outbound network call on observer's
-  behalf; only the optional API proxy forwards **your** requests
-  unchanged to the AI provider you already use.
-- **No "anonymized" sharing.** There is no opt-out toggle because
-  there is no collection to opt out of.
+- **Local storage.** Observer's database, logs, and stash live under
+  `~/.observer/` (per-user, per-platform). Your prompts, code and AI
+  responses stay there unless **you** turn on a feature that sends them.
+- **What leaves by default.** Two calls, neither carrying session data: a
+  daily download of the public model price table from `superbased.app`
+  (opt out with `[pricing.feed] enabled = false`), and a TLS warm-up (a
+  bare HEAD request) to the default provider hosts when the proxy starts.
+  The proxy forwards **your** requests unchanged to the AI provider you
+  already use.
+- **Everything else is opt-in.** Org enrolment, aggregate sharing, message
+  summaries, webhooks, exporters and the rest are listed below with the
+  setting that turns each on.
 - **No accounts required.** You can run observer offline, behind an
   air-gap, without ever signing in to anything.
 
@@ -79,40 +84,40 @@ Per the project's design spec (`superbased-final-spec-v2.md`):
 
 ## When observer DOES make a network call
 
-These are the **only** code paths in the binary that touch the network.
-Every one is gated behind explicit configuration; none are on by
-default for a fresh install.
+These are the code paths in the binary that touch the network. The first
+two run by default and carry no session data; every other one is gated
+behind explicit configuration or your own action. `observer privacy`
+prints this list, with each row's on/off state, for your configuration.
 
 | Feature | When it talks to the network | What it sends | Opt-in via |
 |---|---|---|---|
 | **API proxy** | When your AI client points `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` at observer | **Your** API request, forwarded byte-identically to the upstream provider you chose (api.anthropic.com, chatgpt.com, openai.com, …) | `observer init --claude-code/--codex/--cursor` (writes the env-var hint into the AI client's config) |
 | **Message summary** | If `[messagesummary] enabled = true` | A subset of your conversation, to the LLM endpoint **you** configure (`base_url`, `model`, `api_key`) | TOML config; you provide the endpoint and key |
 | **Org enrolment** | If you ran `observer enroll <org-url>` | Aggregate per-day metrics (token totals, action counts, project hashes), and only the fields the org-server explicitly requests | `observer enroll` (explicit, prompts for org URL + token) |
+| **Model price table** | Every 24 hours by default (`[pricing.feed]`) | A plain GET of the public, signed price table at `superbased.app/api/pricing/...`; no identifier, session or usage data, only an `If-None-Match` cache tag | On by default; opt out with `[pricing.feed] enabled = false` |
+| **TLS warm-up** | At proxy start, when `[proxy].prewarm_targets` is non-empty (the default) | A bare HEAD request to the listed provider hosts so your first real request does not pay the TLS handshake; no session data | On by default; empty `[proxy].prewarm_targets` to turn it off |
 | **Antigravity gRPC fallback** | When parsing Antigravity sessions on macOS where keychain decrypt fails | Local IPC to a Google-installed gRPC socket, never the internet | Automatic; only fires on Antigravity sessions |
 
-If none of these are configured, observer makes **zero** outbound
-network calls. Verify with:
+Apart from the two default calls above, observer makes no outbound network
+calls until you configure one. Verify with:
 
 ```bash
 sudo lsof -p $(pgrep -f 'observer start') -i      # should show ONLY :8820/:8830/:8831 etc. on 127.0.0.1
 ```
 
-## How to verify "no telemetry" yourself
+## How to audit what leaves your machine
 
 The codebase is open source. To audit:
 
 ```bash
-# 1. Confirm no HTTP client in the watcher / adapter / hook code paths
-grep -rE 'http\.(Get|Post|Client|NewRequest)' cmd/observer internal/adapter internal/watcher internal/hook internal/store
-# Returns zero. All outbound HTTP is in internal/proxy/ (forwarding), internal/orgclient/ (org enrolment, opt-in),
-# and internal/intelligence/summary/ (message-summary opt-in). The code index (internal/codeintel) is in-process
-# and makes no network calls.
+# 1. The binary's own report: every outbound path, its gate, and whether it is on
+observer privacy
 
-# 2. Confirm no outbound DNS lookups from the binary
-strings $(which observer) | grep -Ei 'telemetry|analytics|metrics\.|amplitude|segment\.|posthog|datadog|sentry'
-# Returns zero matches.
+# 2. Watch live sockets: apart from the price table refresh, the TLS warm-up and the proxy's
+#    upstream connections, you should see only loopback listeners
+sudo lsof -p $(pgrep -f 'observer start') -i
 
-# 3. Run observer in a network-namespaced shell and confirm everything (parsing, DB, MCP, dashboard) still works
+# 3. Run observer with no network at all and confirm everything (parsing, DB, MCP, dashboard) still works
 unshare -rn observer start --no-dashboard
 ```
 

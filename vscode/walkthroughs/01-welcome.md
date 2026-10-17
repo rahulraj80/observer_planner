@@ -1,12 +1,12 @@
 # SuperBased
 
 **See and control exactly what your AI coding agents cost — across every
-tool, 100% local.**
+tool, running locally.**
 
 SuperBased captures, normalises, and analyses tool-call activity from
 Claude Code, Codex, Cursor, Cline (and forks like Roo Code), Copilot,
 Gemini, Devin, Aider, and 32 more — 40 adapters in all — entirely on
-your machine. No telemetry. No data leaves your machine.
+your machine. Your prompts, code and AI responses stay on your machine unless you choose to share them.
 
 This walkthrough takes about **5 minutes** and covers:
 

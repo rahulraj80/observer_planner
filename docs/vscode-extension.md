@@ -262,11 +262,11 @@ executable or read a secret off disk.
 
 ## Local-first guarantees
 
-- **No telemetry.** The extension respects `telemetry.telemetryLevel`
-  and never reports usage, crash, or session data.
+- **The extension reports nothing about your usage.** It respects
+  `telemetry.telemetryLevel` and sends no usage, crash or session data.
 - **No outbound network calls** except to GitHub Releases on first
   install (for the binary, when none is found locally).
-- **No data leaves your machine.** All `/api/*` traffic is to
+- **Captured data stays local.** All `/api/*` traffic is to
   `127.0.0.1:<dashboard.port>` on the workspace host. Under
   Remote-SSH / Codespaces the iframe `portMapping` routes the
   webview-side `127.0.0.1` to the same loopback on the host, no

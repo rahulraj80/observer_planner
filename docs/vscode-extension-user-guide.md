@@ -554,8 +554,9 @@ charts, columns, filters, metrics, calculations, and a glossary.
 
 The extension is **strictly local-first**:
 
-- **Zero telemetry.** Respects `telemetry.telemetryLevel`. No
-  usage analytics, no crash reports, no session-id beacons.
+- **The extension reports nothing about your usage.** It respects
+  `telemetry.telemetryLevel` and sends no usage analytics, crash reports
+  or session ids.
 - **No outbound network calls** at runtime. The only network
   traffic the extension ever generates is the first-install
   binary download from
@@ -567,9 +568,10 @@ The extension is **strictly local-first**:
   the webview-side `127.0.0.1` to the workspace host's loopback.
   Data still doesn't cross any wire that wasn't already part of
   your VS Code remote-dev session.
-- **No data leaves your machine.** Every byte SuperBased captures is
+- **Captured data stays local.** Every byte SuperBased captures is
   written to `~/.observer/observer.db` (or
-  `$OBSERVER_HOME/observer.db`) and stays there.
+  `$OBSERVER_HOME/observer.db`) and stays there unless you choose to
+  share it ([PRIVACY.md](../PRIVACY.md) lists every network call).
 - **Line counts on save are counts, not content.** The one thing the
   extension sends rather than reads is the per-save line count described
   in [Human line counts on save](#human-line-counts-on-save): how many

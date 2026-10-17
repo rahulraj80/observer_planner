@@ -47,8 +47,8 @@ and helps you control them.**
   returned: net input, 5-minute vs 1-hour cache writes, reasoning tokens and long-context repricing.
 - **Every coding agent in one place.** 40 adapters normalize Claude Code, Codex, Cursor, GitHub
   Copilot, Gemini CLI, Cline, Aider, Kiro, Devin, OpenCode, Junie and more into one local database.
-- **Local-first, no account.** No telemetry and no sign-in. Everything lives in one SQLite file
-  under `~/.observer/`.
+- **Local-first, no account.** No sign-in. Everything lives in one SQLite file under
+  `~/.observer/`, and your prompts, code and AI responses stay there unless you choose to share them.
 - **Know the next bill before it lands.** Prompt-cache tracking with expiry warnings, a cost band
   for your next message, and a 5-hour and weekly limit gauge for proxied sessions.
 - **Guardrails on your own agents.** Built-in and custom rules for destructive commands, secrets
@@ -109,7 +109,8 @@ Click any session to open its detail view. Four of its tabs:
 
 ## Privacy
 
-No telemetry and no account. SuperBased stores paths, commands and short excerpts, scrubs secrets
+Runs locally, no account. Your prompts, code and AI responses stay on your machine unless you
+choose to share them. SuperBased stores paths, commands and short excerpts, scrubs secrets
 before writing, and binds the proxy and dashboard to `127.0.0.1` by default. The proxy forwards your
 own requests, unchanged, to the provider you already use. See
 [PRIVACY.md](https://github.com/superbasedapp/observer/blob/main/PRIVACY.md).
