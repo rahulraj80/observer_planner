@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -260,8 +261,8 @@ func TestContractDrift(t *testing.T) {
 	// Canonical expected values — copied identically into reporterd, the
 	// enterprise repo, and the individual repo. If any repo drifts, this test
 	// fails in that repo.
-	if Version != "1.1.0" {
-		t.Fatalf("Version = %q, want %q", Version, "1.1.0")
+	if Version != "1.2.0" {
+		t.Fatalf("Version = %q, want %q", Version, "1.2.0")
 	}
 	if EffectiveTier(TierUsage) != TierBaseline {
 		t.Fatalf("usage no longer normalizes to baseline — drift gate")
@@ -327,5 +328,91 @@ func TestDeepDisclosureDigestMatchesGolden(t *testing.T) {
 	}
 	if !ValidDeepDigest(doc.DeepDisclosureDigest) {
 		t.Fatal("ValidDeepDigest rejects the golden digest")
+	}
+}
+
+// TestEventFieldsMatchGolden pins the per-event field allow-lists (contract
+// 1.2.0) to the golden contract.json, so the no-text-fields guarantee cannot
+// drift between the data file, this package and the server's copy.
+func TestEventFieldsMatchGolden(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("golden", "contract.json"))
+	if err != nil {
+		t.Fatalf("read golden contract.json: %v", err)
+	}
+	var doc struct {
+		Fields       map[string][]string `json:"fields"`
+		IdentPattern string              `json:"ident_pattern"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse golden contract.json: %v", err)
+	}
+	if len(doc.Fields) != len(classificationPairs) {
+		t.Fatalf("golden fields cover %d events; code has %d", len(doc.Fields), len(classificationPairs))
+	}
+	for ev, want := range doc.Fields {
+		got := EventFields(ev)
+		if got == nil {
+			t.Errorf("golden lists fields for unknown event %q", ev)
+			continue
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("event %q fields drifted: code=%v golden=%v", ev, got, want)
+		}
+	}
+	if doc.IdentPattern != identRe.String() {
+		t.Errorf("ident pattern drifted: code=%s golden=%s", identRe.String(), doc.IdentPattern)
+	}
+}
+
+// TestNoTextChannels proves every free-text channel a sender could try is
+// refused: an unlisted field name on any event, prose in a version, os/arch,
+// schema_version or correlation span.
+func TestNoTextChannels(t *testing.T) {
+	const prose = "please refactor my secret code"
+	cases := map[string]func(e *Envelope){
+		"unknown field on tool_use": func(e *Envelope) { e.Events[0].Fields["prompt"] = prose },
+		"unknown field on error":    func(e *Envelope) { e.Events[1].Fields["message"] = prose },
+		"prose client_version":      func(e *Envelope) { e.ClientVersion = prose },
+		"prose os":                  func(e *Envelope) { e.OS = prose },
+		"prose arch":                func(e *Envelope) { e.Arch = prose },
+		"prose schema_version":      func(e *Envelope) { e.Events[0].SchemaVersion = prose },
+		"prose session_span":        func(e *Envelope) { e.Events[0].SessionSpan = prose },
+		"over-long identifier":      func(e *Envelope) { e.ClientVersion = strings.Repeat("a", 65) },
+		"prose app_start version": func(e *Envelope) {
+			e.Events[0] = Event{
+				Event: EventAppStart, EventVersion: 1, SchemaVersion: "2026-09-14T00:00:00Z",
+				TS: "2026-09-14T09:59:00Z", InstallID: e.InstallID, Seq: 100,
+				Classification: ClassSystemMeta, Purpose: PurposePerfHealth,
+				Fields: map[string]any{"version": prose},
+			}
+		},
+		"prose prompt_cycle turn_id": func(e *Envelope) {
+			e.Events[0] = Event{
+				Event: EventPromptCycle, EventVersion: 1, SchemaVersion: "2026-09-14T00:00:00Z",
+				TS: "2026-09-14T09:59:00Z", InstallID: e.InstallID, Seq: 100,
+				Classification: ClassSystemMeta, Purpose: PurposeBusiness,
+				Fields: map[string]any{
+					"model": "other", "provider": "other", "input_size": 1, "output_size": 1,
+					"cache_percentage": 0, "end_to_end_duration_ms": 1, "segment": "user_prompt", "turn_id": prose,
+				},
+			}
+		},
+	}
+	for name, mutate := range cases {
+		e := validEnvelope()
+		mutate(e)
+		if err := ValidateEnvelope(e); !errors.Is(err, ErrBadSchema) {
+			t.Errorf("%s: err = %v; want ErrBadSchema", name, err)
+		}
+	}
+	// The real client's shapes stay valid: empty client_version / span, "dev".
+	e := validEnvelope()
+	e.ClientVersion, e.Events[0].SessionSpan = "", ""
+	if err := ValidateEnvelope(e); err != nil {
+		t.Errorf("empty client_version + span rejected: %v", err)
+	}
+	e.ClientVersion = "dev"
+	if err := ValidateEnvelope(e); err != nil {
+		t.Errorf(`client_version "dev" rejected: %v`, err)
 	}
 }

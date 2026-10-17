@@ -25,7 +25,7 @@ import (
 
 // Version is the contract semver. Additions are minor bumps; any change of
 // meaning is a new event name (never mutation) plus a major bump here.
-const Version = "1.1.0"
+const Version = "1.2.0"
 
 // EnvelopeVersion is the value expected in Envelope.EnvelopeVersion.
 const EnvelopeVersion = "v1"
@@ -261,7 +261,50 @@ var (
 	uuidRe    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	installRe = regexp.MustCompile(`^inst-[0-9a-f]{12}$`)
 	tsRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$`)
+	// identRe bounds every free-form string the contract admits (versions,
+	// os/arch, correlation spans): an identifier, never prose — no spaces, no
+	// punctuation beyond . _ + -, at most 64 bytes. Contract 1.2.0.
+	identRe = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
 )
+
+// eventFields is the closed field-name allow-list per event (contract 1.2.0).
+// Any other key in an event's fields is refused, so no event can carry prompt,
+// output or other free text under an unlisted name. Mirrored in the golden
+// contract.json ("fields") and pinned by TestEventFieldsMatchGolden.
+var eventFields = map[string][]string{
+	EventAppStart:     {"arch", "os", "version"},
+	EventAppStop:      {"arch", "os", "version"},
+	EventSessionStart: {"adapter"},
+	EventSessionEnd:   {"adapter", "duration_ms", "outcome"},
+	EventToolUse:      {"count", "tool_name"},
+	EventError:        {"error_class", "surface"},
+	EventTokenUse:     {"cache_read", "model_tier", "role", "tokens_in", "tokens_out"},
+	EventDayActive:    {},
+	EventBatchMeta:    {"dropped_count", "retry_count"},
+	EventDiagCommand:  {"argv_trunc", "exit", "tool_name"},
+	EventPromptCycle: {
+		"cache_percentage", "end_to_end_duration_ms", "input_size", "model",
+		"output_size", "provider", "segment", "session_span", "turn_id",
+	},
+}
+
+// EventFields returns the allowed field names for event (sorted), or nil for
+// an unknown event.
+func EventFields(event string) []string {
+	f, ok := eventFields[event]
+	if !ok {
+		return nil
+	}
+	return append(make([]string, 0, len(f)), f...)
+}
+
+// validIdent reports whether s is empty-allowed-or-identifier per identRe.
+func validIdent(s string, allowEmpty bool) bool {
+	if s == "" {
+		return allowEmpty
+	}
+	return identRe.MatchString(s)
+}
 
 // Validation errors — closed vocabulary (plan §D3 error taxonomy).
 var (
@@ -297,6 +340,9 @@ func ValidateEnvelope(e *Envelope) error {
 	if !tsRe.MatchString(e.ClientTS) {
 		return fmt.Errorf("%w: client_ts not RFC3339 UTC", ErrBadSchema)
 	}
+	if !validIdent(e.ClientVersion, true) || !validIdent(e.OS, true) || !validIdent(e.Arch, true) {
+		return fmt.Errorf("%w: client_version/os/arch must be identifiers", ErrBadSchema)
+	}
 	for i := range e.Events {
 		if err := validateEvent(&e.Events[i], e.InstallID); err != nil {
 			return fmt.Errorf("event[%d]: %w", i, err)
@@ -314,8 +360,11 @@ func validateEvent(ev *Event, installID string) error {
 	if ev.EventVersion != 1 {
 		return fmt.Errorf("%w: event_version %d", ErrBadSchema, ev.EventVersion)
 	}
-	if ev.SchemaVersion == "" {
-		return fmt.Errorf("%w: missing schema_version", ErrBadSchema)
+	if !tsRe.MatchString(ev.SchemaVersion) {
+		return fmt.Errorf("%w: schema_version not RFC3339 UTC", ErrBadSchema)
+	}
+	if !validIdent(ev.SessionSpan, true) {
+		return fmt.Errorf("%w: session_span must be an identifier", ErrBadSchema)
 	}
 	if !tsRe.MatchString(ev.TS) {
 		return fmt.Errorf("%w: ts not RFC3339 UTC", ErrBadSchema)
@@ -329,6 +378,21 @@ func validateEvent(ev *Event, installID string) error {
 	}
 	if err := validateFields(ev); err != nil {
 		return err
+	}
+	// No-text-fields enforcement (every event, contract 1.2.0): a field name
+	// outside the event's allow-list is refused.
+	allowed := eventFields[ev.Event]
+	for k := range ev.Fields {
+		ok := false
+		for _, a := range allowed {
+			if k == a {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("%w: %s unknown field %q", ErrBadSchema, ev.Event, k)
+		}
 	}
 	return nil
 }
@@ -400,8 +464,12 @@ func validateFields(ev *Event) error {
 			return fmt.Errorf("%w: adapter %q", ErrBadSchema, get("adapter"))
 		}
 	case EventAppStart, EventAppStop:
-		if get("version") == "" {
-			return fmt.Errorf("%w: missing version", ErrBadSchema)
+		if !validIdent(get("version"), false) {
+			return fmt.Errorf("%w: version must be an identifier", ErrBadSchema)
+		}
+		// os / arch (plan §D5) are optional identifiers.
+		if !validIdent(get("os"), true) || !validIdent(get("arch"), true) {
+			return fmt.Errorf("%w: os/arch must be identifiers", ErrBadSchema)
 		}
 	case EventDiagCommand:
 		if !ToolName[get("tool_name")] {
@@ -444,28 +512,13 @@ func validateFields(ev *Event) error {
 		if !Segment[get("segment")] {
 			return fmt.Errorf("%w: prompt_cycle.segment", ErrBadSchema)
 		}
-		// correlation-only optional fields — allowed when present and a string;
-		// absent is fine too.
+		// correlation-only optional fields — identifiers when present.
 		for _, k := range []string{"session_span", "turn_id"} {
 			if v, ok := f[k]; ok {
 				s, _ := v.(string)
-				_ = s
-				if v != nil && s == "" {
-					return fmt.Errorf("%w: prompt_cycle.%s blank", ErrBadSchema, k)
+				if !validIdent(s, false) {
+					return fmt.Errorf("%w: prompt_cycle.%s must be an identifier", ErrBadSchema, k)
 				}
-			}
-		}
-		// No-text-fields enforcement: any field name not in the allowlist is
-		// rejected. This is the contract-level guarantee that baseline events
-		// cannot smuggle prompt/output text by field name.
-		for k := range f {
-			switch k {
-			case "model", "provider", "input_size", "output_size",
-				"cache_percentage", "end_to_end_duration_ms", "segment",
-				"session_span", "turn_id":
-				// allowed
-			default:
-				return fmt.Errorf("%w: prompt_cycle unknown field %q", ErrBadSchema, k)
 			}
 		}
 	}
