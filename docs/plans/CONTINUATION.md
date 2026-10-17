@@ -10,6 +10,7 @@
 ## Done — 2026-10-17 (sup session)
 
 - **Upstream syncs merged and pushed.** observer_planner `557971c0`; superbased-observer-private `ce74d868a`, deployed on sup (node store 149 -> 166, org PG 61 -> 102, backups in `/mnt/scripts/.backups/2026-10-17-upstream-sync/`).
+- **Step 5.3 done: reporterd TLS on sup.** Let's Encrypt cert for `superbaseddev.bot.nu` (HTTP-01 standalone, no account email, expires 2027-01-15); reporterd serves native TLS (min TLS 1.2) on `:48089` with in-place cert reload (observer_reporter `489670f`), plain HTTP only on loopback `127.0.0.1:48087` for tools (`59ee0b7`). No reverse proxy needed. Renewal: explicit `/etc/cron.d/certbot` twice daily, certbot.timer disabled, deploy hook copies the cert to `/etc/reporterd/tls/`; `certbot renew --dry-run` passes. Clients must now use `https://superbaseddev.bot.nu:48089`.
 - **Guard R-151 alert flood fixed** in the private repo (`885f53ea8`): re-scanned file actions no longer re-flag; alerts are grouped per batch. The 4.97M duplicate guard_events rows are left in place (hash-chain decision pending).
 - **"No telemetry" copy replaced** in both repos (observer_planner `020f0fca`, private `10591a8d7`): no absolute claims; PRIVACY.md + `observer privacy` list every network call; drift gate `tests/invariant/privacy_claims_test.go`. When baseline telemetry ships (5.7/5.8), flip the "usage telemetry" row to on-by-default in the same commit.
 
@@ -87,7 +88,6 @@ We are implementing default-on baseline telemetry across both the individual rep
 ## Pending (not started)
 
 - Step 5.2: Reporterd install-key model + individual API-only self view + delete/export by install key (needs sup write access or a patch for reporterd; also needs the install-key derivation detail locked).
-- Step 5.3: Reporterd TLS on sup (needs certbot + a reverse proxy on sup; may need your go-ahead to install certbot/proxy on sup).
 - Step 5.4: Reporterd self-host distribution story + runbook.
 - Step 5.5: Reporterd enterprise tenant web dashboard + tenant API.
 - Step 5.6: System-nudge classifier bootstrap + improvement loop (in the observer repos, local).
