@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CONTRACT_VERSION = "1.1.0"
+CONTRACT_VERSION = "1.2.0"
 ENVELOPE_VERSION = "v1"
 SCHEMA_VERSION = "2026-09-14T00:00:00Z"
 
@@ -49,6 +49,27 @@ VOCABS = {
                  "codex", "antigravity", "cline", "other"],
     "segment": ["user_prompt", "system_nudge", "tool_call", "other"],
 }
+
+# Closed field-name allow-list per event (contract 1.2.0): any other key is
+# refused, every event — the no-text-fields guarantee by construction.
+FIELDS = {
+    "app_start": ["arch", "os", "version"],
+    "app_stop": ["arch", "os", "version"],
+    "session_start": ["adapter"],
+    "session_end": ["adapter", "duration_ms", "outcome"],
+    "tool_use": ["count", "tool_name"],
+    "error": ["error_class", "surface"],
+    "token_use": ["cache_read", "model_tier", "role", "tokens_in", "tokens_out"],
+    "day_active": [],
+    "batch_meta": ["dropped_count", "retry_count"],
+    "diag_command": ["argv_trunc", "exit", "tool_name"],
+    "prompt_cycle": ["cache_percentage", "end_to_end_duration_ms", "input_size",
+                     "model", "output_size", "provider", "segment",
+                     "session_span", "turn_id"],
+}
+
+# Every free-form string (versions, os/arch, correlation spans) must match this.
+IDENT_PATTERN = "^[A-Za-z0-9._+-]{1,64}$"
 
 EVENTS = {
     "app_start": {"classification": "SystemMetaData", "purpose": "PerformanceAndHealth"},
@@ -150,6 +171,7 @@ def main() -> int:
            "max_uncompressed_bytes": 1 << 20, "max_argv_len": 120,
            "deep_disclosure_digest": deep_disclosure_digest(),
            "vocabularies": VOCABS, "events": EVENTS, "tiers": TIERS,
+           "fields": FIELDS, "ident_pattern": IDENT_PATTERN,
            "digest": None}
     doc["digest"] = hashlib.sha256(json.dumps(
         {k: v for k, v in doc.items() if k != "digest"}, sort_keys=True).encode()).hexdigest()

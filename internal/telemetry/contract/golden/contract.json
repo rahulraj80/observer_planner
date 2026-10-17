@@ -1,7 +1,7 @@
 {
-  "contract_version": "1.1.0",
+  "contract_version": "1.2.0",
   "deep_disclosure_digest": "4d0de50b944dd1a4abee7536230da7ae8f5d84df36a342cb3a356400233708dc",
-  "digest": "71f5dca5ada710836e2cd41d2603caeb9d803060350fdf24dffee71f403721f5",
+  "digest": "83c745c56882e019364d8b9701ff043dce56b5aeb0b92238bbcd4e21d575d9ef",
   "envelope_version": "v1",
   "events": {
     "app_start": {
@@ -50,6 +50,63 @@
       "purpose": "FeatureInsight"
     }
   },
+  "fields": {
+    "app_start": [
+      "arch",
+      "os",
+      "version"
+    ],
+    "app_stop": [
+      "arch",
+      "os",
+      "version"
+    ],
+    "batch_meta": [
+      "dropped_count",
+      "retry_count"
+    ],
+    "day_active": [],
+    "diag_command": [
+      "argv_trunc",
+      "exit",
+      "tool_name"
+    ],
+    "error": [
+      "error_class",
+      "surface"
+    ],
+    "prompt_cycle": [
+      "cache_percentage",
+      "end_to_end_duration_ms",
+      "input_size",
+      "model",
+      "output_size",
+      "provider",
+      "segment",
+      "session_span",
+      "turn_id"
+    ],
+    "session_end": [
+      "adapter",
+      "duration_ms",
+      "outcome"
+    ],
+    "session_start": [
+      "adapter"
+    ],
+    "token_use": [
+      "cache_read",
+      "model_tier",
+      "role",
+      "tokens_in",
+      "tokens_out"
+    ],
+    "tool_use": [
+      "count",
+      "tool_name"
+    ]
+  },
+  "ident_pattern": "^[A-Za-z0-9._+-]{1,64}$",
   "max_argv_len": 120,
   "max_uncompressed_bytes": 1048576,
   "schema_version": "2026-09-14T00:00:00Z",
