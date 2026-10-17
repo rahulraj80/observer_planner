@@ -7,6 +7,14 @@
 **Plan home:** `docs/plans/baseline-telemetry-implementation-plan.md`
 **Plan index:** `docs/plans/index.md`
 
+## Done — 2026-10-17 (sup session)
+
+- **Upstream syncs merged and pushed.** observer_planner `557971c0`; superbased-observer-private `ce74d868a`, deployed on sup (node store 149 -> 166, org PG 61 -> 102, backups in `/mnt/scripts/.backups/2026-10-17-upstream-sync/`).
+- **Guard R-151 alert flood fixed** in the private repo (`885f53ea8`): re-scanned file actions no longer re-flag; alerts are grouped per batch. The 4.97M duplicate guard_events rows are left in place (hash-chain decision pending).
+- **"No telemetry" copy replaced** in both repos (observer_planner `020f0fca`, private `10591a8d7`): no absolute claims; PRIVACY.md + `observer privacy` list every network call; drift gate `tests/invariant/privacy_claims_test.go`. When baseline telemetry ships (5.7/5.8), flip the "usage telemetry" row to on-by-default in the same commit.
+
+**Next:** Step 5.2 below (decide the install-key design first), plus the follow-ups listed under the status update.
+
 ## Status update — 2026-10-17 (sup session)
 
 Rahul re-ordered the work:
