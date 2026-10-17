@@ -266,7 +266,7 @@ Implementation: extend `handleSelfDelete` (or add a parallel handler) so the ins
 1. Reporterd TLS capability: confirm from `cmd/reporterd/main.go` whether reporterd can terminate TLS itself; if not, use proxy-termination. (Plan assumes proxy-termination unless main.go says otherwise.)
 2. Self-host gaps: confirm from `cmd/reporterd/main.go` + store init + seed tools whether a customer can cleanly run their own Postgres/KEK/seed today; add runbook + missing pieces if not.
 3. Enterprise tenant dashboard: confirm whether `handleDashboard` is already a skeleton we extend, or we add a minimal one.
-4. Individual install-key derivation: pick the exact key→token derivation (e.g., hash the key for the bearer token, keep the key itself as the copyable secret) during implementation; the plan only fixes that the key is generated at install, copyable from settings/profile, and used for upload + personal API view + delete/export.
+4. **Resolved 2026-10-17** (see CONTINUATION.md "Install-key derivation detail"): the key is the bearer over TLS, the server stores sha256, the install id is derived from the key, auto-create on first upload with abuse limits. Original text: Individual install-key derivation: pick the exact key→token derivation (e.g., hash the key for the bearer token, keep the key itself as the copyable secret) during implementation; the plan only fixes that the key is generated at install, copyable from settings/profile, and used for upload + personal API view + delete/export.
 5. Segment classifier bootstrap scope: confirm how much local DB text is available for the pareto/frequency bootstrap in each repo; the plan only fixes that it's local, offline, tag-only, and improves over time.
 
 ## 8. Out of scope (explicitly)
