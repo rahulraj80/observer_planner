@@ -87,7 +87,7 @@ func TestValidateEnvelope_Errors(t *testing.T) {
 }
 
 func is(a, b error) bool {
-	return errors.Is(a, b) || a == b
+	return errors.Is(a, b) // errors.Is already reports a == b
 }
 
 func TestTierAllows(t *testing.T) {

@@ -334,6 +334,8 @@ func validateEvent(ev *Event, installID string) error {
 }
 
 // validateFields checks the per-event closed vocabularies and bounds.
+//
+//nolint:gocyclo // one case per closed event type; splitting would scatter the field allowlists the no-text guarantee rests on
 func validateFields(ev *Event) error {
 	f := ev.Fields
 	get := func(k string) string {
