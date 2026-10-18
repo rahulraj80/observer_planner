@@ -274,31 +274,32 @@ func setTelemetryEnabled(enabled bool) error {
 }
 
 func newTelemetryRegisterCmd() *cobra.Command {
-	var userID string
+	var code string
 	cmd := &cobra.Command{
 		Use:   "register",
-		Short: "Register this install with the central ingest and store the token",
-		Args:  cobra.NoArgs,
+		Short: "Register this install with a self-hosted reporter (needs an enrollment code)",
+		Long: "Register this install with the self-hosted observer_reporter at the\n" +
+			"[telemetry] endpoint, using an enrollment code from the reporter's operator\n" +
+			"(reporterd admin enroll). The install token is stored 0600 next to the\n" +
+			"store and never printed. Not needed for the default cloud lane.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// An empty user would be refused server-side anyway (the ingest
-			// admits only users in its population — A2), and the refuse must be a
-			// legible CLI error, not a 404 the loop would retry.
-			if strings.TrimSpace(userID) == "" {
-				return fmt.Errorf("register: --user is required — the central ingest admits only users it already knows")
+			if strings.TrimSpace(code) == "" {
+				return fmt.Errorf("register: --code is required (ask the reporter operator: reporterd admin enroll <user>)")
 			}
 			cfg, err := config.Load(config.LoadOptions{GlobalPath: ""})
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			token, iid, err := telemetryRegister(cfg, userID)
+			_, iid, err := telemetryRegister(cfg, strings.TrimSpace(code))
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "registered install %s; token stored (shown once): %s\n", iid, token)
+			fmt.Fprintf(cmd.OutOrStdout(), "registered install %s with %s; token stored at %s\n", iid, cfg.Telemetry.Endpoint, telemetryTokenPath(cfg))
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&userID, "user", "", "user id known to the central ingest (optional)")
+	cmd.Flags().StringVar(&code, "code", "", "enrollment code from the reporter operator")
 	return cmd
 }
 
@@ -306,13 +307,13 @@ func newTelemetryRegisterCmd() *cobra.Command {
 // stores the token 0600. Idempotent: an existing token file short-circuits.
 // On success the collector ADOPTS the server-issued install id (see
 // adoptServerInstallID) — the wire identity must be the registered one.
-func telemetryRegister(cfg config.Config, userID string) (token, installID string, err error) {
+func telemetryRegister(cfg config.Config, code string) (token, installID string, err error) {
 	if p := telemetryTokenPath(cfg); p != "" {
 		if b, rerr := os.ReadFile(p); rerr == nil && len(strings.TrimSpace(string(b))) > 0 {
 			return "", "", fmt.Errorf("already registered (token at %s); use reset-id to rotate", p)
 		}
 	}
-	body, _ := json.Marshal(map[string]string{"user_id": userID})
+	body, _ := json.Marshal(map[string]string{"enrollment_code": code})
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.Telemetry.Endpoint, "/")+"/v1/register",
 		strings.NewReader(string(body)))
 	if err != nil {
@@ -327,12 +328,19 @@ func telemetryRegister(cfg config.Config, userID string) (token, installID strin
 	var out struct {
 		InstallID    string `json:"install_id"`
 		InstallToken string `json:"install_token"`
+		Error        string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", "", fmt.Errorf("register: decode: %w", err)
+		return "", "", fmt.Errorf("register: decode (http %d): %w", resp.StatusCode, err)
 	}
 	if out.InstallID == "" || out.InstallToken == "" {
-		return "", "", fmt.Errorf("register: server returned no identity (http %d)", resp.StatusCode)
+		switch out.Error {
+		case "enrollment_invalid":
+			return "", "", fmt.Errorf("register: the enrollment code is unknown, expired, revoked or already used; ask the reporter operator for a new one (reporterd admin enroll)")
+		case "enrollment_required", "bad_schema":
+			return "", "", fmt.Errorf("register: the reporter needs an enrollment code (--code); this reporter may predate enrollment codes")
+		}
+		return "", "", fmt.Errorf("register: server returned no identity (http %d %s)", resp.StatusCode, out.Error)
 	}
 	if err := telemetryStoreToken(cfg, out.InstallToken); err != nil {
 		return "", "", err
