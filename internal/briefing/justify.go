@@ -81,7 +81,7 @@ func RepriceSummary(reprice []RepriceTurn) string {
 	for _, r := range reprice {
 		candidate += r.EstimatedCost
 	}
-	// no-bare-usd:allow (observer_planner fork; not yet masked under the token display, see CONTINUATION.md)
+	// no-bare-usd:allow (masked under the token display at the dashboard boundary: maskDollarProse)
 	return fmt.Sprintf("%d step(s) replayed %s → %s; candidate cost ~$%.2f",
 		len(reprice), from, to, round2(candidate))
 }

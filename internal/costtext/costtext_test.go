@@ -220,3 +220,22 @@ func TestWriterStreamsTextBeforeClose(t *testing.T) {
 		t.Errorf("after Close: %q", b.String())
 	}
 }
+
+func TestMaskStringsKeepsFieldsAndNumbers(t *testing.T) {
+	in := map[string]any{
+		"cost_usd":  1.25,
+		"narrative": "You spent $4.10 yesterday, $1,200 this month.",
+		"items":     []any{"saved $0.40 by routing", 3.0},
+	}
+	out := MaskStrings(in).(map[string]any)
+	if out["cost_usd"] != 1.25 {
+		t.Errorf("numeric dollar field changed: %v", out["cost_usd"])
+	}
+	if got := out["narrative"]; got != "You spent [hidden] yesterday, [hidden] this month." {
+		t.Errorf("narrative = %q", got)
+	}
+	items := out["items"].([]any)
+	if items[0] != "saved [hidden] by routing" || items[1] != 3.0 {
+		t.Errorf("items = %v", items)
+	}
+}

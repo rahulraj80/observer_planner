@@ -145,6 +145,33 @@ func StripDollarFields(v any) any {
 	}
 }
 
+// MaskStrings returns a copy of a decoded JSON value with every dollar amount
+// inside every string hidden, and every field and number kept. It is for a
+// response whose numeric dollar fields the client already renders under the
+// display mode, so only server-written prose (a narrative, a justification, a
+// benefit line) still needs masking. StripDollarFields is the variant for
+// clients that do not.
+func MaskStrings(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = MaskStrings(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = MaskStrings(val)
+		}
+		return out
+	case string:
+		return MaskDollars(ModeTokens, t)
+	default:
+		return v
+	}
+}
+
 // TokenFigure renders a token count the way the node dashboard's compact
 // formatter does ("950 tok", "1K tok", "212.4K tok", "1.5M tok"): the token
 // counterpart a figure shows in place of dollars.

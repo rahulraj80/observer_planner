@@ -507,20 +507,20 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	reg("/api/discover", V, secDiscovery, s.handleDiscover)
 	reg("/api/suggestions", V, secSuggestions, s.handleSuggestions)
 	reg("/api/suggestions/state", L, secSuggestions, s.handleSuggestionState)
-	reg("/api/routing/status", V, secRouting, s.handleRoutingStatus)
-	reg("/api/routing/decisions", V, secRouting.WithTab("decisions"), s.handleRoutingDecisions)
-	reg("/api/routing/savings", V, secRouting, s.handleRoutingSavings)
-	reg("/api/routing/tiers", V, secRouting.WithTab("policy"), s.handleRoutingTiers)
-	reg("/api/routing/health", V, secRouting.WithTab("overview"), s.handleRoutingHealth)
-	reg("/api/routing/shadow", V, secRouting.WithTab("shadow"), s.handleRoutingShadow)
-	reg("/api/routing/simulate", V, secRouting.WithTab("overview"), s.handleRoutingSimulate)
+	reg("/api/routing/status", V, secRouting, s.maskDollarProse(s.handleRoutingStatus))
+	reg("/api/routing/decisions", V, secRouting.WithTab("decisions"), s.maskDollarProse(s.handleRoutingDecisions))
+	reg("/api/routing/savings", V, secRouting, s.maskDollarProse(s.handleRoutingSavings))
+	reg("/api/routing/tiers", V, secRouting.WithTab("policy"), s.maskDollarProse(s.handleRoutingTiers))
+	reg("/api/routing/health", V, secRouting.WithTab("overview"), s.maskDollarProse(s.handleRoutingHealth))
+	reg("/api/routing/shadow", V, secRouting.WithTab("shadow"), s.maskDollarProse(s.handleRoutingShadow))
+	reg("/api/routing/simulate", V, secRouting.WithTab("overview"), s.maskDollarProse(s.handleRoutingSimulate))
 	// routing apply POST WRITES per-AI-tool routing config files → whole-route
 	// Local (§9.3). revert is POST-only Local.
 	reg("/api/routing/apply", L, secRouting.WithTab("shadow"), s.handleRoutingApply)
 	reg("/api/routing/apply/revert", L, secRouting.WithTab("shadow"), s.handleRoutingApplyRevert)
-	reg("/api/routing/apply/ledger", V, secRouting.WithTab("shadow"), s.handleRoutingApplyLedger)
-	reg("/api/routing/policy", V, secRouting, s.handleRoutingPolicy)
-	reg("/api/routing/policy/lint", V, secRouting, s.handleRoutingPolicyLint)
+	reg("/api/routing/apply/ledger", V, secRouting.WithTab("shadow"), s.maskDollarProse(s.handleRoutingApplyLedger))
+	reg("/api/routing/policy", V, secRouting, s.maskDollarProse(s.handleRoutingPolicy))
+	reg("/api/routing/policy/lint", V, secRouting, s.maskDollarProse(s.handleRoutingPolicyLint))
 	reg("/api/verbosity/aggregate", V, secAnalysis, s.handleVerbosityAggregate)
 	reg("/api/sessions", V, secSessions, s.handleSessions)
 	reg("/api/sessions/calendar", V, secSessions, s.handleSessionsCalendar)
@@ -548,34 +548,34 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// implicitly — a configured connection is still opt-in per request) and
 	// the grounded Q&A POST (egress-capable compute — read-only data,
 	// auto-escalated to Execute remotely, §9.3, like /api/routing/simulate).
-	reg("/api/briefing", V, secCost, s.handleBriefing)
-	reg("/api/briefing/opportunities", V, secCost, s.handleBriefingOpportunities)
-	reg("/api/briefing/justify", V, secCost, s.handleBriefingJustify)
-	reg("/api/briefing/session/", V, secCost, s.handleBriefingSession)
-	reg("/api/briefing/ask", V, secCost, s.handleBriefingAsk)
-	reg("/api/briefing/ask-past", V, secCost, s.handleBriefingAskPast)
-	reg("/api/briefing/coaching", V, secCost, s.handleBriefingCoaching)
+	reg("/api/briefing", V, secCost, s.maskDollarProse(s.handleBriefing))
+	reg("/api/briefing/opportunities", V, secCost, s.maskDollarProse(s.handleBriefingOpportunities))
+	reg("/api/briefing/justify", V, secCost, s.maskDollarProse(s.handleBriefingJustify))
+	reg("/api/briefing/session/", V, secCost, s.maskDollarProse(s.handleBriefingSession))
+	reg("/api/briefing/ask", V, secCost, s.maskDollarProse(s.handleBriefingAsk))
+	reg("/api/briefing/ask-past", V, secCost, s.maskDollarProse(s.handleBriefingAskPast))
+	reg("/api/briefing/coaching", V, secCost, s.maskDollarProse(s.handleBriefingCoaching))
 	// Stage 1 LLM follow-ups: triage (LLM prioritization + grouping of the
 	// opportunity card set — read-only compute, VIEW like /api/routing/
 	// simulate) and diagnose (per-pattern failure diagnosis). Both degrade to
 	// deterministic answers without egress.
-	reg("/api/briefing/triage", V, secCost, s.handleBriefingTriage)
-	reg("/api/briefing/diagnose", V, secCost, s.handleBriefingDiagnose)
+	reg("/api/briefing/triage", V, secCost, s.maskDollarProse(s.handleBriefingTriage))
+	reg("/api/briefing/diagnose", V, secCost, s.maskDollarProse(s.handleBriefingDiagnose))
 	// Stage 2 Pull rail: the "Actions recommended" rail over the active
 	// opportunity cards, each linking to the config surface + expected
 	// impact (and, for levered cards, the CTA apply). Pure read — VIEW.
-	reg("/api/briefing/actions", V, secCost, s.handleBriefingActions)
+	reg("/api/briefing/actions", V, secCost, s.maskDollarProse(s.handleBriefingActions))
 	// Stage 2 Apply CTA: plan is a pure simulate-first preview (compute
 	// over current evidence — VIEW); apply/revert WRITE config.toml →
 	// Local like /api/config/section/; ledger is the read-only undo
 	// history.
-	reg("/api/briefing/cta/plan", V, secCost, s.handleBriefingCTAPlan)
+	reg("/api/briefing/cta/plan", V, secCost, s.maskDollarProse(s.handleBriefingCTAPlan))
 	reg("/api/briefing/cta/apply", L, secCost, s.handleBriefingCTAApply)
 	reg("/api/briefing/cta/revert", L, secCost, s.handleBriefingCTARevert)
-	reg("/api/briefing/cta/ledger", V, secCost, s.handleBriefingCTALedger)
+	reg("/api/briefing/cta/ledger", V, secCost, s.maskDollarProse(s.handleBriefingCTALedger))
 	reg("/api/briefing/cta/suspend", L, secCost, s.handleBriefingCTASuspend)
 	reg("/api/briefing/cta/resume", L, secCost, s.handleBriefingCTAResume)
-	reg("/api/briefing/suspensions", V, secCost, s.handleBriefingSuspensions)
+	reg("/api/briefing/suspensions", V, secCost, s.maskDollarProse(s.handleBriefingSuspensions))
 	// /api/session/ keeps a View base — its many GET sub-route reads must work
 	// remotely — while its mutating sub-routes resolve explicitly via
 	// sessionSubRouteCapabilities (§9.1): /handoff + /launch are Execute (a

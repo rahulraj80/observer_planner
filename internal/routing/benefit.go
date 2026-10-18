@@ -66,14 +66,14 @@ func BenefitText(kind TurnKind, original, selected string, b BenefitBreakdown) s
 		fmt.Fprintf(&sb, "keep %s", selected)
 	}
 	if b.NetUSD < 0 {
-		// no-bare-usd:allow (observer_planner fork; not yet masked under the token display, see CONTINUATION.md)
+		// no-bare-usd:allow (masked under the token display at the dashboard boundary: maskDollarProse)
 		fmt.Fprintf(&sb, ": -$%.2f/prompt", -b.NetUSD)
 	} else {
-		// no-bare-usd:allow (observer_planner fork; not yet masked under the token display, see CONTINUATION.md)
+		// no-bare-usd:allow (masked under the token display at the dashboard boundary: maskDollarProse)
 		fmt.Fprintf(&sb, ": $%.2f/prompt", b.NetUSD)
 	}
 	if b.CacheForfeit > 0 {
-		// no-bare-usd:allow (observer_planner fork; not yet masked under the token display, see CONTINUATION.md)
+		// no-bare-usd:allow (masked under the token display at the dashboard boundary: maskDollarProse)
 		fmt.Fprintf(&sb, ", forfeits $%.2f warm prefix", b.CacheForfeit)
 	}
 	sb.WriteString(", ")

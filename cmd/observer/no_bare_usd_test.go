@@ -41,15 +41,20 @@ type noBareUSDEntry struct {
 	reason string
 }
 
+// proseMaskedReason: these composers write dollar figures into prose
+// (Briefing narrative and justifications, LLM prompts whose answers come back
+// through the Briefing routes, routing benefit lines). Every developer surface
+// that shows that prose masks it under the token view: the dashboard Briefing
+// and routing read routes through maskDollarProse (costtext.MaskStrings), the
+// MCP server through costtext.ShapeJSON, and the routing CLI through
+// costReportCommands.
+const proseMaskedReason = "prose masked under the token view at the dashboard boundary (maskDollarProse), the MCP server (ShapeJSON) and the routing CLI row"
+
 var noBareUSDAllow = map[string]noBareUSDEntry{
-	"internal/briefing/compose.go": {reason: "observer_planner fork: KNOWN GAP, not yet masked under the developer token display. " +
-		"Follow-up: route Briefing/LLM/benefit prose through costtext (docs/plans/CONTINUATION.md)."},
-	"internal/briefing/justify.go": {reason: "observer_planner fork: KNOWN GAP, not yet masked under the developer token display. " +
-		"Follow-up: route Briefing/LLM/benefit prose through costtext (docs/plans/CONTINUATION.md)."},
-	"internal/llmrun/prompts.go": {reason: "observer_planner fork: KNOWN GAP, not yet masked under the developer token display. " +
-		"Follow-up: route Briefing/LLM/benefit prose through costtext (docs/plans/CONTINUATION.md)."},
-	"internal/routing/benefit.go": {reason: "observer_planner fork: KNOWN GAP, not yet masked under the developer token display. " +
-		"Follow-up: route Briefing/LLM/benefit prose through costtext (docs/plans/CONTINUATION.md)."},
+	"internal/briefing/compose.go":    {reason: proseMaskedReason},
+	"internal/briefing/justify.go":    {reason: proseMaskedReason},
+	"internal/llmrun/prompts.go":      {reason: proseMaskedReason},
+	"internal/routing/benefit.go":     {reason: proseMaskedReason},
 	"cmd/observer/advise.go":          {cliRow: "advise"},
 	"cmd/observer/aggregate.go":       {cliRow: "aggregate"},
 	"cmd/observer/backfill.go":        {cliRow: "backfill"},
