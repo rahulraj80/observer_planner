@@ -205,6 +205,17 @@ type FileCursorSemantics struct {
 	// the total-size gate every adapter had before this field existed.
 	// Set it true only with the seek verified at a file:line.
 	StreamsFromCursor bool
+	// SelfContained declares that a parse of this file reads ONLY the file
+	// itself (and, for a SQLite store, its -wal / -shm / -journal sidecars),
+	// so an unchanged size + modification time since the last successful
+	// parse means there is nothing new. The watcher then skips the parse
+	// instead of re-reading the whole file on every poll tick (a 174 MB
+	// freebuff transcript was re-decoded every ~2 s, 2026-10-18). Leave it
+	// false for a file whose parse also reads other files (an index that
+	// points at message files, a sibling project JSON): a change there would
+	// go unnoticed. Set it true only with every read in the parse path
+	// verified.
+	SelfContained bool
 	// RewindsOnTruncate declares that the file's WRITER truncates or
 	// replaces it in place (log rotation: the old bytes move to a
 	// sibling and the same path restarts empty). For such a file a

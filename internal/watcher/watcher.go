@@ -142,6 +142,11 @@ type Watcher struct {
 	// the invalidation rules.
 	budgetCaptureMu   sync.Mutex
 	budgetCaptureSeen map[string]budgetCaptureSeenEntry
+	// unchangedMu/unchangedSeen memoize, per self-contained watermark store
+	// (adapter.FileCursorSemantics.SelfContained), the file snapshot taken
+	// before the last successful normal parse; see skipUnchangedStore.
+	unchangedMu   sync.Mutex
+	unchangedSeen map[string]budgetFileSnapshot
 }
 
 // rootCacheEntry is one memoized (adapter → deduped roots) mapping,
@@ -1131,6 +1136,14 @@ func (w *Watcher) processFileFrom(ctx context.Context, a adapter.Adapter, path s
 		return out, nil
 	}
 
+	// A self-contained watermark store whose size and modification time are
+	// unchanged since the last successful parse has nothing new: skip the
+	// whole-file read (see skipUnchangedStore).
+	pre, unchanged := w.skipUnchangedStore(a, path, forceFromZero, strict)
+	if unchanged {
+		return out, nil
+	}
+
 	off := resumeAt
 	if !forceFromZero {
 		var getErr error
@@ -1206,7 +1219,55 @@ func (w *Watcher) processFileFrom(ctx context.Context, a adapter.Adapter, path s
 	if setErr := w.persistProcessCursor(ctx, a, path, off, res); setErr != nil {
 		return out, setErr
 	}
+	w.rememberUnchangedStore(a, path, pre, res)
 	return out, nil
+}
+
+// unchangedSeenMax bounds the memo; a reset only costs one re-parse per file.
+const unchangedSeenMax = 4096
+
+// skipUnchangedStore reports whether a NORMAL pass may skip path because it is
+// a self-contained watermark store (adapter.FileCursorSemantics.SelfContained)
+// whose snapshot (size, modification time, SQLite sidecars) equals the one
+// taken before its last successful parse. pre is the snapshot to remember if
+// this pass parses successfully; it is taken BEFORE the parse, so a write that
+// lands mid-parse changes the next snapshot and forces another pass. Forced
+// rescans and the strict budget path never skip.
+func (w *Watcher) skipUnchangedStore(a adapter.Adapter, path string, forceFromZero, strict bool) (pre *budgetFileSnapshot, skip bool) {
+	if forceFromZero || strict {
+		return nil, false
+	}
+	sem := fileCursorSemantics(a, path)
+	if sem.Kind != adapter.CursorWatermark || !sem.SelfContained {
+		return nil, false
+	}
+	snap, err := strictBudgetFileSnapshot(a, path)
+	if err != nil {
+		return nil, false
+	}
+	key := budgetCaptureSeenKey(a, path)
+	w.unchangedMu.Lock()
+	prev, ok := w.unchangedSeen[key]
+	w.unchangedMu.Unlock()
+	if ok && strictBudgetFileChange(prev, snap) == "" {
+		return nil, true
+	}
+	return &snap, false
+}
+
+// rememberUnchangedStore records the pre-parse snapshot after a successful
+// parse that asked for no retry, so the next unchanged pass can skip.
+func (w *Watcher) rememberUnchangedStore(a adapter.Adapter, path string, pre *budgetFileSnapshot, res adapter.ParseResult) {
+	if pre == nil || res.RetrySuggested {
+		return
+	}
+	key := budgetCaptureSeenKey(a, path)
+	w.unchangedMu.Lock()
+	defer w.unchangedMu.Unlock()
+	if w.unchangedSeen == nil || len(w.unchangedSeen) >= unchangedSeenMax {
+		w.unchangedSeen = map[string]budgetFileSnapshot{}
+	}
+	w.unchangedSeen[key] = *pre
 }
 
 // skipProcessFile applies the pre-parse safety gates shared by ordinary and
