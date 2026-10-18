@@ -19,6 +19,7 @@ import { CostDisplayBanner } from "@/components/CostDisplayBanner";
 import { OrgIntelConsentBanner } from "@/components/OrgIntelConsentBanner";
 import { BudgetWarningBanner } from "@/components/BudgetWarningBanner";
 import { UpdateBanner } from "@/components/UpdateBanner";
+import { TelemetryNoticeBanner } from "@/components/TelemetryNoticeBanner";
 import { FirstCaptureToast } from "@/components/FirstCaptureToast";
 import { ToastViewport } from "@/components/Toast";
 import { ConfigSavePreviewHost } from "@/components/ConfigSavePreviewHost";
@@ -393,6 +394,7 @@ export default function App() {
                 which asks the public registry on a click. One loopback GET on
                 mount, no polling. */}
             <UpdateBanner />
+            <TelemetryNoticeBanner />
             <BudgetBanner />
             {/* The ORG's budgets for this developer (GET /api/budget/status,
                 15 s poll). In the shell, above the routes, so it shows on

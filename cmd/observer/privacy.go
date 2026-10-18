@@ -394,6 +394,15 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Detail: "Uploads exactly the bytes `observer cloud preview` showed for a consented session to the hosted cloud service and pulls the enrichment results back. Nothing uploads without the preview-then-consent step.",
 		},
 		{
+			// The usage telemetry rail (internal/telemetry,
+			// cmd/observer/telemetry_loop.go): content-free baseline tier on
+			// by default since Step 5.7 (telemetry plan), with a one-time notice.
+			Name:   "usage telemetry",
+			Gate:   "[telemetry].enabled = true AND a tier above off (default: on at the content-free baseline tier; turn off with `observer telemetry consent off`) AND OBSERVER_TELEMETRY unset or \"on\"",
+			Active: cfg.Telemetry.Enabled && cfg.Telemetry.EffectiveTier() != "off",
+			Detail: fmt.Sprintf("Batches content-free usage events (the published telemetry contract: event names, counts, sizes, timings; no prompt or output text) to %s at your consented tier. On by default at the content-free baseline tier; a one-time notice says so before the first batch. The install is identified by an id derived from this machine's cloud device key (no account); `observer telemetry data` shows what the server holds and `observer telemetry delete --yes` removes it. A node registered with a self-hosted reporter sends there instead.", cfg.Telemetry.Endpoint),
+		},
+		{
 			// The public model price table (internal/pricingfeed/client): a
 			// plain GET with Accept + If-None-Match only, on by default
 			// (config Default(): [pricing.feed] enabled + auto, 24 h).

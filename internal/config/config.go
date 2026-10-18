@@ -131,6 +131,12 @@ type Config struct {
 	// through its org rail and never consults the public feed (§C.3/D8). See
 	// PricingFeedConfig.
 	Pricing PricingSectionConfig `toml:"pricing"`
+	// Telemetry is the [telemetry] surface — the central telemetry rail
+	// CLIENT collector (telemetry-rail plan §D2, canonical in
+	// observer_reporter). LOCAL-ONLY config describing an opt-in node→
+	// internet rail: tier off is the zero value and the default, and with
+	// it nothing is collected, staged, or sent. See internal/telemetry.
+	Telemetry TelemetryConfig `toml:"telemetry"`
 	// Experiments is the [[experiments]] list — productized profile
 	// A/B runs (usability arc P6.4). See experiments.go.
 	Experiments []ExperimentConfig `toml:"experiments"`
@@ -4648,6 +4654,23 @@ func Default() Config {
 				URL:               DefaultPricingFeedURL,
 				PollIntervalHours: 24,
 			},
+		},
+		// Telemetry: BASELINE ON by default (telemetry plan Step 5.7, Rahul's
+		// ruling 2026-10-18: all installs, with a one-time notice). Baseline
+		// is content-free (contract 1.2.0 allow-lists every field). Same
+		// partial-merge rule as Pricing: an install with no [telemetry]
+		// section gets this seed, so it applies on upgrade too; an explicit
+		// `tier = "off"` or `enabled = false` in the file still wins, and the
+		// OBSERVER_TELEMETRY=off kill switch stops everything. The daemon
+		// prints and logs a one-time notice before the first batch
+		// (cmd/observer showTelemetryNoticeOnce) and the dashboard shows a
+		// dismissible banner (/api/telemetry/notice).
+		Telemetry: TelemetryConfig{
+			Tier:                 "baseline",
+			Endpoint:             DefaultTelemetryEndpoint,
+			Enabled:              true,
+			BatchIntervalSeconds: 900,
+			MaxBatchBytes:        262144,
 		},
 		// Loc (lines-of-code tracking) carries only the editor-endpoint
 		// credential. Same partial-merge rule as CacheTrack/Predict — an

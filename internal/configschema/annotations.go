@@ -235,6 +235,24 @@ var rules = []rule{
 	{prefix: "pricing.feed", tier: TierSensitive, restart: RestartRequired, section: "pricing", prominence: ProminenceAdvanced},
 	{prefix: "pricing.feed.enabled", exact: true, prominence: ProminencePrimary},
 
+	// ---------------------------------------------------------------- telemetry
+	// Telemetry rail W2 client collector (telemetry-rail plan §D2, canonical
+	// in observer_reporter). The block is SENSITIVE as a whole: the consent
+	// tier IS egress consent, and tier/endpoint changes are the loosening
+	// direction. Binds at daemon start (the loop reads config once), so a
+	// change needs a restart. LOCAL-ONLY config: never distributed via the
+	// org policy registry. Renders under the existing "observability"
+	// Settings section (telemetry is observability data; the closed org-
+	// facing section vocabulary has no separate id for it).
+	{prefix: "telemetry", tier: TierSensitive, restart: RestartRequired, section: "observability"},
+	{prefix: "telemetry.tier", exact: true, tier: TierSensitive, enum: []string{"", "off", "baseline", "enrichment", "deep", "usage", "error"}, prominence: ProminencePrimary},
+	{prefix: "telemetry.enabled", exact: true, tier: TierSensitive, prominence: ProminencePrimary},
+	{prefix: "telemetry.endpoint", exact: true, tier: TierSensitive},
+	// install_token_file is a credential-holding file INDIRECTION: sensitive
+	// (never plain), not a T2 secret leaf — the secret is the file's CONTENT,
+	// managed by the telemetry verbs, not a config value.
+	{prefix: "telemetry.install_token_file", exact: true, tier: TierSensitive},
+
 	// --------------------------------------------------------------------- loc
 	// Lines-of-code tracking. The block holds only the editor-endpoint
 	// credential; it maps onto the intelligence Settings section because

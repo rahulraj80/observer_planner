@@ -197,6 +197,8 @@ func newRootCmdWith(deps usageDeps) *cobra.Command {
 	// observer_planner fork: demo seeding + LLM analysis connections.
 	root.AddCommand(newDemoSeedCmd())
 	root.AddCommand(newLLMCmd())
+	// Usage telemetry (baseline, cloud lane): consent, status, data, delete.
+	root.AddCommand(newTelemetryCmd())
 	// Component catalog (components.go, modular packaging P0) plus the
 	// selection verbs status/select/add/remove/teardown/purge
 	// (components_manage.go, P1).

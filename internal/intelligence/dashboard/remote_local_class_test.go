@@ -444,6 +444,7 @@ var expectedClassification = map[string]string{
 	// /api/loc/editor-change above, and never something a remote caller writes.
 	"/api/update/extension-version": "L",
 	"/api/update/status":            "V",
+	"/api/telemetry/notice":         "V",
 	"/api/verbosity/aggregate":      "V",
 	"/ws/launch/":                   "V",
 	"/ws/terminal/status":           "V",

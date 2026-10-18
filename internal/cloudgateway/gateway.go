@@ -72,6 +72,9 @@ type Gateway struct {
 	clientOnce sync.Once
 	client     *cloudclient.Client
 	clientErr  error
+
+	// telemetry is the lazily built telemetry lane client (telemetry.go).
+	telemetry telemetryLaneState
 }
 
 // Open constructs a Gateway. It opens the credential store — scoped to the

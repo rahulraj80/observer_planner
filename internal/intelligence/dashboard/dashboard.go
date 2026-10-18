@@ -1071,6 +1071,7 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// version and update state to a viewer who can already see /api/status,
 	// and the Settings -> Health card needs it on every bind mode.
 	reg("/api/update/status", V, secSettings, s.handleUpdateStatus)
+	reg("/api/telemetry/notice", V, secSettings, s.handleTelemetryNotice)
 	// The node-local update ledger (`observer update history`). Local, not
 	// View: a ledger reason can name a local path, which is exactly why the
 	// org-bound posture carries enums only.

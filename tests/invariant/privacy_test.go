@@ -2773,6 +2773,15 @@ func TestSessionLimitSnapshotRowFieldSet(t *testing.T) {
 // SOURCE level so the regression fires before any row is even
 // constructed.
 var forbiddenCacheTables = []string{
+	// Telemetry collector tables (agent migrations 165 + 166, the private
+	// fork's BR-10 client rail). telemetry_staged holds consented, scrubbed,
+	// content-free events awaiting upload; telemetry_state holds the send
+	// watermark and dedup cursor. Their ONE egress is the telemetry client's
+	// own batch path (cmd/observer/telemetry_loop.go -> the reporter
+	// contract), which enforces consent + size caps; orgpush.go must never
+	// read these rows.
+	"telemetry_staged",
+	"telemetry_state",
 	"cache_segments",
 	"cache_entries",
 	// cache_events STAYS here after the enterprise-first per-event timeline

@@ -6,6 +6,18 @@ All notable changes to SuperBased Observer are documented here.
 
 ### Changed (observer_planner fork)
 
+- **Usage telemetry: content-free baseline on by default, sent to the SuperBased cloud (telemetry
+  plan Step 5.8).** This build gains the telemetry rail: the `baseline` tier with the loop on is the
+  default for every install (an explicit `tier = "off"` or `enabled = false` still wins;
+  `OBSERVER_TELEMETRY=off` stops everything). The first daemon start prints and logs a one-time notice,
+  and the dashboard shows a dismissible banner, before the first batch. Batches go to
+  `https://cloud.superbased.app` under an install id derived from the machine's cloud device key (no
+  account). Contract 1.2.0 refuses any field outside each event's allow-list, so no prompt or output
+  text, paths, project names or commands can be sent. Events: daily activity, sessions, tool counts,
+  token totals, error classes and per-prompt `prompt_cycle` (model family, token sizes, cache share,
+  end-to-end time). `observer telemetry data` / `delete --yes` show or remove what the server holds;
+  PRIVACY.md and `observer privacy` list it.
+
 - **Privacy copy states what leaves the machine instead of "no telemetry".** README, PRIVACY.md,
   the npm / PyPI / VS Code listings and walkthroughs, and the installers no longer claim "no
   telemetry", "zero outbound calls" or "nothing leaves your machine": two calls already run by

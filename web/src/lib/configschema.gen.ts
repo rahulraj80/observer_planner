@@ -560,6 +560,12 @@ export type ConfigKeyPath =
   "pricing.feed.auto" |
   "pricing.feed.url" |
   "pricing.feed.poll_interval_hours" |
+  "telemetry.tier" |
+  "telemetry.endpoint" |
+  "telemetry.enabled" |
+  "telemetry.batch_interval_seconds" |
+  "telemetry.max_batch_bytes" |
+  "telemetry.install_token_file" |
   "experiments" |
   "components.distro" |
   "components.add" |

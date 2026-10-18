@@ -40,6 +40,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/shutdown"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/surfaceenrich"
+	"github.com/marmutapp/superbased-observer/internal/telemetry"
 )
 
 // newStartCmd implements `observer start` — the full-mode entrypoint that
@@ -726,6 +727,26 @@ func newStartCmd() *cobra.Command {
 				} else {
 					otelExporter = exp
 					defer otelCleanup()
+				}
+			}
+
+			// Telemetry collector (telemetry rail W2) — same posture as the
+			// OTel exporter: constructed only when [telemetry] enabled = true
+			// AND the consent tier is above off AND the OBSERVER_TELEMETRY
+			// kill switch is not engaged; otherwise nothing is built, staged,
+			// or sent. A construction failure is WARN-only (P1: the rail must
+			// never block the daemon).
+			var telemetryCollector *telemetry.Collector
+			if lockErr == nil {
+				tc, telCleanup, telEnabled, terr := buildTelemetryCollector(ctx, configPath)
+				if terr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "telemetry collector disabled — init failed: %v\n", terr)
+				} else if telEnabled {
+					telemetryCollector = tc
+					defer telCleanup()
+					// Step 5.7: baseline is on by default; say so once,
+					// before the first batch (which waits ~15 min).
+					showTelemetryNoticeOnce(configPath, cmd.OutOrStdout(), slog.Default())
 				}
 			}
 
@@ -1779,6 +1800,19 @@ func newStartCmd() *cobra.Command {
 				d.run(gctx)
 				return nil
 			})
+			if telemetryCollector != nil {
+				// The telemetry loop never propagates an error (P1, same as the
+				// OTel sibling): consent tiers, transport failures, and kill
+				// switches are all handled inside; gctx-cancel ends it.
+				tcollector := telemetryCollector
+				tcfg := cfgForLock
+				g.Go(func() error {
+					if err := runTelemetryLoop(gctx, tcollector, tcfg, slog.Default()); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "telemetry loop stopped: %v\n", err)
+					}
+					return nil
+				})
+			}
 			if otelExporter != nil {
 				// The OTel exporter never propagates an error: a failing or
 				// unreachable collector must never cancel the proxy, watcher,
