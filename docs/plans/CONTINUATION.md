@@ -27,7 +27,7 @@ Rahul re-ordered the work:
 3. Then resume at Step 5.2 below.
 
 **Follow-ups opened by the 2026-10-17 planner merge:**
-- Briefing / LLM-prompt / routing-benefit prose formats dollars directly (`internal/briefing/compose.go`, `justify.go`, `internal/llmrun/prompts.go`, `internal/routing/benefit.go`). They are allow-listed in `cmd/observer/no_bare_usd_test.go` as a known gap: route them through `internal/costtext` so the developer token display masks them.
+- Briefing / LLM-prompt / routing-benefit prose formats dollars directly (`internal/briefing/compose.go`, `justify.go`, `internal/llmrun/prompts.go`, `internal/routing/benefit.go`). **Fixed 2026-10-18** on local branch `fix/usd-masking`: the dashboard masks that prose under the token view (`maskDollarProse` over `costtext.MaskStrings`) on the Briefing and routing read routes.
 - Port the org-side Briefing (org rollup, org digest, `briefing_aggregates` / `virtuous_cycle` push) into `superbased-observer-private`, where the org server now lives.
 - The fork's nav pages (briefing, guide, modelfit, apiexplorer, licenses) and the LLM settings card are outside the org-governance vocabulary (adding them would bump `nodegov.CurrentVocabLevel`, a contract with the org server). Their API routes are governed through the Cost / Analysis / Settings>intelligence sections.
 
