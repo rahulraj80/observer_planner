@@ -25,7 +25,7 @@ import (
 
 // Version is the contract semver. Additions are minor bumps; any change of
 // meaning is a new event name (never mutation) plus a major bump here.
-const Version = "1.2.0"
+const Version = "1.3.0"
 
 // EnvelopeVersion is the value expected in Envelope.EnvelopeVersion.
 const EnvelopeVersion = "v1"
@@ -180,6 +180,11 @@ var Provider = map[string]bool{
 // tool-call segments. "other" is the unclassified fallback so the classifier
 // never has to omit a label; it improves over time locally and only the tag is
 // ever transmitted.
+// Launch is the closed vocabulary of the optional "launch" field (contract
+// 1.3.0, telemetry plan Step 5.9): whether a session was launched from inside
+// the app (its dashboard terminal host) or elsewhere.
+var Launch = map[string]bool{"in_app": true, "external": true}
+
 var Segment = map[string]bool{
 	"user_prompt":  true,
 	"system_nudge": true,
@@ -274,11 +279,11 @@ var (
 var eventFields = map[string][]string{
 	EventAppStart:     {"arch", "os", "version"},
 	EventAppStop:      {"arch", "os", "version"},
-	EventSessionStart: {"adapter"},
-	EventSessionEnd:   {"adapter", "duration_ms", "outcome"},
+	EventSessionStart: {"adapter", "launch"},
+	EventSessionEnd:   {"adapter", "duration_ms", "launch", "outcome"},
 	EventToolUse:      {"count", "tool_name"},
 	EventError:        {"error_class", "surface"},
-	EventTokenUse:     {"cache_read", "model_tier", "role", "tokens_in", "tokens_out"},
+	EventTokenUse:     {"cache_read", "launch", "model_tier", "role", "tokens_in", "tokens_out"},
 	EventDayActive:    {},
 	EventBatchMeta:    {"dropped_count", "retry_count"},
 	EventDiagCommand:  {"argv_trunc", "exit", "tool_name"},
@@ -392,6 +397,14 @@ func validateEvent(ev *Event, installID string) error {
 		}
 		if !ok {
 			return fmt.Errorf("%w: %s unknown field %q", ErrBadSchema, ev.Event, k)
+		}
+	}
+	// Optional closed-vocabulary fields (contract 1.3.0): wherever the
+	// allow-list admits "launch", its value must be in Launch.
+	if v, ok := ev.Fields["launch"]; ok {
+		s, _ := v.(string)
+		if !Launch[s] {
+			return fmt.Errorf("%w: %s.launch %q", ErrBadSchema, ev.Event, s)
 		}
 	}
 	return nil

@@ -33,7 +33,8 @@ const telemetryDisclosure = `TELEMETRY — what each tier sends (the sharing lad
               model and provider family, input and output sizes, cache
               percentage, end-to-end time, and whether the turn was your
               prompt, a system nudge or a tool call (classified on this
-              machine; only the label is sent). Every field comes from a closed
+              machine; only the label is sent), and whether each session
+              was started from the app's own terminal. Every field comes from a closed
               list in the published contract (1.2.0), which refuses any other
               field: no prompt or output text, paths, project names or commands.
   enrichment  reserved for opt-in enrichment; today it sends what baseline sends.

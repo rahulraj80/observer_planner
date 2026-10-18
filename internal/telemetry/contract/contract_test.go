@@ -261,8 +261,8 @@ func TestContractDrift(t *testing.T) {
 	// Canonical expected values — copied identically into reporterd, the
 	// enterprise repo, and the individual repo. If any repo drifts, this test
 	// fails in that repo.
-	if Version != "1.2.0" {
-		t.Fatalf("Version = %q, want %q", Version, "1.2.0")
+	if Version != "1.3.0" {
+		t.Fatalf("Version = %q, want %q", Version, "1.3.0")
 	}
 	if EffectiveTier(TierUsage) != TierBaseline {
 		t.Fatalf("usage no longer normalizes to baseline — drift gate")
@@ -414,5 +414,30 @@ func TestNoTextChannels(t *testing.T) {
 	e.ClientVersion = "dev"
 	if err := ValidateEnvelope(e); err != nil {
 		t.Errorf(`client_version "dev" rejected: %v`, err)
+	}
+}
+
+// TestLaunchField pins the optional launch tag (contract 1.3.0, Step 5.9):
+// allowed on session_start/session_end/token_use with a closed vocabulary,
+// refused elsewhere and with any other value.
+func TestLaunchField(t *testing.T) {
+	ok := validEnvelope()
+	ok.Events[0] = Event{
+		Event: EventSessionStart, EventVersion: 1, SchemaVersion: "2026-09-14T00:00:00Z",
+		TS: "2026-09-14T09:59:00Z", InstallID: ok.InstallID, Seq: 100,
+		Classification: ClassSystemMeta, Purpose: PurposeFeature,
+		Fields: map[string]any{"adapter": "claudecode", "launch": "in_app"},
+	}
+	if err := ValidateEnvelope(ok); err != nil {
+		t.Fatalf("session_start with launch=in_app rejected: %v", err)
+	}
+	ok.Events[0].Fields["launch"] = "from my laptop"
+	if err := ValidateEnvelope(ok); !errors.Is(err, ErrBadSchema) {
+		t.Fatalf("free-text launch accepted: %v", err)
+	}
+	bad := validEnvelope()
+	bad.Events[0].Fields["launch"] = "in_app" // tool_use does not carry launch
+	if err := ValidateEnvelope(bad); !errors.Is(err, ErrBadSchema) {
+		t.Fatalf("launch on tool_use accepted: %v", err)
 	}
 }

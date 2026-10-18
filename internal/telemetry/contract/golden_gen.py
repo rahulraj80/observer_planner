@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CONTRACT_VERSION = "1.2.0"
+CONTRACT_VERSION = "1.3.0"
 ENVELOPE_VERSION = "v1"
 SCHEMA_VERSION = "2026-09-14T00:00:00Z"
 
@@ -48,6 +48,7 @@ VOCABS = {
     "provider": ["anthropic", "openai", "google", "cursor", "copilot",
                  "codex", "antigravity", "cline", "other"],
     "segment": ["user_prompt", "system_nudge", "tool_call", "other"],
+    "launch": ["external", "in_app"],
 }
 
 # Closed field-name allow-list per event (contract 1.2.0): any other key is
@@ -55,11 +56,11 @@ VOCABS = {
 FIELDS = {
     "app_start": ["arch", "os", "version"],
     "app_stop": ["arch", "os", "version"],
-    "session_start": ["adapter"],
-    "session_end": ["adapter", "duration_ms", "outcome"],
+    "session_start": ["adapter", "launch"],
+    "session_end": ["adapter", "duration_ms", "launch", "outcome"],
     "tool_use": ["count", "tool_name"],
     "error": ["error_class", "surface"],
-    "token_use": ["cache_read", "model_tier", "role", "tokens_in", "tokens_out"],
+    "token_use": ["cache_read", "launch", "model_tier", "role", "tokens_in", "tokens_out"],
     "day_active": [],
     "batch_meta": ["dropped_count", "retry_count"],
     "diag_command": ["argv_trunc", "exit", "tool_name"],

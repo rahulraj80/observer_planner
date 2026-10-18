@@ -25,7 +25,9 @@ const (
 // drains them in bounded batches. Construct with NewCollector; the zero
 // value is not usable.
 type Collector struct {
-	db *sql.DB
+	// inApp is the in-app-launched session set loaded per Derive pass (launch.go).
+	inApp map[string]bool
+	db    *sql.DB
 	// cfg is the resolved [telemetry] config snapshot.
 	cfg CollectorConfig
 	// now is the clock seam (tests).

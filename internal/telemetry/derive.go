@@ -99,6 +99,11 @@ func (c *Collector) Derive(ctx context.Context) (DeriveResult, error) {
 		return nil
 	}
 
+	inApp, err := inAppSessions(ctx, tx)
+	if err != nil {
+		return res, err
+	}
+	c.inApp = inApp
 	if err := c.deriveSessions(ctx, tx, since, stage); err != nil {
 		return res, err
 	}
@@ -162,7 +167,7 @@ func (c *Collector) deriveSessions(ctx context.Context, tx sqlTx, since string, 
 	for _, s := range list {
 		adapter := adapterName(s.tool)
 		if err := stage(contract.EventSessionStart, map[string]any{
-			"k": s.id, "adapter": adapter,
+			"k": s.id, "adapter": adapter, "launch": launchTag(c.inApp, s.id),
 		}); err != nil {
 			return err
 		}
@@ -181,6 +186,7 @@ func (c *Collector) deriveSessions(ctx context.Context, tx sqlTx, since string, 
 		}
 		if err := stage(contract.EventSessionEnd, map[string]any{
 			"k": s.id, "adapter": adapter, "duration_ms": dur, "outcome": outcome,
+			"launch": launchTag(c.inApp, s.id),
 		}); err != nil {
 			return err
 		}
@@ -277,7 +283,7 @@ func (c *Collector) deriveTokenUse(ctx context.Context, tx sqlTx, since string, 
 	for _, v := range list {
 		if err := stage(contract.EventTokenUse, map[string]any{
 			"k":          v.session + "/" + v.role + "/" + v.tier,
-			"model_tier": v.tier, "role": v.role,
+			"model_tier": v.tier, "role": v.role, "launch": launchTag(c.inApp, v.session),
 			"tokens_in": v.in, "tokens_out": v.out, "cache_read": v.cache,
 		}); err != nil {
 			return err
