@@ -31,7 +31,9 @@ const telemetryDisclosure = `TELEMETRY — what each tier sends (the sharing lad
               durations, tool-use counts, token totals by model tier, error
               classes, app version and OS/arch, and for each prompt cycle the
               model and provider family, input and output sizes, cache
-              percentage and end-to-end time. Every field comes from a closed
+              percentage, end-to-end time, and whether the turn was your
+              prompt, a system nudge or a tool call (classified on this
+              machine; only the label is sent). Every field comes from a closed
               list in the published contract (1.2.0), which refuses any other
               field: no prompt or output text, paths, project names or commands.
   enrichment  reserved for opt-in enrichment; today it sends what baseline sends.
@@ -76,6 +78,7 @@ func newTelemetryCmd() *cobra.Command {
 	cmd.AddCommand(newTelemetryResetIDCmd())
 	cmd.AddCommand(newTelemetryDataCmd())
 	cmd.AddCommand(newTelemetryDeleteCmd())
+	cmd.AddCommand(newTelemetryNudgeScanCmd())
 	return cmd
 }
 

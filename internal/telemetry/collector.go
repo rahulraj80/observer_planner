@@ -47,6 +47,10 @@ type CollectorConfig struct {
 	BatchInterval time.Duration
 	// MaxBatchBytes is the compressed-payload cap (plan §D3: ~256 KB).
 	MaxBatchBytes int
+	// Nudge is the segment classifier's signature (Step 5.6). The zero value
+	// means DefaultNudgeRules; the daemon passes the defaults merged with the
+	// local rules file (LoadNudgeRules).
+	Nudge NudgeRules
 }
 
 // NewCollector opens a collector over the node's local DB handle. It never

@@ -43,7 +43,8 @@ export function TelemetryNoticeBanner() {
       <div className="min-w-0 flex-1 text-[12px] text-fg-2">
         <p>
           Usage telemetry is on ({n.tier}). It sends content-free counters only (activity, token totals,
-          tool counts, error classes, and per prompt the model family, token sizes, cache share and time) to{" "}
+          tool counts, error classes, and per prompt the model family, token sizes, cache share, time and a
+          prompt/nudge/tool label classified on this machine) to{" "}
           <span className="font-mono">{n.endpoint}</span>. No prompt or output text, paths, project names or
           commands.
         </p>

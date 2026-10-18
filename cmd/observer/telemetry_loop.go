@@ -46,6 +46,7 @@ func buildTelemetryCollector(ctx context.Context, configPath string) (c *telemet
 		ClientVersion: version,
 		BatchInterval: time.Duration(cfg.Telemetry.BatchIntervalSeconds) * time.Second,
 		MaxBatchBytes: cfg.Telemetry.MaxBatchBytes,
+		Nudge:         loadTelemetryNudgeRules(cfg),
 	})
 	return collector, cleanup, true, nil
 }

@@ -11,12 +11,15 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/telemetry/contract"
 )
 
-// Prompt cycles (contract event prompt_cycle; telemetry plan Step 5.7): one
-// event per user prompt, from the prompt to the last model activity before the
-// session's next prompt. Sourced from the transcript-derived tables every
+// Prompt cycles (contract event prompt_cycle; telemetry plan Steps 5.7, 5.6): a
+// cycle runs from a prompt to the last model activity before the session's
+// next prompt, and is reported as up to two segments sharing a turn_id: the
+// trigger (user_prompt, or system_nudge when the local classifier recognizes
+// harness-injected text) and the tool_call remainder. Sourced from the transcript-derived tables every
 // adapter fills (actions.user_prompt, token_usage), so it works with or
 // without the proxy. Content-free: only the model/provider FAMILY, token
-// sizes, the cache share and the end-to-end time leave; no prompt text is read.
+// sizes, the cache share, the end-to-end time and the segment TAG leave; the
+// prompt text is read locally only to classify it.
 
 const (
 	// promptDedupGap collapses the same prompt recorded twice (hook and
@@ -28,8 +31,9 @@ const (
 )
 
 type cyclePrompt struct {
-	id int64
-	ts time.Time
+	id      int64
+	ts      time.Time
+	segment string // user_prompt | system_nudge (classified locally)
 }
 
 type cycleTokens struct {
@@ -44,8 +48,16 @@ func (c *Collector) derivePromptCycles(ctx context.Context, tx sqlTx, since stri
 	if !contract.TierAllows(c.cfg.Tier, contract.EventPromptCycle) {
 		return nil
 	}
+	rules := c.cfg.Nudge
+	if len(rules.MarkupTags) == 0 && len(rules.Prefixes) == 0 && len(rules.TextHashes) == 0 {
+		rules = DefaultNudgeRules()
+	}
+	// The prompt text is read only to classify it here (Step 5.6); it is
+	// never staged, logged or returned.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, COALESCE(session_id, ''), timestamp FROM actions
+		SELECT id, COALESCE(session_id, ''), timestamp,
+		       COALESCE(NULLIF(raw_tool_input, ''), target, '')
+		FROM actions
 		WHERE action_type = 'user_prompt' AND timestamp >= ?
 		ORDER BY session_id, id`, since)
 	if err != nil {
@@ -54,10 +66,10 @@ func (c *Collector) derivePromptCycles(ctx context.Context, tx sqlTx, since stri
 	prompts := map[string][]cyclePrompt{}
 	for rows.Next() {
 		var (
-			id      int64
-			sid, ts string
+			id            int64
+			sid, ts, text string
 		)
-		if err := rows.Scan(&id, &sid, &ts); err != nil {
+		if err := rows.Scan(&id, &sid, &ts, &text); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("telemetry.derivePromptCycles: scan prompt: %w", err)
 		}
@@ -65,7 +77,7 @@ func (c *Collector) derivePromptCycles(ctx context.Context, tx sqlTx, since stri
 		if sid == "" || !ok {
 			continue
 		}
-		prompts[sid] = append(prompts[sid], cyclePrompt{id: id, ts: t})
+		prompts[sid] = append(prompts[sid], cyclePrompt{id: id, ts: t, segment: rules.Classify(text)})
 	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("telemetry.derivePromptCycles: prompts: %w", err)
@@ -120,39 +132,55 @@ func (c *Collector) stageSessionCycles(ctx context.Context, tx sqlTx, sid string
 			}
 			bound = now
 		}
-		fields, ok := cycleFields(p.ts, bound, toks)
-		if !ok {
-			continue // no model activity in the cycle: nothing to report
-		}
-		fields["k"] = fmt.Sprintf("cycle/%d", p.id)
-		if err := stage(contract.EventPromptCycle, fields); err != nil {
-			return err
+		segs := cycleSegments(p.ts, bound, toks, p.segment)
+		turn := fmt.Sprintf("c%d", p.id) // content-free local id, ties segments of one cycle
+		for i, f := range segs {
+			f["turn_id"] = turn
+			f["k"] = fmt.Sprintf("cycle/%d/%d", p.id, i)
+			if err := stage(contract.EventPromptCycle, f); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// cycleFields summarizes the token rows in [start, bound). The model is the
-// one with the most output tokens in the cycle; the end is its last token row.
-func cycleFields(start, bound time.Time, toks []cycleTokens) (map[string]any, bool) {
-	var in, out, cacheRead, create int64
-	var end time.Time
-	byModel := map[string]int64{}
+// cycleSegments splits the cycle [start, bound) into its segments (Step 5.6):
+// the TRIGGER segment (the prompt's own tag, user_prompt or system_nudge) runs
+// from the prompt to the first model response; the TOOL_CALL segment covers
+// every later model call in the cycle (the ones tool results drive), from the
+// first response to the last. Summing a cycle's segments (same turn_id) gives
+// its full end-to-end time. No model activity: no segments.
+func cycleSegments(start, bound time.Time, toks []cycleTokens, trigger string) []map[string]any {
+	var in []cycleTokens
 	for _, t := range toks {
-		if t.ts.Before(start) || !t.ts.Before(bound) {
-			continue
+		if !t.ts.Before(start) && t.ts.Before(bound) {
+			in = append(in, t)
 		}
+	}
+	if len(in) == 0 {
+		return nil
+	}
+	sort.SliceStable(in, func(i, j int) bool { return in[i].ts.Before(in[j].ts) })
+	first := in[0]
+	out := []map[string]any{segmentFields(in[:1], start, first.ts, trigger)}
+	if len(in) > 1 {
+		out = append(out, segmentFields(in[1:], first.ts, in[len(in)-1].ts, SegmentToolCall))
+	}
+	return out
+}
+
+// segmentFields summarizes one segment's token rows. The model is the one
+// with the most output tokens in the segment.
+func segmentFields(rows []cycleTokens, from, to time.Time, segment string) map[string]any {
+	var in, out, cacheRead, create int64
+	byModel := map[string]int64{}
+	for _, t := range rows {
 		in += t.in
 		out += t.out
 		cacheRead += t.cacheRead
 		create += t.create
 		byModel[t.model] += t.out + 1 // +1: a model with zero output still counts
-		if t.ts.After(end) {
-			end = t.ts
-		}
-	}
-	if len(byModel) == 0 {
-		return nil, false
 	}
 	model, best := "", int64(-1)
 	for m, n := range byModel {
@@ -172,11 +200,9 @@ func cycleFields(start, bound time.Time, toks []cycleTokens) (map[string]any, bo
 		"input_size":             inputSize,
 		"output_size":            out,
 		"cache_percentage":       cachePct,
-		"end_to_end_duration_ms": end.Sub(start).Milliseconds(),
-		// The 5.6 classifier refines this (system nudges vs typed prompts);
-		// until then every cycle starts from a user_prompt action.
-		"segment": "user_prompt",
-	}, true
+		"end_to_end_duration_ms": to.Sub(from).Milliseconds(),
+		"segment":                segment,
+	}
 }
 
 func sessionTokens(ctx context.Context, tx sqlTx, sid, since string) ([]cycleTokens, error) {

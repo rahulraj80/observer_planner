@@ -22,8 +22,9 @@ const telemetryNoticeMarker = "telemetry_notice_v1"
 const telemetryNotice = `Usage telemetry is on (baseline tier).
   What is sent: content-free counters only: daily activity, session counts and
   durations, tool-use counts, token totals, error classes, and per prompt the
-  model and provider family, token sizes, cache share and end-to-end time. No
-  prompt or output text, file paths, project names or commands.
+  model and provider family, token sizes, cache share, end-to-end time and a
+  label (your prompt, system nudge or tool call) classified on this machine.
+  No prompt or output text, file paths, project names or commands.
   Where: %s, identified by an install id derived from this machine's device
   key (no account). First batch in about 15 minutes.
   See it:   observer telemetry data

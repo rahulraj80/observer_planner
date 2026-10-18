@@ -400,7 +400,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Name:   "usage telemetry",
 			Gate:   "[telemetry].enabled = true AND a tier above off (default: on at the content-free baseline tier; turn off with `observer telemetry consent off`) AND OBSERVER_TELEMETRY unset or \"on\"",
 			Active: cfg.Telemetry.Enabled && cfg.Telemetry.EffectiveTier() != "off",
-			Detail: fmt.Sprintf("Batches content-free usage events (the published telemetry contract: event names, counts, sizes, timings; no prompt or output text) to %s at your consented tier. On by default at the content-free baseline tier; a one-time notice says so before the first batch. The install is identified by an id derived from this machine's cloud device key (no account); `observer telemetry data` shows what the server holds and `observer telemetry delete --yes` removes it. A node registered with a self-hosted reporter sends there instead.", cfg.Telemetry.Endpoint),
+			Detail: fmt.Sprintf("Batches content-free usage events (the published telemetry contract: event names, counts, sizes, timings; no prompt or output text) to %s at your consented tier. On by default at the content-free baseline tier; a one-time notice says so before the first batch. Each prompt cycle carries a label (your prompt, a system nudge or a tool call) that a local classifier assigns on this machine; the prompt text is never sent for it. The install is identified by an id derived from this machine's cloud device key (no account); `observer telemetry data` shows what the server holds and `observer telemetry delete --yes` removes it. A node registered with a self-hosted reporter sends there instead.", cfg.Telemetry.Endpoint),
 		},
 		{
 			// The public model price table (internal/pricingfeed/client): a
