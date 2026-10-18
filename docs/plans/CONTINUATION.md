@@ -92,7 +92,7 @@ We are implementing default-on baseline telemetry across both the individual rep
 - Step 5.4: Reporterd self-host distribution story + runbook.
 - Step 5.5: Reporterd enterprise tenant web dashboard + tenant API.
 - Step 5.6: System-nudge classifier bootstrap + improvement loop (in the observer repos, local).
-- Step 5.7: Enterprise repo baseline telemetry rail default-on (contract mirror + config default + emit baseline event + install key + settings exposure).
+- Step 5.7: Enterprise repo baseline telemetry rail default-on — **built 2026-10-18** on private branch `feat/telemetry-default-on` (stacked on the lane branch; local): `prompt_cycle` derived from transcripts (`3ce317289`; input_size = total input tokens over the cycle, segment `user_prompt` until 5.6), reset-id watermark fix (`2d659fcf4`), default-on for ALL installs with a one-time daemon notice + dashboard banner (`d371e67e4`, Rahul's ruling). **Release order matters:** observer-cloud with migration 0042 must be live before a build with these defaults ships, or every install sends to a lane that does not exist yet.
 - Step 5.8: Individual repo baseline telemetry rail default-on (build rail from scratch here).
 - Step 5.9: Giveaways / partner providers.
 - Step 5.11: UI simplification — move less-used options into an Advanced/Export mode so the interface looks less daunting. (**User ruling: this is picked DEAD LAST, after all other development work is complete.**)
