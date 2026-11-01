@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	keyring "github.com/zalando/go-keyring"
+	"github.com/marmutapp/superbased-observer/internal/keystore"
 )
 
 // Service is the keyring service namespace holding LLM analysis keys.
@@ -56,17 +56,11 @@ func OpenDir(dir string) *Store {
 // Backend names the active backend for diagnostics ("keychain" or "file").
 func (s *Store) Backend() string { return s.backend }
 
-// keychainUsable probes the keyring with a throwaway record. A full
-// set/get/delete cycle is the only reliable cross-platform availability
-// test (ErrUnsupportedPlatform alone misses headless Linux without a
-// Secret Service). The probe record is always deleted.
+// keychainUsable probes the keyring with a throwaway record through
+// internal/keystore (a full set/get/delete cycle, bounded in time; the probe
+// record is always deleted).
 func keychainUsable() bool {
-	if err := keyring.Set(Service, probeRecord, "1"); err != nil {
-		return false
-	}
-	got, err := keyring.Get(Service, probeRecord)
-	_ = keyring.Delete(Service, probeRecord)
-	return err == nil && got == "1"
+	return keystore.KeychainProbe(Service, probeRecord) == nil
 }
 
 // Save stores key under label (the connection id).
@@ -75,7 +69,7 @@ func (s *Store) Save(label, key string) error {
 		return fmt.Errorf("llmkeyring: label must not be empty")
 	}
 	if s.backend == "keychain" {
-		if err := keyring.Set(Service, label, key); err != nil {
+		if err := keystore.KeyringSet(Service, label, key); err != nil {
 			return fmt.Errorf("llmkeyring.Save: %w", err)
 		}
 		return nil
@@ -92,8 +86,8 @@ func (s *Store) Save(label, key string) error {
 // Load returns the key stored for label. ErrNoKey when absent.
 func (s *Store) Load(label string) (string, error) {
 	if s.backend == "keychain" {
-		v, err := keyring.Get(Service, label)
-		if errors.Is(err, keyring.ErrNotFound) {
+		v, err := keystore.KeyringGet(Service, label)
+		if errors.Is(err, keystore.ErrKeyringNotFound) {
 			return "", ErrNoKey
 		}
 		if err != nil {
@@ -114,7 +108,7 @@ func (s *Store) Load(label string) (string, error) {
 // Delete removes the key for label. Absence is not an error.
 func (s *Store) Delete(label string) error {
 	if s.backend == "keychain" {
-		if err := keyring.Delete(Service, label); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		if err := keystore.KeyringDelete(Service, label); err != nil && !errors.Is(err, keystore.ErrKeyringNotFound) {
 			return fmt.Errorf("llmkeyring.Delete: %w", err)
 		}
 		return nil

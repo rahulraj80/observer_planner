@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/testsupport/latencygate"
 )
 
 // testSnapshot returns a snapshot over the seed tier table with a
@@ -438,9 +439,7 @@ func TestRuleWhen_Matches(t *testing.T) {
 // under -race, where the detector's instrumentation is what the 5 ms
 // would otherwise be measuring.
 func TestDecideHotPathBudget(t *testing.T) {
-	if testing.Short() {
-		t.Skip("wall-clock latency budget: not a -short gate")
-	}
+	latencygate.Gate(t) // listed, and skipped under -short and in a loaded CI shard
 	budget := 5 * time.Millisecond * decideLatencyRaceMultiplier
 	p := valuePolicy(t)
 	snap := testSnapshot()

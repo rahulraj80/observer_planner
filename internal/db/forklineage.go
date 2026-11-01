@@ -3,58 +3,101 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+
+	"github.com/marmutapp/superbased-observer/internal/migplan"
 )
 
 // observer_planner fork lineage.
 //
-// Builds of the observer_planner fork made before 2026-10-17 numbered their
-// own migrations 078-085 (briefing snapshots, analysis calls, turn kind,
-// license usage, dispatch benefit, cross-provider, session-summary FTS, a
-// token_usage index). Upstream later shipped DIFFERENT migrations under the
-// same numbers (078-085, then up to 163). The runner keeps one applied-version
-// watermark, so a store created by an old fork build would sit at version
-// 78..85 and silently skip upstream's 078-085.
+// The fork numbers its own migrations after upstream's highest, and upstream
+// has twice since shipped DIFFERENT migrations under the fork's numbers:
 //
-// The fork's migrations now live at forkFirst..forkLast, after upstream's.
-// reconcileForkLineage rewinds such a store to version 77 so upstream's
-// 078 onward apply, and dropExistingAddColumns lets the renumbered fork
+//   - Builds before 2026-10-17 ran the fork's steps as 078-085; upstream
+//     later used 078-163.
+//   - Builds from 2026-10-17 to 2026-11-01 ran them as 164-170; upstream's
+//     v1.37 release used 164-211.
+//
+// A store from such a build is pre-ledger (its runner kept only the 'version'
+// record), so the ledger would adopt upstream's same-numbered steps as
+// applied without running them. reconcileForkLineage rewinds such a store's
+// version record to the last step both lineages share, so upstream's steps
+// from there on run, and dropExistingAddColumns lets the renumbered fork
 // migrations run again over columns the old build already added.
+
+// forkGeneration is one old numbering of the fork's migrations: a pre-ledger
+// store whose version record is in (base, max] and that holds the fork-only
+// briefing_snapshots table was written by that generation's builds.
+type forkGeneration struct {
+	base int // last version both lineages shared
+	max  int // highest version that generation's builds recorded
+}
+
+// forkGenerations is walked top-down; the ranges do not overlap.
+var forkGenerations = []forkGeneration{
+	{base: 77, max: 85},   // fork steps as 078-085 (before 2026-10-17)
+	{base: 163, max: 170}, // fork steps as 164-170 (2026-10-17 to 2026-11-01)
+}
+
 const (
-	forkLineageBase = 77  // last version both lineages share
-	forkLineageMax  = 85  // highest version an old fork build recorded
-	forkFirst       = 164 // first renumbered fork migration
-	forkLast        = 170 // last renumbered fork migration
+	forkFirst = 212 // first renumbered fork migration
+	forkLast  = 218 // last renumbered fork migration
 )
 
 func isForkMigration(v int) bool { return v >= forkFirst && v <= forkLast }
 
-// reconcileForkLineage returns the applied version to migrate from. For a
-// store written by an old fork build (watermark 78..85 and the fork-only
-// briefing_snapshots table present) it rewinds the recorded watermark to
-// forkLineageBase inside the caller's migration transaction, so a failure
-// later in the batch rolls the rewind back too. Any other store is untouched.
-func reconcileForkLineage(ctx context.Context, conn *sql.Conn, applied int) (int, error) {
-	if applied <= forkLineageBase || applied > forkLineageMax {
-		return applied, nil
-	}
-	var n int
+// reconcileForkLineage rewinds the version record of a store written by an
+// old fork generation to that generation's base, inside the caller's
+// migration transaction, so a failure later in the batch rolls the rewind
+// back too. A store with a ledger, an upstream store, or a fresh database is
+// untouched.
+func reconcileForkLineage(ctx context.Context, conn *sql.Conn) error {
+	var ledgered int
 	if err := conn.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'briefing_snapshots'`,
-	).Scan(&n); err != nil {
-		return applied, fmt.Errorf("db.reconcileForkLineage: probe: %w", err)
+		`SELECT COUNT(*) FROM schema_meta WHERE key = ?`, migplan.HorizonKey,
+	).Scan(&ledgered); err != nil {
+		return fmt.Errorf("db.reconcileForkLineage: probe ledger: %w", err)
 	}
-	if n == 0 {
-		return applied, nil // an upstream store at 78..85: nothing to reconcile
+	if ledgered > 0 {
+		return nil
 	}
-	if _, err := conn.ExecContext(ctx,
-		`UPDATE schema_meta SET value = ? WHERE key = 'version'`, fmt.Sprint(forkLineageBase),
-	); err != nil {
-		return applied, fmt.Errorf("db.reconcileForkLineage: rewind: %w", err)
+	var raw string
+	err := conn.QueryRowContext(ctx, `SELECT value FROM schema_meta WHERE key = 'version'`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
 	}
-	return forkLineageBase, nil
+	if err != nil {
+		return fmt.Errorf("db.reconcileForkLineage: read version: %w", err)
+	}
+	applied, err := strconv.Atoi(raw)
+	if err != nil {
+		return fmt.Errorf("db.reconcileForkLineage: version %q: %w", raw, err)
+	}
+	for _, g := range forkGenerations {
+		if applied <= g.base || applied > g.max {
+			continue
+		}
+		var n int
+		if err := conn.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'briefing_snapshots'`,
+		).Scan(&n); err != nil {
+			return fmt.Errorf("db.reconcileForkLineage: probe: %w", err)
+		}
+		if n == 0 {
+			return nil // an upstream store in this range: nothing to reconcile
+		}
+		if _, err := conn.ExecContext(ctx,
+			`UPDATE schema_meta SET value = ? WHERE key = 'version'`, strconv.Itoa(g.base),
+		); err != nil {
+			return fmt.Errorf("db.reconcileForkLineage: rewind: %w", err)
+		}
+		return nil
+	}
+	return nil
 }
 
 var addColumnRE = regexp.MustCompile(`(?im)^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)[^;]*;\s*$`)
