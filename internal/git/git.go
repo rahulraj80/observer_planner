@@ -298,7 +298,7 @@ func linkedWorktree(gitFile string) (worktreeDirs, bool) {
 	if err != nil {
 		return worktreeDirs{}, false
 	}
-	common := strings.TrimSpace(string(body))
+	common := pointerValue(string(body))
 	if common == "" {
 		return worktreeDirs{}, false
 	}
@@ -313,7 +313,7 @@ func linkedWorktree(gitFile string) (worktreeDirs, bool) {
 	if err != nil {
 		return worktreeDirs{}, false
 	}
-	backPath, ok := resolveGitPointer(gitDir, strings.TrimSpace(string(back)))
+	backPath, ok := resolveGitPointer(gitDir, pointerValue(string(back)))
 	if !ok || !sameFile(backPath, gitFile) {
 		return worktreeDirs{}, false
 	}
@@ -409,6 +409,19 @@ func readGitFileDir(path string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// pointerValue is a path git stored in one of its worktree pointer files
+// (`<gitdir>/commondir`, `<gitdir>/gitdir`), trimmed and translated to this
+// host's flavor the way readGitFileDir translates the `.git` file's own
+// value. Git for Windows writes absolute pointers as `D:/repo/...`; read
+// by a daemon inside WSL that spelling is not absolute, so without the
+// translation the back-pointer check refused every worktree Windows git
+// created and each one became a project of its own (live 2026-11-07: 56
+// `.claude/worktrees/*` projects on one node). A relative value (`../..`)
+// and a native absolute one pass through unchanged.
+func pointerValue(raw string) string {
+	return pathnorm.NormalizeForeign(strings.TrimSpace(raw))
 }
 
 // resolveGitPointer resolves a path git stored in a worktree pointer (the
@@ -657,6 +670,43 @@ func CheckoutRootTarget(root string) (string, bool) {
 	return loc.root, true
 }
 
+// ContainingRootTarget reports the project root of a stored projects row
+// that lies inside a git working tree without being that tree's project
+// root: Info.Root of the tree containing it (the main repository inside a
+// linked worktree, the top level inside a subdirectory), the rule the
+// watcher files a session by. Builds before the hook root fix (2026-11-07)
+// filed every hook row under the raw working directory, so a session that
+// worked in a linked worktree or changed into a subdirectory left rows on a
+// projects row of its own.
+//
+// A root no longer on disk (a removed worktree) is judged by its nearest
+// existing ancestor, and gone is true: the folder sat inside that working
+// tree when its rows were written. ok is false for a project root itself, a
+// root inside no git working tree, and a root that is not an absolute path
+// on this host.
+func ContainingRootTarget(root string) (target string, gone, ok bool) {
+	if root == "" || !filepath.IsAbs(root) {
+		return "", false, false
+	}
+	dir := filepath.Clean(root)
+	for !isDir(dir) {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false, false
+		}
+		dir, gone = parent, true
+	}
+	abs, err := absResolveSymlinks(dir)
+	if err != nil {
+		return "", false, false
+	}
+	loc := locateGit(abs)
+	if !loc.ok || loc.root == "" || (!gone && loc.root == abs) {
+		return "", false, false
+	}
+	return loc.root, gone, true
+}
+
 // LinkedWorktreeCheckouts lists the top levels of the linked worktrees of
 // the repository whose main top level is root, in admin-directory name
 // order, at most max (0: none). It reads `<root>/.git/worktrees/*/gitdir`
@@ -720,7 +770,7 @@ func ListLinkedWorktrees(root string, max int) WorktreeListing {
 			l.Complete = false
 			continue
 		}
-		back, ok := resolveGitPointer(admin, strings.TrimSpace(string(body)))
+		back, ok := resolveGitPointer(admin, pointerValue(string(body)))
 		if !ok {
 			l.Complete = false
 			continue

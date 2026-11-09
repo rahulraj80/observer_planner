@@ -187,3 +187,28 @@ func TestLookupAndFieldPaths(t *testing.T) {
 		t.Error("Lookup of a table path must fail (tables are not leaves)")
 	}
 }
+
+// TestSandboxRestartClasses (D-R4-1): one case per [terminal.sandbox]
+// restart rule. The block binds on the next launch; workspaces_dir alone
+// needs a daemon restart.
+func TestSandboxRestartClasses(t *testing.T) {
+	cases := []struct {
+		path string
+		want Restart
+	}{
+		{"terminal.sandbox.enabled", RestartNextSpawn},
+		{"terminal.sandbox.backends", RestartNextSpawn},
+		{"terminal.sandbox.egress_allow_hosts", RestartNextSpawn},
+		{"terminal.sandbox.workspaces_dir", RestartRequired},
+	}
+	for _, c := range cases {
+		l, ok := Lookup(c.path)
+		if !ok {
+			t.Errorf("Lookup(%q): not found", c.path)
+			continue
+		}
+		if l.Restart != c.want {
+			t.Errorf("Lookup(%q).Restart = %q, want %q", c.path, l.Restart, c.want)
+		}
+	}
+}

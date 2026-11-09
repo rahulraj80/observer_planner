@@ -17,6 +17,17 @@ export {
   type SurfaceBadgeProps,
   type SurfaceKind,
 } from "./SurfaceBadge";
+export {
+  ExecutionLocationBadge,
+  EXECUTION_FILTER_OPTIONS,
+  EXECUTION_LOCATIONS,
+  executionLocationLabel,
+  isExecutionFilterValue,
+  isExecutionLocation,
+  type ExecutionFilterValue,
+  type ExecutionLocation,
+  type ExecutionLocationBadgeProps,
+} from "./ExecutionLocationBadge";
 export { SegmentedControl, type Segment } from "./SegmentedControl";
 export { GranularityControl } from "./GranularityControl";
 export { TabStrip, TabPanel, useTabVisited, tabDomId, panelDomId, type TabDef } from "./Tabs";
@@ -111,6 +122,8 @@ export { ObsFlight, ObsLoader, ObsInline, ObsMoment, ObsLanding, ObsJobRider } f
 export { PermissionDenied, ReadOnlyBanner } from "./PermissionDenied";
 export { LiveDot, type LiveTone } from "./LiveDot";
 export { Modal } from "./Modal";
+export { ConfirmDialogHost, ConfirmDialogView, type ConfirmDialogViewProps } from "./ConfirmDialog";
+export { confirmDialog, type ConfirmDialogOptions, type ConfirmTone } from "./confirmDialogModel";
 export { MarkTile } from "./MarkTile";
 export { Meter } from "./Meter";
 export { ProgressRing } from "./ProgressRing";
@@ -126,6 +139,7 @@ export {
   type JsonPreviewProps,
 } from "./JsonPreview";
 export { ConfirmButton, armedBehaviour, type ArmedBehaviour, type ConfirmButtonProps, type ConfirmReason } from "./ConfirmButton";
+export { type ArmedNoteSide } from "./confirmButtonModel";
 export { OneTimeSecret } from "./OneTimeSecret";
 export { SetupChecklist, type SetupChecklistStep } from "./SetupChecklist";
 export {

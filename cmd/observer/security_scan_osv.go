@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/extrun"
 	"github.com/marmutapp/superbased-observer/internal/secscan"
 	"github.com/marmutapp/superbased-observer/internal/secscan/depscan"
@@ -53,19 +54,13 @@ func writeOSVCanary(dir string) error {
 	return nil
 }
 
-// osvInstallOffer is the guided vendor install text (D-766): the vendor's
-// own channels, shown for the user to run. Observer runs none of them.
-const osvInstallOffer = `osv-scanner is not bundled with Observer. To use the security.scan.osv driver, install it
-yourself from the vendor (https://google.github.io/osv-scanner/installation/), for example:
-
-  go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.6.0
-  brew install osv-scanner                      (macOS or Linux with Homebrew)
-  a release binary from https://github.com/google/osv-scanner/releases/tag/v2.6.0
-    (check it against the release's osv-scanner_SHA256SUMS; linux amd64 sha256 %s)
-
-Observer installs nothing by itself. Until osv-scanner is on this machine, the driver starts no
-process and every project's dependencies show as "not scanned".
-`
+// osvInstallOffer is the guided vendor install offer (D-766): the vendor's
+// own channels, shown for the user to run; Observer runs none of them. One
+// owner (dashapi.OSVScannerInstall): the dashboard's Scanners card shows
+// the same ways under the osv-scanner row's "How to install".
+func osvInstallOffer() dashapi.OSVScannerInstall {
+	return dashapi.NewOSVScannerInstall(depscan.OSVScannerMinVersion, depscan.OSVScannerLinuxAMD64)
+}
 
 func newSecurityScanInstallCmd() *cobra.Command {
 	return &cobra.Command{
@@ -73,7 +68,7 @@ func newSecurityScanInstallCmd() *cobra.Command {
 		Short: "Show how to install osv-scanner for the security.scan.osv driver (installs nothing)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(), osvInstallOffer, depscan.OSVScannerLinuxAMD64)
+			fmt.Fprint(cmd.OutOrStdout(), osvInstallOffer().Text())
 			return nil
 		},
 	}

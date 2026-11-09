@@ -40,7 +40,7 @@ type terminalSandboxConfigPayload struct {
 	// pointer for the same reason.
 	EgressAllowHosts *[]string `json:"egress_allow_hosts,omitempty"`
 	// PassEnv names the extra variables a sandboxed agent may receive
-	// (WINFIX2 R-167), a pointer for the same reason.
+	// (WINFIX2, ledger SBX-WIN-ENV-1), a pointer for the same reason.
 	PassEnv *[]string `json:"pass_env,omitempty"`
 	// SignInSeedTools are the tools whose sign-in a sandboxed run copies
 	// without asking (lane BOXSIGNIN, local-only), a pointer for the same
@@ -81,6 +81,27 @@ type terminalSandboxConfigPayload struct {
 	// VendorForcedNative is [terminal.sandbox].vendor_forced_native (lane
 	// SBX-P3D, the native panel); a pointer for the same reason.
 	VendorForcedNative *string `json:"vendor_forced_native,omitempty"`
+	// Seccomp is [terminal.sandbox].seccomp, Observer's own syscall filter
+	// for bwrap and process_lite (lane N2, the Settings toggle of lane O4);
+	// a pointer for the same reason.
+	Seccomp *bool `json:"seccomp,omitempty"`
+	// Setup is [terminal.sandbox.setup], the sandbox installation lifecycle
+	// (allow_elevated, decision P-250; the Settings card's toggle, P-254); a
+	// pointer for the same reason: an older client keeps the saved block.
+	Setup *terminalSandboxSetupPayload `json:"setup,omitempty"`
+	// The gateway-row block (lanes O1A and O2, the Settings panel of lane
+	// O4): embedded from terminal_sandbox_config_gatewayrow.go, the one
+	// dashboard file that names it (the OpenShell boundary invariant).
+	terminalSandboxGatewayRowPayload
+	// The vm, readopt, wslc, hcs and windows blocks (dashboard CLI parity
+	// lane L3): embedded from terminal_sandbox_config_tiers.go.
+	terminalSandboxTiersPayload
+}
+
+// terminalSandboxSetupPayload is the dashboard shape of
+// [terminal.sandbox.setup]. Local-only: an organization can never turn it on.
+type terminalSandboxSetupPayload struct {
+	AllowElevated bool `json:"allow_elevated"`
 }
 
 // terminalSandboxLandlockPayload is the dashboard shape of
@@ -279,9 +300,11 @@ func (s *Server) handleTerminalSandboxConfigPut(w http.ResponseWriter, r *http.R
 	// writes nothing, `?base_etag=` refuses a file changed since that
 	// preview, and the write is validated, read back and audited like every
 	// section save.
+	var savedMXCTier string // the audit row says when a save loosens the MXC tier floor
 	s.commitConfigEdit(w, r, configEdit{
 		section: "terminal.sandbox",
 		apply: func(cfg *config.Config) {
+			savedMXCTier = cfg.Terminal.Sandbox.Windows.MXCTier
 			// Omitted optional fields keep their saved value (see the payload).
 			if body.Egress == nil {
 				next.Egress = cfg.Terminal.Sandbox.Egress
@@ -356,22 +379,37 @@ func (s *Server) handleTerminalSandboxConfigPut(w http.ResponseWriter, r *http.R
 			if body.VendorForcedNative == nil {
 				next.VendorForcedNative = cfg.Terminal.Sandbox.VendorForcedNative
 			}
+			if body.Seccomp == nil {
+				next.Seccomp = cfg.Terminal.Sandbox.Seccomp
+			}
+			body.terminalSandboxGatewayRowPayload.keepUnsent(&next, cfg.Terminal.Sandbox)
+			body.terminalSandboxTiersPayload.keepUnsent(&next, cfg.Terminal.Sandbox)
+			keepUnsentSandboxBlocks(&next, cfg.Terminal.Sandbox, body.Setup != nil)
 			cfg.Terminal.Sandbox = next
 		},
 		auditAction: "terminal_sandbox_config",
 		auditDetailFor: func(cfg config.Config) string {
 			n := cfg.Terminal.Sandbox
 			return fmt.Sprintf(
-				"enabled=%v default_on=%v egress=%s egress_allow_cidrs=%d tool_config_writes=%v remote_clone=%v worktree=%v mask_paths=%d ro_binds=%d rw_binds=%d backends=%d min_isolation=%s oci_rootful=%v oci_devcontainer=%v seatbelt_keychain=%v",
+				"enabled=%v default_on=%v egress=%s egress_allow_cidrs=%d tool_config_writes=%v remote_clone=%v worktree=%v mask_paths=%d ro_binds=%d rw_binds=%d backends=%d min_isolation=%s oci_rootful=%v oci_devcontainer=%v seatbelt_keychain=%v mxc_tier=%s mxc_tier_loosened=%v",
 				n.Enabled, n.DefaultOn, n.Egress, len(n.EgressAllowCIDRs), n.AllowToolConfigWrites, n.AllowRemoteClone, n.AllowWorktreeSource,
 				len(n.MaskPaths), len(n.ExtraROBinds), len(n.ExtraRWBinds), len(n.Backends), n.MinIsolation, n.OCI.AllowRootful, n.OCI.AllowDevcontainerImage, n.Seatbelt.AllowKeychain,
+				n.Windows.MXCTier, mxcTierLoosens(savedMXCTier, n.Windows.MXCTier),
 			)
 		},
+		// restart_required comes from the changed keys' restart classes
+		// (configschema annotations: the block binds on the next launch,
+		// workspaces_dir needs a restart), never a constant here (D-R4-1).
 		extra: func(cfg config.Config) map[string]any {
 			return map[string]any{
-				"sandbox":          sandboxConfigPayload(cfg.Terminal.Sandbox),
-				"restart_required": true,
+				"sandbox": sandboxConfigPayload(cfg.Terminal.Sandbox),
 			}
+		},
+		// The save binds on the next launch through the same seam a setup
+		// step's Enable uses (sandbox_setup.go applySandboxLive).
+		afterWrite: func(config.Config) map[string]any {
+			s.applySandboxLive(r)
+			return nil
 		},
 	})
 }
@@ -408,6 +446,7 @@ func sandboxConfigPayload(c config.TerminalSandboxConfig) terminalSandboxConfigP
 	if liveRunPolicy == "" {
 		liveRunPolicy = "defer" // the empty value's meaning (live_run_update_policy)
 	}
+	seccomp := c.Seccomp
 	return terminalSandboxConfigPayload{
 		Enabled:                c.Enabled,
 		Backend:                c.Backend,
@@ -448,14 +487,34 @@ func sandboxConfigPayload(c config.TerminalSandboxConfig) terminalSandboxConfigP
 		AppleContainer: &terminalSandboxAppleContainerPayload{
 			Image: c.AppleContainer.Image, MemoryMiB: c.AppleContainer.MemoryMiB, CPUs: c.AppleContainer.CPUs,
 		},
-		Landlock:           &terminalSandboxLandlockPayload{MinABI: c.Landlock.MinABI},
-		VendorForcedNative: &vendorForced,
+		Landlock:                         &terminalSandboxLandlockPayload{MinABI: c.Landlock.MinABI},
+		VendorForcedNative:               &vendorForced,
+		Seccomp:                          &seccomp,
+		Setup:                            &terminalSandboxSetupPayload{AllowElevated: c.Setup.AllowElevated},
+		terminalSandboxGatewayRowPayload: gatewayRowPayloadFor(c),
+		terminalSandboxTiersPayload:      tiersPayloadFor(c),
 		Hosted: &terminalSandboxHostedPayload{
 			MinSessionMinutes: c.Hosted.MinSessionMinutes, KeyCustody: c.Hosted.KeyCustody, MemoryImages: c.Hosted.MemoryImages,
 			CheckpointMinutes: c.Hosted.CheckpointMinutes, MaxRunMinutes: c.Hosted.MaxRunMinutes, DailyBoxMinutes: c.Hosted.DailyBoxMinutes,
 			DBExport: &dbExport,
 			E2B:      hostedProviderToPayload(c.Hosted.E2B), Modal: hostedProviderToPayload(c.Hosted.Modal), Vercel: hostedProviderToPayload(c.Hosted.Vercel),
 		},
+	}
+}
+
+// keepUnsentSandboxBlocks puts back the [terminal.sandbox] keys the payload
+// has no field for (each has its own route, CLI or pin), so a Settings
+// save never resets them (lane O4: a save rebuilt the block from the
+// payload, which dropped every key it does not carry). The vm, readopt,
+// wslc, hcs and windows blocks are the tiers payload's now, kept by its
+// keepUnsent when a save omits them (dashboard CLI parity lane L3).
+// sentSetup says the body carried a setup field; without one the saved
+// [terminal.sandbox.setup] is kept, so a save from a client that predates
+// the allow_elevated toggle never turns it off (P-254).
+func keepUnsentSandboxBlocks(next *config.TerminalSandboxConfig, saved config.TerminalSandboxConfig, sentSetup bool) {
+	next.ProviderDirect = saved.ProviderDirect
+	if !sentSetup {
+		next.Setup = saved.Setup
 	}
 }
 
@@ -564,6 +623,16 @@ func normalizedSandboxConfig(p terminalSandboxConfigPayload) (config.TerminalSan
 	next.VendorForcedNative = config.Default().Terminal.Sandbox.VendorForcedNative
 	if p.VendorForcedNative != nil {
 		next.VendorForcedNative = strings.TrimSpace(*p.VendorForcedNative)
+	}
+	if p.Seccomp != nil {
+		next.Seccomp = *p.Seccomp
+	}
+	if p.Setup != nil {
+		next.Setup = config.TerminalSandboxSetupConfig{AllowElevated: p.Setup.AllowElevated}
+	}
+	p.terminalSandboxGatewayRowPayload.applyTo(&next)
+	if err := p.terminalSandboxTiersPayload.applyTo(&next); err != nil {
+		return config.TerminalSandboxConfig{}, err
 	}
 	// Validate against an otherwise-default config before taking the write
 	// locks so request mistakes are a 400, not an internal-error-shaped 500.

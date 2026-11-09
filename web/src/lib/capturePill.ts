@@ -108,7 +108,7 @@ const ROWS: Row[] = [
     when: (f) => f.bypassed.length > 0 && f.proxied > 0,
     view: (f) => ({
       label: `Partly bypassed: ${kindList(f.bypassed)}`,
-      tooltip: `In the last ${f.windowDays} days ${f.proxied} of ${f.sessions} Claude Code sessions went through this machine's proxy, but ${bypassDetail(f)}. ${fileNote(f)} Route that surface too, or launch it through the observer wrapper.${unjudgedNote(f)}`,
+      tooltip: `In the last ${f.windowDays} days ${f.proxied} of ${f.sessions} Claude Code sessions went through this machine's proxy, but ${bypassDetail(f)}. ${fileNote(f)} Route that surface too (Set up for Claude Code in Settings > Connected tools), or start it from a dashboard terminal (New terminal), which launches through the observer wrapper.${unjudgedNote(f)}`,
       state: "paused",
     }),
   },

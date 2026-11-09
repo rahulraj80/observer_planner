@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/components"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/feasibility/nodefeas"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/termcore"
@@ -524,18 +526,6 @@ func modelSuggestionsFor(ctx context.Context, recentModels func(context.Context,
 	return true, suggestions
 }
 
-// modelIsMember reports whether model appears among suggestions — the
-// server-side membership check handleTerminalLaunch applies to a
-// client-supplied model before trusting it (B5).
-func modelIsMember(suggestions []modelSuggestion, model string) bool {
-	for _, s := range suggestions {
-		if s.Model == model {
-			return true
-		}
-	}
-	return false
-}
-
 type launchRequest struct {
 	To          string `json:"to"`
 	Carry       string `json:"carry"`
@@ -579,7 +569,7 @@ func (s *Server) handleSessionLaunch(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "launch unavailable - this dashboard runs without the embedded-terminal launcher (set [handoff].allow_dashboard_launch and run via `observer start`)", http.StatusServiceUnavailable)
+		http.Error(w, "launch unavailable: "+errTerminalUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -618,11 +608,14 @@ func (s *Server) handleSessionLaunch(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 
+	initiator, parent := s.launchOrigin(r)
 	handle, err := s.opts.LaunchManager.Create(LaunchSpec{
-		Subcommand:  sub,
-		SessionID:   sessionID,
-		Carry:       body.Carry,
-		FromMessage: body.ForkMessage,
+		Subcommand:      sub,
+		SessionID:       sessionID,
+		Carry:           body.Carry,
+		FromMessage:     body.ForkMessage,
+		Initiator:       initiator,
+		ParentSessionID: parent,
 	})
 	if err != nil {
 		switch {
@@ -709,7 +702,7 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "resume unavailable - this dashboard runs without the embedded-terminal launcher (set [handoff].allow_dashboard_launch and run via `observer start`)", http.StatusServiceUnavailable)
+		http.Error(w, "resume unavailable: "+errTerminalUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -782,12 +775,15 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 
+	initiator, parent := s.launchOrigin(r)
 	handle, runID, err := s.opts.LaunchManager.CreateResume(ResumeLaunchSpec{
-		Tool:        tool,
-		Subcommand:  cap.Resume.Subcommand,
-		SessionID:   sessionID,
-		ProjectRoot: projectRoot,
-		ExtraArgs:   extraArgs,
+		Tool:            tool,
+		Subcommand:      cap.Resume.Subcommand,
+		SessionID:       sessionID,
+		ProjectRoot:     projectRoot,
+		ExtraArgs:       extraArgs,
+		Initiator:       initiator,
+		ParentSessionID: parent,
 	})
 	if err != nil {
 		switch {
@@ -932,7 +928,7 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 	case "", integration.LaunchKindTerminal:
 		// fall through to the PTY launch
 	case integration.LaunchKindGUI:
-		s.handleGUILaunch(w, body)
+		s.handleGUILaunch(w, r, body)
 		return
 	default:
 		writeErrStatus(w, errors.New("unknown launch kind "+body.Kind), http.StatusBadRequest)
@@ -961,7 +957,7 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 	// model picker's semantics.
 	model := strings.TrimSpace(body.Model)
 	if model != "" && !isShell {
-		if _, suggestions := modelSuggestionsFor(r.Context(), s.opts.RecentModels, body.Tool); !modelIsMember(suggestions, model) {
+		if !dashapi.ModelOffered(r.Context(), s.opts.RecentModels, body.Tool, model) {
 			model = ""
 		}
 	} else {
@@ -986,7 +982,10 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 	if body.Sandbox && !s.sandboxRequestOK(w, r, body, workspaceSource) {
 		return
 	}
+	initiator, parent := s.launchOrigin(r)
 	handle, err := s.opts.LaunchManager.CreateFresh(FreshLaunchSpec{
+		Initiator:       initiator,
+		ParentSessionID: parent,
 		Tool:            body.Tool,
 		Subcommand:      sub,
 		ProjectRoot:     body.ProjectRoot,
@@ -1187,7 +1186,7 @@ func statusForSandboxVerdict(verdict string) int {
 // sandboxSourceByID finds the SandboxSourceAvail entry matching id in a
 // probe's Sources list — the server-side membership check
 // handleTerminalLaunch applies to a client-supplied workspace_source
-// before trusting it, mirroring modelIsMember's role for the model picker.
+// before trusting it, mirroring dashapi.ModelOffered's role for the model picker.
 // ok is false when no entry matches id at all (an unrecognised source
 // name, distinct from a recognised-but-unavailable one).
 func sandboxSourceByID(sources []SandboxSourceAvail, id string) (src SandboxSourceAvail, ok bool) {
@@ -1204,9 +1203,13 @@ func sandboxSourceByID(sources []SandboxSourceAvail, id string) (src SandboxSour
 // means buildTerminalStack returned nothing, which has exactly two causes:
 // [handoff].allow_dashboard_launch = false, or no PTY backend on this OS.
 // The pre-ConPTY copy ("run the daemon under WSL/Linux") is WRONG since
-// 2026-07-04 — a native-Windows daemon runs these terminals.
-const errTerminalUnavailable = "the in-dashboard terminal is disabled on this daemon " +
-	"([handoff].allow_dashboard_launch = false) or unsupported on this OS " +
+// 2026-07-04 — a native-Windows daemon runs these terminals. The switch is
+// named where the dashboard edits it (Settings > Terminal, under More
+// settings; dashboard CLI parity plan section 3), with the key in
+// parentheses for readers of the file.
+const errTerminalUnavailable = "the in-dashboard terminal is off on this daemon " +
+	"(turn on dashboard launch in Settings > Terminal, under More settings: " +
+	"[handoff].allow_dashboard_launch, then restart the daemon) or unsupported on this OS " +
 	"(Windows before 10 version 1809 has no ConPTY)"
 
 // LaunchableTool annotates ONE entry of the New-Terminal picker with the two
@@ -1340,6 +1343,10 @@ func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) 
 	// dialog uses it to decide whether to offer the plain-shell picker option
 	// honestly (rather than always showing it and failing at launch time).
 	var shellEnabled bool
+	// freshEnabled reflects [terminal].enabled and
+	// [terminal.launch].allow_fresh_agent: with it and shellEnabled both
+	// off the dialog says nothing can start and where to turn them on (D-12).
+	var freshEnabled bool
 	// cfg stays the zero value when the config cannot be loaded — the same
 	// deny-all / watch-all floor every other read of an unloadable config uses.
 	var cfg config.Config
@@ -1347,6 +1354,7 @@ func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) 
 		cfg = loaded
 		allowedRoots = resolveAllowedProjectRoots(cfg.Terminal.Launch.AllowedProjectRoots)
 		shellEnabled = cfg.Terminal.Enabled && cfg.Terminal.Launch.AllowShell
+		freshEnabled = cfg.Terminal.Enabled && cfg.Terminal.Launch.AllowFreshAgent
 	}
 	writeJSON(w, map[string]any{
 		"sessions":              s.visibleSnapshot(r.Context()),
@@ -1354,6 +1362,7 @@ func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) 
 		"launchable_tool_info":  s.annotateToolAvailability(r.Context(), launchableToolInfo(cfg)),
 		"allowed_project_roots": allowedRoots,
 		"shell_enabled":         shellEnabled,
+		"fresh_enabled":         freshEnabled,
 		// Whether a Windows path typed as a custom project root is
 		// translated to its /mnt/<drive> form: only a daemon inside WSL does
 		// that (crossmount.TranslateForeignPath), so the dialog shows the
@@ -1494,7 +1503,7 @@ func (s *Server) handleTerminalInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.opts.AllowToolInstall == nil || !s.opts.AllowToolInstall() {
-		writeErrStatus(w, errors.New("guided install is disabled - set [terminal.launch].allow_install = true to enable the Install-in-terminal affordance"), http.StatusForbidden)
+		writeErrStatus(w, errors.New(errGuidedInstallOff), http.StatusForbidden)
 		return
 	}
 	var body terminalInstallRequest
@@ -1546,6 +1555,108 @@ func (s *Server) handleTerminalInstall(w http.ResponseWriter, r *http.Request) {
 	// tree before first launch. Even when it does not, the retry schedule
 	// behind RefreshWatchRoots is harmless. Primary kick remains post-launch.
 	s.kickWatchRootsRefresh()
+}
+
+// errGuidedInstallOff is the install route's 403 while the guided-install
+// kill switch is off. It names the dashboard control first (dashboard CLI
+// parity plan section 3) and keeps the key for readers of the file.
+const errGuidedInstallOff = "guided install is off: turn on \"Allow guided install and uninstall\" in " +
+	"Terminals > Settings > Fresh-agent launch policy ([terminal.launch].allow_install)"
+
+// sandboxReadoptCheck is the re-adoption piece's own check that a local
+// container run is offered for re-adoption now (dashboard CLI parity plan
+// item B-G3, decision P-3). cmd/observer's readopt file installs it from
+// init, so only a build and an OS that carry the piece have one; nil means
+// re-adoption is not here and the route answers 404. The piece is the one
+// owner of its offer files, so the dashboard never reads them itself.
+var sandboxReadoptCheck atomic.Pointer[func(ctx context.Context, run string) error]
+
+// SetSandboxReadoptCheck installs the re-adoption piece's run check (nil
+// removes it). It is a package-level setter rather than an Options field
+// because the piece registers from its own build-tagged init, the way its
+// dashboard routes do (cmd/observer/sandbox_gates_routes.go), so a build
+// without the piece carries no wiring for it.
+func SetSandboxReadoptCheck(check func(ctx context.Context, run string) error) {
+	if check == nil {
+		sandboxReadoptCheck.Store(nil)
+		return
+	}
+	sandboxReadoptCheck.Store(&check)
+}
+
+// sandboxRunIDRE is the shape of a local container run id (the alphabet
+// sandboxoci.ValidToken accepts). The piece's check reads its offers too;
+// this only keeps the argv to one fixed shape.
+var sandboxRunIDRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]{7,63}$`)
+
+// sandboxReadoptArgv is the fixed command the re-adoption terminal runs:
+// the daemon's own binary and `sandbox readopt <run>`. No request text other
+// than the checked run id reaches it, and it is never a shell string.
+func sandboxReadoptArgv(exe, run string) []string {
+	return []string{exe, "sandbox", "readopt", run}
+}
+
+// handleSandboxReadoptTerminal serves POST
+// /api/terminal/sandbox/readopt/attach: the Sandbox isolation card's
+// "Re-attach in a terminal" (plan decision P-3: a command that needs an
+// interactive terminal gets a button that opens it in a dashboard terminal).
+// It runs `observer sandbox readopt <run>` in a local-writer-only setup PTY,
+// exactly as the guided install runs its fixed command. LOCAL + confirm
+// token; the path sits under /api/terminal/sandbox/readopt, which guard rule
+// R-165 already denies to an agent (internal/policy/rules_selfapproval.go).
+// Gates, in order: confirm token; the piece present (404); the terminal
+// stack (503); the run id's shape (400); the piece's own offer check (409).
+// One terminal per run: a second click returns the live PTY's handle.
+func (s *Server) handleSandboxReadoptTerminal(w http.ResponseWriter, r *http.Request) {
+	if !requireConfirmToken(w, r) {
+		return
+	}
+	check := sandboxReadoptCheck.Load()
+	if check == nil {
+		writeErrStatus(w, errors.New("re-adopting a container run is not in this build or not on this OS"), http.StatusNotFound)
+		return
+	}
+	if s.opts.LaunchManager == nil {
+		writeErrStatus(w, errors.New(errTerminalUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Run string `json:"run"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+		writeErrStatus(w, fmt.Errorf("invalid JSON body: %w", err), http.StatusBadRequest)
+		return
+	}
+	run := strings.TrimSpace(body.Run)
+	if !sandboxRunIDRE.MatchString(run) {
+		writeErrStatus(w, errors.New("a run id is required"), http.StatusBadRequest)
+		return
+	}
+	if err := (*check)(r.Context(), run); err != nil {
+		writeErrStatus(w, err, http.StatusConflict)
+		return
+	}
+	exe, err := osExecutable()
+	if err != nil {
+		writeErr(w, fmt.Errorf("locate the observer binary: %w", err))
+		return
+	}
+	handle, err := s.opts.LaunchManager.CreateSetup(SetupSpec{
+		Argv:  sandboxReadoptArgv(exe, run),
+		Label: "sandbox-readopt:" + run,
+	})
+	if err != nil {
+		writeSetupSpawnErr(w, err)
+		return
+	}
+	if s.opts.Logger != nil {
+		s.opts.Logger.Info("dashboard: sandbox run re-adoption terminal spawned", slog.String("run", run))
+	}
+	writeJSON(w, map[string]any{
+		"handle":  handle,
+		"run":     run,
+		"command": "observer sandbox readopt " + run,
+	})
 }
 
 // handleAttachSessions serves GET /api/attach/sessions — the live
@@ -2781,4 +2892,22 @@ func (d *deniedFrameCoalescer) flush() {
 	d.pending = 0
 	d.rows++
 	d.emit(n)
+}
+
+// launchOrigin is who started a dashboard launch (lane cli-2, migration
+// 214): the origin a confirmed hold recorded, else the daemon's resolver over
+// the connection's two ends (Options.LaunchCaller), else unknown: with no
+// resolver the dashboard cannot tell who called, so it never claims a human
+// did (fixes-1, audit M2 (b)).
+func (s *Server) launchOrigin(r *http.Request) (initiator, parentSession string) {
+	if h, ok := replayOrigin(r.Context()); ok {
+		return h.initiator, h.parent
+	}
+	if s.opts.LaunchCaller != nil {
+		client, server := requestEnds(r)
+		if i, p := s.opts.LaunchCaller(r.Context(), client, server); i != "" {
+			return i, p
+		}
+	}
+	return dashapi.InitiatorUnknown, ""
 }

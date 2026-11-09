@@ -429,6 +429,8 @@ var dynamicExecSites = map[string]dynamicSite{
 	"internal/termsession/spawn_resolve.go:<pkg>":                            {class: "vendor AI tool CLIs", how: "the lookProgram seam (exec.LookPath) resolving the AI tool CLI Spawn starts"},
 	"internal/thirdparty/actionlint/process.go:run":                          {checkedBy: "internal/secscan/actionlint/actionlint_test.go:TestNoProcessStarted", how: "never reached: the driver leaves the shellcheck and pyflakes names empty, so actionlint creates neither rule"},
 	// Core packages (no component lists them).
+	"internal/cloudagentsnet/net.go:Run":                                 {programs: []string{"codex", "gh"}, how: "argv from the cloudagents connector table, argv[0] bound to the row's command, resolved through the cloudagentsnet resolver"},
+	"internal/cloudagentsnet/net.go:lookPath":                            {programs: []string{"codex", "gh"}, how: "the PATH-directory probe behind the cloudagentsnet resolver"},
 	"internal/deliverynet/client.go:getGH":                               {programs: []string{"gh"}, how: "the gh CLI, resolved by its literal name through the deliverynet resolver"},
 	"internal/deliverynet/client.go:lookPath":                            {programs: []string{"gh", "git"}, how: "the PATH-directory probe behind the deliverynet resolver"},
 	"internal/deliverynet/mirror.go:configSSHCommand":                    {programs: []string{"git"}, how: "git, as the deliverynet resolver found it"},
@@ -456,6 +458,10 @@ var dynamicExecSites = map[string]dynamicSite{
 	"internal/planlimitsnet/net.go:Converse":                             {checkedBy: "tests/invariant/process_declaration_test.go:TestProcessDeclarationArgvBuilders", how: "argv from the planlimits driver table"},
 	"internal/shimguard/shimguard.go:LookPath":                           {lookupOnly: true, how: "resolves the vendor binary a caller names past the command-wrapping shims; the caller starts it"},
 	"internal/toolresolve/host/host.go:<pkg>":                            {programs: []string{"npm", "bash", "zsh", "sh", "ksh", "dash", "fish"}, how: "npm (prefix -g) and the operator's login shell from the closed loginShellTable, through the runNpmPrefix and runLoginShell seams"},
+	// Test support, linux only, imported only by _test.go files: no binary
+	// links it.
+	"internal/testsupport/standin/standin.go:<pkg>": {checkedBy: "internal/testsupport/standin/standin_test.go:TestSingleProgramBinaryDoesItsJobUnderAVendorName", how: "test only: a temp-dir copy of the coreutils program a test names (mkdir, sleep, yes from the closed probes table), run once with a fixed probe argv"},
+	"internal/testsupport/standin/standin.go:run":   {checkedBy: "internal/testsupport/standin/standin_test.go:TestSingleProgramBinaryDoesItsJobUnderAVendorName", how: "test only: the probe run of that temp-dir copy, with the probe's fixed argv"},
 }
 
 // TestDynamicExecSitesGrounded (lane LEFT2-SEC item R-025, PT-04): every
@@ -777,6 +783,7 @@ var coreExecAllowance = []struct {
 	binaries []string
 	reason   string
 }{
+	{"internal/cloudagentsnet", []string{"codex", "gh"}, "the cloud-agent connectors' vendor CLIs, through their resolver (dynamic sites, lane CA-B1)"},
 	{"internal/deliverynet", []string{"gh", "git"}, "the delivery lane's gh CLI and git, through its resolver (dynamic sites, lane LEFT2-SEC R-025)"},
 	{"internal/diag", []string{"pwsh", "powershell"}, "doctor's Windows hook-runner rows read the PowerShell execution policy with a fixed read-only Get-ExecutionPolicy -List (surface-gap W-8, dynamic site)"},
 	{"internal/diag", []string{"curl"}, "doctor's Windows route probe runs the Windows curl.exe at a constant /mnt/c path (dynamic site, lane LEFT2-SEC R-025)"},

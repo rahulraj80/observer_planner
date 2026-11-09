@@ -28,7 +28,7 @@ type Target struct {
 // generation, whenever PinnableKeys, ShareKeys or Features grows. target_test.go
 // fails when a key is missing from both the first-generation baseline and the
 // since tables.
-const CurrentKeyGen = 5
+const CurrentKeyGen = 6
 
 // FirstKeyGen is the key vocabulary of the first node.governance build
 // (v1.31.0).
@@ -36,9 +36,9 @@ const FirstKeyGen = 1
 
 // pinSince / shareSince / featureSince name the generation at which each key
 // joined its vocabulary; a key absent from its table has been there since
-// FirstKeyGen. Generations 1-4 are released builds (literal key lists in
+// FirstKeyGen. Generations 1-5 are released builds (literal key lists in
 // target_test.go, taken from the tags; 4, v1.36.0, is the first that
-// advertises its generation); 5 is unreleased.
+// advertises its generation; 5 is v1.37.0 and v1.37.1); 6 is unreleased.
 var (
 	pinSince = map[string]int{
 		"guard.strict":          3, // v1.33.0
@@ -48,13 +48,13 @@ var (
 		"tasks.enabled":         3, // v1.33.0
 		// after v1.34.0 (the 2026-10-02 budget-latency arc)
 		"org_client.push_interval_seconds": 4,
-		// D-502 (structured unenrol). Generation 4 is still unreleased: the
+		// D-502 (structured unenrol). Generation 4 was unreleased then: the
 		// held v1.35.0 ships as one combined release with this work (D-400).
 		"guard.budget.fail_closed": 4,
 		// lane P1 (managed route maintenance, the admin's routing switch).
 		"proxy.maintain_routes": 5,
 		// lane SBX-P1B (the sandboxed-terminal settings, sandbox plan v2
-		// section 10.1), joining the still-unreleased generation 5.
+		// section 10.1), joining generation 5 (released in v1.37.0).
 		"terminal.sandbox.backends":                 5,
 		"terminal.sandbox.remote_allowed_hosts":     5,
 		"terminal.sandbox.mask_paths":               5,
@@ -110,10 +110,15 @@ var (
 		"terminal.sandbox.readopt.checkpoint_cap_mib": 5,
 		"terminal.sandbox.windows.mxc_tier":           5,
 		// lane w6-governance (DEC-9, OBS-8a: the direct provider egress
-		// posture), joining the still-unreleased generation 5.
+		// posture), joining generation 5 (released in v1.37.0).
 		"terminal.sandbox.provider_direct": 5,
 		// lane w6-governance (CLI-1b, D6: managed command wrapping).
 		"shell_wrap.org_maintain": 5,
+		// lane FU4 (tracker F-002: the seccomp filter as a governed axis),
+		// the first key of generation 6: generation 5 shipped in v1.37.0,
+		// whose nodes refuse a whole body naming a key they do not know
+		// (audit FU4-A1).
+		"terminal.sandbox.seccomp": 6,
 	}
 	shareSince = map[string]int{
 		"full_tool_bodies":            2, // v1.32.0
@@ -216,6 +221,11 @@ var capabilityEra = map[int]struct{ MaxSchema, KeyGen int }{
 	9: {3, 4},
 	// Level 10 (the security pillar's Code security page): same as level 9.
 	10: {3, 4},
+	// Level 11 (the Code security page's Overview, Projects, Coverage and
+	// Scanners tabs): same as level 10.
+	11: {3, 4},
+	// Level 12 (the You page): same as level 11.
+	12: {3, 4},
 }
 
 // TargetForCapabilities resolves the Target a node advertises, and false when

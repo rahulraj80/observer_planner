@@ -22,16 +22,29 @@ linear-time, no catastrophic-backtracking class to worry about.
 
 ```toml
 [[rule]]
-id         = "U-001"            # required; must NOT collide with a built-in ID
+id         = "U-001"            # required; must NOT collide with a built-in ID, or with an ID a more trusted layer defines
 category   = "boundary"         # required: destructive|boundary|secrets|exfil|
                                 #           posture|mcp|taint|budget|anomaly
 severity   = "high"             # optional; default "warn" (info|warn|high|critical)
 decision   = "deny"             # required: allow|flag|ask|deny
 enforce    = true               # optional: rule blocks even in observe mode (§4.1)
 applies_to = ["file_access"]    # optional; usually inferred from the matchers
+doc        = "agent writing outside the project"  # optional, one line (<= 300 chars): the verdict reason
+advice     = "Write inside the repository, or ask the operator."  # optional, one line: what to do instead
 match.path_outside_project = true
 match.path_not = ["~/.config/shared-lint/**"]
 ```
+
+`doc` is what the verdict says matched (default: `<layer> rule <id>`); `advice` is
+the one sentence on what to do instead. Both are shown to the agent and on
+the dashboard, so write them for the agent to read. They may not hold control
+characters (a file that has one fails to parse), and a repository file's
+`doc` and `advice` are shown as "project rule <id> (repository file): ...",
+never in the guard's own voice.
+
+A rule must not reuse an id that a more trusted layer defines (org > user >
+trusted > repository; built-ins and packs own their ids first). Such a row is
+dropped alone, with a load issue, even when its category and severity match.
 
 Decision semantics by mode: in **observe** the effective decision is
 `min(decision, flag)` — deny/ask-class rules record but don't block —
@@ -56,6 +69,10 @@ shellparse unwrap (`bash -c`, wrappers, interpreter one-liners):
 
 Command-scoped rules imply `applies_to = ["shell_exec"]`.
 
+Matcher strings may not hold raw control characters. The in-repo policy file
+must be a regular file of at most 128 KiB, with TOML nesting of at most 8
+levels and at most 16 dots per line.
+
 **Event-scoped** — evaluated once per event:
 
 | Matcher | Type | Semantics | Implies applies_to |
@@ -64,6 +81,7 @@ Command-scoped rules imply `applies_to = ["shell_exec"]`.
 | `path_not` | []string | exemption globs — compiles into a per-rule safe pattern checked FIRST | (none; modifies the rule) |
 | `path_outside_project` | bool | path resolves outside the session's project root | file_access, config_change |
 | `path_sensitive` | bool | the built-in sensitive-path set (SSH keys, cloud creds, …) | file_access, config_change |
+| `access` | string | `"write"` (a write, edit or delete action, or a config change) or `"read"` (anything else) on the event path; pair it with a path matcher, e.g. writes to `**/.env` only | file_access, config_change |
 | `url_domain` | string | URL host equals the domain or is a subdomain of it | tool_call, api_request |
 | `mcp_server` | string | MCP server name parsed from the call target | mcp_call |
 | `mcp_tool` | string | MCP tool-name suffix match | mcp_call |
@@ -497,6 +515,10 @@ How it reaches a node:
   fires on a project only a floor reaches).
 
 ## Cookbook — worked recipes
+
+(These are hand-written policy fragments. For ready-made bundles of rules,
+a strictness level plus packs applied and removed in one step, see
+[guard-recipes.md](guard-recipes.md).)
 
 Each recipe is a complete user-policy fragment plus the command that
 proves it does what you meant. All of them lint with `observer guard

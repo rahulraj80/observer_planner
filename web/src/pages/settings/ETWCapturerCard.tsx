@@ -7,7 +7,7 @@ import { LAUNCH_TERMINAL as LaunchTerminal } from "@/lib/components.gen";
 import { fetchJSON } from "@/lib/api";
 import { saveConfigSection } from "@/lib/configSectionSave";
 import { useApi } from "@/lib/useApi";
-import { markRestartPending } from "@/lib/restartPending";
+import { markRestartPending, RESTART_HINT } from "@/lib/restartPending";
 
 // ETWCapturerCard — the dashboard-driven setup surface for the ELEVATED
 // Windows ETW process capturer (docs/plans/etw-dashboard-setup-plan-2026-07-27.md
@@ -199,7 +199,7 @@ export function ETWCapturerCard() {
       if (res.restart_required) markRestartPending("process");
       setEnableMsg(
         res.restart_required
-          ? "Saved. Restart the observer daemon - the accept listener binds at start - then come back here to register the task."
+          ? `Saved. The accept listener binds at daemon start, so restart the daemon (${RESTART_HINT}), then come back here to register the task.`
           : "Saved.",
       );
       status.reload();

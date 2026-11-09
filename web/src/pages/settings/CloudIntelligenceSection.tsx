@@ -34,7 +34,8 @@ import {
   CLOUD_PURPOSE_LABELS,
 } from "@/lib/cloud";
 import type { CloudPlanView, CloudStatusWithDigestPlan } from "@/lib/cloud";
-import { markRestartPending } from "@/lib/restartPending";
+import { markRestartPending, RESTART_HINT } from "@/lib/restartPending";
+import { cloudLoginPortError, cloudLoginPortShown } from "@/lib/cloudLoginPort";
 import { CloudLedgerCard } from "./CloudLedgerCard";
 import type {
   CloudActionResponse,
@@ -1382,6 +1383,11 @@ function useCloudConfigForm(): CloudConfigForm {
   };
 
   const save = async () => {
+    const portErr = cloudLoginPortError(Number(form.LoginPort) || 0);
+    if (portErr) {
+      setSaveError(`Login callback port: ${portErr}`);
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -1391,6 +1397,7 @@ function useCloudConfigForm(): CloudConfigForm {
         AutoSyncIntervalMinutes: Number(form.AutoSyncIntervalMinutes) || 0,
         AutoEnrich: form.AutoEnrich,
         WorkOSClientID: form.WorkOSClientID,
+        LoginPort: Number(form.LoginPort) || 0,
       });
       if (!res.saved) {
         setSaveError("Save was not confirmed by the server.");
@@ -1401,7 +1408,7 @@ function useCloudConfigForm(): CloudConfigForm {
       if (res.restart_required) markRestartPending("cloud");
       pushToast(
         res.restart_required
-          ? "Cloud settings saved. Restart the daemon to apply the auto-sync schedule."
+          ? `Cloud settings saved. The auto-sync schedule applies after a restart: ${RESTART_HINT}.`
           : "Cloud settings saved.",
         "success",
       );
@@ -1478,7 +1485,8 @@ function CloudPreferences({
           <div className="text-[10.5px] text-fg-4">
             While <span className="font-mono">observer start</span> runs, spawn{" "}
             <span className="font-mono">observer cloud sync</span> on a schedule. Still
-            consent-gated - nothing is sent without a live grant. Restart the daemon to apply.
+            consent-gated - nothing is sent without a live grant. Applies after a restart (Restart
+            now in the banner after you save, or Restart daemon in Settings &gt; Health).
           </div>
           {form.AutoSync && (
             <Input
@@ -1580,12 +1588,27 @@ function CloudAdvancedSettings({ settings, lockedTitle }: { settings: CloudConfi
             />
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="max-w-[52ch] text-[10.5px] text-fg-4">
-              Login callback port <span className="font-mono">[cloud].login_port</span>:{" "}
-              <span className="font-mono text-fg-3">{form.LoginPort || 9797}</span> - file-only
-              (edit config.toml directly); it must match the redirect URI registered in WorkOS.
-            </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Input
+              type="number"
+              min={0}
+              max={65535}
+              step={1}
+              value={form.LoginPort}
+              onChange={(ev) => update("LoginPort", Number(ev.target.value))}
+              disabled={locked}
+              mono
+              label={
+                <>
+                  Login callback port <span className="font-mono normal-case text-fg-4">[cloud].login_port</span>
+                </>
+              }
+              error={cloudLoginPortError(Number(form.LoginPort) || 0) ?? undefined}
+              help={`Sign-in listens on 127.0.0.1:${cloudLoginPortShown(Number(form.LoginPort) || 0)}. 0 = the built-in default (9797); otherwise 1024-65535. It must match the redirect URI registered in WorkOS.`}
+            />
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
             <Button
               size="sm"
               variant="secondary"

@@ -356,6 +356,10 @@ func buildOrgBundleWith(ctx context.Context, configPath string, quietWhenNotEnro
 	// T-393: a re-enrolment into another org, or as another member, removes
 	// the previous identity's org guard bundle file.
 	client.SetGuardBundleCachePath(orgBundleCachePath(cfg))
+	// Every push from this client ships under the GOVERNED share posture
+	// (the org's lowering and a managed node's signed raise), the same one
+	// the daemon's pushes use; the daemon swaps in its live handle.
+	client.SetShareProvider(cliGovernanceShareProvider(cfg, st, logger))
 	return orgBundle{
 		client:  client,
 		store:   st,
@@ -403,6 +407,7 @@ func newEnrollCmd() *cobra.Command {
 		wireClients      bool
 		acceptGovernance bool
 		acceptIntel      bool
+		tokenFile        string
 	)
 	cmd := &cobra.Command{
 		Use:   "enroll [<org-url> <token>]",
@@ -417,6 +422,9 @@ Four ways to supply credentials, in priority order:
   --link <url>             A magic link the admin shared
                            (form: ` + "`http(s)://<host>/enrol/<code>`" + `)
   <org-url> <token>        Positional pair (legacy form)
+  <org-url> --token-file F The org URL with the code read from file F ("-"
+                           reads stdin), so the code never sits on the
+                           command line where other local users can see it
   ENROLMENT_TOKEN env      With ` + "`--link <url-without-/enrol/code>`" + ` for org URL only
 
 After enrolling, the agent (a) writes a default [org_client] block to
@@ -432,6 +440,10 @@ enrolment is ever shared (the push cursor seeds at the current
 high-water id).`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, err := enrolArgsWithTokenFile(tokenFile, linkURL, idpURL, args, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
 			orgURL, token, err := resolveEnrolCredentials(linkURL, idpURL, args)
 			if err != nil {
 				return err
@@ -604,7 +616,84 @@ high-water id).`,
 		"accept an organization governance grant without an interactive prompt (scripted rollout; see `observer org grant show` for what was granted)")
 	cmd.Flags().BoolVar(&acceptIntel, "accept-intel-consent", false,
 		"accept the organization's Cloud Intelligence terms without an interactive prompt when it requires them (the terms are still printed; see `observer intel status`)")
+	cmd.Flags().StringVar(&tokenFile, "token-file", "",
+		"read the enrolment code from this file (\"-\" reads stdin) instead of the command line; pass the org URL as the only argument")
 	return cmd
+}
+
+// enrolArgsWithTokenFile folds --token-file into the positional pair
+// resolveEnrolCredentials already understands: with a token file the one
+// positional argument is the org URL and the code comes from the file (or
+// stdin for "-"), trimmed of surrounding whitespace. Without the flag args
+// pass through unchanged. The code then never appears on argv, where
+// /proc/<pid>/cmdline shows it to every local user.
+func enrolArgsWithTokenFile(tokenFile, linkURL, idpURL string, args []string, stdin io.Reader) ([]string, error) {
+	if tokenFile == "" {
+		return args, nil
+	}
+	if linkURL != "" || idpURL != "" {
+		return nil, errors.New("observer enroll: --token-file cannot be combined with --link or --idp")
+	}
+	if len(args) != 1 {
+		return nil, errors.New("observer enroll: with --token-file pass exactly one argument, the org URL")
+	}
+	var raw []byte
+	var err error
+	if tokenFile == "-" {
+		raw, err = readEnrolTokenBounded(stdin)
+	} else {
+		raw, err = readEnrolTokenFile(tokenFile)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("observer enroll: read --token-file: %w", err)
+	}
+	code := strings.TrimSpace(string(raw))
+	if code == "" {
+		return nil, errors.New("observer enroll: --token-file holds no enrolment code")
+	}
+	return []string{args[0], code}, nil
+}
+
+// enrolTokenFileLimit bounds what --token-file reads, from a file or from
+// stdin: an enrolment code is well under a kilobyte, so anything larger is
+// refused rather than read until memory runs out (F-029 V1).
+const enrolTokenFileLimit = 64 << 10
+
+// readEnrolTokenBounded reads at most enrolTokenFileLimit bytes and refuses
+// a source that holds more.
+func readEnrolTokenBounded(r io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, enrolTokenFileLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > enrolTokenFileLimit {
+		return nil, fmt.Errorf("more than %d bytes; an enrolment code is much shorter", enrolTokenFileLimit)
+	}
+	return raw, nil
+}
+
+// readEnrolTokenFile reads a --token-file path: only a regular file is
+// read (a FIFO with no writer would block enrolment forever and a device
+// such as /dev/zero would never end), and the read is bounded like stdin
+// (F-029 V1). The type is checked on the opened file, which on unix is
+// opened without blocking (openEnrolTokenFile), so a path swapped for a FIFO
+// between a check and the open cannot hang enrolment (O5 audit finding
+// O5-A7). A pipe is read through `--token-file -` (stdin), which the
+// refusal says.
+func readEnrolTokenFile(path string) ([]byte, error) {
+	f, err := openEnrolTokenFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file (to read the code from a pipe, pass --token-file - and pipe it to stdin)", path)
+	}
+	return readEnrolTokenBounded(f)
 }
 
 // errNotAnEnrolmentLink reports that a --link URL parsed as a dashboard

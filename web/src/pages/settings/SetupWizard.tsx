@@ -296,7 +296,7 @@ const CODEX_TRUST_STATE_LABEL: Record<CodexHookTrustEntry["state"], string> = {
   untrusted: "not trusted yet: register hooks again",
   modified: "changed since trusted: register hooks again",
   disabled: "switched off in /hooks",
-  missing: "not registered yet: run the Hooks step or restart the daemon",
+  missing: "not registered yet: run the Hooks step, or restart the daemon (Restart daemon in Settings > Health)",
 };
 
 function WizardStep({
@@ -546,6 +546,7 @@ function RemoveStep({ spec, tool, onChanged }: { spec: StepSpec; tool: string; o
             onConfirm={() => void apply(false)}
             confirmLabel={`Remove from ${tool}?`}
             armedNote="Removes only the entries listed below."
+            armedNoteSide="top"
           >
             Remove
           </ConfirmButton>

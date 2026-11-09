@@ -65,7 +65,7 @@ var sandboxSettingsInventory = map[string]adminHome{
 	"egress_allow_cidrs":       {Pin: "terminal.sandbox.egress_allow_cidrs"},
 	"egress_allow_hosts":       {Pin: "terminal.sandbox.egress_allow_hosts"},
 	"allow_tool_config_writes": {Pin: "terminal.sandbox.allow_tool_config_writes"},
-	// The developer's own environment variables (WINFIX2 R-167): local-only.
+	// The developer's own environment variables (WINFIX2, ledger SBX-WIN-ENV-1): local-only.
 	"pass_env": {Local: "names the developer's own environment variables; an org has no fleet-wide value and cannot widen a box's environment"},
 	// The developer's own clipboard through the terminal (ruling P-175):
 	// local-only.
@@ -81,6 +81,10 @@ var sandboxSettingsInventory = map[string]adminHome{
 	// the computed capture per tier.
 	"provider_direct": {OrgPin: "terminal.sandbox.provider_direct"},
 	"min_isolation":   {Floor: "min_isolation"},
+	// Observer's own syscall filter (lane N2; the card toggle is lane O4's,
+	// F-020 A13). Its org home (a nodegov pin and a posture axis) is
+	// tracker F-002, left to a later lane.
+	"seccomp": {Owed: "F-002: a node.governance pin and a sandboxselect posture axis, a later lane"},
 	// The container driver's block (lane SBX-P3A) has its own inventory.
 	"oci": {Nested: "sandboxOCISettingsInventory"},
 	// The macOS drivers' blocks (lane SBX-P5) have their own inventories
@@ -97,6 +101,9 @@ var sandboxSettingsInventory = map[string]adminHome{
 	// The microVM row's block (lane SBX-P4) has its own inventory
 	// (terminal_sandbox_vm_test.go).
 	"vm": {Nested: "sandboxVMSettingsInventory"},
+	// The OpenShell row's block (lane O1A) has its own inventory
+	// (terminal_sandbox_openshell_inventory_test.go).
+	"openshell": {Nested: "sandboxOpenShellSettingsInventory"},
 	// Lane GATES-SBX's blocks have their own inventory
 	// (sandbox_gates_inventory_test.go).
 	"readopt": {Nested: "sandboxGatesSettingsInventory"},
@@ -141,7 +148,7 @@ var sandboxOCISettingsInventory = map[string]adminHome{
 // owedAdminHomes are the only keys whose admin home may still be owed: a
 // machine path has no fleet-wide pin, and its per-node override arrives
 // with the managed pull.
-var owedAdminHomes = map[string]bool{"workspaces_dir": true, "oci.socket": true, "oci.install_versions": true}
+var owedAdminHomes = map[string]bool{"workspaces_dir": true, "oci.socket": true, "oci.install_versions": true, "seccomp": true}
 
 // TestSandboxSettingsInventory walks every [terminal.sandbox] key in the
 // config schema and fails when a key has no row, no node home in the

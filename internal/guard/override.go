@@ -3,6 +3,8 @@ package guard
 import (
 	"fmt"
 	"net/url"
+	"sort"
+	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
@@ -105,6 +107,14 @@ type OrgOverridePosture struct {
 	// verified and no last verified layer stands in for it, on a node where
 	// the org's authority reaches every rule (T-844): every rule is locked.
 	Unverifiable bool
+	// Enforced is the sorted set of rule IDs the ORG layer makes block or
+	// defer in the running mode (FU-235): rows the org bundle authored or
+	// overrode (Source "org") whose mode-selected decision is ask or deny
+	// and that no `enforce = false` caps. In observe mode these are the
+	// rules that still stop an action, so the status surfaces can say
+	// "observe locally; N rules enforced by your organization" instead of
+	// a bare "observe". Nil when the org layer is absent or enforces none.
+	Enforced []string
 }
 
 // For answers the per-rule question. Both false means the rule is
@@ -140,13 +150,113 @@ func (g *Guard) OrgOverridePosture() OrgOverridePosture {
 		Overridable:    map[string]bool{},
 		Named:          es.orgNamedRules,
 	}
+	enforced := map[string]bool{}
 	for _, info := range es.base().RuleInfos() {
 		// Multi-row IDs (R-152's write/read split) grant as a unit:
 		// one overridable row makes the public ID overridable.
 		if info.Overridable {
 			out.Overridable[info.ID] = true
 		}
+		if info.Source == policy.SourceOrg && orgRowStops(es.base().RuleStances(info.ID)) {
+			enforced[info.ID] = true
+		}
 	}
+	out.Enforced = sortedRuleIDs(enforced)
+	return out
+}
+
+// orgModeLineMaxIDs bounds the rule ids ModeLine lists before "+N more".
+const orgModeLineMaxIDs = 8
+
+// orgLockTailRows is the lock-reach tail of ModeLine, walked top-down
+// (CLAUDE.md rule 5): what a local approval can still do on this node.
+var orgLockTailRows = []struct {
+	applies func(p OrgOverridePosture) bool
+	tail    func(p OrgOverridePosture) string
+}{
+	{
+		func(p OrgOverridePosture) bool { return p.LocksEveryRule },
+		func(OrgOverridePosture) string {
+			return "your organization locks every rule on this node, so local exceptions do not apply"
+		},
+	},
+	{
+		func(p OrgOverridePosture) bool { return len(p.Named) > 0 },
+		func(p OrgOverridePosture) string {
+			return fmt.Sprintf("local exceptions do not apply to the %s your organization names", ruleCount(len(p.Named)))
+		},
+	},
+}
+
+// ModeLine renders the organization's half of the guard mode for the status
+// surfaces (FU-235): the local mode governs only the rules the org layer
+// does not reach, so a bare "observe" next to an org-enforced deny reads as
+// a contradiction. Examples:
+//
+//	observe locally; 1 rule enforced by your organization (R-101); your organization locks every rule on this node, so local exceptions do not apply
+//	observe locally; your organization's policy enforces no rule here; local exceptions do not apply to the 2 rules your organization names
+//
+// "" when no org layer is in force and its bundle is not unverifiable (an
+// individual, un-enrolled node: the local mode is the whole story).
+func (p OrgOverridePosture) ModeLine(mode string) string {
+	if p.Unverifiable {
+		return "your organization's policy bundle does not verify and no verified copy is held, so local exceptions are refused for every rule until a verified bundle is back"
+	}
+	if !p.OrgApplies {
+		return ""
+	}
+	if strings.TrimSpace(mode) == "" {
+		mode = string(policy.ModeObserve)
+	}
+	parts := []string{mode + " locally"}
+	switch n := len(p.Enforced); {
+	case n == 0:
+		parts = append(parts, "your organization's policy enforces no rule here")
+	case n <= orgModeLineMaxIDs:
+		parts = append(parts, fmt.Sprintf("%s enforced by your organization (%s)", ruleCount(n), strings.Join(p.Enforced, ", ")))
+	default:
+		parts = append(parts, fmt.Sprintf("%s enforced by your organization (%s, +%d more)",
+			ruleCount(n), strings.Join(p.Enforced[:orgModeLineMaxIDs], ", "), n-orgModeLineMaxIDs))
+	}
+	for _, row := range orgLockTailRows {
+		if row.applies(p) {
+			parts = append(parts, row.tail(p))
+			break
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// ruleCount renders "1 rule" / "N rules".
+func ruleCount(n int) string {
+	if n == 1 {
+		return "1 rule"
+	}
+	return fmt.Sprintf("%d rules", n)
+}
+
+// orgRowStops reports whether some row of a rule stops an action in the
+// running mode: its mode-selected decision is ask or deny and no
+// `enforce = false` override caps it (RuleStances already applies the cap).
+func orgRowStops(stances []policy.Verdict) bool {
+	for _, v := range stances {
+		if v.Decision >= policy.DecisionAsk && v.EnforceCappedBy == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedRuleIDs returns the set's members in order (nil for an empty set).
+func sortedRuleIDs(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -212,6 +322,7 @@ func (g *Guard) stampOrgOverrideAt(es *engineSet, av *ActionVerdict, projectRoot
 	av.Overridable = av.Verdict.Overridable
 	av.OrgLocked = orgLockedVerdict(av.Verdict, g.orgLocksVerdictRule(es, av.Verdict.RuleID, projectRoot))
 	av.RequestBase = g.requestBase
+	av.BlockNotice = g.blockNotice
 }
 
 // blockedWhatByKind names the blocked thing for the human-first line,
@@ -253,12 +364,17 @@ const blockedWhatFallback = "this action"
 // Hyphens only, never em-dashes: this string is read by humans in
 // terminals, desktop toasts and provider error bodies.
 func HumanBlockLine(av ActionVerdict, sessionID string) string {
-	if av.Verdict.RuleID == "" || (!av.Overridable && !av.OrgLocked) {
-		return ""
-	}
 	what, ok := blockedWhatByKind[av.Kind]
 	if !ok {
 		what = blockedWhatFallback
+	}
+	if row, ok := blockNotices[av.BlockNotice]; ok {
+		// A sandbox notice (blocknotice.go) leads every blocking verdict
+		// and replaces the override and request wording below.
+		return row.line(av.Verdict, what)
+	}
+	if av.Verdict.RuleID == "" || (!av.Overridable && !av.OrgLocked) {
+		return ""
 	}
 	switch {
 	case av.Overridable && sessionID != "":

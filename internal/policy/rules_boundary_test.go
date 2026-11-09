@@ -139,6 +139,9 @@ func TestBoundaryRules_FileAccess(t *testing.T) {
 		{name: "R-160 hit: project claude settings", kind: KindFileAccess, actionType: "write_file", target: ".claude/settings.json", wantRule: "R-160", wantEnforce: DecisionDeny},
 		{name: "R-160 hit: codex config", kind: KindFileAccess, actionType: "write_file", target: "~/.codex/config.toml", wantRule: "R-160", wantEnforce: DecisionDeny},
 		{name: "R-160 hit: config-change kind", kind: KindConfigChange, actionType: "", target: "~/.claude/settings.json", wantRule: "R-160", wantEnforce: DecisionDeny},
+		{name: "R-160 hit: committed Copilot hook file", kind: KindFileAccess, actionType: "write_file", target: ".github/hooks/superbased-observer.json", wantRule: "R-160", wantEnforce: DecisionDeny},
+		{name: "R-160 near-miss: another Copilot hook file", kind: KindFileAccess, actionType: "write_file", target: ".github/hooks/team.json"},
+		{name: "R-160 near-miss: read committed Copilot hook file", kind: KindFileAccess, actionType: "read_file", target: ".github/hooks/superbased-observer.json"},
 		{name: "R-160 near-miss: settings.local.json is host-tool-owned", kind: KindFileAccess, actionType: "write_file", target: ".claude/settings.local.json"},
 		{name: "R-160 near-miss: read observer config", kind: KindFileAccess, actionType: "read_file", target: "~/.observer/config.toml"},
 

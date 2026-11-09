@@ -37,6 +37,10 @@ type PredictResponse struct {
 
 	// Limit is the proxy-gated half. See LimitGauge.
 	Limit LimitGauge `json:"limit"`
+
+	// Projection is the run-out projection of the limit windows and of any
+	// budget in force (predict_projection.go). Additive.
+	Projection PredictProjection `json:"projection"`
 }
 
 // LimitGauge is the rate-limit / subscription-window half of the
@@ -85,6 +89,7 @@ func (s *Server) handleSessionPredict(w http.ResponseWriter, r *http.Request, se
 	if shape.Model == "" {
 		resp.Estimate = predict.EstimateResult{PrefixTokens: shape.PrefixTokens, Warnings: []predict.Warning{predict.WarnNoSessionHistory}}
 		resp.Reason = predictReasonNoModel
+		resp.Projection = s.buildPredictProjection(ctx, st, shape.Tool, sessionID, resp.Limit, resp.Estimate)
 		writeJSON(w, resp)
 		return
 	}
@@ -147,6 +152,7 @@ func (s *Server) handleSessionPredict(w http.ResponseWriter, r *http.Request, se
 		DefaultTurns:         defaultTurns,
 	}
 	resp.Estimate = predict.Estimate(in)
+	resp.Projection = s.buildPredictProjection(ctx, st, shape.Tool, sessionID, resp.Limit, resp.Estimate)
 	writeJSON(w, resp)
 }
 

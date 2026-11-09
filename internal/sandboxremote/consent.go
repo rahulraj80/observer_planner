@@ -153,6 +153,22 @@ type ConsentScreen struct {
 // ConsentFileList caps the file names the consent screen lists.
 const ConsentFileList = 50
 
+// remoteClonePrefix opens the consent scope of a box-side clone.
+const remoteClonePrefix = "remote_clone:"
+
+// RemoteCloneScopeKey is the consent scope of a box-side clone of url (a
+// remote_clone delivery): the one owner the launch checks and every consent
+// surface records (FX3 item 3, live finding F-L6P4-1), so the two never
+// differ. The URL is kept exactly as the launch carries it.
+func RemoteCloneScopeKey(url string) string { return remoteClonePrefix + url }
+
+// RemoteCloneURL reads the clone URL out of a remote-clone scope key (ok
+// false for any other scope).
+func RemoteCloneURL(scope string) (string, bool) {
+	url, ok := strings.CutPrefix(scope, remoteClonePrefix)
+	return url, ok && url != ""
+}
+
 // BuildConsentScreen renders the facts, the manifest, the vendor row and an
 // estimate into the screen's lines (the same lines on every surface).
 func BuildConsentScreen(v Vendor, f ConsentFacts, m Manifest, estimate Estimate) ConsentScreen {
@@ -162,15 +178,15 @@ func BuildConsentScreen(v Vendor, f ConsentFacts, m Manifest, estimate Estimate)
 	}
 	lines := []ConsentLine{
 		{"Provider", v.Name + " (" + f.Endpoint + ")"},
-		{"Where the box runs", "on " + v.Name + "'s machines, region " + f.Region},
+		{"Where the box runs", whereLine(v, f.Region)},
 		{"What is uploaded", m.Summary() + " from " + m.Root + " (git tracked and untracked-not-ignored files; never your home directory, never .git history)"},
 		{"In-box observer", f.BoxBinary},
 		{"Model credential", custodyLine(f.Custody)},
 		{"Network tier", f.Tier},
 		{"Capture", captureLine},
 		{"Memory images", memoryLine(v, f.MemoryImages)},
-		{"Spend cap", fmt.Sprintf("each box stops after at most %d minutes, sooner when less is left of today's %d box-minutes on %s", f.MaxRunMinutes, f.DailyBoxMinutes, v.Name)},
-		{"Estimated cost", estimate.Label()},
+		{"Spend cap", fmt.Sprintf("each box stops after at most %d minutes, sooner when less is left of this machine's own cap of %d box-minutes a day on %s", f.MaxRunMinutes, f.DailyBoxMinutes, v.Name)},
+		{"Estimated cost", costLine(v, estimate)},
 	}
 	if f.Region == RegionOrgPublished {
 		// SBX-GOV-2: the endpoint is shown, and what it may not do.
@@ -178,6 +194,11 @@ func BuildConsentScreen(v Vendor, f ConsentFacts, m Manifest, estimate Estimate)
 	}
 	for _, n := range v.NetworkNotes {
 		lines = append(lines, ConsentLine{"Outside Observer's control", n})
+	}
+	if url, ok := RemoteCloneURL(m.ScopeKey); ok {
+		// A box-side clone uploads nothing from this machine; the URL is
+		// shown in full, as the digest binds it.
+		setConsentLine(lines, "What is uploaded", "nothing from this machine: the box clones "+url+" itself (the clone never runs here)")
 	}
 	scr := ConsentScreen{Provider: v.ID, Lines: lines, Excluded: m.Excluded, Facts: f, Uploaded: []string{}}
 	for i, file := range m.Files {
@@ -188,6 +209,41 @@ func BuildConsentScreen(v Vendor, f ConsentFacts, m Manifest, estimate Estimate)
 		scr.Uploaded = append(scr.Uploaded, file.Path)
 	}
 	return scr
+}
+
+// setConsentLine replaces the value of the line with this label (FX3-A9:
+// by label, never by position, so a line added above it cannot shift it).
+func setConsentLine(lines []ConsentLine, label, value string) {
+	for i := range lines {
+		if lines[i].Label == label {
+			lines[i].Value = value
+			return
+		}
+	}
+}
+
+// whereLine names whose machines run the box (live finding F-L3-7): a
+// vendor whose endpoint only an organization publishes (OrgEndpoint) runs
+// on that organization's machines, never on a vendor named after the row.
+func whereLine(v Vendor, region string) string {
+	if v.OrgEndpoint {
+		return "on your organization's machines, region " + region
+	}
+	return "on " + v.Name + "'s machines, region " + region
+}
+
+// costLine is the estimate line (live finding F-L3-7): a vendor with no
+// recorded list price gets no estimate with empty fields; an
+// organization-published one says the organization's compute is not billed
+// to the user here.
+func costLine(v Vendor, e Estimate) string {
+	if e.Price.Date != "" || e.Price.USDPerHour != 0 {
+		return e.Label()
+	}
+	if v.OrgEndpoint {
+		return "no estimate: the box runs on your organization's compute, which it provides and pays for; your organization's quotas apply"
+	}
+	return "no estimate: no list price is recorded for " + v.Name
 }
 
 func custodyLine(c string) string {

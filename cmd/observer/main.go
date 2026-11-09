@@ -200,6 +200,9 @@ func newRootCmdWith(deps usageDeps) *cobra.Command {
 		root.AddCommand(mk())
 	}
 	root.AddCommand(newIDECmd())
+	// Scriptable launch and run control over the daemon (P-228, phase 1b).
+	root.AddCommand(newLaunchCmd())
+	root.AddCommand(newTerminalsCmd())
 	root.AddCommand(newShellWrapCmd())
 	root.AddCommand(newRelayCmd())
 	root.AddCommand(newHookBridgeCmd())
@@ -233,6 +236,11 @@ func newRootCmdWith(deps usageDeps) *cobra.Command {
 	root.AddCommand(newWorkspacesCmd())
 	root.AddCommand(newSandboxCmd())
 	root.AddCommand(newCloudCmd())
+	// cloud-session plus the CA-C7 loopback receiver verbs (their own file,
+	// so the cloud-session command file keeps one call site for this lane).
+	cloudSessionCmd := newCloudSessionCmd()
+	cloudSessionCmd.AddCommand(newCloudSessionOTelReceiverCmd())
+	root.AddCommand(cloudSessionCmd)
 	root.AddCommand(newIntelCmd())
 	root.AddCommand(newPricingCmd())
 	root.AddCommand(newRepriceCmd())
@@ -282,6 +290,7 @@ func observerSubcommandsWith(deps usageDeps) []*cobra.Command {
 		newProcessBridgeCmd(),
 		newDBCmd(),
 		newCostCmd(),
+		newChartCmd(),
 		newScoreCmd(),
 		newAdviseCmd(),
 		newDiscoverCmd(),
@@ -305,6 +314,7 @@ func observerSubcommandsWith(deps usageDeps) []*cobra.Command {
 		newModelValueCmd(),
 		newPredictCmd(),
 		newPlansCmd(),
+		newCloudAgentsCmd(),
 		newProjectCmd(),
 		newTasksCmd(),
 		newArchiveCmd(),

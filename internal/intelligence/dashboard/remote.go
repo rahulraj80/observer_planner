@@ -75,6 +75,9 @@ func (s *Server) guardedHandler(addr string) http.Handler {
 	} else {
 		h = browserGuard(s.Handler(), hostIsLoopback)
 	}
+	// The caller check rides outside the route guards, so it covers every
+	// route of both handlers by construction (caller_guard.go).
+	h = s.callerGuard(h)
 	if s.opts.ReadCaches {
 		h = costRowCacheMiddleware(h)
 	}

@@ -75,6 +75,10 @@ const (
 	// SectionMessages is the admin and developer Messages page (T-854). It
 	// sits on the unhideable floor (D-695), so its routes are never refused.
 	SectionMessages Section = "messages"
+	// SectionYou is the You page (identity, accounts, consents, credentials).
+	// It carries the developer's own consent withdrawals, so it sits on the
+	// unhideable floor like Messages and Requests.
+	SectionYou Section = "you"
 )
 
 // AllSections is the closed set, for the coverage test and for callers that
@@ -84,7 +88,7 @@ var AllSections = []Section{
 	SectionCodeSecurity, SectionEgress, SectionSearch, SectionCost, SectionPlans, SectionAnalysis, SectionTools,
 	SectionCompression, SectionCache, SectionSuggestions, SectionRouting,
 	SectionBenchmarks, SectionDiscovery, SectionPatterns, SectionPolicies, SectionAgentConfig,
-	SectionPrivacy, SectionTerminals, SectionRemote, SectionMessages, SectionRequests, SectionSettings,
+	SectionPrivacy, SectionTerminals, SectionRemote, SectionMessages, SectionRequests, SectionSettings, SectionYou,
 }
 
 // configSectionPrefix is the one route whose SUB-resource is itself a

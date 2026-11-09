@@ -71,6 +71,8 @@ type Result struct {
 	// nothing left to configure.
 	PromptReconsiderRowsDeleted int
 	// ProcessRowsDeleted is the count of process_runs + process_events rows
+	// (plus the capture budget's aged process_rollups / process_capture_stats
+	// rows and the unattributed rows its policy compacted, migration 212)
 	// removed by the process-observability sweep
 	// ([observer.process].retention_days, docs/process-observability.md §11).
 	// Same orchestration pattern as CacheRowsDeleted: the retention package

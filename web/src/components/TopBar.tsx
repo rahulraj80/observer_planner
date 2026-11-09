@@ -42,6 +42,7 @@ import { useComponentState } from "@/lib/useComponents";
 import { InstanceSwitcher } from "@/components/InstanceSwitcher";
 import { RemoteMachineChip } from "@/components/RemoteMachineChip";
 import { NotificationBell } from "@/components/NotificationBell";
+import { avatarInitials, identityLabel, type MeMachine } from "@/lib/you";
 import { PhoneTerminalButton } from "@/components/LaunchDock";
 
 // `dashboard-refresh` is a window-level CustomEvent that useApi
@@ -157,14 +158,23 @@ export function TopBar({
         )}
         <RemoteMachineChip />
       </div>
-      <div className="flex items-center gap-2 text-[11px] text-fg-3">
+      <div className="flex min-w-0 items-center gap-2 text-[11px] text-fg-3">
         {/* Secondary status + Export — hidden on phones (< md) to keep
-            the header uncluttered; the drawer + Refresh stay reachable. */}
+            the header uncluttered; the drawer + Refresh stay reachable.
+            Between md and xl the column is too narrow for every chip (at
+            1,024 px they ran about 100 px past the edge and gave the page a
+            horizontal scrollbar, 2026-11-06), so the lowest-value ones
+            (last activity, the cloud chip, density, the link tools) wait
+            for xl. */}
         <div className="hidden items-center gap-2 md:flex">
-          <LastActivity iso={lastSeen} />
+          <span className="hidden xl:inline-flex">
+            <LastActivity iso={lastSeen} />
+          </span>
           <UpdateAvailablePill current={status.data?.version} />
           <EnrolmentBadge />
-          <CloudAccountBadge />
+          <span className="hidden xl:inline-flex">
+            <CloudAccountBadge />
+          </span>
           <CaptureStatePill setup={setup.data} />
           {/* Instance switcher — renders nothing unless the operator has
               configured [[terminal.ssh.profiles]], so a solo install's header
@@ -206,7 +216,7 @@ export function TopBar({
         </Tooltip>
         {/* Extra link tools: desktop only (low value on a phone). The
             shared PageLinkTools, the same pair the org top bar carries. */}
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="hidden items-center gap-2 xl:flex">
           <div className="mx-1 h-4 w-px bg-line-2" />
           <PageLinkTools />
         </div>
@@ -223,7 +233,9 @@ export function TopBar({
             needs the room for the page title: below sm they live in the
             navigation drawer instead (Sidebar, DisplayControls). */}
         <span className="hidden items-center gap-2 sm:flex">
-          <TopBarDensity />
+          <span className="hidden xl:inline-flex">
+            <TopBarDensity />
+          </span>
           <ThemeToggle dataTour="topbar-theme" />
         </span>
         {onHelp && (
@@ -236,6 +248,7 @@ export function TopBar({
             </IconButton>
           </span>
         )}
+        <YouChip />
       </div>
     </header>
   );
@@ -478,5 +491,24 @@ function RefreshGlyph() {
     <span className={busy ? "inline-flex animate-spin" : "inline-flex"} aria-hidden>
       <Icon icon={RefreshCw} size="xs" />
     </span>
+  );
+}
+
+// YouChip is the avatar at the far right of the bar: initials from the best
+// identity known (the org email, else the OS user) linking to the You page.
+function YouChip() {
+  const enrol = useApi<EnrolmentStatus>("/api/enrolment/status", undefined, [], { refreshMs: 30000 });
+  const me = useApi<MeMachine>("/api/me/machine");
+  const who = identityLabel(enrol.data?.enrolled ? enrol.data.user_email : undefined, me.data?.os_user);
+  return (
+    <Tooltip content={who ? `You: ${who}` : "You"}>
+      <RouterLink
+        to="/you"
+        aria-label={who ? `You: ${who}` : "You"}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-pill border border-line-2 bg-bg-2 text-[10.5px] font-semibold text-fg-1 hover:bg-bg-3 hover:text-fg-0"
+      >
+        {who ? avatarInitials(who) : "?"}
+      </RouterLink>
+    </Tooltip>
   );
 }

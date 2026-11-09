@@ -9,9 +9,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -53,6 +55,7 @@ func newGuardCmd() *cobra.Command {
 	cmd.AddCommand(newGuardExportCmd())
 	cmd.AddCommand(newGuardReportCmd())
 	cmd.AddCommand(newGuardPromptCmd())
+	cmd.AddCommand(newGuardRecipeCmd())
 	registerGuardEnforceCmds(cmd)
 	return cmd
 }
@@ -91,6 +94,12 @@ func newGuardStatusCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out, "Guard:        %s\n", onOff(cfg.Guard.Enabled))
 			fmt.Fprintf(out, "Mode:         %s\n", cfg.Guard.Mode)
+			// FU-235: the org layer's rules follow the org's action whatever
+			// the local mode, so say so next to the mode (empty with no org
+			// layer).
+			if line := g.OrgOverridePosture().ModeLine(cfg.Guard.Mode); line != "" {
+				fmt.Fprintf(out, "Org policy:   %s\n", line)
+			}
 			fmt.Fprintf(out, "Strict:       %v (fail-%s on guard internal error)\n",
 				cfg.Guard.Strict, map[bool]string{true: "closed", false: "open"}[cfg.Guard.Strict])
 			fmt.Fprintf(out, "Rules:        %d active rows\n", g.RuleCount())
@@ -110,6 +119,11 @@ func newGuardStatusCmd() *cobra.Command {
 				for _, note := range ps.Notes {
 					fmt.Fprintf(out, "NOTE:         %s\n", note)
 				}
+			}
+			// The applied guard recipe of this machine (docs/guard-recipes.md),
+			// and a [guard] level that disagrees with it.
+			for _, line := range guardRecipeStatusLines(cfg) {
+				fmt.Fprintln(out, line)
 			}
 			for _, issue := range g.LoadIssues() {
 				fmt.Fprintf(out, "LOAD ISSUE:   %s\n", issue)
@@ -170,12 +184,18 @@ func newGuardStatusCmd() *cobra.Command {
 			// one person who could see the reason was not the one hitting it.
 			fmt.Fprintf(out, "Org budget:   %s\n", orgBudgetCLILine(cmd.Context(), cfg, database))
 			fmt.Fprintf(out, "Node control: %s\n", nodeInterventionStatusLine(cmd.Context(), s, cfg.Observer.DBPath))
+			// The organization's coding-agent prompt judge (P-228): whether it
+			// runs here, its scope and judge route, and the last day's
+			// verdicts.
+			for _, line := range planeBGuardStatusLines(loadPlaneBStatusFacts(cmd.Context(), cfg, s, time.Now().UTC())) {
+				fmt.Fprintln(out, line)
+			}
 
 			sum, err := s.SummarizeGuardEvents(cmd.Context(), time.Now().UTC().Add(-24*time.Hour))
 			if err != nil {
 				return fmt.Errorf("summarize: %w", err)
 			}
-			fmt.Fprintf(out, "\nVerdicts (24h): %d total, %d enforced\n", sum.Total, sum.Enforced)
+			fmt.Fprintf(out, "\nVerdicts (24h): %d total, %d enforced%s\n", sum.Total, sum.Enforced, enforcedByOrgSuffix(sum.EnforcedByOrg))
 			for _, line := range []struct {
 				label string
 				m     map[string]int
@@ -194,12 +214,24 @@ func newGuardStatusCmd() *cobra.Command {
 				fmt.Fprintf(out, "Audit chain:  OK (%d rows verified)\n", report.Checked)
 			} else {
 				fmt.Fprintf(out, "Audit chain:  BROKEN at id %d - %s\n", report.FirstDivergenceID, report.Detail)
+				if hint := store.GuardChainRepairHint(report); hint != "" {
+					fmt.Fprintf(out, "Repair:       %s\n", hint)
+				}
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
 	return cmd
+}
+
+// enforcedByOrgSuffix is the "(N by your organization)" tail of the verdict
+// count line (FU-235); "" when the organization's policy enforced none.
+func enforcedByOrgSuffix(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d by your organization's policy)", n)
 }
 
 // newGuardRulesCmd implements `observer guard rules [--effective]
@@ -610,6 +642,9 @@ func newGuardVerifyAuditCmd() *cobra.Command {
 			fmt.Fprintf(out, "audit chain BROKEN - first divergence at id %d (%d row(s) walked)\n%s\n",
 				report.FirstDivergenceID, report.Checked, report.Detail)
 			fmt.Fprintln(out, formatGuardBreaks(report.Breaks))
+			if hint := store.GuardChainRepairHint(report); hint != "" {
+				fmt.Fprintln(out, "repair: "+hint)
+			}
 			return errors.New("guard verify-audit: chain divergence")
 		},
 	}
@@ -712,9 +747,12 @@ func newGuardDedupEventsCmd() *cobra.Command {
 // the id. Reports only, unless --apply.
 func newGuardRepairAnchorsCmd() *cobra.Command {
 	var (
-		configPath string
-		apply      bool
-		ceiling    int64
+		configPath    string
+		apply         bool
+		ceiling       int64
+		radius        int64
+		workers       int
+		progressEvery time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "repair-anchors",
@@ -728,7 +766,16 @@ func newGuardRepairAnchorsCmd() *cobra.Command {
 			"stored hash. That is a proof, not a guess: a row edited in any other\n" +
 			"way matches no id and stays reported. No hash is rewritten, so a\n" +
 			"deleted row stays a broken link. With --apply it writes the proven\n" +
-			"ids to action_anchor; without it it only reports.",
+			"ids to action_anchor; without it it only reports.\n\n" +
+			"Each row is searched around hints, in order: the id an identical\n" +
+			"earlier row was proven with (a repeated row), the last anchor in its\n" +
+			"session, and the anchored rows just before and after it; within\n" +
+			"--radius of each (0 searches every id up to --ceiling). A row not\n" +
+			"proven within the radius is reported unproven with the reason, never\n" +
+			"guessed: run again with a wider --radius, or --radius 0, to search\n" +
+			"further. --workers hash one row's range in parallel (the result does\n" +
+			"not depend on it), progress goes to stderr every --progress, and\n" +
+			"Ctrl-C prints the partial report and writes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
@@ -741,18 +788,29 @@ func newGuardRepairAnchorsCmd() *cobra.Command {
 			}
 			defer database.Close()
 			st := store.New(database)
-			report, err := st.RepairGuardAnchors(cmd.Context(), store.GuardAnchorRepairOptions{
-				Apply: apply, Ceiling: ceiling,
-			})
+			// Ctrl-C / SIGTERM stop the search and print what it found so far.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			opts := store.GuardAnchorRepairOptions{
+				Apply: apply, Ceiling: ceiling, Radius: radius, Workers: workers,
+				ProgressEvery: progressEvery,
+			}
+			if progressEvery > 0 {
+				errOut := cmd.ErrOrStderr()
+				opts.Progress = func(p store.GuardAnchorProgress) {
+					fmt.Fprintln(errOut, formatGuardAnchorProgress(p))
+				}
+			}
+			report, err := st.RepairGuardAnchors(ctx, opts)
+			out := cmd.OutOrStdout()
+			if report.Interrupted {
+				writeGuardAnchorReport(out, report)
+				return fmt.Errorf("guard repair-anchors: interrupted, nothing written: %w", err)
+			}
 			if err != nil {
 				return fmt.Errorf("repair: %w", err)
 			}
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "%d row(s) fail as rewritten with no action id; %d proven (action ids 1-%d, %d hash(es) tried)\n",
-				report.Candidates, report.Proven, report.Ceiling, report.Tries)
-			if report.UnprovenCount > 0 {
-				fmt.Fprintf(out, "%d not proven (left as reported), the first: %v\n", report.UnprovenCount, report.Unproven)
-			}
+			writeGuardAnchorReport(out, report)
 			if !report.Applied {
 				if report.Proven > 0 {
 					fmt.Fprintln(out, "dry run: pass --apply to write the proven ids")
@@ -775,6 +833,12 @@ func newGuardRepairAnchorsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Write the proven action ids (default: report only)")
 	cmd.Flags().Int64Var(&ceiling, "ceiling", 0, "Highest action id to try (default: the highest id the node ever issued)")
+	cmd.Flags().Int64Var(&radius, "radius", guardAnchorDefaultRadius,
+		"Try only action ids within this distance of each row's hint; 0 tries every id up to the ceiling")
+	cmd.Flags().IntVar(&workers, "workers", store.DefaultGuardAnchorWorkers(),
+		"Goroutines hashing one row's range (the result does not depend on it)")
+	cmd.Flags().DurationVar(&progressEvery, "progress", 10*time.Second,
+		"Print progress to stderr at this interval; 0 turns it off")
 	return cmd
 }
 

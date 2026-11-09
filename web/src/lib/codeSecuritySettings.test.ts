@@ -66,6 +66,8 @@ test("every row is complete and keyed under security.", () => {
     "Security.Deps.InstallWaitMS",
     "Security.Deps.MinPackageAgeH",
     "Security.Deps.IndexDownload",
+    "Security.Deps.DBSource",
+    "Security.Deps.DBFallbackUpstream",
     "Security.Secrets.WriteCheck",
     "Security.Secrets.CommitCheck",
     "Security.Secrets.PostWriteCapKiB",
@@ -88,6 +90,10 @@ test("every row is complete and keyed under security.", () => {
     "Security.Scan.Opengrep.ScheduleHours",
     "Security.Scan.Opengrep.PauseOnBattery",
     "Security.Scan.Opengrep.Feed",
+    "Security.Scan.Opengrep.TaintPass",
+    "Security.Scan.Opengrep.TaintPassBudgetSeconds",
+    "Security.Scan.Opengrep.TaintPassJobs",
+    "Security.Scan.Opengrep.TaintPassMemoryMiB",
     "Security.Feedback.AfterWrite",
   ]);
 });
@@ -111,6 +117,8 @@ test("a row shows only while its owning component is active", () => {
     "security.deps.install_wait_ms",
     "security.deps.min_package_age_h",
     "security.deps.index_download",
+    "security.deps.db_source",
+    "security.deps.db_fallback_upstream",
     "security.deps.unknown_action",
     "security.deps.online_unknown_action",
     ...scanning,

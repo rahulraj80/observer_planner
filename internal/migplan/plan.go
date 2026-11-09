@@ -198,9 +198,12 @@ var horizonRules = []horizonRule{
 type stepFacts struct {
 	version  int
 	recorded bool
-	late     bool
-	present  bool
-	horizon  int
+	// adopted reports a record of RecordAdopted: the step was bookkept, never
+	// executed, so its late-step probe can still overrule it.
+	adopted bool
+	late    bool
+	present bool
+	horizon int
 }
 
 // stepRule is one row of the ordered per-step table. action "" means skip.
@@ -212,6 +215,10 @@ type stepRule struct {
 
 // stepRules decide each embedded step, first match wins.
 var stepRules = []stepRule{
+	// A late step a ledger already adopted under the pre-ledger horizon, before
+	// it had a lateSteps row, whose probe column is missing: the adoption was a
+	// guess the schema disproves, so the step runs. An applied record is final.
+	{name: "adopted late step missing", applies: func(f stepFacts) bool { return f.recorded && f.adopted && f.late && !f.present }, action: ActionRun},
 	{name: "recorded", applies: func(f stepFacts) bool { return f.recorded }},
 	{name: "late step present", applies: func(f stepFacts) bool { return f.late && f.present }, action: ActionAdopt},
 	{name: "late step missing", applies: func(f stepFacts) bool { return f.late && !f.present }, action: ActionRun},
@@ -253,11 +260,12 @@ func Decide(in Input) (Plan, error) {
 
 	plan.Version = l.Version
 	for _, v := range in.Embedded {
-		_, recorded := l.Steps[v]
+		record, recorded := l.Steps[v]
 		present, late := in.Late[v]
 		f := stepFacts{
 			version:  v,
 			recorded: recorded && v <= l.Version,
+			adopted:  record == RecordAdopted,
 			late:     late,
 			present:  present,
 			horizon:  plan.Horizon,

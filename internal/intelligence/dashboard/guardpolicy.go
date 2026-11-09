@@ -406,7 +406,7 @@ func (s *Server) handleGuardPolicyBackup(w http.ResponseWriter, r *http.Request)
 	bakPath := path + ".bak"
 	switch r.Method {
 	case http.MethodGet:
-		body, readErr := os.ReadFile(bakPath)
+		body, readErr := os.ReadFile(bakPath) //nolint:gosec // G703: the configured user policy, or the trusted dir joined with the sha256 of a known project root (guardKnownProjectRoot); no request text reaches the path
 		if errors.Is(readErr, os.ErrNotExist) {
 			writeJSON(w, map[string]any{"exists": false, "backup_path": bakPath})
 			return
@@ -416,7 +416,7 @@ func (s *Server) handleGuardPolicyBackup(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		var modifiedAt string
-		if fi, statErr := os.Stat(bakPath); statErr == nil {
+		if fi, statErr := os.Stat(bakPath); statErr == nil { //nolint:gosec // G703: the configured user policy, or the trusted dir joined with the sha256 of a known project root (guardKnownProjectRoot); no request text reaches the path
 			modifiedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
 		writeJSON(w, map[string]any{
@@ -426,7 +426,7 @@ func (s *Server) handleGuardPolicyBackup(w http.ResponseWriter, r *http.Request)
 			"content":     string(body),
 		})
 	case http.MethodPost:
-		bak, readErr := os.ReadFile(bakPath)
+		bak, readErr := os.ReadFile(bakPath) //nolint:gosec // G703: the configured user policy, or the trusted dir joined with the sha256 of a known project root (guardKnownProjectRoot); no request text reaches the path
 		if errors.Is(readErr, os.ErrNotExist) {
 			http.Error(w, "no backup exists yet - backups are created on the first editor save over an existing file", http.StatusNotFound)
 			return
@@ -444,7 +444,7 @@ func (s *Server) handleGuardPolicyBackup(w http.ResponseWriter, r *http.Request)
 			})
 			return
 		}
-		cur, readErr := os.ReadFile(path)
+		cur, readErr := os.ReadFile(path) //nolint:gosec // G703: the configured user policy, or the trusted dir joined with the sha256 of a known project root (guardKnownProjectRoot); no request text reaches the path
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 			writeErr(w, readErr)
 			return
@@ -537,8 +537,8 @@ func writeFileAtomic(path string, content []byte) error {
 	}
 	tmpName := tmp.Name()
 	defer func() {
-		if _, statErr := os.Stat(tmpName); statErr == nil {
-			_ = os.Remove(tmpName)
+		if _, statErr := os.Stat(tmpName); statErr == nil { //nolint:gosec // G703: the CreateTemp file in the policy file own dir and the policy path itself (see handleGuardPolicyBackup); no request text reaches either
+			_ = os.Remove(tmpName) //nolint:gosec // G703: the CreateTemp file in the policy file own dir and the policy path itself (see handleGuardPolicyBackup); no request text reaches either
 		}
 	}()
 	if _, err := tmp.Write(content); err != nil {
@@ -548,7 +548,7 @@ func writeFileAtomic(path string, content []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := os.Rename(tmpName, path); err != nil { //nolint:gosec // G703: the CreateTemp file in the policy file own dir and the policy path itself (see handleGuardPolicyBackup); no request text reaches either
 		return fmt.Errorf("rename %s → %s: %w", tmpName, path, err)
 	}
 	return nil

@@ -9,9 +9,11 @@
 package notify
 
 import (
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"testing"
 	"time"
 	"unicode/utf8"
 )
@@ -34,9 +36,33 @@ type Desktop struct {
 	run func(name string, args ...string) error
 }
 
+// AllowRealNotifyInTestEnv is the escape hatch for the one kind of test
+// that must show a real desktop notification (a manual probe): set to "1",
+// a `go test` binary's NewDesktop runs the real helper again.
+const AllowRealNotifyInTestEnv = "OBSERVER_ALLOW_REAL_NOTIFY_IN_TEST"
+
 // NewDesktop returns the production desktop notifier.
+//
+// Inside a `go test` binary it returns an inert notifier (ledger TESTNOTIFY-1,
+// FU-235): hook and guard tests drive real verdicts (an R-101 deny under a
+// fixture org bundle, an org-locked rule) through the same composition the
+// daemon uses, and before this guard a test run on a Windows or macOS host,
+// or a Linux desktop with notify-send, showed the developer real "Observer
+// Guard: R-101 deny ... your organization locks this rule" toasts that no
+// node of theirs had produced. The same testing.Testing() backstop shape as
+// internal/db GuardLiveDB and internal/testwriteguard. Production cost is one
+// boolean read.
 func NewDesktop() *Desktop {
-	return &Desktop{run: runWithTimeout}
+	return &Desktop{run: desktopRunner(testing.Testing(), os.Getenv(AllowRealNotifyInTestEnv) == "1")}
+}
+
+// desktopRunner picks the helper runner: the real one in production (or in a
+// test that opted in), a no-op inside a test binary otherwise.
+func desktopRunner(inTest, allowInTest bool) func(name string, args ...string) error {
+	if inTest && !allowInTest {
+		return func(string, ...string) error { return nil }
+	}
+	return runWithTimeout
 }
 
 // runWithTimeout starts the helper and waits at most notifyTimeout.

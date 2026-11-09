@@ -60,6 +60,9 @@ type samlSessionContextKey string
 // scimTokenContextKey is the context key for scimToken security scheme
 type scimTokenContextKey string
 
+// shipTokenContextKey is the context key for shipToken security scheme
+type shipTokenContextKey string
+
 // PushBatchParams defines parameters for PushBatch.
 type PushBatchParams struct {
 	// XSBOTimestamp Unix seconds at which the push was signed. Rejected with 401 if absent or outside ±300s of server time.

@@ -14,7 +14,7 @@ import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { isRemoteView } from "@/lib/remote";
-import { foldAgentExits, isLiveStatus, policyStopMessage } from "@/lib/launchStatus";
+import { foldAgentExits, foldSessionExit, installResume, isLiveStatus, policyStopMessage } from "@/lib/launchStatus";
 import type { Status, PolicyStopInfo } from "@/lib/launchStatus";
 import type { LaunchIsolation } from "@/lib/types";
 // The terminal itself comes from the component registry: a lazy component in
@@ -396,11 +396,35 @@ export function LaunchDockProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // A setup terminal's socket can keep reading live after its command exited
+  // (it is not an agent run, so the status stream never names it): while a
+  // resume waits on it, read the daemon's session list, which says exited.
   useEffect(() => {
     if (!pendingInstall) return;
-    const status = statuses[pendingInstall.token];
-    if (status !== "exited" && status !== "error") return;
-    setNewTerminalDraft(pendingInstall.draft);
+    const token = pendingInstall.token;
+    let stopped = false;
+    const t = window.setInterval(() => {
+      fetch("/api/launch/sessions")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { sessions?: LaunchInfoWire[] } | null) => {
+          if (stopped || !data) return;
+          setStatuses((prev) => foldSessionExit(prev, token, data.sessions ?? null));
+        })
+        .catch(() => {
+          /* the daemon did not answer: keep the socket's status */
+        });
+    }, 3000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
+  }, [pendingInstall]);
+
+  useEffect(() => {
+    if (!pendingInstall) return;
+    const draft = installResume(pendingInstall, statuses);
+    if (draft === null) return;
+    setNewTerminalDraft(draft);
     setPendingInstall(null);
     setResumedAfterInstall(true);
     setActiveToken((current) =>

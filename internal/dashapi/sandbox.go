@@ -69,6 +69,9 @@ type SandboxAvailability struct {
 	Available bool   `json:"available"`
 	Verdict   string `json:"verdict,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	// ReasonListsRows: Reason lists every row of this host (the overall
+	// answer when none is available), not one row's own reason (FX1-A4).
+	ReasonListsRows bool `json:"reason_lists_rows,omitempty"`
 	// Backend names the sandbox mechanism ("bwrap" in v1); BackendVersion is
 	// the resolved binary's parsed version string. Both empty when the
 	// backend itself could not be located.
@@ -152,6 +155,18 @@ type SandboxBackendAvail struct {
 	Verdict string `json:"verdict,omitempty"`
 	Rule    string `json:"rule,omitempty"`
 	Reason  string `json:"reason,omitempty"`
+	// Enabled is whether the row is in the enabled backends list
+	// ([terminal.sandbox].backends after any organization pin, the master
+	// switch aside), so a settings editor can show it checked.
+	Enabled bool `json:"enabled"`
+	// WhenEnabledAvailable, WhenEnabledVerdict and WhenEnabledReason say,
+	// for a row dropped only because it is not enabled (verdict
+	// disabled_by_config), what selection answers once it is: available,
+	// or the next rule's drop. All empty for every other row, so a client
+	// can tell "enable it and it runs" from "enabling it would not help".
+	WhenEnabledAvailable bool   `json:"when_enabled_available,omitempty"`
+	WhenEnabledVerdict   string `json:"when_enabled_verdict,omitempty"`
+	WhenEnabledReason    string `json:"when_enabled_reason,omitempty"`
 	// Verification is live, doc, fixture or inferred on this host; Beta is
 	// true for anything not live (and for a version outside the tested
 	// range), rendered as "beta" everywhere.
@@ -170,6 +185,31 @@ type SandboxBackendAvail struct {
 	// not make the row unavailable (for example a container runtime known
 	// to fail, with the known-good one); empty when none.
 	Hint string `json:"hint,omitempty"`
+	// GatewayMode is the gateway that runs the row's boxes, for a row that
+	// has one (managed_local or external; OpenShell lane O4); empty for
+	// every other row. The org floor gateway_modes judges it.
+	GatewayMode string `json:"gateway_mode,omitempty"`
+	// Prerequisite is the driver's plain sentence of what the row needs on
+	// this host (for the openshell row the docker group, which is
+	// root-equivalent, or rootless Podman 5, which the probe still
+	// refuses); empty when none. Shown as served, never restated.
+	Prerequisite string `json:"prerequisite,omitempty"`
+	// VersionPins are the version pin values the row's driver serves for
+	// the dashboard's pin picker (the openshell row: its tested versions;
+	// a pin to another version can never make it usable); absent when the
+	// row has no pin. The picker reads them, never a hard-coded list.
+	VersionPins []string `json:"version_pins,omitempty"`
+	// Disclosures are what the user is told before first use, one per
+	// closed registry disclosure, each with the daemon's own text for this
+	// row's gateway mode (OpenShell lane O4). Old clients ignore it.
+	Disclosures []SandboxDisclosure `json:"disclosures,omitempty"`
+}
+
+// SandboxDisclosure is one entry of SandboxBackendAvail.Disclosures: the
+// closed registry id and the sentence the dashboard shows as served.
+type SandboxDisclosure struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // SandboxSourceAvail is one entry of SandboxAvailability.Sources - whether a

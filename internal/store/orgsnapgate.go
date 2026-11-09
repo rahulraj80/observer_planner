@@ -124,20 +124,25 @@ const (
 	snapFamSessionVerbosity   snapFamily = "session_verbosity"
 	snapFamSessionProcess     snapFamily = "session_process"
 	snapFamSessionNetwork     snapFamily = "session_network"
-	snapFamProcessSummary     snapFamily = "process_summary"
-	snapFamProjectPatterns    snapFamily = "project_patterns"
-	snapFamBenchmark          snapFamily = "benchmark"
-	snapFamCompressionStats   snapFamily = "compression_stats"
-	snapFamCodeintelDev       snapFamily = "codeintel_dev"
-	snapFamCodeintelSummary   snapFamily = "codeintel_summary"
-	snapFamTerminalRuns       snapFamily = "terminal_runs"
-	snapFamTerminalCommands   snapFamily = "terminal_commands"
-	snapFamRemoteAuditRows    snapFamily = "remote_audit_rows"
-	snapFamTerminalSummary    snapFamily = "terminal_summary"
-	snapFamRemoteAuditSummary snapFamily = "remote_audit_summary"
-	snapFamGuardPins          snapFamily = "guard_pins"
-	snapFamGuardApprovals     snapFamily = "guard_approvals"
-	snapFamLimitGauge         snapFamily = "limit_gauge"
+	// The process capture budget's org wire (layer O1,
+	// processrolluporgrows.go): ONE gated recompute feeding TWO slices (the
+	// rollup rows and the per-session stats rows), the benchmark arrangement,
+	// probed over the two capture tables.
+	snapFamSessionProcessCapture snapFamily = "session_process_capture"
+	snapFamProcessSummary        snapFamily = "process_summary"
+	snapFamProjectPatterns       snapFamily = "project_patterns"
+	snapFamBenchmark             snapFamily = "benchmark"
+	snapFamCompressionStats      snapFamily = "compression_stats"
+	snapFamCodeintelDev          snapFamily = "codeintel_dev"
+	snapFamCodeintelSummary      snapFamily = "codeintel_summary"
+	snapFamTerminalRuns          snapFamily = "terminal_runs"
+	snapFamTerminalCommands      snapFamily = "terminal_commands"
+	snapFamRemoteAuditRows       snapFamily = "remote_audit_rows"
+	snapFamTerminalSummary       snapFamily = "terminal_summary"
+	snapFamRemoteAuditSummary    snapFamily = "remote_audit_summary"
+	snapFamGuardPins             snapFamily = "guard_pins"
+	snapFamGuardApprovals        snapFamily = "guard_approvals"
+	snapFamLimitGauge            snapFamily = "limit_gauge"
 	// The two Lines-of-Code wire families (docs/plans/
 	// lines-of-code-tracking-plan-2026-09-07.md §3.4). They share one probe
 	// because they read one source family, exactly like the three
@@ -211,6 +216,7 @@ var snapProbes = map[snapFamily]func(*Store, context.Context) (string, error){
 	snapFamSessionProcess:        (*Store).probeProcessRuns,
 	snapFamProcessSummary:        (*Store).probeProcessRuns,
 	snapFamSessionNetwork:        (*Store).probeNetworkEvents,
+	snapFamSessionProcessCapture: (*Store).probeProcessCapture,
 	snapFamProjectPatterns:       (*Store).probeProjectPatterns,
 	snapFamBenchmark:             (*Store).probeBenchmarks,
 	snapFamCompressionStats:      (*Store).probeCompressionEvents,

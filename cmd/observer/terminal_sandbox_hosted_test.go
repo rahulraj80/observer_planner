@@ -18,6 +18,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/keystore"
+	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/nodegov"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/terminalsisolation"
 	"github.com/marmutapp/superbased-observer/internal/sandbox"
@@ -387,6 +388,16 @@ var sandboxHostedSettingsInventory = map[string]adminHome{
 	"e2b":    {Floor: "allowed_regions"},
 	"modal":  {Floor: "allowed_regions"},
 	"vercel": {Floor: "allowed_regions"},
+	// The org-hosted row's table: its admin home is the managed body's
+	// org_openshell field (the published gateway); the member's two keys
+	// (laptop_relay, hold_on_end) live on the Org-hosted OpenShell card.
+	"openshell-org": {Managed: "org_openshell"},
+}
+
+// sandboxHostedNodeHome names a key whose node home is not the Hosted
+// sandboxes panel (lane G4: the org-hosted row has its own card).
+var sandboxHostedNodeHome = map[string]string{
+	"openshell-org": "SandboxOrgShellCard.tsx",
 }
 
 // TestSandboxHostedSettingsInventory walks [terminal.sandbox.hosted]: every
@@ -404,7 +415,12 @@ func TestSandboxHostedSettingsInventory(t *testing.T) {
 			t.Errorf("[terminal.sandbox.hosted].%s has no inventory row", key)
 			continue
 		}
-		if !strings.Contains(string(panel), key) {
+		if card, ok := sandboxHostedNodeHome[key]; ok {
+			b, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "components", card))
+			if err != nil || !strings.Contains(string(b), "laptop-relay") || !strings.Contains(string(b), "hold-on-end") {
+				t.Errorf("[terminal.sandbox.hosted].%s has no node home in %s (%v)", key, card, err)
+			}
+		} else if !strings.Contains(string(panel), key) {
 			t.Errorf("[terminal.sandbox.hosted].%s has no node home in the panel", key)
 		}
 		switch {
@@ -415,6 +431,10 @@ func TestSandboxHostedSettingsInventory(t *testing.T) {
 		case home.Floor != "":
 			if _, ok := terminalsisolation.LookupFloorKey(home.Floor); !ok {
 				t.Errorf("%s: floor %q is not a terminals.isolation key", key, home.Floor)
+			}
+		case home.Managed != "":
+			if !managedBodyHasField(home.Managed) {
+				t.Errorf("%s: %q is not a field of the managed sandbox body", key, home.Managed)
 			}
 		default:
 			t.Errorf("%s has no admin home", key)
@@ -557,4 +577,16 @@ func TestBoxRedialWhileTheRelayReopens(t *testing.T) {
 	}); err == nil {
 		t.Error("a relay that never came back passed")
 	}
+}
+
+// managedBodyHasField reports whether the managed sandbox body has a field
+// with this JSON key.
+func managedBodyHasField(key string) bool {
+	t := reflect.TypeOf(orgcontract.SandboxManagedPolicyV1{})
+	for i := 0; i < t.NumField(); i++ {
+		if strings.SplitN(t.Field(i).Tag.Get("json"), ",", 2)[0] == key {
+			return true
+		}
+	}
+	return false
 }

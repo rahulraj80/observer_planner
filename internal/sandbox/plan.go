@@ -126,6 +126,11 @@ type Request struct {
 	// spelling, so a bind named through a link cannot show the observer dir
 	// in a box. nil checks the written spelling only.
 	ResolvePath func(string) string
+	// Seccomp names the seccomp profile the run is filtered with (an
+	// internal/sandboxseccomp profile id; "" plans none, lane N2). bwrap
+	// reads the program from SeccompFD, which the host helper fills, so a
+	// plan with a profile always runs the helper (seccomp.go).
+	Seccomp string
 }
 
 // RelayRequest is the relay input of a plan.
@@ -370,6 +375,8 @@ type Plan struct {
 	guest []string
 	net   NetRequest
 	relay RelayRequest
+	// seccomp is the request's profile id ("" for none).
+	seccomp string
 	// placeholders are the overlays whose path the host helper must create
 	// before bwrap runs (Plan.HostArgv carries them).
 	placeholders []Overlay
@@ -569,11 +576,18 @@ func BuildPlan(req Request) (Plan, error) {
 	//     carries an Observer secret (GuestUnsetEnv).
 	pre = append(pre, unsetEnvArgs()...)
 
-	// 12. Enter the workspace and die with the daemon.
+	// 12. The seccomp filter, when one is planned (bwrap loads it last,
+	//     right before it execs the inner argv). Then enter the workspace
+	//     and die with the daemon.
+	sc, err := seccompArgs(req.Seccomp)
+	if err != nil {
+		return Plan{}, fmt.Errorf("sandbox.BuildPlan: %w", err)
+	}
+	add(sc...)
 	add(flagChdir, req.WorkspaceRoot)
 	add(flagDieWithParent)
 
-	return Plan{pre: pre, guest: guest, net: req.Net, relay: req.Relay, placeholders: placeholdersOf(req.Overlays), HomeMode: homeMode, Egress: prof}, nil
+	return Plan{pre: pre, guest: guest, net: req.Net, relay: req.Relay, seccomp: req.Seccomp, placeholders: placeholdersOf(req.Overlays), HomeMode: homeMode, Egress: prof}, nil
 }
 
 // roBinaryArgs is BuildPlan's step 4: the derived read-only binaries and
@@ -859,13 +873,29 @@ func validateRel(rel string) error {
 // validateAbs guards a resolved bind path. rw marks a writable bind, for which
 // the whole-root "/" is additionally forbidden.
 func validateAbs(p string, rw bool) error {
+	return checkAbs(p, rw, false)
+}
+
+// validateOneShotAbs is validateAbs for the one-shot planner's own paths
+// (oneshot.go): the same rules, except that a plain space is accepted (see
+// badPathCharIndex). Every other caller keeps validateAbs.
+func validateOneShotAbs(p string, rw bool) error {
+	return checkAbs(p, rw, true)
+}
+
+// checkAbs is the body of validateAbs and validateOneShotAbs; allowSpace
+// picks badPathCharIndex over badCharIndex.
+func checkAbs(p string, rw, allowSpace bool) error {
 	if p == "" {
 		return fmt.Errorf("empty path")
 	}
 	if strings.HasPrefix(p, "-") {
 		return fmt.Errorf("%q must not begin with '-'", p)
 	}
-	if i := badCharIndex(p); i >= 0 {
+	switch {
+	case allowSpace && badPathCharIndex(p) >= 0:
+		return fmt.Errorf("%q contains a NUL, a control character, or whitespace other than a space", p)
+	case !allowSpace && badCharIndex(p) >= 0:
 		return fmt.Errorf("%q contains a NUL, whitespace, or control character", p)
 	}
 	if hasDotDot(p) {
@@ -1038,6 +1068,23 @@ func hasDotDot(p string) bool {
 func badCharIndex(s string) int {
 	for i, r := range s {
 		if r <= ' ' || r == 0x7f {
+			return i
+		}
+	}
+	return -1
+}
+
+// badPathCharIndex is badCharIndex less one rune: a plain space (U+0020) is
+// accepted, so a folder such as "future calculator" can be scanned. It is
+// only for a path that reaches bwrap as an argv element of its own through
+// exec, never through a shell or a joined string (the one-shot planner's
+// paths: internal/isolation hands the argv to extrun, which execs bwrap
+// directly). exec passes each element whole, so a space can neither split a
+// path nor start a second flag. NUL, tab, newline, every other rune below
+// 0x20, and 0x7f stay refused.
+func badPathCharIndex(s string) int {
+	for i, r := range s {
+		if r < ' ' || r == 0x7f {
 			return i
 		}
 	}

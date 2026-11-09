@@ -32,8 +32,8 @@ func TestCatalogShape(t *testing.T) {
 			feature++
 		}
 	}
-	if adapter != 55 {
-		t.Errorf("adapter rows = %d, want 55 (one per integration registry tool)", adapter)
+	if adapter != 56 {
+		t.Errorf("adapter rows = %d, want 56 (one per integration registry tool)", adapter)
 	}
 	if core != 2 {
 		t.Errorf("core rows = %d, want 2 (node core and org.core)", core)
@@ -45,9 +45,10 @@ func TestCatalogShape(t *testing.T) {
 	// have their own row: 57 after lanes SBX-P5 and SBX-P6 merged; lane
 	// SBX-P7 adds the e2b, modal and vercel hosted drivers; lane GATES-SBX
 	// adds readopt, credentials, mxc.appcontainer, wslc and hcs; lane GATES-SEC
-	// the trivy and kics drivers and isolation.seal).
-	if got := feature + integration; got < 38 || got > 76 {
-		t.Errorf("optional node rows = %d, want 38 to 76", got)
+	// the trivy and kics drivers and isolation.seal; plan 14.5 item 3b the
+	// Go symbol check, security.reach.go).
+	if got := feature + integration; got < 38 || got > 80 {
+		t.Errorf("optional node rows = %d, want 38 to 80", got)
 	}
 	if server < 21 {
 		t.Errorf("server rows = %d, want at least 21", server)

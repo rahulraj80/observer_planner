@@ -35,6 +35,28 @@ export type SnapshotCounts = {
   // Sessions with activity in the last 15 minutes (the /api/live
   // definition, uncapped) — drives the sidebar Live badge.
   live_sessions?: number;
+  // The same activity definition over the last 24 hours — drives the
+  // sidebar Overview badge. The rest of this block are newer too, so all
+  // are optional: an older daemon omits them and the badge hides.
+  active_sessions_24h?: number;
+  // Rows of project_patterns / plan_accounts / benchmark_runs — the
+  // Patterns, Plans & limits and Benchmarks badges.
+  project_patterns?: number;
+  plan_accounts?: number;
+  benchmark_runs?: number;
+  // Open security issues as the Code security page header counts them
+  // (stamped by the dashboard handler). Absent from the CLI's status, a
+  // build without the security module, or when the read failed.
+  open_issues?: OpenIssueCounts;
+};
+
+// OpenIssueCounts mirrors internal/diag/status.go's OpenIssueCounts: open
+// security issues (findings grouped by issue, each issue once), with the
+// ones whose worst finding is critical or high split out.
+export type OpenIssueCounts = {
+  total: number;
+  critical: number;
+  high: number;
 };
 
 export type StatusSnapshot = {
@@ -298,6 +320,78 @@ export type ProjectRow = {
   commits_30d?: number;
   last_commit_at?: string;
   capture?: ProjectCaptureInfo;
+  // Where it ran (cloud-agents lane CA-B5). execution_mix is the all-time
+  // session count per location ("unknown" = unstamped), absent when nothing
+  // on the project was ever stamped. synthetic_cloud marks a
+  // "cloud:<remote>" project (a remote-only session's home); cloud_twin_of
+  // is the local project it now groups under, cloud_twins the reverse.
+  execution_mix?: Partial<Record<"local" | "vendor_cloud" | "customer_worker" | "unknown", number>>;
+  synthetic_cloud?: boolean;
+  cloud_twin_of?: number;
+  cloud_twins?: number[];
+};
+
+// ---------- /api/project/<id>/cloud (where it ran, lane CA-B5) ----------
+// Mirrors internal/cloudlane.Lane plus the handler's envelope. A missing
+// figure is ABSENT (tokens / cost_usd), never 0: coverage says why.
+
+/** Coverage of one lane figure: the shared CoverageStatus vocabulary. */
+export type CloudLaneCoverage = "full" | "partial" | "none" | "unknown";
+
+export type CloudLaneTokens = {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  reasoning?: number;
+  total: number;
+};
+
+export type CloudLaneLedgerFigure = {
+  connector: string;
+  unit: string;
+  value_type: string;
+  measurement_source: string;
+  monetary_status: string;
+  rollup: "sum" | "latest_per_session" | "latest";
+  value: number;
+  entries: number;
+  sessions: number;
+  coverage: CloudLaneCoverage;
+};
+
+export type CloudLaneBucket = {
+  location: "local" | "vendor_cloud" | "customer_worker" | "unknown";
+  sessions: number;
+  sessions_with_tokens: number;
+  tokens?: CloudLaneTokens;
+  token_coverage: CloudLaneCoverage;
+  cost_usd?: number;
+  // Sessions with at least one turn; one without leaves cost partial.
+  sessions_with_turns: number;
+  turns: number;
+  unpriced_turns?: number;
+  cost_coverage: CloudLaneCoverage;
+  provenance?: { source: string; turns: number }[];
+  ledger?: CloudLaneLedgerFigure[];
+};
+
+export type CloudLaneProject = { id: number; root_path: string; synthetic?: boolean };
+
+export type CloudLaneResponse = {
+  buckets: CloudLaneBucket[];
+  off_machine_sessions: number;
+  unknown_sessions: number;
+  accounts?: { connector: string; provider: string; coverage_state?: string; last_error_class?: string }[];
+  projects: CloudLaneProject[];
+  folded_into?: CloudLaneProject;
+  ledger_truncated?: boolean;
+  // Turns the CA-D12 precedence set aside because a better rail reported
+  // the same session (lane CA-C1); absent when none.
+  superseded_turns?: number;
+  since: string;
+  until: string;
+  window_days: number;
 };
 
 // ProjectAuthoredSplit is the code-vs-comment split every Projects surface
@@ -331,6 +425,9 @@ export type ProjectCostBucketRow = {
   // /cost?by=session rows only: the session's AI code-vs-comment split
   // (code-category files only); absent with no AI-authored lines.
   ai_split?: ProjectAuthoredSplit;
+  // /cost?by=session rows only: where the session ran (lane CA-C1); absent
+  // when nothing stamped it (unknown, never local).
+  execution_location?: string;
 };
 
 export type ProjectSpendByDay = {
@@ -356,6 +453,21 @@ export type ProjectSpendBySession = {
   // 2026-09-22 rework finding S5: same honesty contract as
   // ProjectSpendByDay.unpriced_turns, scoped to this session.
   unpriced_turns?: number;
+  // Where the session ran; absent when nothing stamped it (lane CA-C1).
+  execution_location?: string;
+};
+
+// ProjectSpendLocations is the local/cloud split of the Spend figures
+// (decision CA-D21, lane CA-C1). Its buckets are built from the SAME folded
+// rows as total_usd (the project plus any folded "cloud:<remote>" twin), so
+// their dollars add up to it. Provider ledger figures stay in their own unit
+// beside the dollars and are never converted. Absent for a project that
+// never ran off this machine and folds no twin.
+export type ProjectSpendLocations = {
+  buckets: CloudLaneBucket[];
+  folded?: CloudLaneProject[];
+  superseded_turns?: number;
+  ledger_truncated?: boolean;
 };
 
 export type ProjectDetailSpend = {
@@ -366,6 +478,7 @@ export type ProjectDetailSpend = {
   by_model: ProjectCostBucketRow[];
   by_day: ProjectSpendByDay[];
   by_session: ProjectSpendBySession[];
+  locations?: ProjectSpendLocations;
 };
 
 // ProjectRoiTile is one row of the `roi[]` array — one proxy metric, always
@@ -495,9 +608,14 @@ export type ProjectCommitOwnerReason =
   | "most_code_lines"
   | "most_files"
   | "earliest_prompt"
-  | "session_id";
+  | "session_id"
+  // Cloud-agent credit (lane CA-C5): a cloud session's PR or branch
+  // produced the commit (docs/projects-page.md "Cloud-agent credit").
+  | "cloud_pr_commit"
+  | "cloud_pr_landing"
+  | "cloud_pr_subject";
 
-export type ProjectCommitShareBasis = "code_lines" | "files";
+export type ProjectCommitShareBasis = "code_lines" | "files" | "cloud_claim";
 
 export type ProjectCommitContributor = {
   session_id: string;
@@ -1054,6 +1172,13 @@ export type SessionRow = {
   // adapter read from disk. omitempty — ABSENT MEANS UNSTAMPED, never
   // fabricated.
   tool_version?: string;
+  // Where the session's agent ran (node migration 240, cloud-agents arc):
+  // local | vendor_cloud | customer_worker. omitempty: ABSENT MEANS UNKNOWN,
+  // never "local". Render through ExecutionLocationBadge.
+  execution_location?: string;
+  // The vendor's second native session id (cse_..., a run id), used to join
+  // capture rails. An opaque id, shown only in the badge tooltip.
+  vendor_session_ref?: string;
 };
 
 export type SessionsResponse = {
@@ -1623,6 +1748,10 @@ export type SessionDetail = {
   // must never be rendered as "cli" (see the shared SurfaceBadge).
   surface?: string;
   surface_host?: string;
+  // Where the session's agent ran and the vendor's second session id
+  // (migration 240). OMITTED when unstamped: absence means UNKNOWN.
+  execution_location?: string;
+  vendor_session_ref?: string;
   // Captured tool/CLI version (migration 125): the version-shaped token an
   // adapter read from disk (or the proxy read off a session-bound request's
   // User-Agent). Ships to the org as session metadata since server
@@ -1922,6 +2051,136 @@ export type PredictResponse = {
   estimate: PredictEstimate;
   reason?: string;
   limit: PredictLimitGauge;
+  // Run-out projection of the limit windows and of any budget in force
+  // (Go: dashboard.PredictProjection over predict.Projection). Optional:
+  // an older daemon does not send it.
+  projection?: PredictProjection;
+};
+
+// ---------- /api/session/<id>/predict projection ----------
+// Field names mirror internal/predict/projection.go's JSON tags.
+
+export type ProjectionState =
+  | "live"
+  | "reset_inferred"
+  | "reset"
+  | "no_reset_time"
+  | "rolling"
+  | "session";
+
+export type ProjectionNote =
+  | "not_enough_data"
+  | "capacity_too_small"
+  | "carried_forward"
+  | "local_only"
+  | "reading_stale"
+  | "window_reset"
+  | "window_inferred"
+  | "unpriced_usage"
+  | "timezone_assumed_utc"
+  | "other_machines"
+  | "exhausted"
+  | "no_message_estimate";
+
+export type ProjectionUsage = {
+  tokens: number;
+  input: number;
+  cache_read: number;
+  cache_write: number;
+  output: number;
+  reasoning: number;
+  cost_usd: number;
+  turns: number;
+  sessions: number;
+  unpriced?: boolean;
+};
+
+export type ProjectionContributor = { name: string; tokens: number; usd: number; share: number };
+
+export type Projection = {
+  kind: "limit" | "budget";
+  key: string;
+  state: ProjectionState;
+  unit: "fraction" | "usd" | "tokens";
+  token_def: "all" | "input_output";
+  source?: string;
+  origin?: "node" | "org";
+  scope?: string;
+  enforcement?: string;
+  subject?: string;
+  observed_at_unix?: number;
+  reading_age_sec?: number;
+  window_start_unix?: number;
+  resets_at_unix?: number;
+  window_inferred?: boolean;
+  length_sec?: number;
+  elapsed_frac?: number;
+  seconds_to_reset?: number;
+  used_frac?: number;
+  used_frac_est?: number;
+  used_frac_is_estimate?: boolean;
+  left_frac?: number;
+  cap?: number;
+  spent?: number;
+  used: ProjectionUsage;
+  capacity_tokens_est?: number;
+  capacity_usd_est?: number;
+  left_tokens?: number;
+  left_usd?: number;
+  left_tokens_is_estimate?: boolean;
+  left_usd_is_estimate?: boolean;
+  burn?: {
+    frac_per_hour: number;
+    frac_per_day: number;
+    tokens_per_hour: number;
+    tokens_per_day: number;
+    usd_per_hour: number;
+    usd_per_day: number;
+    basis_hours: number;
+  };
+  pace?: { elapsed_frac: number; used_frac: number; delta: number; verdict: "ahead" | "on_pace" | "behind" };
+  run_out?: {
+    exhausted?: boolean;
+    runs_out_at_unix?: number;
+    lasts_until_reset?: boolean;
+    projected_left_at_reset_frac?: number;
+    safe_per_hour_frac?: number;
+    safe_per_day_frac?: number;
+    safe_per_hour_tokens?: number;
+    safe_per_day_tokens?: number;
+    safe_per_hour_usd?: number;
+    safe_per_day_usd?: number;
+  };
+  sessions?: {
+    count: number;
+    this_tokens: number;
+    this_usd: number;
+    this_share?: number;
+    avg_tokens: number;
+    avg_usd: number;
+  };
+  more_sessions_est?: number;
+  more_prompts?: { low: number; mid: number; high: number; basis: "usd" | "tokens" };
+  trend?: {
+    prev_start_unix: number;
+    prev_end_unix: number;
+    prev_tokens: number;
+    prev_usd: number;
+    prev_sessions: number;
+    rate_change?: number;
+  };
+  mix?: { input: number; cache_read: number; cache_write: number; output: number; reasoning: number };
+  top_models?: ProjectionContributor[];
+  top_projects?: ProjectionContributor[];
+  five_hour_windows_left?: number;
+  confidence?: "" | "low" | "medium" | "high";
+  notes?: ProjectionNote[];
+};
+
+export type PredictProjection = {
+  limits: Projection[];
+  budgets: Projection[];
+  counted_tools?: string[];
 };
 
 // ---------- /api/session/<id>/tasks + /api/tasks (task tracking) ----------
@@ -3973,6 +4232,35 @@ export type SessionProcessResponse = {
   roots: ProcessNode[];
   findings: ProcessFinding[];
   diagnostics: ProcessDiagnostics;
+  // Present on a daemon with the process capture budget (plan 9.3): the tree
+  // is the most recent window, capped by `limit`. An older daemon returns the
+  // whole tree and neither field.
+  truncated?: boolean;
+  window?: { from?: string; to?: string; limit?: number; returned?: number };
+};
+
+// ProcessSummaryService / ProcessSummaryRollup / ProcessSummaryResponse are
+// GET /api/session/<id>/processes/summary (process capture budget plan 9.3).
+// They live in shared/lib/processCaptureSummary.ts, the model the node System
+// tab and the org drawer's System panel share; re-exported here.
+export type {
+  ProcessSummaryResponse,
+  ProcessSummaryRollup,
+  ProcessSummaryService,
+} from "@shared/lib/processCaptureSummary";
+
+// GET /api/process/capture/estimate (plan 9.3): the data volume the capture
+// limits being edited would produce, from replaying recent stored runs.
+export type ProcessCaptureEstimate = {
+  basis: { days: number; sessions: number; observed_rows: number };
+  current: { rows_per_day: number; bytes_per_day: number };
+  projected: {
+    rows_per_day: number;
+    bytes_per_day: number;
+    rollup_rows_per_day: number;
+    org_rows_per_day: number;
+  };
+  by_setting: { key: string; rows_per_day: number }[];
 };
 
 export type ProcessDiagnostics = {
@@ -4354,6 +4642,9 @@ export type TerminalSessionsMeta = {
   launchable_tool_info?: LaunchableTool[];
   allowed_project_roots?: string[];
   shell_enabled?: boolean;
+  /** [terminal].enabled and [terminal.launch].allow_fresh_agent both on.
+   *  Absent (an older daemon): unknown, never read as off. */
+  fresh_enabled?: boolean;
   /** True only when the daemon runs inside WSL and so translates a Windows
    *  custom root (C:\...) to its /mnt/c form. Absent (an older daemon) or
    *  false: the dialog does not promise the translation. */
@@ -4476,6 +4767,16 @@ export type SandboxBackendAvail = {
   verdict?: string;
   rule?: string;
   reason?: string;
+  // enabled: the row is in the enabled backends list ([terminal.sandbox]
+  // .backends, after any organization pin; the master switch aside).
+  // Optional because an older daemon does not send it.
+  enabled?: boolean;
+  // For a row dropped only because it is not enabled (verdict
+  // disabled_by_config): whether it would run here once enabled, else the
+  // next rule's drop. Empty for every other row.
+  when_enabled_available?: boolean;
+  when_enabled_verdict?: string;
+  when_enabled_reason?: string;
   verification?: string;
   beta: boolean;
   register_ref?: string;
@@ -4487,6 +4788,21 @@ export type SandboxBackendAvail = {
   // not make the row unavailable (sandboxoci's runtime hint table; empty
   // today).
   hint?: string;
+  // gateway_mode is the gateway that runs the row's boxes, for a row that
+  // has one ("managed_local" or "external"; OpenShell lane O4); absent for
+  // every other row and from an older daemon.
+  gateway_mode?: string;
+  // prerequisite is the driver's plain sentence of what the row needs on
+  // this host (the openshell row: the docker group, root-equivalent, or
+  // rootless Podman 5, which the probe still refuses). Shown as served.
+  prerequisite?: string;
+  // version_pins are the version pin values the row's driver serves for
+  // the Settings card's pin picker (the openshell row: its tested
+  // versions); absent when the row has no pin and from an older daemon.
+  version_pins?: string[];
+  // disclosures are what the user is told before first use, each with the
+  // daemon's own sentence for the row's gateway mode. Shown as served.
+  disclosures?: { id: string; text: string }[];
 };
 
 // LaunchIsolation is a sandboxed run's isolation evidence on a live
@@ -4505,6 +4821,11 @@ export type LaunchIsolation = {
   // hooks_drifted, heartbeat_missed).
   capture_degraded?: boolean;
   capture_causes?: string[];
+  // seccomp is what the syscall filter gave the run (the closed
+  // sandboxvocab.SeccompRun vocabulary: observer_default, engine_default,
+  // off, not_applicable, none); absent from an older daemon or a run that
+  // recorded none.
+  seccomp?: string;
 };
 
 // SSHProfileInfo is one row of GET /api/terminal/ssh — an operator-authored

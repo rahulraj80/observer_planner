@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -33,9 +35,12 @@ import (
 // (internal/sandboxcred); this file holds the keystore, the run records,
 // the hooks and the verbs.
 //
-// Local runs (bwrap, oci) get no injection in this release: their model
-// requests reach the proxy through a plain socket forward that carries no
-// host-side run identity (recorded in docs and the ledger, SBX-NET-2).
+// Local runs (bwrap and oci-runc on the proxy_only tier, or on the
+// internet tier with the provider-host block; lane N3) get the same
+// injection (process_lite and any host-tier run get none): their host helper stamps the run on its model-proxy forward
+// (sandbox_helpers_credlane_linux.go, sandbox_cred_local_linux.go), and the
+// run's record carries lane "local", judged by the match table's local
+// rows.
 
 func init() {
 	hostedCredReady = credReady
@@ -72,6 +77,10 @@ var credProviderHost = func(p sandboxcred.Provider) string { return p.Host }
 // credNow is the clock (a test seam).
 var credNow = func() time.Time { return time.Now().UTC() }
 
+// credHelperLive reports whether a run's host helper still holds the run's
+// liveness lock (a test seam).
+var credHelperLive = sandboxrelayd.RunLive
+
 // credRunRecord is one run's injection record: hashes only, never the
 // sentinel, the token or the key.
 type credRunRecord struct {
@@ -81,8 +90,14 @@ type credRunRecord struct {
 	Custody      vocab.KeyCustody `json:"custody"`
 	SentinelHash string           `json:"sentinel_hash"`
 	TokenHash    string           `json:"token_hash,omitempty"`
-	CreatedAt    time.Time        `json:"created_at"`
-	Expires      time.Time        `json:"expires"`
+	// Lane is how the run's requests reach the proxy ("" hosted, "local"
+	// for a local run's host helper; lane N3).
+	Lane sandboxcred.Lane `json:"lane,omitempty"`
+	// DroppedEnv names the credential variables a local run's box env did
+	// not get (names only, never a value; F-005).
+	DroppedEnv []string  `json:"dropped_env,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	Expires    time.Time `json:"expires"`
 }
 
 const credRecordVersion = 1
@@ -94,6 +109,20 @@ func credRunsDir(observerDir string) string {
 
 func credRunPath(observerDir, runID string) string {
 	return filepath.Join(credRunsDir(observerDir), runID+".json")
+}
+
+// credFreshDir holds each injected local run's kept fresh session ids
+// (ids only), beside its injection record. The relay daemon is its one
+// writer (credFreshStore.AddFresh); the run's host helper removes the
+// run's file with the record at the run's end (credLocalEnd), and a file
+// left by a helper killed outright stays with its record for the run's
+// re-adoption, as the record does.
+func credFreshDir(observerDir string) string {
+	return filepath.Join(observerDir, "sandbox-cred", "fresh")
+}
+
+func credFreshPath(observerDir, runID string) string {
+	return filepath.Join(credFreshDir(observerDir), runID+".json")
 }
 
 // credReadRecord reads a run's record, owner-checked and without
@@ -116,7 +145,7 @@ func credReadRecord(observerDir, runID string) (credRunRecord, error) {
 // credReadOwned reads a small owner-only regular file of this user, never
 // through a link.
 func credReadOwned(p string) ([]byte, error) {
-	fi, err := os.Lstat(p)
+	fi, err := os.Lstat(p) //nolint:gosec // G703: false positive; the run's own credential record path, only lstat'd before the owner and type checks
 	if err != nil {
 		return nil, err
 	}
@@ -178,15 +207,26 @@ func credProvidersFile(observerDir string) string {
 
 // credStoredProviders reads the list (empty when absent or unreadable).
 func credStoredProviders(observerDir string) []string {
+	ids, _ := credReadProviders(observerDir)
+	return ids
+}
+
+// credReadProviders reads the list, telling an absent list (no key was
+// ever added: nil, nil) from one that exists but is refused or unreadable
+// (an error naming why; audit FU3-A4).
+func credReadProviders(observerDir string) ([]string, error) {
 	b, err := credReadOwned(credProvidersFile(observerDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("%s: %w", credProvidersFile(observerDir), err)
 	}
 	var ids []string
-	if json.Unmarshal(b, &ids) != nil {
-		return nil
+	if err := json.Unmarshal(b, &ids); err != nil {
+		return nil, fmt.Errorf("%s: %w", credProvidersFile(observerDir), err)
 	}
-	return ids
+	return ids, nil
 }
 
 // credMarkProvider records that provider has a key (or no longer has one).
@@ -264,8 +304,14 @@ func (i *credInjector) decide(runID, token, host, xAPIKey, authorization, googKe
 	var p sandboxcred.Provider
 	if err == nil {
 		_, rerr := sandboxrelayd.ReadRun(i.observerDir, runID)
-		facts.Live = rerr == nil && credNow().Before(rec.Expires) && rec.Custody == vocab.CustodyHomeRelay
+		// A hosted record must be home_relay; a local record's custody
+		// and its helper are judged by the match table's local rows.
+		facts.Live = rerr == nil && credNow().Before(rec.Expires) && (rec.Lane == sandboxcred.LaneLocal || rec.Custody == vocab.CustodyHomeRelay)
 		facts.Provider, facts.SentinelHash, facts.TokenHash = rec.Provider, rec.SentinelHash, rec.TokenHash
+		facts.Lane, facts.Custody = rec.Lane, string(rec.Custody)
+		if rec.Lane == sandboxcred.LaneLocal {
+			facts.HelperLive = credHelperLive(i.observerDir, runID)
+		}
 		p, _ = sandboxcred.ProviderFor(rec.Provider)
 	}
 	if p.ID != "" && strings.EqualFold(host, credProviderHost(p)) {

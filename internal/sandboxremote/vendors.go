@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
 )
@@ -20,6 +21,11 @@ const (
 	VendorE2B    = "e2b"
 	VendorModal  = "modal"
 	VendorVercel = "vercel-sandbox"
+	// VendorOpenShellOrg is the org-hosted OpenShell gateway (tracker F-019,
+	// lane G4): its "vendor" is the organization's own gateway, reached
+	// through the org's validating front, which the org publishes in its
+	// signed managed sandbox body.
+	VendorOpenShellOrg = "openshell-org"
 )
 
 // RegionKind says how a vendor places a box.
@@ -169,6 +175,67 @@ type Vendor struct {
 	// NetworkNotes are what a live run saw the vendor's own network do that
 	// Observer does not carry and cannot stop (shown on the consent screen).
 	NetworkNotes []string
+	// MintedCredential (lane G4, the org-hosted row): the row has no stored
+	// or environment credential. Every call carries a short-lived token the
+	// org server mints for this member, node and run, through a
+	// CredentialSource the hosted core hands the wire client
+	// (Credential.Minted); the keystore and environment lookups and the
+	// credential_missing probe row do not apply. The endpoint is the one the
+	// org published (OrgEndpoint).
+	MintedCredential bool
+	// UploadViaExec (lane G4): the vendor has no file API, so the hosted
+	// core writes files as bounded one-shot exec parts whose credit is each
+	// part's exit (flow-controlled: never more than one part in flight).
+	UploadViaExec bool
+	// Deliveries are the workspace deliveries the row offers
+	// (internal/workspace Delivery values); the hosted prepare step resolves
+	// the run's source through workspace.DeliveryFor with them. Empty means
+	// sync only, what the three file-API vendors do.
+	Deliveries []string
+	// OrgEndpoint: the API endpoint exists only as one the organization
+	// published (front_url), never a default or a local value.
+	OrgEndpoint bool
+	// BoundedStdin (lane G4): the vendor ends an exec whose client outruns
+	// its bounded stdin buffer (OpenShell 0.1.6, exit 74), so a streaming
+	// stdin runs under the in-box paced-stdin wrapper (ExecSpec.PacedStdin)
+	// and the relay argv is wrapped by it.
+	BoundedStdin bool
+	// BoxWorkspace and BoxRunDir are the box's fixed workspace and run dir
+	// (lane G4 fix round 1, ruling A3: the org row's /sandbox/workspace and
+	// /sandbox/run). "" keeps the hosted rule: the workspace at the laptop's
+	// same path and the run dir under the box home. With a fixed workspace
+	// the laptop's path never reaches the box, so a resume from another
+	// machine uses the same paths. With a fixed run dir every box-side file
+	// the node writes lives under it (OB-084): the in-box observer at
+	// <run dir>/bin/observer, the upload parts, sessions.json, and the
+	// guest's baseline.
+	BoxWorkspace, BoxRunDir string
+	// NoRootExec (ruling A3): the vendor runs every exec as the box user and
+	// offers no root exec, so the core never asks for one and the wire
+	// client refuses ExecSpec.AsRoot instead of dropping it.
+	NoRootExec bool
+	// ReadyWaitSeconds bounds the wait for a box the vendor's create (or a
+	// resume) answered before it was ready: the hosted core polls Get with
+	// backoff until the box runs, before its first exec (FX3 item 1, live
+	// finding F-L3P4-1: OpenShell 0.1.6's CreateSandbox answers before the
+	// sandbox reaches its ready phase). 0 is DefaultReadyWaitSeconds. A
+	// vendor whose create answers a running box never waits.
+	ReadyWaitSeconds int
+	// OneShotStdinBytes is the most stdin one one-shot exec carries on an
+	// UploadViaExec vendor (each upload part is one such exec); 0 keeps the
+	// core's quarter-MiB default.
+	OneShotStdinBytes int
+}
+
+// DefaultReadyWaitSeconds is the ready wait of a row that names none.
+const DefaultReadyWaitSeconds = 180
+
+// ReadyWait is the row's bounded wait for a box to become ready.
+func (v Vendor) ReadyWait() time.Duration {
+	if v.ReadyWaitSeconds <= 0 {
+		return DefaultReadyWaitSeconds * time.Second
+	}
+	return time.Duration(v.ReadyWaitSeconds) * time.Second
 }
 
 // blockAll is the shared mapping text of the none and proxy_only tiers.
@@ -334,6 +401,61 @@ var vendors = map[string]Vendor{
 		// They are account and project identifiers, not secrets; the token
 		// stays in the Authorization header and never enters a URL.
 	},
+	// The org-hosted OpenShell gateway (g1-design.md sections 3 and 4). Every
+	// fact is the design of record's and the 0.1.6 live gate's (G-L1 and
+	// G-L2, decision log OB-077 to OB-079), never a third party's docs.
+	VendorOpenShellOrg: {
+		ID: VendorOpenShellOrg, Name: "OpenShell (org-hosted)",
+		// No default endpoint: the front URL is the org's, published in its
+		// signed body (OrgEndpoint).
+		KeystoreService: "sbo-openshell-org-grant-v1",
+		// RegionByEndpoint with no endpoint: the region a run records is the
+		// org's own label, carried beside the published endpoint.
+		Regions: Regions{Kind: RegionByEndpoint, Default: RegionOrgPublished, Known: []string{RegionOrgPublished}},
+		Tiers: map[vocab.Tier]TierMapping{
+			vocab.TierNone:      blockAll("an OpenShell policy with no network rule (the org gateway's supervisor proxy denies every connection); the relay carries only the hook stream", false),
+			vocab.TierProxyOnly: blockAll("an OpenShell policy with no network rule; the relay carries the hook stream and the model proxy", true),
+			// The org-compiled network rule: the org's hosts narrowed by the
+			// node's, private ranges removed, the org's allow_cidrs added and
+			// its blocked_cidrs subtracted last (section 6.1).
+			vocab.TierInternet: {Mechanism: "the org-compiled OpenShell network rule (org hosts, private ranges removed, blocked_cidrs subtracted last) plus the relay for the model proxy", Source: vocab.SourceDocumented, Relay: true},
+		},
+		// The row's static cap (7200 s); the org's max_run_minutes lowers it
+		// at launch and the front and the reaper enforce it.
+		LifetimeCaps: []PlanCap{{"the organization's gateway", 120}},
+		MemoryImages: MemoryImagePolicy{AutoPauseExists: false, Note: "no suspend: OpenShell 0.1.6 drivers do not implement it (a held box is a stopped box)"},
+		RelayStdin:   true, GuestPTY: false, Reattach: false, BoxHome: "/home/sandbox",
+		Docs: []EndpointDoc{
+			{"create", "gRPC", "openshell.v1.OpenShell/CreateSandbox through the org's front (the front creates the spec the org compiled at mint)", "docs/plans/openshell/build/g1-design.md section 3.2 step 5", ""},
+			{"get", "gRPC", "openshell.v1.OpenShell/GetSandbox", "g1-design.md section 7.6 row F3", ""},
+			{"delete", "gRPC", "openshell.v1.OpenShell/DeleteSandbox (a teardown token only)", "g1-design.md section 7.6 row F6", ""},
+			{"exec", "gRPC", "openshell.v1.OpenShell/ExecSandbox (one-shot, stdin in the request)", "g1-design.md section 3.3", ""},
+			{"interactive", "gRPC", "openshell.v1.OpenShell/ExecSandboxInteractive (bidi; TTY for the agent, TTY off for the relay)", "g1-design.md section 3.3; live gate G-L2 verdict tty_false (OB-079)", ""},
+			{"health", "gRPC", "grpc.health.v1.Health/Check (service superbased.openshell.front)", "g1-design.md section 7.6 row F1", ""},
+		},
+		Unverified: []string{
+			"the front's answers through a real org deployment (live checks G-L3 and G-L6)",
+		},
+		NetworkNotes: []string{
+			"the box's own network refusals stay on your organization's machine and are not reported to this machine in this release",
+		},
+		MintedCredential: true, UploadViaExec: true, OrgEndpoint: true, BoundedStdin: true,
+		// The org's fixed box paths (internal/openshellorg compile.go
+		// BoxWorkspace and BoxRunDir; a test pins them equal).
+		BoxWorkspace: "/sandbox/workspace", BoxRunDir: "/sandbox/run", NoRootExec: true,
+		Deliveries: []string{"sync", "remote_clone"},
+		// The 0.1.6 create answers before the box is ready (the gateway
+		// provisions the container after it answers, then the supervisor
+		// dials back; G-L3 run 3 saw 0.3 s to over 1 s): the core waits up to
+		// this long, polling the front's GetSandbox (a read, never one of the
+		// gateway's admitted mutations).
+		ReadyWaitSeconds: 180,
+		// internal/openshellorg MaxOneShotStdin (a test pins them equal): the
+		// gateway's 1 MiB gRPC decode limit (MAX_GRPC_DECODE_SIZE in the
+		// 0.1.6 gateway's multiplex.rs) less 64 KiB for the rest of the
+		// request (FX4 item 2, F-P6-2; FX3 had assumed 4 MiB).
+		OneShotStdinBytes: 1<<20 - 64<<10,
+	},
 }
 
 // VendorFor returns the vendor of a registry row id.
@@ -411,6 +533,11 @@ const RegionCustomEndpoint = "custom-endpoint"
 // (CheckBinding, SBX-GOV-4). ok is false otherwise.
 func (v Vendor) ResolveEndpoint(configuredRegion, endpoint string, orgPublished bool) (region, ep string, ok bool) {
 	endpoint = strings.TrimSuffix(strings.TrimSpace(endpoint), "/")
+	if v.OrgEndpoint {
+		// Only the organization's published endpoint, never a default or a
+		// local value; the region is the org's own label (section 8.2).
+		return v.resolveOrgEndpoint(configuredRegion, endpoint, orgPublished)
+	}
 	if endpoint == "" {
 		return v.ResolveRegion(configuredRegion)
 	}
@@ -433,6 +560,20 @@ func (v Vendor) ResolveEndpoint(configuredRegion, endpoint string, orgPublished 
 		}
 	}
 	return RegionCustomEndpoint, endpoint, true
+}
+
+// resolveOrgEndpoint is ResolveEndpoint for an OrgEndpoint row: an https
+// origin the org published, recorded with the org's region label (empty is
+// kept empty, so an allowed_regions floor refuses it, S7b).
+func (v Vendor) resolveOrgEndpoint(region, endpoint string, orgPublished bool) (string, string, bool) {
+	if !orgPublished || endpoint == "" {
+		return "", "", false
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(endpoint, "?#") {
+		return "", "", false
+	}
+	return strings.TrimSpace(region), endpoint, true
 }
 
 // OwnsHost reports whether host is one of the vendor's own domains or under
@@ -496,5 +637,13 @@ type BoxLayout struct {
 // cleaned slash path).
 func (v Vendor) Layout(hostRoot string) BoxLayout {
 	root := v.BoxHome + "/.observer-box"
-	return BoxLayout{Home: v.BoxHome, Workspace: hostRoot, Binary: root + "/bin/observer", RunDir: root + "/run"}
+	l := BoxLayout{Home: v.BoxHome, Workspace: hostRoot, Binary: root + "/bin/observer", RunDir: root + "/run"}
+	if v.BoxWorkspace != "" {
+		l.Workspace = v.BoxWorkspace
+	}
+	if v.BoxRunDir != "" {
+		l.RunDir = v.BoxRunDir
+		l.Binary = v.BoxRunDir + "/bin/observer"
+	}
+	return l
 }

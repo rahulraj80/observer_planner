@@ -409,6 +409,11 @@ func (s *Session) Release() {
 	s.w.Release()
 }
 
+// PeerProven reports whether a frame from the peer has verified under the
+// session's keys. Accept checks no secret of its own (the first frame's MAC
+// does), so until then the run id the peer named is only a claim.
+func (s *Session) PeerProven() bool { return s.r.Opener().Verified() }
+
 // Recv reads frames until one whole message has arrived on stream, under
 // the message deadline from its first frame. Heartbeats are skipped; data
 // on another stream, or the stream closing mid-message, is fatal.

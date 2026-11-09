@@ -73,7 +73,7 @@ type leafValue struct {
 func secretWarningsFor(values []leafValue) []keyError {
 	var out []keyError
 	for _, v := range values {
-		if configschema.SecretShaped(v.value, agentconfigsvc.DefaultDetect) {
+		if configschema.SecretShapedLeaf(v.leaf, v.value, agentconfigsvc.DefaultDetect) {
 			out = append(out, keyError{Key: v.leaf.Path, Message: "this value looks like a credential; config.toml is plain text, so prefer an environment-variable reference"})
 		}
 	}
@@ -193,7 +193,18 @@ func (s *Server) commitConfigSave(w http.ResponseWriter, r *http.Request, sv con
 			resp[k] = v
 		}
 	}
+	keepRestartRequiredHonest(resp, classes)
 	writeJSON(w, resp)
+}
+
+// keepRestartRequiredHonest applies the one rule after a route's extras
+// (lane FU10, F-049): a route may raise restart_required (it knows the
+// section binds at start), never lower it below a listed restart key, so
+// the boolean and restart_required_keys cannot contradict each other.
+func keepRestartRequiredHonest(resp map[string]any, classes restartClasses) {
+	if len(classes.restart) > 0 {
+		resp["restart_required"] = true
+	}
 }
 
 // configDryRun answers a dry run: the masked unified diff of the bytes the
@@ -242,6 +253,7 @@ func (s *Server) configDryRun(w http.ResponseWriter, sv configSave) {
 	for k, v := range sv.extra {
 		resp[k] = v
 	}
+	keepRestartRequiredHonest(resp, classes)
 	writeJSON(w, resp)
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/ownagent"
 	"github.com/marmutapp/superbased-observer/internal/platform/jetbrainshost"
 	"github.com/marmutapp/superbased-observer/internal/platform/vscodehost"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/securityscanning"
@@ -113,6 +114,13 @@ const (
 	// (canaryParentThreadID) — see that constant's doc for the ruling.
 	secForkedFrom   = "SECRET_FORKEDFROM_grandiloquent_ff"
 	secThreadSource = "SECRET_THREADSOURCE_sesquipedalian_ss"
+
+	// Cloud-session sandbox tag (agent migration 245, cloud-agents lane
+	// CA-F1, decision CA-D18): sessions.reported_via_token names the node
+	// ship token whose batch landed the session. NODE-LOCAL in every share
+	// mode: the org carries its own server-set copy (server 302), written
+	// from the authenticated route, never from the wire.
+	secReportedVia = "SECRET_REPORTEDVIA_cst_floccinaucinihilipilification"
 
 	// User-attachment metadata (migration 126): actions.user_attachments is
 	// NODE-LOCAL — never selected by the push seam, in ANY share mode (like
@@ -219,6 +227,15 @@ const (
 	// LINEAGE-1 for the full ruling text.
 	canaryParentThreadID = "CANARY_PARENT_THREAD_perspicacious_ll"
 
+	// canaryVendorSessionRef is the cloud-agents CANARY (agent migration 240
+	// / server 300 / pg 0170, lane CA-A1): sessions.vendor_session_ref is the
+	// vendor's secondary session id used for cross-rail joins, an opaque
+	// vendor-minted id like parent_thread_id, so it is a POSITIVE canary: it
+	// ships in every posture. sessions.execution_location (a closed
+	// vocabulary, the surface reasoning) ships beside it and is asserted by
+	// its wire key and value.
+	canaryVendorSessionRef = "CANARY_VENDOR_SESSION_REF_perspicacious_vr"
+
 	// canaryGenBasis is the S10-SPEED generation-timing CANARY (server
 	// migration 174 / pg 0040): token_usage.gen_basis is a closed,
 	// adapter-minted enum (never developer-typed text), so it ships
@@ -298,6 +315,7 @@ var allSentinels = []string{
 	secRawInput, secRawOutput, secReasoning, secErrMsg,
 	secTarget, secSourceFile, secRootPath, secGitRemote, secGitBranch,
 	secForkedFrom, secThreadSource,
+	secReportedVia,
 	secUserAttachments,
 	secGuardReason, secGuardExcerpt, secGuardTaint,
 	secOTelContent,
@@ -395,8 +413,11 @@ func TestPushPayloadCarriesNoContent(t *testing.T) {
 	if _, err := database.ExecContext(ctx,
 		`UPDATE sessions SET git_branch = ?, forked_from_id = ?, parent_thread_id = ?, thread_source = ?,
 		    workspace = ?, workspace_hash = 'sha256:workspace-canary', is_worktree = 1,
-		                     surface = ?, surface_host = ?, tool_version = ?, tool_version_last = ?`,
-		secGitBranch, secForkedFrom, canaryParentThreadID, secThreadSource, secWorkspace, canarySurface, canarySurfaceHost, canaryToolVersion, canaryToolVersionLast); err != nil {
+		                     surface = ?, surface_host = ?, tool_version = ?, tool_version_last = ?,
+		                     execution_location = 'customer_worker', vendor_session_ref = ?,
+		                     reported_via_token = ?`,
+		secGitBranch, secForkedFrom, canaryParentThreadID, secThreadSource, secWorkspace, canarySurface, canarySurfaceHost, canaryToolVersion, canaryToolVersionLast,
+		canaryVendorSessionRef, secReportedVia); err != nil {
 		t.Fatalf("stuff sessions git_branch + lineage + identity v2 + surface + tool_version: %v", err)
 	}
 	// Plane B per-turn authority stamps (Sol S5 / Luna L15, migration 095):
@@ -628,6 +649,14 @@ func TestPushPayloadCarriesNoContent(t *testing.T) {
 	if !bytes.Contains(raw, []byte(canaryParentThreadID)) {
 		t.Errorf("expected the session's parent_thread_id (%q) in the payload; this change made it unconditional metadata, not gated content", canaryParentThreadID)
 	}
+	// Cloud-agents canaries (agent 240 / server 300 / pg 0170): where the
+	// session ran and its vendor reference are unconditional METADATA.
+	if !bytes.Contains(raw, []byte(canaryVendorSessionRef)) {
+		t.Errorf("expected the session's vendor_session_ref (%q) in the payload; it is unconditional metadata like parent_thread_id", canaryVendorSessionRef)
+	}
+	if !bytes.Contains(raw, []byte(`"execution_location":"customer_worker"`)) {
+		t.Errorf("expected the session's execution_location in the payload; it is closed-vocabulary metadata like surface")
+	}
 
 	// Guard-layer canaries (G2, guard spec §10.2): the guard event must
 	// have SHIPPED (metadata) for the guard sentinel scan above to be
@@ -741,6 +770,9 @@ func TestPushPayloadCarriesContentWhenOptedIn(t *testing.T) {
 		// unconditionally, in every posture including this one — see
 		// canaryParentThreadID.
 		secForkedFrom, secThreadSource,
+		// The cloud-session sandbox tag (agent 245) is node-local in EVERY
+		// share mode.
+		secReportedVia,
 		// User-attachment metadata (migration 126) is node-local in EVERY
 		// share mode — org-wire promotion is a documented follow-up.
 		secUserAttachments,
@@ -799,8 +831,8 @@ func TestPushPayloadCarriesContentWhenOptedIn(t *testing.T) {
 				t.Fatalf("stuff token_usage: %v", err)
 			}
 			if _, err := database.ExecContext(ctx,
-				`UPDATE sessions SET git_branch = ?, forked_from_id = ?, parent_thread_id = ?, thread_source = ?, workspace = ?`,
-				secGitBranch, secForkedFrom, canaryParentThreadID, secThreadSource, secWorkspace); err != nil {
+				`UPDATE sessions SET git_branch = ?, forked_from_id = ?, parent_thread_id = ?, thread_source = ?, workspace = ?, reported_via_token = ?`,
+				secGitBranch, secForkedFrom, canaryParentThreadID, secThreadSource, secWorkspace, secReportedVia); err != nil {
 				t.Fatalf("stuff sessions git_branch + lineage + workspace: %v", err)
 			}
 			if _, err := st.InsertGuardEvents(ctx, []store.GuardEventRow{{
@@ -1711,7 +1743,8 @@ func TestSessionSurfaceAndSidechainTokensShipAsMetadata(t *testing.T) {
 			// opaque-vendor-pointer shape production writes via
 			// Store.SetSessionLineage.
 			if _, err := database.ExecContext(ctx,
-				`UPDATE sessions SET surface = 'ide', surface_host = 'vscode', tool_version = '1.2.3', tool_version_last = '1.3.0', parent_thread_id = 'sess-cur-1' WHERE id = 'sess-cc-1'`); err != nil {
+				`UPDATE sessions SET surface = 'ide', surface_host = 'vscode', tool_version = '1.2.3', tool_version_last = '1.3.0', parent_thread_id = 'sess-cur-1',
+				        execution_location = 'vendor_cloud', vendor_session_ref = 'cse_01privacy' WHERE id = 'sess-cc-1'`); err != nil {
 				t.Fatalf("stamp surface + tool_version + parent_thread_id: %v", err)
 			}
 			// Likewise exactly ONE usage row is a sub-agent row.
@@ -1807,6 +1840,17 @@ func TestSessionSurfaceAndSidechainTokensShipAsMetadata(t *testing.T) {
 			}
 			if unstamped.ParentThreadID != "" {
 				t.Errorf("unstamped session carries a phantom parent_thread_id %q; a session with no parent must reach the org EMPTY, never a fabricated guess", unstamped.ParentThreadID)
+			}
+			// Cloud-agents arc (agent 240 / server 300 / pg 0170): the same
+			// unconditional-metadata / honest-absence pair. An unstamped
+			// session must reach the org as UNKNOWN, never a defaulted "local".
+			if stamped.ExecutionLocation != "vendor_cloud" || stamped.VendorSessionRef != "cse_01privacy" {
+				t.Errorf("stamped session (execution_location, vendor_session_ref) = (%q, %q), want (vendor_cloud, cse_01privacy) in every posture",
+					stamped.ExecutionLocation, stamped.VendorSessionRef)
+			}
+			if unstamped.ExecutionLocation != "" || unstamped.VendorSessionRef != "" {
+				t.Errorf("unstamped session carries a phantom (execution_location, vendor_session_ref) = (%q, %q)",
+					unstamped.ExecutionLocation, unstamped.VendorSessionRef)
 			}
 
 			var sidechain, ordinary *orgcontract.TokenUsageRow
@@ -1917,6 +1961,73 @@ func TestSessionSurfaceHostClosedVocabulary(t *testing.T) {
 						t.Errorf("out-of-vocabulary surface_host %q survived into the batch bytes under %+v", tc.stored, share)
 					}
 				}
+			}
+		})
+	}
+}
+
+// TestOwnAgentNameShipsHashedUnlessRawContent pins the own-agent name on the
+// org wire (P-228, design docs/plans/discovery-sdk-2026-11-03.md section 4.5,
+// orchestrator call "hashed unless shipsRawContent()"). The name is not a new
+// wire column: it rides sessions.surface_host as "agent:<name>", which ships
+// in every posture, so this is its sentinel. A developer-chosen name can
+// encode a client or a project: in the metadata-only posture the batch bytes
+// must not contain it at all, and the hashed token must still group one
+// agent's sessions; under each shipsRawContent() disjunct it ships raw.
+//
+// The row is stamped with direct SQL, like the closed-vocabulary pin above,
+// because the threat is a value that reached the column some other way.
+func TestOwnAgentNameShipsHashedUnlessRawContent(t *testing.T) {
+	const secretAgent = "acme-billing-migration-bot"
+	stored := ownagent.SurfaceHost(secretAgent)
+	hashed, _ := ownagent.WireSurfaceHost(stored, false)
+	for _, tc := range []struct {
+		name  string
+		share store.ShareOptions
+		want  string
+		raw   bool
+	}{
+		{"metadata-only ships the hash", store.ShareOptions{}, hashed, false},
+		{"full_content ships the name", store.ShareOptions{FullContent: true}, stored, true},
+		{"admin_managed ships the name", store.ShareOptions{AdminManaged: true}, stored, true},
+		{"enterprise grant ships the name", store.ShareOptions{EnterpriseGranted: true}, stored, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			if err != nil {
+				t.Fatalf("db.Open: %v", err)
+			}
+			defer func() { _ = database.Close() }()
+			st := store.New(database)
+			seed(ctx, t, st)
+			if _, err := database.ExecContext(ctx,
+				`UPDATE sessions SET tool = 'custom-agent', surface = 'sdk', surface_host = ? WHERE id = 'sess-cc-1'`, stored); err != nil {
+				t.Fatalf("stamp surface_host: %v", err)
+			}
+			batch, err := st.SelectUnpushedSince(ctx, store.PushCursor{}, 1<<20, "org-1", "dev@acme.example",
+				tc.share, store.ScopeOptions{})
+			if err != nil {
+				t.Fatalf("SelectUnpushedSince: %v", err)
+			}
+			var got *orgcontract.SessionRow
+			for i := range batch.Sessions {
+				if batch.Sessions[i].ID == "sess-cc-1" {
+					got = &batch.Sessions[i]
+				}
+			}
+			if got == nil {
+				t.Fatalf("sess-cc-1 missing from the wire, got %+v", batch.Sessions)
+			}
+			if got.SurfaceHost != tc.want {
+				t.Errorf("surface_host on the wire = %q, want %q", got.SurfaceHost, tc.want)
+			}
+			raw, err := json.Marshal(batch)
+			if err != nil {
+				t.Fatalf("marshal batch: %v", err)
+			}
+			if leaked := bytes.Contains(raw, []byte(secretAgent)); leaked != tc.raw {
+				t.Errorf("agent name in the batch bytes = %v, want %v under %+v", leaked, tc.raw, tc.share)
 			}
 		})
 	}
@@ -2980,6 +3091,13 @@ var forbiddenCacheTables = []string{
 	"process_runs",
 	"process_events",
 	"process_network_bodies",
+	// The process capture budget's rollups and per-session capture stats
+	// (migration 212, docs/plans/process-capture-budget-plan-2026-11-04.md
+	// §9.2) are NODE-LOCAL like process_runs: rollup rows carry an example
+	// argv and process keys. The org layer (O1) adds its own wire shape and
+	// server tables later and must consciously update this sentinel.
+	"process_rollups",
+	"process_capture_stats",
 	// Rate-limit snapshots (migration 049, the Next-Message Cost & Limit
 	// Predictor's limit half). The RAW log is NODE-LOCAL and its name stays
 	// forbidden in orgpush.go: scope_hash (an auth-identity hash), the raw
@@ -3401,6 +3519,32 @@ var forbiddenCacheTables = []string{
 	// posture as every other cloud_* table: no org share key, no paired
 	// orgserver migration.
 	"cloud_enrich_skips",
+	// Agent migration 241 (cloud-agents arc, lane CA-A1): the node-local
+	// state of cloud-agent connectors. cloud_connector_accounts names the
+	// developer's linked vendor accounts (immutable account id, display
+	// e-mail), cloud_sync_checkpoints their provider cursors and gap
+	// intervals, cloud_usage_ledger the native-unit usage (ACUs, credits,
+	// vendor-reported USD) with its scope ids. None ships in any share mode:
+	// org usage for cloud agents comes from vendor connections, not from this
+	// ledger (plan section 4.2). No org share key, no paired orgserver
+	// migration. TestCloudAgentTablesPinnedOutOfPush is the seeded-value pin.
+	"cloud_connector_accounts",
+	"cloud_sync_checkpoints",
+	"cloud_usage_ledger",
+	// Agent migration 244 (cloud-agents arc, lane CA-B3): the ship tokens
+	// this node minted for its own cloud-session ingest route. Credential
+	// digests and labels; never on the wire in any share mode, no org share
+	// key, no paired orgserver migration.
+	"cloud_session_ship_tokens",
+	// Agent migration 246 (cloud-agents arc, lane CA-C5): the pull requests
+	// and branches a cloud-agent vendor said a session produced, per
+	// repository. Repository slugs name clients and branch names encode
+	// ticket ids (the M2 precedent): never on the wire in any share mode.
+	// What the credit changes on the wire is only the existing
+	// CommitOwnershipRow's owner / reason / share basis. No org share key, no
+	// paired orgserver migration. TestCloudSessionLinksPinnedOutOfPush is the
+	// seeded-value pin.
+	"cloud_session_links",
 	// file_changes (migration 103, Lines-of-Code tracking) is NODE-LOCAL BY
 	// TABLE NAME: orgpush.go must never reference it. Its grain is ONE ROW
 	// PER FILE — a file-level activity map of the developer's working tree,
@@ -3463,6 +3607,17 @@ var forbiddenCacheTables = []string{
 	"project_skill_tree_files",
 	"project_skill_worktree",
 	"project_skill_scan",
+	// project_quality_daily (agent migrations 219 and 221,
+	// docs/projects-page.md "Quality metrics", plan item 8 M3L-2 and
+	// M3L-4) is NODE-LOCAL BY TABLE NAME: a project's daily coverage,
+	// duplication and complexity numbers. (The per-function complexity it
+	// rolls up lives on codeintel_nodes, migration 215, already
+	// node-local by the codeintel_* names above.) It holds no path
+	// or name, but an org roll-up is out of scope (plan 14.10: a wire-shape
+	// change with paired migrations and its own review), so orgpush.go must
+	// never name it. TestProjectQualityDailyPinnedOutOfPush is the
+	// end-to-end seeded-value pin.
+	"project_quality_daily",
 	// Enterprise Update Management, node side (agent migration 105,
 	// docs/plans/enterprise-update-management-plan-2026-09-07.md §3.4). Both
 	// tables are NODE-LOCAL BY TABLE NAME: orgpush.go must never reference
@@ -3499,6 +3654,12 @@ var forbiddenCacheTables = []string{
 	"plan_snapshots",
 	"plan_runs",
 	"plan_optins",
+	// plan_usage_daily (agent migration 248): the vendor's account-wide
+	// daily token totals of a Plans & limits account (Codex
+	// account/usage/read), reconciled on this node against its own
+	// captured tokens. Same posture as the other four: node-local by table
+	// name, no share key, no server pair.
+	"plan_usage_daily",
 	// Delivery, commit to PR to merge (agent migrations 166 to 172, D-689,
 	// docs/plans/commit-pr-merge-tracking-plan-2026-10-15.md 6.1). All
 	// NODE-LOCAL BY TABLE NAME: orgpush.go must never reference them.
@@ -3771,6 +3932,21 @@ var forbiddenCacheTables = []string{
 	// Single writer internal/store/hookactivity.go, fed only by the daemon's
 	// hook spool drainer (the hook process never opens SQLite).
 	"hook_activity",
+	// Sandbox egress refusal audit (agent migration 230, OpenShell build
+	// lane N1): one row per refused egress attempt of a sandboxed run, at
+	// most one per (run, host) per minute, naming the refused host, the
+	// closed rule and the deciding config key, plus the run's project root.
+	// Decision D6 keeps refusal events on the node in v1: no wire row, no
+	// share key, no server pair. Single writer internal/store/sandboxegress.go,
+	// fed only by the daemon's refusal receiver (a host helper never opens
+	// SQLite).
+	"sandbox_egress_refusals",
+	// The dropped count beside the refusal audit (agent migration 231,
+	// OpenShell build lane OC, audit finding O3-W2): per run, how many
+	// refusals a feed or the receiver dropped before they were written.
+	// Node-local like the rows it sits beside (decision D6). Single writer
+	// internal/store/sandboxegress.go.
+	"sandbox_egress_refusal_drops",
 }
 
 // forbiddenGatewayTables names the SERVER-SIDE gateway tables that MUST NEVER be
@@ -3920,6 +4096,13 @@ var forbiddenOrgControlPlaneTables = []string{
 	// violation. Pinned as a fixed expected member by
 	// TestForbiddenOrgControlPlaneTablesExpectedSet below.
 	"org_setup_setting",
+	// The first-run setup claim (server migration 274, org first-admin setup
+	// design 2026-11-02): a singleton holding the claim token's hash and its
+	// cleartext SEALED under the org's key, which makes whoever holds it the
+	// org's first administrator. Server-only bootstrap state with no agent
+	// counterpart; a seam in orgpush.go that named it would be a boundary
+	// violation.
+	"org_setup_claim",
 	// The WS1.4 project display-label store (server migration 048). Rows are
 	// ADMIN-AUTHORED display strings for a project hash — org-side naming the
 	// node never possesses and must never be asked for. The node ships the
@@ -4116,6 +4299,25 @@ var forbiddenOrgControlPlaneTables = []string{
 	"org_message_delivery",
 	"org_message_admin_reads",
 	"org_message_suggestions",
+	// Cloud-agents arc: the org ship-token credential store (server migration
+	// 301, sha256 digests of ingest-only tokens) and the org-wide Rail S
+	// switch (server migration 306, CLOUDSESS-13 part 2). Server-only control
+	// state: a sandbox reaches the org through the ship-token route, never
+	// the node push wire.
+	"org_cloud_session_tokens",
+	"org_cloud_session_settings",
+	// My profile (plan 2026-11-07 section 2b): a member's own email
+	// notification choices (server migration 310) and the per-session
+	// sign-in registry (server migration 311, ledger PROFILE-1). Server-only
+	// control state about the dashboard member; no node ever sends or
+	// receives either.
+	"org_member_notification_prefs",
+	"org_auth_sessions",
+	// Per-node agent keys (server migration 312, lane fl32, ledger
+	// OSH-116): server-only control state binding each enrolment bearer to
+	// the agent key it enrolled with. The node sends its key once at
+	// enrolment, never this table.
+	"org_member_node_keys",
 	// The org AI tool settings policy documents (server migration 201) and
 	// managed nodes' applied state as the server stores it (202). The node
 	// RECEIVES the composed policy on its own signed rail and ships its
@@ -4389,6 +4591,10 @@ var forbiddenOrgControlPlaneTables = []string{
 	"org_vendor_snapshots",
 	"org_vendor_replay",
 	"org_vendor_source_policy",
+	// Cloud-agents arc, lane CA-C3 (server migration 303 / PG 0173): the org
+	// vendor-connection projection of cloud sessions (vendor ids, a vendor
+	// identity, the member it resolved to). Server-only.
+	"org_cloud_session_projections",
 	// G7 (server migration 223, lane L12): spend approval thresholds,
 	// conversions, comparison reports (member ids, held identities, per-member
 	// values) and approvals. All server-only.
@@ -4709,6 +4915,8 @@ func TestForbiddenOrgControlPlaneTablesExpectedSet(t *testing.T) {
 		"org_vendor_snapshots",
 		"org_vendor_replay",
 		"org_vendor_source_policy",
+		// Cloud-agents arc, lane CA-C3 (server migration 303).
+		"org_cloud_session_projections",
 		// G7 (server migration 223, lane L12).
 		"org_vendor_spend_thresholds",
 		"org_vendor_conversions",
@@ -4731,6 +4939,16 @@ func TestForbiddenOrgControlPlaneTablesExpectedSet(t *testing.T) {
 		"org_message_delivery",
 		"org_message_admin_reads",
 		"org_message_suggestions",
+		// Cloud-agents arc: ship tokens (server migration 301) and the Rail S
+		// switch (server migration 306, CLOUDSESS-13).
+		"org_cloud_session_tokens",
+		"org_cloud_session_settings",
+		// My profile: member notification preferences (server migration 310)
+		// and the per-session sign-in registry (311).
+		"org_member_notification_prefs",
+		"org_auth_sessions",
+		// Per-node agent keys (server migration 312, lane fl32).
+		"org_member_node_keys",
 	}
 	have := make(map[string]struct{}, len(forbiddenOrgControlPlaneTables))
 	for _, n := range forbiddenOrgControlPlaneTables {
@@ -5459,6 +5677,147 @@ func TestCloudLocalTablesPinnedOutOfPush(t *testing.T) {
 	}
 }
 
+// TestCloudAgentTablesPinnedOutOfPush is the cloud-agents sibling of
+// TestCloudLocalTablesPinnedOutOfPush (agent migration 241, lane CA-A1). It
+// proves both halves of the posture: (1) the three table names are in the
+// source-level sentinel forbiddenCacheTables; (2) a sentinel planted in every
+// free-text column of all three tables never appears in a marshaled push
+// payload under any of the three share postures, because there is no wire
+// surface for connector accounts, checkpoints or the native-unit ledger.
+// The CHECK-constrained vocabulary columns (stream, measurement_source,
+// value_type, monetary_status) carry closed values, not sentinels.
+func TestCloudAgentTablesPinnedOutOfPush(t *testing.T) {
+	for _, name := range []string{"cloud_connector_accounts", "cloud_sync_checkpoints", "cloud_usage_ledger"} {
+		found := false
+		for _, n := range forbiddenCacheTables {
+			if n == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s is not in forbiddenCacheTables: the source-level sentinel is missing", name)
+		}
+	}
+
+	const sentinel = "SBCLOUDAGENTSENT" // unmistakable; appears nowhere legitimate
+	s := func(table, col string) string { return sentinel + "_" + table + "_" + col }
+
+	ctx := context.Background()
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	st := store.New(database)
+	seed(ctx, t, st) // seeds sessions that DO ride the wire
+
+	execSeed := func(query string, args ...any) {
+		if _, err := database.ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("seed cloud-agent table: %v\nquery: %s", err, query)
+		}
+	}
+	execSeed(`INSERT INTO cloud_connector_accounts
+		  (id, connector, provider, issuer, account_id, display_email, coverage_state, last_error_class, created_at, updated_at)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s("acct", "connector"), s("acct", "provider"), s("acct", "issuer"), s("acct", "account_id"),
+		s("acct", "display_email"), s("acct", "coverage_state"), s("acct", "last_error_class"),
+		s("acct", "created_at"), s("acct", "updated_at"))
+	execSeed(`INSERT INTO cloud_sync_checkpoints
+		  (account_pk, stream, scope, cursor, overlap_seconds, last_attempt_at, last_success_at, gaps_json, updated_at)
+		VALUES (1, 'session_history', ?, ?, 60, ?, ?, ?, ?)`,
+		s("cp", "scope"), s("cp", "cursor"), s("cp", "last_attempt_at"), s("cp", "last_success_at"),
+		s("cp", "gaps_json"), s("cp", "updated_at"))
+	execSeed(`INSERT INTO cloud_usage_ledger
+		  (connector, source_record_id, measurement_source, value_type, unit, value, monetary_status,
+		   scope_run, scope_session, scope_user, scope_account, scope_org, scope_model,
+		   interval_start, interval_end, includes_children, reported_at, observed_at)
+		VALUES (?, ?, 'provider_run_total', 'interval', ?, 4.5, 'reported_charge',
+		        ?, 'sess-cc-1', ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		s("ledger", "connector"), s("ledger", "source_record_id"), s("ledger", "unit"),
+		s("ledger", "scope_run"), s("ledger", "scope_user"), s("ledger", "scope_account"),
+		s("ledger", "scope_org"), s("ledger", "scope_model"), s("ledger", "interval_start"),
+		s("ledger", "interval_end"), s("ledger", "reported_at"), s("ledger", "observed_at"))
+
+	const wireCanary = "gpt-5-codex" // rides the wire in every posture (see TestCloudLocalTablesPinnedOutOfPush)
+	for _, p := range []struct {
+		name  string
+		share store.ShareOptions
+	}{
+		{"metadata_only", store.ShareOptions{}},
+		{"full_content", store.ShareOptions{FullContent: true}},
+		{"admin_managed", store.ShareOptions{AdminManaged: true}},
+	} {
+		batch, err := st.SelectUnpushedSince(ctx, store.PushCursor{}, 1<<20, "org-1", "dev@x", p.share, store.ScopeOptions{})
+		if err != nil {
+			t.Fatalf("SelectUnpushedSince(%s): %v", p.name, err)
+		}
+		raw, err := json.Marshal(batch)
+		if err != nil {
+			t.Fatalf("marshal batch(%s): %v", p.name, err)
+		}
+		if !bytes.Contains(raw, []byte(wireCanary)) {
+			t.Fatalf("positive canary %q missing from the %s push payload: the absence check would be vacuous", wireCanary, p.name)
+		}
+		if bytes.Contains(raw, []byte(sentinel)) {
+			t.Errorf("cloud-agent table content leaked into the push payload under %s", p.name)
+		}
+	}
+}
+
+// TestCloudSessionLinksPinnedOutOfPush (agent migration 246, lane CA-C5):
+// the table is in the source-level sentinel, and a sentinel planted in every
+// free-text column, against a session that DOES ride the wire, never appears
+// in a marshaled push payload under any of the three share postures.
+func TestCloudSessionLinksPinnedOutOfPush(t *testing.T) {
+	found := false
+	for _, n := range forbiddenCacheTables {
+		found = found || n == "cloud_session_links"
+	}
+	if !found {
+		t.Fatal("cloud_session_links is not in forbiddenCacheTables: the source-level sentinel is missing")
+	}
+	const sentinel = "SBCLOUDLINKSENT" // unmistakable; appears nowhere legitimate
+	ctx := context.Background()
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	st := store.New(database)
+	seed(ctx, t, st)
+	if _, err := database.ExecContext(ctx, `INSERT INTO cloud_session_links
+		  (session_id, connector, remote, pr_number, branch, first_seen_at, last_seen_at)
+		VALUES ('sess-cc-1', ?, ?, 7, ?, ?, ?)`,
+		sentinel+"_connector", sentinel+"_remote", sentinel+"_branch", sentinel+"_first", sentinel+"_last"); err != nil {
+		t.Fatalf("seed cloud_session_links: %v", err)
+	}
+	const wireCanary = "gpt-5-codex"
+	for _, p := range []struct {
+		name  string
+		share store.ShareOptions
+	}{
+		{"metadata_only", store.ShareOptions{}},
+		{"full_content", store.ShareOptions{FullContent: true}},
+		{"admin_managed", store.ShareOptions{AdminManaged: true}},
+	} {
+		batch, err := st.SelectUnpushedSince(ctx, store.PushCursor{}, 1<<20, "org-1", "dev@x", p.share, store.ScopeOptions{})
+		if err != nil {
+			t.Fatalf("SelectUnpushedSince(%s): %v", p.name, err)
+		}
+		raw, err := json.Marshal(batch)
+		if err != nil {
+			t.Fatalf("marshal batch(%s): %v", p.name, err)
+		}
+		if !bytes.Contains(raw, []byte(wireCanary)) {
+			t.Fatalf("positive canary %q missing from the %s push payload: the absence check would be vacuous", wireCanary, p.name)
+		}
+		if bytes.Contains(raw, []byte(sentinel)) {
+			t.Errorf("cloud_session_links content leaked into the push payload under %s", p.name)
+		}
+	}
+}
+
 // TestProjectCommitTablesPinnedOutOfPush is the commit-capture sibling of
 // TestCloudLocalTablesPinnedOutOfPush (projects-page-roi-and-commit-
 // alignment plan, agent migration 127). It proves both halves of the
@@ -5626,11 +5985,12 @@ func TestDeliveryTablesPinnedOutOfPush(t *testing.T) {
 		s("provider_links", "scopes_seen"), s("provider_links", "last_error_kind"), s("provider_links", "last_error"), now)
 	execSeed(`INSERT INTO pull_requests
 		  (id, provider_link_id, provider, host, repo_slug, number, title, url, author_login, pr_state, merge_readiness,
-		   facets_json, provider_raw_state, head_sha, base_ref, merge_commit_sha, merge_method, created_at, merged_at, fetched_at)
-		VALUES (1, 1, 'github', 'github.com', ?, 5, ?, ?, ?, 'merged', '', '{}', ?, ?, ?, ?, 'squash', ?, ?, ?)`,
+		   facets_json, provider_raw_state, head_sha, base_ref, merge_commit_sha, merge_method, created_at, merged_at, fetched_at,
+		   head_ref)
+		VALUES (1, 1, 'github', 'github.com', ?, 5, ?, ?, ?, 'merged', '', '{}', ?, ?, ?, ?, 'squash', ?, ?, ?, ?)`,
 		s("pull_requests", "repo_slug"), s("pull_requests", "title"), s("pull_requests", "url"), s("pull_requests", "author_login"),
 		s("pull_requests", "provider_raw_state"), s("pull_requests", "head_sha"), s("pull_requests", "base_ref"),
-		s("pull_requests", "merge_commit_sha"), now, now, now)
+		s("pull_requests", "merge_commit_sha"), now, now, now, s("pull_requests", "head_ref"))
 	execSeed(`INSERT INTO pull_request_commits (pr_id, sha, position, patch_fp) VALUES (1, ?, 0, ?)`,
 		s("project_commits", "sha"), s("pull_request_commits", "patch_fp"))
 	execSeed(`INSERT INTO commit_landings
@@ -5694,7 +6054,7 @@ func TestDeliveryTablesPinnedOutOfPush(t *testing.T) {
 				"key_name", "account_login", "scopes_seen", "last_error_kind", "last_error", "title", "author_login",
 				"provider_raw_state", "head_sha", "base_ref", "merge_commit_sha", "patch_fp", "landing_sha",
 				"contributors_json", "url_hash", "path", "tip_sha", "ref_name_hash", "ref_name", "merge_base_sha",
-				"range_fp", "member_shas_json", "files_json",
+				"range_fp", "member_shas_json", "files_json", "head_ref",
 			} {
 				v := s(table, col)
 				if p.raw && rawAllowed[v] {
@@ -6844,6 +7204,9 @@ func TestSandboxPostureCarriesNoRunIdentity(t *testing.T) {
 			Class: "process", Stack: []string{"bwrap"}, CaptureLevel: "full", CaptureOrigin: "sandboxed",
 			Verification: "live", KeyCustody: "host_bound", EvidenceDigest: secret,
 			EvidenceProducer: "terminal_run", EvidenceComponent: secret, EvidenceComponentVersion: secret,
+			// A seccomp value outside the closed vocabulary never leaves
+			// the node (lane FU4: it counts as not recorded).
+			Seccomp: secret,
 		},
 	}); err != nil {
 		t.Fatalf("InsertTerminalRun: %v", err)
@@ -6874,6 +7237,11 @@ func TestSandboxPostureCarriesNoRunIdentity(t *testing.T) {
 	allowed := map[string]bool{
 		"OrgID": true, "UserEmail": true, "Day": true, "IsolationClass": true, "CaptureLevel": true,
 		"CaptureOrigin": true, "Verification": true, "NativeSandboxState": true, "KeyCustody": true, "Runs": true,
+		// Seccomp (lane FU4, tracker F-002): run counts keyed by the closed
+		// sandboxvocab.SeccompRun vocabulary, filtered on the node and
+		// clamped at ingest; the seeded out-of-vocabulary value above
+		// proves an unknown key never ships.
+		"Seccomp": true,
 	}
 	rt := reflect.TypeOf(orgcontract.SandboxPostureRow{})
 	for i := 0; i < rt.NumField(); i++ {
@@ -7207,10 +7575,12 @@ func TestSecurityWireSecretCanary(t *testing.T) {
 	}
 }
 
-// TestSecurityWireOffByDefault pins Q7 for an existing install: with the
-// seam unbound (the module inactive) or bound at the default individual
-// level, an envelope carries no security key at all.
-func TestSecurityWireOffByDefault(t *testing.T) {
+// TestSecurityWireDefaultIsPostureOnly pins the individual default (Q7 as
+// amended by ruling R1 of lane CODESEC-ORG, 2026-11-03): with the seam
+// unbound (the module inactive) or bound at an explicit "off", an envelope
+// carries no security key at all; bound at the default (the key unset) it
+// carries the posture row and never a finding or a change record.
+func TestSecurityWireDefaultIsPostureOnly(t *testing.T) {
 	ctx := context.Background()
 	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
@@ -7222,12 +7592,27 @@ func TestSecurityWireOffByDefault(t *testing.T) {
 		VALUES ('f1', 'r1', 'k1', 'S-721', 'secret', 'high', 'high', ?, ?)`, now, now); err != nil {
 		t.Fatal(err)
 	}
-	for _, bind := range []bool{false, true} {
+	cases := []struct {
+		name    string
+		bind    bool
+		local   string
+		posture bool
+	}{
+		{"unbound", false, "", false},
+		{"explicit off", true, "off", false},
+		{"default", true, "", true},
+	}
+	for _, c := range cases {
 		st := store.New(database)
-		if bind {
+		if c.bind {
+			local := c.local
 			st.SetSecurityOrgProviders(store.SecurityOrgProviders{
 				Level: func(context.Context, store.ShareOptions) store.SecurityShare {
-					return store.ResolveSecurityShare(store.ResolveSecurityShareFacts{})
+					return store.ResolveSecurityShare(store.ResolveSecurityShareFacts{LocalLevel: local})
+				},
+				Posture: func(ctx context.Context, day string, scope store.SecurityScope) (orgcontract.SecurityPostureRow, bool, error) {
+					r, err := st.SecurityPostureFacts(ctx, day, time.Now().UTC(), scope)
+					return r, err == nil, err
 				},
 				Findings: st.SelectSecurityFindingRows,
 			})
@@ -7237,10 +7622,13 @@ func TestSecurityWireOffByDefault(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw, _ := json.Marshal(orgcontract.PushEnvelope{SecurityFindings: batch.SecurityFindings, SecurityPosture: batch.SecurityPosture, AIChangeRecords: batch.AIChangeRecords})
-		for _, key := range []string{"security_findings", "security_posture", "ai_change_records"} {
+		for _, key := range []string{"security_findings", "ai_change_records"} {
 			if bytes.Contains(raw, []byte(key)) {
-				t.Errorf("bound=%v: %s on the wire at the default level: %s", bind, key, raw)
+				t.Errorf("%s: %s on the wire: %s", c.name, key, raw)
 			}
+		}
+		if got := bytes.Contains(raw, []byte("security_posture")); got != c.posture {
+			t.Errorf("%s: posture row on the wire = %v, want %v: %s", c.name, got, c.posture, raw)
 		}
 	}
 }
@@ -7400,6 +7788,77 @@ func TestChangeRecordEnvelopeCanary(t *testing.T) {
 		wire, _ := json.Marshal(orgcontract.PushEnvelope{AIChangeRecords: batch.AIChangeRecords})
 		if got := bytes.Contains(wire, []byte(canary)); got != m.raw {
 			t.Errorf("%s: envelope canary on the wire = %v, want %v", m.name, got, m.raw)
+		}
+	}
+}
+
+// TestProjectQualityDailyPinnedOutOfPush is the quality-trend sibling of
+// TestProjectCommitTablesPinnedOutOfPush (agent migration 219,
+// docs/projects-page.md "Quality metrics"): the table is in
+// forbiddenCacheTables, and a seeded sentinel in every TEXT column (and an
+// unmistakable number in the counts) never reaches a marshaled push payload
+// in any share posture.
+func TestProjectQualityDailyPinnedOutOfPush(t *testing.T) {
+	found := false
+	for _, n := range forbiddenCacheTables {
+		if n == "project_quality_daily" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("project_quality_daily is not in forbiddenCacheTables: the source-level sentinel is missing")
+	}
+
+	const sentinel = "SBQUALITYSENT"
+	const number = 918273645
+	s := func(col string) string { return sentinel + "_" + col }
+
+	ctx := context.Background()
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	st := store.New(database)
+	seed(ctx, t, st)
+
+	projectID, err := st.UpsertProject(ctx, "/repo/quality-pin", "")
+	if err != nil {
+		t.Fatalf("UpsertProject: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO project_quality_daily
+		  (project_id, day, measured_at, coverage_state, coverage_lines, coverage_covered, coverage_reports, coverage_report_at,
+		   dup_state, dup_eligible_symbols, dup_cloned_symbols, dup_eligible_lines, dup_cloned_lines, dup_groups, dup_indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 1, ?)`,
+		projectID, s("day"), s("measured_at"), s("coverage_state"), number, number, s("coverage_report_at"),
+		s("dup_state"), number, number, number, number, s("dup_indexed_at")); err != nil {
+		t.Fatalf("seed project_quality_daily: %v", err)
+	}
+
+	postures := []struct {
+		name  string
+		share store.ShareOptions
+	}{
+		{"metadata_only", store.ShareOptions{}},
+		{"full_content", store.ShareOptions{FullContent: true}},
+		{"admin_managed", store.ShareOptions{AdminManaged: true}},
+	}
+	const wireCanary = "gpt-5-codex"
+	for _, p := range postures {
+		batch, err := st.SelectUnpushedSince(ctx, store.PushCursor{}, 1<<20, "org-1", "dev@x", p.share, store.ScopeOptions{})
+		if err != nil {
+			t.Fatalf("SelectUnpushedSince(%s): %v", p.name, err)
+		}
+		raw, err := json.Marshal(batch)
+		if err != nil {
+			t.Fatalf("marshal batch(%s): %v", p.name, err)
+		}
+		if !bytes.Contains(raw, []byte(wireCanary)) {
+			t.Fatalf("positive canary %q missing from the %s push payload: the absence assertion would be vacuous", wireCanary, p.name)
+		}
+		if bytes.Contains(raw, []byte(sentinel)) || bytes.Contains(raw, []byte("918273645")) {
+			t.Errorf("project_quality_daily content leaked into the push payload under %s: the quality trend is node-local", p.name)
 		}
 	}
 }

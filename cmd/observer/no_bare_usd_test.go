@@ -46,6 +46,7 @@ var noBareUSDAllow = map[string]noBareUSDEntry{
 	"cmd/observer/aggregate.go":       {cliRow: "aggregate"},
 	"cmd/observer/backfill.go":        {cliRow: "backfill"},
 	"cmd/observer/backfill_codex.go":  {cliRow: "backfill"},
+	"cmd/observer/chart.go":           {cliRow: "chart"},
 	"cmd/observer/benchmark.go":       {cliRow: "benchmark"},
 	"cmd/observer/benchmark_run.go":   {cliRow: "benchmark"},
 	"cmd/observer/cache_status.go":    {cliRow: "cache-status"},
@@ -81,6 +82,9 @@ var noBareUSDAllow = map[string]noBareUSDEntry{
 		"the benchmark row) and never rendered by the dashboard."},
 	"internal/budgetwarn/budgetwarn.go": {reason: "budget warnings render shares of the cap under the token display " +
 		"(42274ed2d); the dollar formatter runs only in the dollar view."},
+	"internal/dashapi/projectdetail_fold.go": {reason: "SpendSplitLines is printed only by `observer project` (the " +
+		"project row: its stdout goes through costtext.NewWriter under the token display); the dashboard renders " +
+		"the Spend tab from the JSON, never from these lines."},
 	"internal/intelligence/advisor/detect_phase2.go":       {reason: advisorProseReason},
 	"internal/intelligence/advisor/detect_phase4.go":       {reason: advisorProseReason},
 	"internal/intelligence/advisor/detect_posture.go":      {reason: advisorProseReason},

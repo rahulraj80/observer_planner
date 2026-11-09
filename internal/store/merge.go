@@ -38,6 +38,14 @@ const (
 	// is removed they are simply unused strings; no edit is needed.
 	SourceObsSDK  = "sdk_otlp"
 	SourceObsOTLP = "otlp_trace"
+	// SourceAgentOTel is a developer's own agent's span turn (PT-55,
+	// internal/otlpvendor's own-agent row, docs/own-agents.md). The counts
+	// are what the developer's own instrumentation reported from the
+	// provider response, never computed by Observer, but they are not the
+	// provider's bytes as the proxy sees them, so they rank Approx: a proxy
+	// row for the same request id always wins, and a proxy insert for that
+	// id replaces the span row outright (supersededByProxyInsert).
+	SourceAgentOTel = "agent_otel"
 	// SourceProxyTurn mirrors internal/obs/span.SourceProxyTurn (the gateway
 	// rail, cmd/observer/obs_wire.go): a chat.completions span synthesized
 	// FROM an already-priced api_turns row. obsTurnSink.ReconcileLLMSpan
@@ -59,7 +67,7 @@ func fidelityForSource(source string) turnmerge.Fidelity {
 	switch source {
 	case SourceCCOTel, SourceNativeOTel:
 		return turnmerge.FidelityNativeExact
-	case SourceJSONL, SourceObsSDK, SourceObsOTLP:
+	case SourceJSONL, SourceObsSDK, SourceObsOTLP, SourceAgentOTel:
 		return turnmerge.FidelityApprox
 	case SourceProxyTurn:
 		return turnmerge.FidelityProxyExact
@@ -229,7 +237,18 @@ func (s *Store) updateMergeTurnSource(ctx context.Context, id int64, merged turn
 // sourceForFidelity exactly as before T-475. native_otel needs it because it
 // shares the native-exact fidelity with cc_otel: mapping it back would
 // relabel any other tool's native turn as Claude Code's.
-var preservedSources = map[string]bool{SourceNativeOTel: true}
+// SourceAgentOTel needs it for the same reason: mapping Approx back would
+// relabel an own agent's span turn as a JSONL envelope.
+var preservedSources = map[string]bool{SourceNativeOTel: true, SourceAgentOTel: true}
+
+// supersededByProxyInsert lists the sources whose row a PROXY insert for the
+// same request id replaces instead of standing beside. The proxy writes its
+// rows with InsertAPITurn, not the request-id merge, so a lower-fidelity
+// row that landed first (an own agent's span exported before the proxy
+// finished writing the same call) would otherwise count the call twice. A
+// replaced row is deleted through the normal path, so the org push records
+// the deletion (org_push_delete_api_turns). Data table, one row per source.
+var supersededByProxyInsert = map[string]bool{SourceAgentOTel: true}
 
 // mergedSource names the source a merged row persists with.
 func mergedSource(merged turnmerge.Fidelity, existing, incoming string) string {
@@ -253,4 +272,21 @@ func sourceForFidelity(f turnmerge.Fidelity) string {
 	default:
 		return SourceProxy
 	}
+}
+
+// supersedeForProxyInsert deletes the rows the proxy's just-inserted row
+// (id) replaces (supersededByProxyInsert): rows with t's request id whose
+// source the table lists. It runs only for a proxy-fidelity insert that
+// carries a request id, so every other writer's insert is unchanged.
+func (s *Store) supersedeForProxyInsert(ctx context.Context, t models.APITurn, id int64) error {
+	if t.RequestID == "" || fidelityForSource(t.Source) != turnmerge.FidelityProxyExact {
+		return nil
+	}
+	for src := range supersededByProxyInsert {
+		if _, err := s.db.ExecContext(ctx,
+			`DELETE FROM api_turns WHERE request_id = ? AND source = ? AND id <> ?`, t.RequestID, src, id); err != nil {
+			return fmt.Errorf("store.InsertAPITurn: supersede %s row: %w", src, err)
+		}
+	}
+	return nil
 }

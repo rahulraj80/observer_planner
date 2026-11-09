@@ -133,6 +133,10 @@ var PinnableKeys = []PinnableKey{
 		Key: "guard.mode", Kind: "string", Direction: DirFree,
 		Enum:  []any{"off", "observe", "enforce"},
 		Label: "Command guard mode",
+		// The node's prompt guard takes its stance from this pin
+		// (internal/config governancePinFollowers, operator ruling
+		// 2026-11-08).
+		Help: "The prompt guard follows this mode too: under observe it only warns about secrets in prompts, under enforce it asks or blocks. An organization prompt rule that can stop a prompt keeps it acting under observe.",
 	},
 	// guard.strict inverts guard's Q2 fail-open default (internal.config's
 	// GuardConfig.Strict doc comment): a judge/policy-engine internal error
@@ -303,6 +307,14 @@ var PinnableKeys = []PinnableKey{
 	{
 		Key: "terminal.sandbox.default_on", Kind: "bool", Direction: DirRestrictiveOnly, Safe: true,
 		Label: "Pre-check \"Run in sandbox\" for new terminals",
+	},
+	// The seccomp filter of the bwrap and process_lite rows (tracker F-002,
+	// lane FU4): an org pin may require it on (the safe value), never turn
+	// it off on a node that set it. The default stays off on every node
+	// (decision D7).
+	{
+		Key: "terminal.sandbox.seccomp", Kind: "bool", Direction: DirRestrictiveOnly, Safe: true,
+		Label: "Sandbox syscall filter (seccomp) on the bwrap and process_lite backends",
 	},
 	{
 		Key: "terminal.sandbox.allow_remote_clone", Kind: "bool", Direction: DirRestrictiveOnly, Safe: false,

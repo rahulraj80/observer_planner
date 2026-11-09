@@ -154,7 +154,7 @@ func observersOnPath(pathEnv string) []string {
 
 // siblingExists is the real filesystem answer to "does <dir>/<name> exist".
 func siblingExists(dir, name string) bool {
-	_, err := os.Stat(filepath.Join(filepath.FromSlash(dir), filepath.FromSlash(name)))
+	_, err := os.Stat(filepath.Join(filepath.FromSlash(dir), filepath.FromSlash(name))) //nolint:gosec // G703: false positive; an existence check only, nothing is read or written
 	return err == nil
 }
 

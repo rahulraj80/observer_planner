@@ -171,7 +171,7 @@ type guiLaunchResponse struct {
 // (fail-closed, the same reasoning the sandbox validation uses): a caller that
 // asked for a sandboxed, model-pinned launch and silently got a bare IDE would
 // have been misled about what ran.
-func (s *Server) handleGUILaunch(w http.ResponseWriter, body terminalLaunchRequest) {
+func (s *Server) handleGUILaunch(w http.ResponseWriter, r *http.Request, body terminalLaunchRequest) {
 	id := strings.TrimSpace(body.Tool)
 	if id == "" {
 		writeErrStatus(w, errors.New("missing tool"), http.StatusBadRequest)
@@ -187,7 +187,8 @@ func (s *Server) handleGUILaunch(w http.ResponseWriter, body terminalLaunchReque
 		return
 	}
 
-	res, err := s.opts.LaunchManager.CreateGUI(GUILaunchSpec{ID: id, ProjectRoot: body.ProjectRoot})
+	initiator, parent := s.launchOrigin(r)
+	res, err := s.opts.LaunchManager.CreateGUI(GUILaunchSpec{ID: id, ProjectRoot: body.ProjectRoot, Initiator: initiator, ParentSessionID: parent})
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrLaunchFreshDisabled):

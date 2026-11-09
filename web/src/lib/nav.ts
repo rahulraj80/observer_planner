@@ -26,6 +26,7 @@ import {
   Split,
   SquareTerminal,
   Trophy,
+  UserRound,
   Wrench,
   Zap,
   type LucideIcon,
@@ -108,6 +109,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "configure",
     label: "Configure",
     items: [
+      { id: "you", label: "You", path: "/you", icon: UserRound },
       { id: "policies", label: "Policies", path: "/policies", icon: ScrollText },
       { id: "agent-config", label: "AI tool settings", path: "/agent-config", icon: FileCog },
       { id: "privacy", label: "Privacy", path: "/privacy", icon: Lock },

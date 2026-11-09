@@ -40,7 +40,10 @@ export const VOCAB_ICONS = {
   // shared/lib/actions.ts ACTION_SURFACES
   toolSurface: { builtin: I.Package, mcp: I.Plug, orchestration: I.Workflow, meta: I.Settings2, unresolved: I.CircleHelp },
   // shared/primitives/SurfaceBadge.tsx (the only vocabulary with icons today)
-  captureSurface: { cli: I.SquareTerminal, ide: I.AppWindow, desktop: I.Monitor, sdk: I.Braces, web: I.Globe },
+  captureSurface: { cli: I.SquareTerminal, ide: I.AppWindow, desktop: I.Monitor, sdk: I.Braces, web: I.Globe, mobile: I.Smartphone },
+  // shared/primitives/ExecutionLocationBadge.tsx (where a session's agent ran;
+  // node migration 240 / server 300 sessions.execution_location)
+  executionLocation: { local: I.Laptop, vendor_cloud: I.Cloud, customer_worker: I.Server },
   // shared/lib/guardCatalog.ts
   guardDecision: { allow: I.ShieldCheck, flag: I.Flag, ask: I.ShieldQuestion, deny: I.ShieldBan },
   guardSeverity: { info: I.Info, warn: I.TriangleAlert, high: I.OctagonAlert, critical: I.Siren },
@@ -388,6 +391,20 @@ export const VOCAB_ICONS = {
     needs_noninteractive_credentials: I.KeyRound,
   },
   deliverySource: { provider: I.Cloud, mirror: I.Copy, user_refs: I.Monitor, none: I.Unlink },
+  // Cloud agents, Settings > Connected tools > Cloud agents (lane CA-B5; tone
+  // tables in web/src/lib/cloudAgents.ts; values from
+  // internal/cloudagents/coverage.go, grounding.go and owner.go).
+  cloudAgentCoverage: {
+    verified: I.CircleCheck, available_to_configure: I.Settings2, permission_required: I.ShieldAlert,
+    partial_history: I.CircleDashed, delayed_reporting: I.Clock, not_established: I.CircleHelp, disconnected: I.Unplug,
+  },
+  cloudAgentError: {
+    not_installed: I.PackageX, not_signed_in: I.KeyRound, permission_denied: I.ShieldBan, rate_limited: I.Gauge,
+    unreachable: I.CloudOff, server_error: I.ServerCrash, timeout: I.Timer, wrong_shape: I.FileWarning, over_cap: I.HardDrive,
+    host_not_allowed: I.Ban, invalid: I.OctagonX, stream_expired: I.History, stream_resume_refused: I.RotateCcw, failed: I.CircleX,
+  },
+  cloudAgentGrounding: { live_verified: I.BadgeCheck, documented: I.BookOpen, observed_undocumented: I.Eye },
+  cloudAgentUser: { vendor_user_not_chosen: I.UserX, vendor_user_chosen: I.UserCheck },
 } satisfies Record<string, Record<string, LucideIcon>>;
 
 export type Vocab = keyof typeof VOCAB_ICONS;

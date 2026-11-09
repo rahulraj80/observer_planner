@@ -132,7 +132,7 @@ var egressLanes = []egressLane{
 	},
 	{
 		ID: "org.client", Pkg: "internal/orgclient", Kind: egressRemote,
-		Reaches:  "the one org server the node is enrolled with: push, signed policy, pricing, budget and display pulls, update manifests and artifacts from the org mirror, and the org server's security relay lookup on a managed node (install gate queries, public package names only)",
+		Reaches:  "the one org server the node is enrolled with: push, signed policy, pricing, budget and display pulls, update manifests and artifacts from the org mirror, the org server's security relay lookup on a managed node (install gate queries, public package names only), and, on a managed node whose org's signed security policy sets package_lookup = org_mirror, the org mirror's advisory shard objects (GET /api/agent/security/shards/<Set>/index|obj/<sha256>: content-addressed digests chosen from short hash prefixes of package names, never a name, version, path or code; lane RM-3)",
 		Triggers: []egressTrigger{trigDaemonLoop, trigUserCommand},
 		Gate:     "enrolment: no org URL or credential exists until `observer org enroll`",
 	},
@@ -186,12 +186,46 @@ var egressLanes = []egressLane{
 		Gate:     "a user-launched sandboxed terminal on the vercel-sandbox row (listed in backends, the terminals.sandbox.vercel component active, consent recorded) or a user's confirm in the leftover-box list (I6); the probe never calls it",
 		Pins:     []string{"sandbox_remote_egress_test.go"},
 	},
+	// The org-hosted OpenShell row (tracker F-019, lane G4): the node to
+	// front lane. It reaches only the front URL the organization published in
+	// its signed managed sandbox body, never the gateway, with a run token
+	// the org server minted for this run.
+	{
+		ID: "sandbox.remote.openshell-org", Pkg: "internal/sandboxremote/openshellorg", Kind: egressRemote,
+		Reaches:  "the organization's OpenShell front (the front_url of the signed managed sandbox body), over gRPC with TLS and the published certificate pin; never the gateway itself",
+		Triggers: []egressTrigger{trigUserAction},
+		Gate:     "a user-launched sandboxed terminal on the openshell-org row (a managed node whose verified body publishes the gateway, the terminals.sandbox.openshell-org component active, signed in, opted in to the laptop relay, consent recorded) or an explicit `observer sandbox org-shell check`; the probe never calls it",
+		Pins:     []string{"sandbox_remote_egress_test.go"},
+	},
+	// Sandbox setup's pinned download (sandbox installation lifecycle plan
+	// sections 3.5 and 8, lane sbxinstall-download, decision O2=B).
+	{
+		ID: "sandbox.setup.net", Pkg: "internal/sandboxsetupnet", Kind: egressRemote,
+		Reaches:  "the pinned vendor release asset of a sandbox host tool (today the Cloud Hypervisor v54.0 static binary) on github.com, redirects followed only to release-assets.githubusercontent.com and objects.githubusercontent.com, over HTTPS on port 443 to that exact host allow-list, the body capped at the pin's size, no cookies; nothing about a project or the person is sent (the URL names the version and the platform's asset)",
+		Triggers: []egressTrigger{trigUserAction, trigUserCommand},
+		Gate:     "a person's click on a pinned download step, or `observer sandbox setup run`: [terminal.launch].allow_install, the per-step consent (the pin's version, sha256 and size echoed by the run request), the module (terminals.sandbox compiled in and active); never on a managed node (decision O3: the org mirror only, no mirror kind yet); linked only into the cmd layer",
+		Pins:     []string{"sandboxsetup_egress_test.go"},
+	},
 	{
 		ID: "delivery", Pkg: "internal/deliverynet", Kind: egressRemote,
 		Reaches:  "the GitHub API and the git remotes of tracked repositories",
 		Triggers: []egressTrigger{trigDaemonLoop, trigUserCommand},
 		Gate:     "the user connects a code host or opts into a mirror",
 		Pins:     []string{"delivery_egress_test.go"},
+	},
+	{
+		ID: "cloud.agents", Pkg: "internal/cloudagentsnet", Kind: egressRemote,
+		Reaches:  "the user's own codex and gh CLIs with fixed argv (which reach OpenAI Codex Cloud and GitHub under the user's existing logins), and, for the API connectors of lane CA-B2, exactly api.cursor.com, api.devin.ai, app.all-hands.dev and (lane CA-V6) api.cline.bot (and app.warp.dev for lane CA-V1's warp-cloud connector) over HTTPS, and for lane CA-V2's qoder-cloud api.qoder.com or api.qoder.com.cn, the one region the user picked at connect (each request bound to its own row's host and auth scheme, the key from the keychain), with no redirects, capped bodies and time-boxed event streams",
+		Triggers: []egressTrigger{trigDaemonLoop, trigUserCommand, trigUserAction},
+		Gate:     "the user links a cloud-agent account (`observer cloud-agents connect` or Settings > Cloud agents); with none linked the service makes no call",
+		Pins:     []string{"cloudagents_egress_test.go"},
+	},
+	{
+		ID: "cloud.session", Pkg: "internal/cloudsessionnet", Kind: egressRemote,
+		Reaches:  "the one destination a cloud-session flush names: the org server's ship-token route or the user's own node, over HTTPS (plain http only to a loopback host) with no redirects, the ship token as a bearer header, the org push envelope gzipped, bodies capped; and, for `cloud-session init` with the npm install source and no pin given, a GET of each Linux platform package's version document on the npm registry (dist.integrity, no credential, no redirect)",
+		Triggers: []egressTrigger{trigUserCommand},
+		Gate:     "`observer cloud-session flush`, which a committed repository hook runs inside a vendor's cloud sandbox and which does nothing without the vendor's cloud marker, and the developer's own `observer cloud-session init`; no daemon path links it",
+		Pins:     []string{"cloudsession_egress_test.go"},
 	},
 	{
 		ID: "aggregate", Pkg: "internal/aggregateclient", Kind: egressRemote,
@@ -215,9 +249,9 @@ var egressLanes = []egressLane{
 	},
 	{
 		ID: "security.scan.osv.db", Pkg: "internal/secscan/osvnet", Kind: egressRemote,
-		Reaches:  "the OSV database bucket (osv-vulnerabilities.storage.googleapis.com: the per-ecosystem exports, metadata first, the body only when its CRC32C changed; only the ecosystem name is sent) and the OSV API (api.osv.dev, online matching: ecosystem, public package name and version), over HTTPS to an exact host allow-list with no redirects",
+		Reaches:  "SuperBased's signed mirror of the OSV exports (superbased.app/api/security/v1/content/security.osv_export/: the manifest with its ETag, then only the base and delta artifacts whose digest the node does not hold; nothing about a project is sent), the OS release databases from the same mirror (superbased.app/api/security/v1/content/security.osv_os_export/: the manifest with its ETag, then only the base and delta artifacts of the releases a scanned image needs or that are already installed; the OSV bucket is never used for them; only the release names are sent), the OSV database bucket as the fallback source (osv-vulnerabilities.storage.googleapis.com: the per-ecosystem exports, metadata first, the body only when its CRC32C changed, then only the changed records; only the ecosystem name and public record ids are sent) and the OSV API (api.osv.dev, online matching: ecosystem, public package name and version; and, for git submodules, only the commit ids they are pinned to, one /v1/query per distinct commit after the public self-test commit, never a submodule's url, path or name), over HTTPS to an exact host allow-list with no redirects, every body capped; the exploit-likelihood kinds from the same mirror (superbased.app/api/security/v1/content/security.kev/ and security.epss/: each kind's manifest with its ETag, then its one artifact, kev.json or epss.bin, only when its digest changed; nothing about a project is sent; the node never contacts cisa.gov or the EPSS host)",
 		Triggers: []egressTrigger{trigDaemonLoop, trigUserCommand},
-		Gate:     "a dependency scanner component selected (security.scan.scalibr or security.scan.osv, with security.deps), `[security.deps] online` on and its first-run disclosure recorded, on an individual node only (a managed node is never handed this client); online matching only on `observer security scan --online`; linked only into the daemon's scan loop and the scan command",
+		Gate:     "a dependency scanner component selected (security.scan.scalibr or security.scan.osv, with security.deps) on an individual node only (a managed node is never handed this client); the database download only after the developer's one-time accept (R-165), from the source order [security.deps] db_source / db_fallback_upstream choose (db_source = import makes no request); the OS release databases only after the developer's separate one-time OS accept (osv-os-db-consent.json, R-165), from superbased.app only and never the bucket, on demand for the releases a scanned image needs and the 6-hourly refresh of the releases already installed (db_source = import or upstream fetches none); online matching (package names and submodule commit ids) only on an online scan (the dashboard scan dialog's \"Also check online\" or `observer security scan --online`) with `[security.deps] online` on and its disclosure recorded (version 3, which names the submodule commit ids, so an accept of an earlier text is asked again), never on a managed node (its submodules are not checked online); linked only into the daemon's scan loop, its scan-now jobs and the scan command; the exploit kinds security.kev and security.epss only after the same one-time database accept (no consent of their own, ruling Q14-3), from superbased.app only, on the daemon's 6-hourly database refresh (db_source = import or upstream fetches none); a managed node takes them from its org mirror only; the SuperBased lookup's signed shard manifest and set descriptors (superbased.app/api/security/v1/content/security.osv_shards/: the manifest with its ETag, then only the descriptors whose digest changed; the same files for everyone, nothing about a project is sent) only in lookup mode remote or both with the developer's remote-lookup consent (lane RM-2), at most every 6 hours from the daemon",
 		Pins:     []string{"security_scan_egress_test.go"},
 	},
 	{
@@ -239,6 +273,20 @@ var egressLanes = []egressLane{
 		Reaches:  "the pinned Trivy release archive and its sigstore bundle on github.com (redirects followed only to release-assets.githubusercontent.com and objects.githubusercontent.com), over HTTPS to an exact host allow-list, every body capped; nothing about a project is sent",
 		Triggers: []egressTrigger{trigUserCommand, trigUserAction},
 		Gate:     "security.scan.trivy selected (opt-in) on an individual node, only after the developer's one-time size consent for the pin in force (dashboard or CLI, never an agent: R-165); never on a managed node (its engine comes from the org mirror); linked only into the cmd layer (lane GATES-SEC)",
+	},
+	{
+		ID: "security.scan.trivy.db", Pkg: "internal/secscan/trivydb", Kind: egressRemote,
+		Reaches:  "Trivy's vulnerability database, the public OCI artifact ghcr.io/aquasecurity/trivy-db:2, anonymously over the OCI distribution API: ghcr.io for the pull token (/token), the manifest by tag (/v2/aquasecurity/trivy-db/manifests/2) and the one layer request by digest, which the registry redirects to pkg-containers.githubusercontent.com (the only redirect followed, on the layer request only); HTTPS to that exact two-host allow-list, every body capped, the manifest checked against its digest and the layer against the manifest's digest and size; User-Agent superbased-observer; nothing about a project or an image is sent",
+		Triggers: []egressTrigger{trigUserCommand, trigDaemonLoop},
+		Gate:     "security.scan.image.trivy selected (opt-in) with security.scan.trivy and security.deps, on an individual node only (a managed node's mirror does not serve Trivy's database yet, so it makes no request), only after the developer's one-time accept (trivy-db-consent.json, dashboard or CLI, never an agent: R-165); on `observer security scan image` with the trivy driver, `observer security scan trivy-db refresh` and the daemon's dependency scan pass (under the scan lease, never waiting for it; a failed refresh keeps the last good database), at most every 6 hours and not before the database's own NextUpdate; linked only into the cmd layer (lane OS-2 T)",
+		Pins:     []string{"security_trivydb_egress_test.go"},
+	},
+	{
+		ID: "security.scan.osv.shards", Pkg: "internal/secscan/osvshard/shardnet", Kind: egressRemote,
+		Reaches:  "the SuperBased package lookup's advisory shards and their index files on shards.superbased.app only (OS and CI scanning plan sections 13.3 and 13.11, mode M1): GETs of <Set>/index/<sha256>.json and <Set>/obj/<sha256>.json.gz, over HTTPS to that one host, no redirects, every body capped at the size the verified descriptor or index file lists; which digests are asked for follows from a short hash prefix of each package name the scan holds (project-derived, so a lane of its own), never a package name, version, path or code; only objects not already in the node-local verified cache; User-Agent superbased-observer. The signed shard manifest and set descriptors (security.osv_shards) come through security.scan.osv.db's content feed client, not this lane",
+		Triggers: []egressTrigger{trigDaemonLoop, trigUserCommand},
+		Gate:     "lookup mode remote or both ([security.deps] match) on an individual node only (a managed node never reaches it: its organization decides, and its shards come from its org mirror over org.client, lane RM-3), with the developer's own signed remote-lookup consent (osv-remote-consent.json, the Privacy page's Package lookup card or `observer security lookup mode`, never an agent: R-165), a dependency scanner selected and a content-feed key in the build; private and internal package names are withheld (never hashed into a request) unless the developer chose remote_private = send with its own consent (osv-remote-private-consent.json); every request re-checks the config file's and the consent record's change stamps, so turning the lookup off stops sending at once; on `observer security scan` and the daemon's dependency scan pass, same cadence as local scans; linked only into the cmd layer (lane RM-2)",
+		Pins:     []string{"security_osvshards_egress_test.go"},
 	},
 	{
 		ID: "proxy.upstream", Pkg: "internal/proxy", Kind: egressRemote,
@@ -360,6 +408,12 @@ var egressLanes = []egressLane{
 		Gate:     "`security.deps` active, an install command (or a manifest edit), an online-cache miss for a package name, the install-gate wait (default 1.5 s); the daemon serves it only while online checks are on and disclosed (security plan section 8.3, JSP-11)",
 	},
 	{
+		ID: "promptjudge.ask", Pkg: "internal/promptjudgeipc", Kind: egressLocal,
+		Reaches:  "the daemon's owner-only prompt judge endpoint, through internal/localipc (a unix socket under a 0700 directory, or an owner-only named pipe), never TCP and never off the machine; the daemon then judges through the org relay lane (internal/orgclient), not this package",
+		Triggers: []egressTrigger{trigHookProcess, trigDaemonLoop},
+		Gate:     "a prompt-gate hook on a managed node whose signed guard posture says the organization's prompt judge is active (planeb.admission with node_lane, enforce.admission held); individual nodes never dial it (P-228 phase 2, lane adm-2)",
+	},
+	{
 		ID: "sandbox.relay", Pkg: "internal/sandboxrelayd", Kind: egressLocal,
 		Reaches:  "the capture relay's owner-only local endpoints: a sandbox box's per-run relay socket (served by the host helper) and the daemon's link endpoint under the observer directory (an owner-only named pipe on native Windows, the MXC row, lane SBX-P6, whose box reaches its helper on the run's token-checked loopback port served by cmd/observer); the package itself never dials TCP and never leaves the machine",
 		Triggers: []egressTrigger{trigAIClient, trigUserAction},
@@ -395,6 +449,13 @@ var egressLanes = []egressLane{
 		Triggers: []egressTrigger{trigUserAction},
 		Gate:     "the user switches to a remote instance",
 	},
+	{
+		ID: "security.dast", Pkg: "internal/secdastnet", Kind: egressLocal,
+		Reaches:  "ONE development server the developer names on this machine: the host must be localhost or a loopback literal with a port, it is resolved once and every address must be loopback (127.0.0.0/8 or ::1, secdast.IsLoopbackAddr; a NAT64 or 6to4 form is refused), each connection dials that pinned address through a Control hook that refuses any non-loopback address; plain GETs only (at most 16 per run, 32 round trips with same-origin redirects), no proxy, cookie jar, credential or body, no redirect off the origin, bodies capped at 256 KiB, 5 s per request and 30 s per run",
+		Triggers: []egressTrigger{trigUserCommand},
+		Gate:     "security.dast selected (opt-in, plan 14.9 and 14.13), `observer security dast <url>` started by the developer (never an agent: R-165 denies the verb, the accept and the record) after its one-time signed accept (dast-consent.json); linked only into the cmd layer (lane M3L-5)",
+		Pins:     []string{"security_dast_egress_test.go"},
+	},
 
 	// --- listen-only: serves, never dials ---------------------------------
 	{ID: "dashboard", Pkg: "internal/intelligence/dashboard", Kind: egressListen, Reaches: "the loopback dashboard's HTTP and websocket handlers"},
@@ -418,6 +479,8 @@ var egressLanes = []egressLane{
 	{ID: "vendorsurface", Pkg: "internal/vendorsurface", Kind: egressAddress, Reaches: "endpoint parsing"},
 	{ID: "mcpintel.discover", Pkg: "internal/mcpintel/discover", Kind: egressAddress, Reaches: "endpoint formatting"},
 	{ID: "netpolicy", Pkg: "internal/netpolicy", Kind: egressAddress, Reaches: "the pure IP classification and dial-control hook mcp.egress dials through"},
+	{ID: "ipclass", Pkg: "internal/ipclass", Kind: egressAddress, Reaches: "the one IP classifier (netpolicy and the guard network rules R-174..R-176 classify through it)"},
+	{ID: "policy", Pkg: "internal/policy", Kind: egressAddress, Reaches: "host and IP parsing for the guard network rules R-174..R-179 (judges a command line; opens no connection)"},
 	{ID: "processobs", Pkg: "internal/processobs", Kind: egressAddress, Reaches: "endpoint formatting"},
 	{ID: "processbridge.setup", Pkg: "internal/processbridge/setup", Kind: egressAddress, Reaches: "endpoint parsing"},
 	{ID: "ingest.hostguard", Pkg: "internal/ingest/hostguard", Kind: egressAddress, Reaches: "Host header and peer address checks"},

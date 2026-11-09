@@ -49,6 +49,9 @@ var daemonLoopComponents = map[string][]string{
 	"hook-lifecycle": nil,
 	// Plans & limits reads the local database only until an account is added.
 	"plans": nil,
+	// Cloud agents (docs/cloud-agents.md) read the local database only
+	// until the user links an account.
+	"cloud-agents": nil,
 
 	"proxy":          {"capture.proxy"},
 	"dashboard":      {"ui.dashboard"},
@@ -56,6 +59,9 @@ var daemonLoopComponents = map[string][]string{
 	"session-score":  {"analytics"},
 	"advisor-digest": {"analytics"},
 	"commit-scan":    {"projects"},
+	// The Projects-page quality trend reads report files and the codeintel
+	// index only; duplication answers not_in_build without codeintel.
+	"code-quality": {"projects"},
 	// Delivery (D-689) serves the Projects page; it reads the local
 	// database only until a code host is connected or a mirror scheduled.
 	"delivery":            {"projects"},
@@ -73,6 +79,7 @@ var daemonLoopComponents = map[string][]string{
 	"browser-listener":    {"capture.browser"},
 	"obs-alerts":          {"obs"},
 	"guard-posture":       {"guard"},
+	"prompt-judge":        {"guard"}, // P-228 hook lane: dialed only while guard-posture.json says the judge is active
 	"guard-git-aliases":   {"guard"},
 	"guard-user-policy":   {"guard"},
 	"guard-baseline-scan": {"guard"},

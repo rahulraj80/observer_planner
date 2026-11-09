@@ -149,6 +149,10 @@ export const EXPORT_ROUTES: readonly ExportRow[] = [
   { path: "/remote", tab: "terminal-control", endpoint: "/api/remote/sessions" },
   { path: "/remote", tab: "tailscale", none: CONFIG_TAB },
   { path: "/remote", tab: "audit", endpoint: "/api/remote/audit" },
+  {
+    path: "/you",
+    none: "Nothing to export here: this page shows your identity and credentials, which are not exported.",
+  },
   { path: "/messages", endpoint: "/api/messages" },
   { path: "/requests", endpoint: "/api/requests" },
   { path: "/settings", endpoint: "/api/config" },

@@ -757,22 +757,22 @@ export function RemotePage() {
                 app: <DeviceTailscaleLinks />.
               </p>
               {pairing.tailscale_serve && (
-                <div className="pt-2">
-                  <div className="mb-1 text-[11px] text-fg-3">
-                    Point Tailscale at the backend (run once on this machine), then restart the daemon:
+                <div className="space-y-1 pt-2">
+                  {/* Dashboard CLI parity (lane L3): the Tailscale tab's
+                      guided step runs `tailscale serve` for the owner, so
+                      this points at it instead of a command to copy. */}
+                  <div className="text-[11px] text-fg-3">
+                    Point Tailscale at the backend once on this machine: the Tailscale tab&apos;s &ldquo;Set up Tailscale
+                    serve for me&rdquo; does it (same as <code className="text-fg-2">{pairing.tailscale_serve}</code>). The
+                    listener binds after the daemon restart the banner offers.
                   </div>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 break-all rounded-2 border border-line-2 bg-bg-3 px-2 py-1 font-mono text-[11px] text-fg-2">
-                      {pairing.tailscale_serve}
-                    </code>
-                    <CopyOnClick
-                      value={pairing.tailscale_serve ?? ""}
-                      title="Copy the command"
-                      className="rounded-2 border border-line-2 bg-bg-2 px-2 py-1 text-caption text-fg-2 hover:bg-bg-3"
-                    >
-                      Copy
-                    </CopyOnClick>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={goToTailscaleSetup}
+                    className="rounded-2 border border-accent/50 bg-accent/15 px-2 py-1 text-[11px] font-medium text-accent hover:bg-accent/25"
+                  >
+                    Open the Tailscale step
+                  </button>
                 </div>
               )}
             </div>
@@ -1358,7 +1358,7 @@ function TailscaleCard({
     return (
       <ChartShell
         title="Tailscale"
-        sub="Tailscale is installed but this node is not up. Log in from a terminal, then this card will show your tailnet host."
+        sub="Tailscale is installed but this node is not up. Log in with the button below (it opens a terminal here), then this card will show your tailnet host."
         right={<Pill variant="warn">{data.state || "not up"}</Pill>}
       >
         <div className="space-y-2 p-1 text-[12px]">

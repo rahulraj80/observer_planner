@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -34,14 +35,23 @@ func init() {
 	hostedCredTeardownHook = credTeardown
 	hostedCredEnvHook = credEnv
 	hostedCredStampHook = credStamp
+	hostedCredIsSentinelHook = sandboxcred.IsSentinel
 }
 
-// credOtherHomeRelay reports whether a key the proxy adds itself is
-// configured (a routing key pool or the org gateway route), which serves
-// home_relay without injection.
+// credOtherHomeRelay reports whether the proxy itself puts a credential on
+// the box's requests (homeRelayServedAtHome: the org gateway route), which
+// serves home_relay with no stored key. The box still gets a sentinel, so
+// its tool starts (FX3 item 5, F-L3P4-4).
 var credOtherHomeRelay = func() bool {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: daemonConfigPath()})
-	return err == nil && (len(cfg.Routing.KeyPool) > 0 || cfg.Proxy.OrgRoute.Mode != "")
+	return err == nil && homeRelayServedAtHome(cfg)
+}
+
+// credKeyPoolSet reports whether a routing key pool is configured, for the
+// refusal's words: a pool never serves home_relay.
+var credKeyPoolSet = func() bool {
+	cfg, err := config.Load(config.LoadOptions{GlobalPath: daemonConfigPath()})
+	return err == nil && len(cfg.Routing.KeyPool) > 0
 }
 
 // credSetup mints the run's sentinel for home_relay custody, or applies the
@@ -62,15 +72,30 @@ func credSetup(ctx context.Context, plan hostedPlanFile) error {
 func credSetupHomeRelay(plan hostedPlanFile) error {
 	provider := credToolProvider(plan.Tool)
 	unsat := func(why string) error {
-		if credOtherHomeRelay() {
-			return nil // the pool or the org gateway serves the custody
+		if credKeyPoolSet() {
+			why += " (the routing key pool does not serve home_relay: it only rotates keys a request already carries)"
 		}
 		return fmt.Errorf("%s: key custody home_relay: %s", verdictHostedCustody, why)
 	}
+	served := credOtherHomeRelay()
 	if provider == "" {
+		if served {
+			return nil // the org gateway serves; no key variable injection knows
+		}
 		return unsat("the tool's model provider is not one credential injection serves")
 	}
-	if !credKeyStored(plan.ObserverDir, provider) {
+	// Whoever serves the key at home, the box gets a sentinel in its tool's
+	// key variable, so the tool starts (F-L3P4-4): the injector swaps a
+	// stored key for it, or the org gateway route replaces it with the
+	// org's virtual key.
+	stored, perr := credKeyPresence(plan.ObserverDir, provider)
+	if served {
+		stored, perr = true, nil
+	}
+	if perr != nil {
+		return unsat("the list of stored provider keys cannot be read (" + perr.Error() + "); remove it and add your key again with `observer sandbox credentials add " + provider + "`")
+	}
+	if !stored {
 		return unsat("no " + provider + " key is stored for injection; add yours with `observer sandbox credentials add " + provider + "` or in Terminals > Settings")
 	}
 	sentinel, err := sandboxcred.MintSentinel(rand.Reader, provider)
@@ -234,11 +259,29 @@ func credToolProvider(tool string) string {
 	return sandboxcred.ProviderForTool(spec.Model.Catalog.Kind == integration.ModelCatalogVendor, spec.Model.Catalog.Providers)
 }
 
-// credKeyStored reports whether the user's key for provider is stored.
+// credKeyStored reports whether the user's key for provider is stored,
+// from the ids-only list the add and remove verbs keep (credMarkProvider),
+// never by reading the key (F-010 A6): no key bytes enter a host helper's
+// memory and no keychain prompt is raised for a presence check. A key
+// removed behind the verbs' back reads as stored; the daemon's injector
+// then finds no key (match row no_key) and the sentinel is refused, fail
+// closed.
 func credKeyStored(observerDir, provider string) bool {
+	stored, err := credKeyPresence(observerDir, provider)
+	return stored && err == nil
+}
+
+// credKeyPresence is credKeyStored that also says when the list exists but
+// cannot be read (refused: not an owner-only file of this user, or not
+// JSON), so a caller can refuse loudly rather than read it as "no key"
+// (audit FU3-A4). An absent list is no error: no key was ever added.
+func credKeyPresence(observerDir, provider string) (bool, error) {
 	if observerDir == "" || provider == "" {
-		return false
+		return false, nil
 	}
-	v, err := credKeysFn(observerDir).Get(sandboxcred.KeyName(provider))
-	return err == nil && v != ""
+	ids, err := credReadProviders(observerDir)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(ids, provider), nil
 }

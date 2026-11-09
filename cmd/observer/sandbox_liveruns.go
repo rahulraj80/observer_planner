@@ -405,6 +405,13 @@ const liveRunsDaemonTimeout = 5 * time.Second
 // so a --dashboard-addr or every-interface bind is found), else the address
 // the config at configPath ("" = the default lookup) resolves to.
 var newDaemonLiveRunsClient = func(configPath string) daemonLiveRunsClient {
+	return httpLiveRunsClient("http://" + daemonDashboardAddr(configPath) + "/api/admin/restart")
+}
+
+// daemonDashboardAddr is the dialable address of the running daemon's
+// dashboard: the address the daemon recorded beside its database, else the
+// one the config at configPath ("" = the default lookup) resolves to.
+func daemonDashboardAddr(configPath string) string {
 	addr := "127.0.0.1:8081"
 	if cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath}); err == nil {
 		addr = resolveDashboardAddr("", cfg.Dashboard.Addr, addr)
@@ -414,7 +421,7 @@ var newDaemonLiveRunsClient = func(configPath string) daemonLiveRunsClient {
 	} else {
 		addr = resolveDashboardAddr("", "", addr)
 	}
-	return httpLiveRunsClient("http://" + dialableDashboardAddr(addr) + "/api/admin/restart")
+	return dialableDashboardAddr(addr)
 }
 
 // httpLiveRunsClient is the loopback client over the restart route.

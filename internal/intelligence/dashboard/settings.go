@@ -470,6 +470,18 @@ func (s *Server) handleConfigSection(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// validCloudLoginPort accepts the [cloud].login_port values the dashboard may
+// write: 0 (unset: `observer cloud login` uses its built-in default) or an
+// unprivileged port, 1024-65535. A privileged port is refused here because the
+// login callback listener runs as the user; the config loader's own range
+// check (0-65535) still applies to a hand-written file.
+func validCloudLoginPort(p int) error {
+	if p == 0 || (p >= 1024 && p <= 65535) {
+		return nil
+	}
+	return fmt.Errorf("cloud.login_port %d out of range: use 1024-65535, or 0 for the built-in default", p)
+}
+
 // applySectionUpdate decodes body as the named section's payload and
 // writes it onto cfg. Section names map to either a top-level Config
 // field, a nested ObserverConfig sub-struct, or a synthetic group of
@@ -525,21 +537,29 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 		cfg.Observer.Antigravity = sec
 	case "cloud":
 		// Editable subset of [cloud] (Settings → Cloud Intelligence's "Cloud
-		// settings" card): base URL, the two automation toggles + interval, and
-		// the PUBLIC WorkOS client id. LoginPort keeps its loaded value (it must
-		// match a WorkOS-registered redirect URI, a hand-written decision).
-		// Pointer fields so a partial body preserves what it omits (the
+		// settings" card): base URL, the two automation toggles + interval, the
+		// PUBLIC WorkOS client id, and the login callback port (Advanced fold;
+		// it must match a redirect URI registered in WorkOS, so the form says
+		// so). Pointer fields so a partial body preserves what it omits (the
 		// process-section idiom); config.Validate re-checks base_url shape and
-		// the interval floor before the write.
+		// the interval floor before the write, and the port range is checked
+		// here (validCloudLoginPort).
 		var sec struct {
 			BaseURL                 *string `json:"BaseURL"`
 			AutoSync                *bool   `json:"AutoSync"`
 			AutoSyncIntervalMinutes *int    `json:"AutoSyncIntervalMinutes"`
 			AutoEnrich              *bool   `json:"AutoEnrich"`
 			WorkOSClientID          *string `json:"WorkOSClientID"`
+			LoginPort               *int    `json:"LoginPort"`
 		}
 		if err := json.Unmarshal(body, &sec); err != nil {
 			return fmt.Errorf("decode cloud: %w", err)
+		}
+		if sec.LoginPort != nil {
+			if err := validCloudLoginPort(*sec.LoginPort); err != nil {
+				return err
+			}
+			cfg.Cloud.LoginPort = *sec.LoginPort
 		}
 		if sec.BaseURL != nil {
 			cfg.Cloud.BaseURL = strings.TrimSpace(*sec.BaseURL)
@@ -1029,37 +1049,46 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 			}
 		}
 		prior := cfg.Guard
-		// Cloud is the D1 network-egress opt-in — a hand-written
-		// config decision the dashboard must never be able to flip
-		// (the same selective copy the org case uses for enrolment
-		// identity).
+		// Cloud is the network-egress opt-in ([guard.cloud]). It has its
+		// own consent surface (the Security → MCP tab's Network features
+		// card, PUT /api/guard/cloud, confirm-gated and agent-pinned), so
+		// a plain guard-section save must never flip it: preserve the
+		// prior block (the same selective copy the org case uses for
+		// enrolment identity).
 		sec.Cloud = prior.Cloud
 		// OrgBundle is org-client-owned; CEL is the parse-but-reject
 		// v2 gate. Neither is on the form — preserve.
 		sec.Rules.OrgBundle = prior.Rules.OrgBundle
 		sec.Rules.CEL = prior.Rules.CEL
-		// Boundary lists distinguish nil (engine defaults) from
-		// explicitly empty ("none"); a form can't express that, so
-		// empty preserves prior and "none" stays a config-file edit.
-		if len(sec.Boundary.AllowPaths) == 0 {
-			sec.Boundary.AllowPaths = prior.Boundary.AllowPaths
-		}
-		if len(sec.Boundary.ProtectedBranches) == 0 {
-			sec.Boundary.ProtectedBranches = prior.Boundary.ProtectedBranches
-		}
+		// Boundary lists distinguish nil (engine defaults) from an
+		// explicitly empty list ("none"). The form's three-way choice
+		// (Engine defaults / Custom list / None, dashboard CLI parity
+		// follow-up) sends JSON null or [] for them, and every saver
+		// spreads the Guard object GET /api/config answered, which
+		// marshals a nil slice as null and an empty one as [], so the
+		// body's value is taken as sent.
 		cfg.Guard = sec
 	case "routing":
 		// Model-routing layer (security-routing usability arc R1.1).
 		// The form owns the adoption-funnel knobs ONLY: gate, mode,
 		// policy template, retention, stickiness, calibration, rate-
-		// limit window. Everything else under [routing] — tiers,
-		// benchmark_files, path_classes, privacy rules, budget scopes,
-		// reliability, key_pool (holds API keys), local_upstreams —
-		// is a complex shape or carries secrets: those stay
-		// config-file-only, so decode the editable subset and keep the
-		// rest of the prior section wholesale. §R23 posture: this PUT
-		// writes THIS node's config file only — routing deliberately
-		// has no remote mode surface.
+		// limit window. Every other [routing] shape is kept from the
+		// prior section wholesale unless the body carries its explicit
+		// escape hatch below. key_pool (holds API keys, decision P-4)
+		// has none; plain keys this form does not show (benchmark_files,
+		// the reliability retry knobs) are the keys route's (More
+		// settings, PUT /api/config/keys).
+		// §R23 posture: this PUT writes THIS node's config file only;
+		// routing deliberately has no remote mode surface.
+		//
+		// The shape cards (Settings > Routing: tier overrides, path
+		// classes, budget scopes, privacy rules, local upstreams, model
+		// fallbacks) each send ONE Set* field (routing_shapes.go). Their
+		// names differ from the GET payload's Go names, so the section
+		// form never sends one: absent = kept wholesale, present =
+		// replaced (an empty value clears), gated by the dashboard's row
+		// checks, the exact config.Load [routing] checks and the
+		// compiler's error lint; a refusal leaves the file untouched.
 		//
 		// [[routing.rules]] (R2.2, Q3 FULL) keeps this case as its ONE
 		// writer with an explicit escape hatch: RulesTOML absent (the
@@ -1107,6 +1136,9 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 		next.Stickiness = sec.Stickiness
 		next.RateLimitWindow = sec.RateLimitWindow
 		next.Calibration = sec.Calibration
+		if problems := applyRoutingShapes(&next, body); len(problems) > 0 {
+			return fmt.Errorf("routing settings refused (file untouched): %s", strings.Join(problems, "; "))
+		}
 		if sec.RulesTOML != nil {
 			rules, problems := checkRoutingRulesTOML(next, *sec.RulesTOML)
 			if len(problems) > 0 {

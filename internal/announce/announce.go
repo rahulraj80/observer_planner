@@ -149,7 +149,7 @@ var releaseAnnouncements = []Announcement{
 		ID:        "v1.37.0-macos13-codesec",
 		Severity:  SeverityNotice,
 		Title:     "v1.37.0 needs macOS 13 or later, and code security is now on",
-		Body:      "This release needs macOS 13 Ventura or later. On macOS 12, stay on v1.36.0. Code security is now on by default in the developer and full editions, so an agent commit or push can ask you first. Run observer guard status to see it.",
+		Body:      "This release needs macOS 13 Ventura or later. On macOS 12, stay on v1.36.0. Code security is now on by default in the developer and full editions, so an agent commit or push can ask you first. See it on the Security page.",
 		URL:       "https://github.com/superbasedapp/observer/releases/tag/v1.37.0",
 		ExpiresAt: "2026-12-30T00:00:00Z",
 		Source:    SourceRelease,

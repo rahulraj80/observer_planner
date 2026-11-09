@@ -94,6 +94,7 @@ var pages = []page{
 	{"benchmarks", "benchmarks", "Benchmarks", "BenchmarksPage", "benchmark"},
 	{"discovery", "discovery", "Discovery", "DiscoveryPage", "analytics"},
 	{"patterns", "patterns", "Patterns", "PatternsPage", "analytics"},
+	{"you", "you", "You", "YouPage", "core"},
 	{"privacy", "privacy", "Privacy", "PrivacyPage", "core"},
 	{"messages", "messages", "Messages", "MessagesPage", "org.client"},
 	{"requests", "requests", "Requests", "RequestsPage", "org.client"},
@@ -122,6 +123,12 @@ var features = []feature{
 	// Terminal dialog's Isolation picker (sandbox plan v2 section 11.1).
 	{"SANDBOX_SETTINGS_CARD", "components/SandboxSettingsCard", "SandboxSettingsCard", "terminals.sandbox"},
 	{"SANDBOX_ISOLATION_PICKER", "components/SandboxIsolationPicker", "SandboxIsolationPicker", "terminals.sandbox"},
+	// The sandbox setup checklist (sandbox installation lifecycle plan
+	// section 3.7), opened from the Isolation picker and the Settings card.
+	{"SANDBOX_SETUP_PANEL", "components/SandboxSetupPanel", "SandboxSetupPanel", "terminals.sandbox"},
+	// The Terminals page's refused connections card (OpenShell lane N5),
+	// the module's like the settings card.
+	{"SANDBOX_REFUSALS_CARD", "components/SandboxRefusals", "SandboxRefusalsCard", "terminals.sandbox"},
 }
 
 // packages maps an npm package that only a component's pages and features

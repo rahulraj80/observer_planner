@@ -712,7 +712,7 @@ function CacheEfficiencyTile({
   const subLine =
     eventCount > 0
       ? `${fmtInt(eventCount)} events · ${fmtInt(sessionCount)} sessions · read ${fmtCompact(efficiency?.read_tokens ?? 0)}`
-      : "no cache events yet · enable [cachetrack] or run Settings > Backfill > cache-rescan";
+      : "no cache events yet · turn on Settings > Cache tracking, or run Settings > Backfill > cache-rescan";
 
   const cornerPill =
     dominantCause && dominantCause.count > 0 ? (

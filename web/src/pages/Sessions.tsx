@@ -8,6 +8,7 @@ import {
   Pencil,
   Star,
   Table2,
+  Bot,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -26,6 +27,9 @@ import {
   SlideOver,
   SurfaceBadge,
   type SurfaceKind,
+  ExecutionLocationBadge,
+  EXECUTION_FILTER_OPTIONS,
+  type ExecutionFilterValue,
   ToolBadge,
   Tooltip,
   TruncatedPath,
@@ -87,6 +91,8 @@ import {
   SessionsFiltersDrawer,
 } from "./sessions/FiltersDrawer";
 import { navIcon } from "@/lib/nav";
+import { OwnAgentsView } from "./sessions/OwnAgentsView";
+import { agentFromSurfaceHost } from "@/lib/ownAgents";
 
 // One glyph per sessions section card title (the ChartShell `icon` slot): the
 // chart or table shape the section shows, never decoration.
@@ -133,7 +139,7 @@ const SORT_OPTIONS: SortOption[] = [
   { id: "favorite", desc: true, label: "Favorites first" },
 ];
 
-type View = "table" | "calendar";
+type View = "table" | "calendar" | "agents";
 
 // SURFACE_FILTER_OPTIONS backs the toolbar's Client dropdown — one row per
 // value of the closed capture-surface vocabulary (SurfaceBadge's
@@ -149,6 +155,7 @@ const SURFACE_FILTER_OPTIONS: ReadonlyArray<{ value: SurfaceKind | ""; label: st
   { value: "desktop", label: "desktop - desktop app" },
   { value: "sdk", label: "sdk - programmatic" },
   { value: "web", label: "web - browser" },
+  { value: "mobile", label: "mobile - phone app" },
 ];
 
 export function SessionsPage() {
@@ -246,6 +253,16 @@ export function SessionsPage() {
   // or "" for any. Server-side (all pages) and transient, exactly like
   // favoriteOnly — the stamp is the server's fact, the filter a view choice.
   const [surfaceFilter, setSurfaceFilter] = useState<SurfaceKind | "">("");
+  // agentHost is the Own agents view's pick: one own agent's stored
+  // surface_host ("agent:<name>"). It narrows the table SERVER-side to that
+  // agent's custom-agent sessions (tool + surface_host), all pages, and is
+  // transient like the Client dropdown. null = no agent filter.
+  const [agentHost, setAgentHost] = useState<string | null>(null);
+  // ranFilter is the "Where it ran" dropdown's value (execution_location on
+  // /api/sessions, node migration 240): local / vendor_cloud /
+  // customer_worker / unknown, or "" for anywhere. Server-side and transient,
+  // exactly like surfaceFilter.
+  const [ranFilter, setRanFilter] = useState<ExecutionFilterValue>("");
   const tagKey = tagFilters.join(",");
   // annotations holds per-session optimistic overrides for the
   // classification fields, merged over the fetched rows. Each entry is
@@ -273,7 +290,7 @@ export function SessionsPage() {
   };
 
   // Reset page when filters change (incl. picked calendar day).
-  const filterKey = `${win}|${tool}|${project}|${model}|${pickedDay ?? ""}|${sortBy}|${sortDir}|${tagKey}|${favoriteOnly}|${surfaceFilter}`;
+  const filterKey = `${win}|${tool}|${project}|${model}|${pickedDay ?? ""}|${sortBy}|${sortDir}|${tagKey}|${favoriteOnly}|${surfaceFilter}|${agentHost ?? ""}|${ranFilter}`;
   const lastKey = useMemo(() => filterKey, [filterKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => setPage(1), [lastKey]);
@@ -286,7 +303,10 @@ export function SessionsPage() {
     {
       page,
       limit: PAGE_LIMIT,
-      tool: toolParam,
+      // An own-agent pick names its tool outright (the global tool filter
+      // would otherwise hide every custom-agent session).
+      tool: agentHost ? "custom-agent" : toolParam,
+      surface_host: agentHost ?? undefined,
       model: modelParam,
       project: projectParam,
       ...winParams,
@@ -300,6 +320,8 @@ export function SessionsPage() {
       // Capture-surface kind, exact match server-side; "" is dropped by
       // buildUrl so "any" sends nothing.
       surface: surfaceFilter || undefined,
+      // Where it ran; "" (anywhere) is dropped by buildUrl.
+      execution_location: ranFilter || undefined,
     },
     [
       page,
@@ -314,6 +336,8 @@ export function SessionsPage() {
       tagKey,
       favoriteOnly,
       surfaceFilter,
+      agentHost,
+      ranFilter,
     ],
     // Live-capture refresh: every 30 s while the tab is visible and the
     // table is not covered by a modal panel. Lets fresh Antigravity-CLI .pb
@@ -670,9 +694,23 @@ export function SessionsPage() {
         onClear: () => setSurfaceFilter(""),
       });
     }
+    if (agentHost) {
+      c.push({
+        label: `agent: ${agentFromSurfaceHost(agentHost)}`,
+        title: "Show every session again",
+        onClear: () => setAgentHost(null),
+      });
+    }
+    if (ranFilter) {
+      c.push({
+        label: `ran: ${EXECUTION_FILTER_OPTIONS.find((o) => o.value === ranFilter)?.label.split(" - ")[0] ?? ranFilter}`,
+        title: "Show sessions from everywhere again",
+        onClear: () => setRanFilter(""),
+      });
+    }
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [favoriteOnly, tagKey, surfaceFilter]);
+  }, [favoriteOnly, tagKey, surfaceFilter, agentHost, ranFilter]);
 
   const showScoring = (sessions.data?.scored_count ?? 0) > 0;
   const columns = useMemo<ColumnDef<SessionRow, unknown>[]>(
@@ -703,6 +741,7 @@ export function SessionsPage() {
             options={[
               { value: "table", label: "Table", icon: Table2 },
               { value: "calendar", label: "Calendar", icon: CalendarDays },
+              { value: "agents", label: "Own agents", icon: Bot },
             ]}
             value={view}
             onChange={setView}
@@ -766,6 +805,31 @@ export function SessionsPage() {
                 }
               >
                 {SURFACE_FILTER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
+            <Tooltip
+              content={
+                ranFilter
+                  ? "Showing sessions from one place only - pick \"anywhere\" to show all"
+                  : "Filter by where the agent ran: this machine, a vendor's cloud sandbox, or compute your organization runs (server-side, all pages)"
+              }
+              maxWidth={320}
+            >
+              <select
+                aria-label="Filter sessions by where they ran"
+                value={ranFilter}
+                onChange={(e) => setRanFilter(e.target.value as ExecutionFilterValue)}
+                className={
+                  ranFilter
+                    ? "h-7 rounded-2 border border-accent/50 bg-accent-soft px-2 text-[11px] text-accent focus:outline-none"
+                    : "h-7 rounded-2 border border-line-2 bg-bg-2 px-2 text-[11px] text-fg-2 hover:bg-bg-3 focus:border-accent focus:outline-none"
+                }
+              >
+                {EXECUTION_FILTER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
@@ -912,10 +976,22 @@ export function SessionsPage() {
               setTagFilters([]);
               setFavoriteOnly(false);
               setSurfaceFilter("");
+              setAgentHost(null);
+              setRanFilter("");
             }}
           />
         )}
-        {view === "calendar" ? (
+        {view === "agents" ? (
+          <OwnAgentsView
+            onPick={(a) => {
+              // Narrow the table to the picked agent's sessions, then
+              // swap to it (the calendar's day-pick precedent).
+              setAgentHost(a.surface_host);
+              setLocalQuery("");
+              setView("table");
+            }}
+          />
+        ) : view === "calendar" ? (
           <CalendarView
             cells={calendar.data?.cells ?? []}
             loading={calendar.loading}
@@ -1464,6 +1540,8 @@ const COL_W = {
   // hosts ("claude-code", "vscode"); the pill's own tooltip carries the
   // full gloss + host, and the cell truncates rather than growing.
   client: 104,
+  // Ran: one short pill ("cloud", "worker", "local") or blank for unknown.
+  ran: 76,
   project: 132,
   tags: 116,
   models: 108,
@@ -1492,6 +1570,7 @@ const SESSIONS_MIN_WIDTH =
   COL_W.session +
   COL_W.tool +
   COL_W.client +
+  COL_W.ran +
   COL_W.project +
   COL_W.tags +
   COL_W.models +
@@ -1820,6 +1899,25 @@ function buildColumns(
             surface={row.original.surface}
             host={row.original.surface_host}
             className="min-w-0 max-w-full [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
+          />
+        </span>
+      ),
+    },
+    {
+      // Ran: where the session's agent ran (node migration 240). The badge
+      // renders NOTHING for an unstamped row: blank is unknown, never
+      // "local". Not sortable (no server sort key, manualSorting table);
+      // the toolbar's "Where it ran" picker filters server-side instead.
+      id: "ran",
+      header: () => <>Ran<HelpInd id="column.sessions.ran" /></>,
+      accessorFn: (r) => r.execution_location ?? "",
+      enableSorting: false,
+      meta: { width: COL_W.ran, truncate: true },
+      cell: ({ row }) => (
+        <span className="flex min-w-0">
+          <ExecutionLocationBadge
+            location={row.original.execution_location}
+            vendorRef={row.original.vendor_session_ref}
           />
         </span>
       ),
@@ -2262,6 +2360,8 @@ function exportSessionsCsv(rows: SessionRow[]) {
     { header: "tool", value: (r) => r.tool },
     { header: "surface", value: (r) => r.surface },
     { header: "surface_host", value: (r) => r.surface_host },
+    { header: "execution_location", value: (r) => r.execution_location },
+    { header: "vendor_session_ref", value: (r) => r.vendor_session_ref },
     { header: "project", value: (r) => r.project },
     { header: "started_at", value: (r) => r.started_at },
     { header: "duration_seconds", value: (r) => r.duration_seconds },

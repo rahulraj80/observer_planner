@@ -445,6 +445,16 @@ const (
 	// node's proxy, or vetoes a loopback route. Located like
 	// CaptureRiskVendorPolicyBlocksMCP; the URL never crosses.
 	CaptureRiskVendorPolicyPinsRoute = "vendor_policy_pins_route"
+	// CaptureRiskSandboxGatewayConfigDrift (OpenShell build lane O4,
+	// revision 1 R-17): the config of a sandbox gateway Observer owns on
+	// this node (the managed OpenShell gateway's gateway.toml) is no longer
+	// what Observer wrote for it: changed or removed outside Observer since
+	// the gateway was last started. TAMPER-EVIDENT, never tamper-proof: the
+	// file, the record of what was started and the daemon all belong to the
+	// same local OS user, who can rewrite all three together. A standing
+	// condition, label-only (no path crosses). Additive: an older server
+	// drops the label, an older node never sends it.
+	CaptureRiskSandboxGatewayConfigDrift = "sandbox_gateway_config_drift"
 )
 
 // Closed unknown-check labels. An unknown check is not a clean result and is
@@ -459,6 +469,11 @@ const (
 	CaptureUnknownBinaryPath         = "running_binary_unknown"
 	CaptureUnknownRecordedBinary     = "registered_binary_unknown"
 	CaptureUnknownCodexTrust         = "codex_trust_unknown"
+	// CaptureUnknownSandboxGatewayConfig (lane O4): the read-back of a
+	// sandbox gateway config Observer owns could not say whether it is
+	// still Observer's (unreadable, or a record that does not parse); never
+	// read as clean. Additive like the capture-risk label.
+	CaptureUnknownSandboxGatewayConfig = "sandbox_gateway_config_unknown"
 )
 
 // ManagedIntegrityDetail is the versioned, bounded JSON persisted in the
@@ -758,6 +773,18 @@ type PushEnvelope struct {
 	// teams tier. Optional both directions. See
 	// internal/orgcontract/processsession.go.
 	SessionProcesses []SessionProcessRow `json:"session_processes,omitempty"`
+
+	// SessionProcessRollups / SessionProcessCaptureStats are the process
+	// capture budget's org wire (docs/plans/process-capture-budget-plan-
+	// 2026-11-04.md §4.8, layer O1): the per-bucket rollup groups of the runs
+	// the node counted but did not keep as SessionProcesses rows, and one
+	// counters row per session. Same shipsRawContent() tier as
+	// SessionProcesses. Optional both directions: an older server ignores the
+	// keys, and an older agent sends neither, which the server reads as "no
+	// capture budget" (the drawer's legacy view), never as zero processes.
+	// See internal/orgcontract/processrollup.go.
+	SessionProcessRollups      []SessionProcessRollupRow       `json:"session_process_rollups,omitempty"`
+	SessionProcessCaptureStats []SessionProcessCaptureStatsRow `json:"session_process_capture_stats,omitempty"`
 
 	// SessionNetworkEvents is the W2.2b session-scoped RAW network-egress wire
 	// (one row per process_events network row, joined to its optional
@@ -1577,6 +1604,22 @@ type SessionRow struct {
 	// joining through this column (rollup/messageaccounts.go). See
 	// docs/security.md ledger row LINEAGE-1.
 	ParentThreadID string `json:"parent_thread_id,omitempty"`
+	// ExecutionLocation is where the session's agent ran (cloud-agents arc
+	// CA-D1; agent migration 240 / server 300 / pg 0170): one of the closed
+	// models.Execution* kinds ("local", "vendor_cloud", "customer_worker").
+	// METADATA like Surface: a closed vocabulary, so it ships BY DEFAULT with
+	// no share key and no shipsRawContent() gate; the ingest lands an
+	// out-of-vocabulary value as NULL. Empty means UNKNOWN (an older agent,
+	// or a session no capture path stamped), never a defaulted "local".
+	ExecutionLocation string `json:"execution_location,omitempty"`
+	// VendorSessionRef is the vendor's second native session reference used
+	// to join one session across capture rails (CA-D2; same migrations): a
+	// Claude Code `cse_...` id, a `ccr.session.id`, a GitHub
+	// `agent_session_id`. METADATA like ParentThreadID: an opaque
+	// vendor-minted id, never content, bounded by ValidVendorSessionRef,
+	// which the ingest re-checks (a malformed value lands NULL). Ships BY
+	// DEFAULT. Empty means the session has no recorded reference.
+	VendorSessionRef string `json:"vendor_session_ref,omitempty"`
 	// NodeRev is the node's change-sequence snapshot this row was read at
 	// (agent migration 140 / server 178 / pg 0044, lane R2-RESEND): the org
 	// ingest lets a re-sent row REPLACE the stored one only when its NodeRev is

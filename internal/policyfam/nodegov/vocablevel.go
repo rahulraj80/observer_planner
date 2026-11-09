@@ -41,7 +41,7 @@ import (
 // add each new id to navSince / settingsSince at the new level, whenever
 // NavSectionIDs or SettingsSectionIDs grows. vocablevel_test.go fails when an
 // id is missing from both the first-level baseline and the since tables.
-const CurrentVocabLevel = 10
+const CurrentVocabLevel = 12
 
 // FirstTabVocabLevel is the level at which page TABS ("<page>/<tab>",
 // vocab.go) joined the nav vocabulary (per-tab visibility, T-132). Every tab
@@ -74,6 +74,9 @@ var (
 		// The security pillar's Code security page (security pillar plan
 		// section 4.10).
 		"code-security": 10,
+		// The You page (identity, accounts, consents). On the T8 floor, so no
+		// body names it, but the level stays truthful.
+		"you": 12,
 	}
 	settingsSince = map[string]int{
 		"cloud": 2, // v1.33.0
@@ -100,6 +103,14 @@ var (
 		"code-security/findings":   9,
 		"code-security/exceptions": 10,
 		"code-security/baselines":  9,
+		// The Code security redesign (2026-11-06): Overview (the default),
+		// Projects, Coverage and Scanners join; the scanner and setup routes
+		// move from Findings to Scanners. Level-10 builds have the three-tab
+		// page.
+		"code-security/overview": 11,
+		"code-security/projects": 11,
+		"code-security/coverage": 11,
+		"code-security/scanners": 11,
 	}
 )
 

@@ -492,3 +492,40 @@ export async function deliveryWrite<T>(method: "POST" | "PUT" | "DELETE", path: 
     throw e;
   }
 }
+
+/** CloudAgentsWriteError is a refused cloud-agents write: the server's sentence
+ *  and the HTTP status (400 a refused value, 404 an unknown account, 503 the
+ *  keychain or the service is unavailable). */
+export class CloudAgentsWriteError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** cloudAgentsWrite sends one owner-local, confirm-token POST to a
+ *  /api/cloud-agents route (Settings > Connected tools > Cloud agents) and maps
+ *  a refusal to its sentence. The body may carry an API key: it goes in the
+ *  body only, never in a URL, and nothing here logs it. */
+export async function cloudAgentsWrite<T>(path: string, body: unknown = {}): Promise<T> {
+  try {
+    return await fetchJSON<T>(path, undefined, {
+      method: "POST",
+      headers: await localConfirmHeaders(),
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    if (e instanceof ApiError) {
+      let parsed: { error?: string } | null = null;
+      try {
+        parsed = JSON.parse(e.body) as { error?: string };
+      } catch {
+        parsed = null;
+      }
+      throw new CloudAgentsWriteError(parsed?.error || e.body.trim() || e.message, e.status);
+    }
+    throw e;
+  }
+}

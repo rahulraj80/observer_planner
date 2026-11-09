@@ -344,3 +344,40 @@ func TestEnterpriseContentLineRules(t *testing.T) {
 		})
 	}
 }
+
+// TestCLIOrgClientShipsUnderGovernedShare: a push from a client built outside
+// the daemon (`observer org push-now`, the dashboard's push-now) ships under
+// the same governed posture as the daemon's own pushes. On a managed node
+// holding a signed extract.managed grant that is the raw-content raise; the
+// identical grant on an individual enrolment stays at the node's own
+// metadata-only floor. Before this, such a client shipped the raw config
+// block in both cases.
+func TestCLIOrgClientShipsUnderGovernedShare(t *testing.T) {
+	cases := []struct {
+		name    string
+		tenancy string
+		raw     bool
+	}{
+		{"managed grant raises", orgcontract.TenancyManaged, true},
+		{"individual grant inert", orgcontract.TenancyIndividual, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st, _, _ := signedGrantFixture(t, tc.tenancy, []string{govern.AuthorityExtractManaged})
+			path, _ := w4fMetadataOnlyConfig(t)
+			cfg, err := config.Load(config.LoadOptions{GlobalPath: path})
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			client := idpTestOrgClient(t, st)
+			client.SetShareProvider(cliGovernanceShareProvider(cfg, st, nil))
+			share := client.ShareOptions()
+			if share.ShipsRawContent() != tc.raw || share.EnterpriseGranted != tc.raw {
+				t.Fatalf("CLI client share = %+v, want raw content %v", share, tc.raw)
+			}
+			if share.FullContent {
+				t.Fatal("the node's own full_content must stay false; the raise rides EnterpriseGranted")
+			}
+		})
+	}
+}

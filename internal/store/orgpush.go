@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/ownagent"
 )
 
 // schema_meta keys holding the per-table push cursor (the highest table id /
@@ -238,6 +239,16 @@ type PushBatch struct {
 	SessionCacheSummaries     []orgcontract.SessionCacheRow
 	SessionProcesses          []orgcontract.SessionProcessRow
 	SessionNetworkEvents      []orgcontract.SessionNetworkEventRow
+	// SessionProcessRollups / SessionProcessCaptureStats are the process
+	// capture budget's org wire (layer O1): the rollup groups of the runs the
+	// node counted but did not keep, and one counters row per session.
+	// Composed by store.SelectSessionProcessRollupRows /
+	// SelectSessionProcessCaptureStatsRows (processrolluporgrows.go), which
+	// own the node-local reads; this file names neither table (the privacy
+	// sentinel forbids it). Same shipsRawContent() tier as SessionProcesses;
+	// windowed-recompute + server-upsert-replace; no cursor effect.
+	SessionProcessRollups      []orgcontract.SessionProcessRollupRow
+	SessionProcessCaptureStats []orgcontract.SessionProcessCaptureStatsRow
 	// SessionCacheEvents is the PER-EVENT cache timeline (operator directive
 	// item 6) — the same shipsRawContent() posture as SessionCacheSummaries
 	// beside it, and deliberately NOT the teams-tier CacheDetail flag.
@@ -577,6 +588,7 @@ func (b PushBatch) hasSessionAggregates() bool {
 	return len(b.SessionVerbositySummaries) > 0 || len(b.SessionCacheSummaries) > 0 ||
 		len(b.SessionCacheEvents) > 0 ||
 		len(b.SessionProcesses) > 0 || len(b.SessionNetworkEvents) > 0 ||
+		len(b.SessionProcessRollups) > 0 || len(b.SessionProcessCaptureStats) > 0 ||
 		len(b.SessionTaskItems) > 0 || len(b.SessionTaskTransitions) > 0 ||
 		len(b.SessionToolAccounts) > 0 || len(b.SessionHookActivity) > 0 ||
 		len(b.SessionQuality) > 0 ||
@@ -2155,6 +2167,31 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			batch.SessionProcesses = fitSnapshot(s, budget, snapFamSessionProcess, sp)
 		}
 
+		// The process capture budget's rollups + per-session counters (layer
+		// O1): ONE gated recompute feeding two slices, like the benchmark
+		// pair. The stats rows go first: they are small, never capped, and
+		// they are what keeps the org's totals exact when the rollup rows are
+		// truncated by the budget. The rollup Select re-applies the
+		// shipsRawContent() gate to its one content column itself.
+		if s.snapChanged(ctx, snapFamSessionProcessCapture) {
+			cs, err := s.SelectSessionProcessCaptureStatsRows(ctx)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session process capture stats: %w", err)
+			}
+			ru, err := s.SelectSessionProcessRollupRows(ctx, share)
+			if err != nil {
+				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: session process rollups: %w", err)
+			}
+			for i := range cs {
+				cs[i].OrgID, cs[i].UserEmail = orgID, userEmail
+			}
+			for i := range ru {
+				ru[i].OrgID, ru[i].UserEmail = orgID, userEmail
+			}
+			batch.SessionProcessCaptureStats = fitSnapshot(s, budget, snapFamSessionProcessCapture, cs)
+			batch.SessionProcessRollups = fitSnapshot(s, budget, snapFamSessionProcessCapture, ru)
+		}
+
 		// Wave-3 per-developer enterprise wires (advisor / patterns /
 		// benchmarks / compression / routing-dev / codeintel-dev /
 		// terminals+remote / guard pins+approvals). Each Select lives in its
@@ -2590,7 +2627,8 @@ const sessionPushSelect = `SELECT s.rowid, s.id,
 		             COALESCE(p.content_fingerprint_hash,''), COALESCE(p.git_upstream_remote,''),
 		             COALESCE(s.workspace_hash,''), COALESCE(s.workspace,''), COALESCE(s.is_worktree,0),
 		             COALESCE(s.surface,''), COALESCE(s.surface_host,''), COALESCE(s.tool_version,''),
-		             COALESCE(s.parent_thread_id,''), COALESCE(s.tool_version_last,'')
+		             COALESCE(s.parent_thread_id,''), COALESCE(s.tool_version_last,''),
+		             COALESCE(s.execution_location,''), COALESCE(s.vendor_session_ref,'')
 		        FROM sessions s JOIN projects p ON s.project_id = p.id`
 
 const actionPushSelect = `SELECT a.id, a.session_id,
@@ -2661,7 +2699,8 @@ func scanSessionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail str
 		&r.ContentFingerprintHash, &r.GitUpstreamRemote,
 		&r.WorkspaceHash, &r.Workspace, &isWorktree,
 		&r.Surface, &r.SurfaceHost, &r.ToolVersion,
-		&r.ParentThreadID, &r.ToolVersionLast); err != nil {
+		&r.ParentThreadID, &r.ToolVersionLast,
+		&r.ExecutionLocation, &r.VendorSessionRef); err != nil {
 		return 0, r, err
 	}
 	r.IsWorktree = isWorktree != 0
@@ -2671,7 +2710,16 @@ func scanSessionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail str
 	// makes that true rather than merely conventional. Unrecognized ⇒
 	// "other"; empty stays empty (unstamped, not unknown-host). See
 	// knownSurfaceHosts at the bottom of this file.
-	r.SurfaceHost = surfaceHostForWire(r.SurfaceHost)
+	//
+	// The one OPEN host is an own agent's name (P-228, internal/ownagent):
+	// a developer-chosen string that can encode a client or a project, so
+	// it ships raw only under shipsRawContent() and as a stable hash
+	// otherwise. Decided by the value's own prefix, never by the tool.
+	if wire, ok := ownagent.WireSurfaceHost(r.SurfaceHost, share.shipsRawContent()); ok {
+		r.SurfaceHost = wire
+	} else {
+		r.SurfaceHost = surfaceHostForWire(r.SurfaceHost)
+	}
 	// Privacy seam: strip raw paths when not opted into full-content
 	// sharing. The hash counterparts (already scanned) carry the
 	// signal the server needs. git_branch is stripped outright — it has
@@ -2709,6 +2757,13 @@ func scanSessionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail str
 	// shipping the pointer adds structure (fan-out), not content.
 	// forked_from_id / thread_source (the fact/kind of a fork) stay
 	// NODE-LOCAL and are deliberately not selected above.
+	// execution_location / vendor_session_ref (cloud-agents arc, agent 240
+	// / server 300 / pg 0170) join the unconditional bucket too: the
+	// location is a closed vocabulary (models.KnownExecutionLocation, the
+	// surface reasoning) and the reference an opaque vendor-minted session
+	// id bounded by orgcontract.ValidVendorSessionRef (the parent_thread_id
+	// reasoning). Both are validated on write by SetSessionExecution; empty
+	// stays empty, an unstamped session reaches the org as UNKNOWN.
 	if !share.shipsRawContent() {
 		r.ProjectRoot = ""
 		r.GitRemote = ""
@@ -3328,10 +3383,19 @@ var knownSurfaceHosts = map[string]bool{
 	// token, not a path or free text.
 	"claude":         true,
 	"claude-desktop": true,
-	"sdk":            true,
-	"ts":             true,
-	"py":             true,
-	"cli":            true,
+	// Claude Code cloud sessions started through the API / MCP (entrypoint
+	// "remote", cloud-agents lane CA-B4, grounded 2026-10-31): surface web,
+	// host "claude-remote". A fixed vendor-derived token, never a path or
+	// free text. ("remote_desktop" reuses "claude-desktop" above.)
+	"claude-remote": true,
+	// Claude Code cloud sessions started from the Claude mobile app
+	// (entrypoint "remote_mobile", grounded live 2026-10-31 for CA-D20):
+	// surface mobile, host "claude-mobile". A fixed vendor-derived token.
+	"claude-mobile": true,
+	"sdk":           true,
+	"ts":            true,
+	"py":            true,
+	"cli":           true,
 	// Codex + its Open Interpreter rebadge (internal/adapter/codex).
 	"codex-cli":        true,
 	"codex-exec":       true,
@@ -3348,21 +3412,37 @@ var knownSurfaceHosts = map[string]bool{
 	"cline-kanban":     true,
 	"cline-subagent":   true,
 	"cline-web":        true,
-	"copilot-cli":      true,
-	"cursor-agent":     true,
-	"devin-desktop":    true,
-	"factory-desktop":  true,
-	"freebuff":         true,
-	"freebuff-desktop": true,
-	"junie-cli":        true,
-	"kiro-cli":         true,
-	"kiro-crew":        true,
-	"poolside-cli":     true,
-	"qoder-work":       true,
-	"vibe":             true,
+	// Cline Cloud Agents (cloud-agents lane CA-V6, 2026-11-01): a session
+	// the cline-cloud connector pulls keeps tool "cline" and is told apart
+	// by this fixed product token (CA-D15).
+	"cline-cloud": true,
+	"copilot-cli": true,
+	// The GitHub Copilot coding agent (cloud-agents decision CA-D15,
+	// 2026-10-31): a cloud task pulled by the copilot-agent connector keeps
+	// tool "copilot" and is told apart by this fixed product token.
+	"copilot-coding-agent": true,
+	"cursor-agent":         true,
+	"devin-desktop":        true,
+	"factory-desktop":      true,
+	"freebuff":             true,
+	"freebuff-desktop":     true,
+	"junie-cli":            true,
+	"kiro-cli":             true,
+	"kiro-crew":            true,
+	"poolside-cli":         true,
+	"qoder-work":           true,
+	"vibe":                 true,
 	// vtcode full-auto `auto-task-<n>` sessions (internal/adapter/vtcode,
 	// 2026-10-21): surface cli, host vtcode-auto. A fixed vendor token.
 	"vtcode-auto": true,
+	// A Warp cloud agent run pulled by the warp-cloud connector (cloud-agents
+	// lane CA-V1, the CA-D15 pattern): a Claude Code or Codex harness run
+	// keeps its tool and is told apart by this fixed product token.
+	"warp-cloud": true,
+	// A Qoder Cloud Agents session pulled by the qoder-cloud connector
+	// (cloud-agents lane CA-V2, decision CA-D15): it keeps tool "qoder"
+	// and is told apart by this fixed product token.
+	"qoder-cloud": true,
 }
 
 // surfaceHostForWire applies the closed vocabulary to one stored

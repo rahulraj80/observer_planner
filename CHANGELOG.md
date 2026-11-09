@@ -4,10 +4,711 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-11-09
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). Everything below is new since 1.37.1. It brings cloud agents and cloud
+sessions into the dashboard, adds OpenShell sandboxes (beta) on the node and on the org server,
+sandbox setup from the New Terminal dialog, guard recipes, a larger code security pass, your own
+agents as a tool, and the org prompt judge on every tool with a prompt gate. Like 1.37.x it needs
+macOS 13 Ventura or later: a Mac on macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Highlights
+
+- **Cloud agents:** sessions run by Codex cloud, the Copilot coding agent, Cursor, Devin,
+  OpenHands, Warp, Qoder and Cline cloud agents appear beside your local work, and `observer
+  cloud-session` runs Observer inside a Claude Code on the web or Copilot cloud agent sandbox.
+- **OpenShell sandboxes (beta):** a private gateway on the node, or the organization's own
+  gateway for managed machines.
+- **Sandbox setup** from the New Terminal dialog, Settings and `observer sandbox setup`.
+- **Guard recipes** and new database and network guard rules.
+- **Code security:** container image OS packages, reachability labels, KEV and EPSS exploit
+  labels, a passive DAST check, rule pack 1.5.0 and six more dependency ecosystems.
+- **Your own agents** become a tool on the dashboard, and the org prompt judge reaches every tool
+  with a prompt gate.
+- **One agent key per enrolled machine:** a member's second machine no longer locks out the first.
+
+### Read this before upgrading
+
+- **This release still requires macOS 13 Ventura or later**, as 1.37.x did. A Mac on macOS 12
+  stays on v1.36.0.
+- **Individual nodes are asked to accept the OSV database download once more** (the accept text
+  is now version 2), and **online dependency checks wait for a new accept** (the online disclosure
+  is now version 3, because it also sends your git submodules' pinned commit ids).
+- **New database and network guard rules are on.** In enforce mode an `UPDATE` without `WHERE`, a
+  schema drop, a database wipe, a cloud metadata endpoint, a reverse shell, a listener, tunnel or
+  scanner now asks or denies (R-121 to R-126, R-174 to R-179).
+- **An existing project-scoped guard approval starts applying** on the tool-gate hooks, to every
+  session in that repository; review the Approvals card.
+- **Under an organization's observe pin, the prompt guard now only warns** about secrets in prompts
+  (it follows the organization's guard mode).
+- **An existing individually enrolled node starts sending its daily Code security posture row** to
+  its org (counts and states only) unless its developer picked Off.
+- **Process capture now keeps a bounded number of rows per session**, with exact counts;
+  `[observer.process.capture] enabled = false` restores the old behaviour.
+- **Dependency findings that were fixed close on the next complete scan** (before, none closed).
+
+### Cloud agents and cloud sessions
+
+- **Cloud agents: sessions a managed cloud agent ran now appear beside your local work.**
+  `observer cloud-agents connect <connector>` links a vendor account and pulls its cloud sessions
+  into Sessions and Projects, under the local project with the same git remote (else
+  `cloud:github.com/owner/repo`, else "repository not reported"). `codex-cloud` and `copilot-agent`
+  use your own `codex` and `gh` logins and give no tokens or cost; `cursor-cloud`, `devin`,
+  `openhands-cloud`, `warp-cloud`, `qoder-cloud` and `cline-cloud` take an API key and add token
+  totals, the vendor's own cost or units (ACUs, credits; never converted) and tool calls as
+  metadata. Titles, prompts and tool output are never stored. Off by default: no vendor call until
+  you link an account. Settings > Connected tools > Cloud agents has a control for every verb. See
+  `docs/cloud-agents.md`.
+- **Each cloud-agents connector says how well it is grounded, and three pull only your own
+  sessions.** Live verified: `copilot-agent`, `cursor-cloud`, `devin`, `qoder-cloud`. Documented:
+  `codex-cloud`, `openhands-cloud`, `warp-cloud`. "Observed in vendor client, undocumented":
+  `cline-cloud`, an unpublished API, so a changed shape fails the pass with `wrong_shape` instead of
+  landing wrong figures. A Devin, OpenHands or Warp key also lists colleagues' sessions, so those
+  accounts pull nothing until you pick your own user (`observer cloud-agents users` and
+  `choose-user`, or the card's picker). Cursor tool calls are readable only within 24 hours of a
+  run; an older run is recorded as a gap. Codex cloud chats on chatgpt.com are not pulled.
+- **Projects and Sessions show where each session ran.** Sessions gains a Ran column and a "Where it
+  ran" picker (local, vendor cloud, customer worker, unknown), and the project Overview and Spend
+  tabs a Where it ran lane. The project Spend total now includes the project's `cloud:` twin and
+  lists the local, cloud, worker and unknown parts, provider units beside the dollars; a session
+  that reported no turns reads "not reported", not $0.00. Commits from the pull request or branch a
+  cloud agent produced (Copilot, Devin, Cursor; Codex reports none) are credited to its session on
+  the Commits tab and in Delivery. Agent migrations 240, 241 and 246. See `docs/projects-page.md`.
+- **`observer cloud-session` runs Observer inside a Claude Code on the web or Copilot cloud agent
+  sandbox.** `init --agent claude-code|copilot --destination org|node` writes hooks and a setup
+  script that installs a pinned, integrity-checked observer; you review and commit them, and
+  `remove` takes out exactly what `init` added. The hooks do nothing on a developer machine; in the
+  sandbox they capture with the normal adapters and ship on session start, each prompt, every 25
+  tool calls and stop. A hook block the agent edited holds delivery, and `status` shows coverage
+  (for example a network level that blocks the destination). For `--destination node`, mint a token
+  with `observer cloud-session token mint <environment>`. The Copilot row is not live-checked yet.
+  See `docs/cloud-sessions.md`.
+- **Cloud sessions can enforce guard policy, serve MCP and export per-request telemetry, each
+  opt-in.** `init --guard` commits the org's (or your node's) signed guard policy and gates that
+  judge tool calls in the sandbox with no network call, plus a soft budget stop on prompts when the
+  org's spend snapshot is over a cap (enforce by default; a tampered policy file locks the session's
+  calls until it is restored). `--mcp` registers `observer serve` and builds its database during
+  setup (`--codeintel` adds the code index). `--otel-loopback` (Claude Code only) starts a loopback
+  OTLP receiver that adds each request's id, cost and duration, folded with the transcript so
+  nothing counts twice. Cloud sessions show no rate-limit figure.
+- **`observer cloud-session worker` runs the Observer proxy on cloud-agent compute you run
+  yourself.** `check`, `run -- <agent>`, `start` and `stop` with `--env claude-code-self-hosted`,
+  `copilot-self-hosted-runner`, `devin-outpost` or `warp-self-hosted-worker` start the proxy for one
+  agent run, point the agent's base URL at it and stamp its sessions as customer worker. It refuses
+  a vendor-hosted sandbox (Claude Code on the web, a GitHub-hosted runner), never overrides a base
+  URL already set, and routes nothing for Devin Outposts or Codex under Warp. None of the four
+  environments is live-checked; guard rule R-168 asks before an agent runs `worker run`.
+- **A `claude --teleport` copy no longer counts the cloud session's tokens again.** The cloud lines
+  it copies (`remoteSourced`) add no tokens, actions or timing to the local session, which records
+  the claude.ai session as its fork parent instead. A Claude Code transcript is marked as run in the
+  cloud only with a second signal (the sandbox marker or the cloud VM layout), so a teleported copy
+  never marks a local session. Sessions started from the Claude mobile app get their own surface,
+  `claude-mobile`, with an entry in the Sessions filter.
+- **Cloud-agent keys and cloud-session ship tokens are kept narrow.** An API key is typed without
+  echo or read from stdin (no `--key` flag or environment variable), kept only in the keychain
+  service `sbo-cloudagents-v1` and sent only to its connector's pinned HTTPS host, with no
+  redirects; vendor strings printed to the terminal have control and bidi characters replaced. A
+  ship token is stored as a hash and can only land capture rows for its owner: 8 hours by default
+  (up to 7 days), one per cloud environment, 200,000 rows. The node ingest never stores the
+  sandbox's file paths or overwrites a session the token did not create. `init` and `remove` refuse
+  to write through a symbolic link in the repository, and R-160 stops an agent editing its hook file.
+
+### Sandboxed terminals
+
+- **OpenShell sandboxes on the node (beta).** The new `openshell` row runs a sandboxed terminal in
+  a Docker container built by an OpenShell v0.1.6 gateway. By default this is a private gateway that
+  Observer runs itself: loopback only, telemetry off, and its keys in the OS keychain or, where
+  there is none, in unencrypted owner-only files. `gateway_mode = "external"` uses your own gateway
+  instead. The row is native Linux only (WSL2 is refused) and explicit-only, and its component
+  `terminals.sandbox.openshell` is off in every distro. It needs your user in the root-equivalent
+  `docker` group (rootless Podman stays refused until measured), launches the live workspace only
+  and refuses extra binds. See `docs/sandbox-openshell.md`.
+- **OpenShell network rules and refusal audit.** On the `internet` tier the run's
+  `egress_allow_hosts` compiles to one OpenShell network rule: ports 443 and 80, with the private
+  ranges and the SSRF floor excluded. An empty list, a model provider's host or a host alias refuses
+  the launch. OpenShell's denials reach the daemon's receiver on `127.0.0.1:14317` and become
+  refusal rows. An `internet` launch is refused unless the gateway exports them there: managed mode
+  writes this export itself, and on your own gateway you add it. The receiver has no
+  authentication, so these rows are tamper-evident at best. DNS lookups are not fenced on any tier.
+- **The OpenShell row checks what it runs.** `openshell` and `openshell-gateway` must come from a
+  root-owned location; a copy your user can write refuses the row (`openshell_binary_untrusted`).
+  The probe records the Docker engine's ID at first use and refuses a different engine
+  (`docker_engine_changed`). It also refuses a supervisor or sandbox runtime image without a digest
+  Observer pins for v0.1.6 (`runtime_image_digest_mismatch`). The private gateway names both images
+  by digest. On your own gateway, a tag is checked for what it names now.
+- **Refused connections on the Terminals page, with "Allow this host".** Observer's egress gateway
+  now answers a refused request with a JSON 403 (rule, config key, host, next step) instead of plain
+  text. Every refusal is stored on this machine only (one row per run and host per minute, kept 30
+  days, at most 10,000 per run; agent migrations 230 to 233) and is read through the owner-local
+  `GET /api/sandbox/refusals`. On an `allow-list-miss` refusal the owner can add that one host to
+  `[terminal.sandbox].egress_allow_hosts` for runs started after the save. A provider host, a
+  private range, a literal IP and a host an org pin leaves out are never offered.
+- **An opt-in seccomp filter for bubblewrap and Landlock-only runs.** `[terminal.sandbox].seccomp =
+  true` (default off) loads Observer's own deny list on every `bwrap` and `process_lite` launch:
+  kernel modules, eBPF, mounts, ptrace attach, io_uring and more, each answering EPERM. A launch
+  whose filter cannot be built, loaded or read back is refused. A nested bwrap and `strace -p` fail
+  under it. `strace <cmd>` on a child it starts works with strace releases before 6.14 (they fall
+  back to PTRACE_TRACEME); strace 6.14 and later fails under the filter, because its startup check
+  seizes itself. Container rows keep their engine's profile, and other rows record `not_applicable`. Each
+  run records what it got (agent migration 232, shown on the run pill). An organization may pin the
+  filter on (`terminal.sandbox.seccomp`, restrictive only) and sees it as a posture axis.
+- **Credential injection for local sandboxed runs.** Three conditions apply: the opt-in component
+  `terminals.sandbox.credentials` is on, a provider key is stored, and that provider's key variable
+  is set where you launch. Then a `bwrap` or `oci-runc` run on `proxy_only` (or on `internet` with
+  the provider-host block on) gets a per-run sentinel instead of the key, and the proxy swaps it on
+  the way out. Other model-provider credential variables are left out of the box. This does not
+  cover `process_lite`, the `host` and `none` tiers, or the VM, Seatbelt, MXC and Apple container
+  rows. See `docs/sandboxed-terminals.md` "Credential injection".
+- **Sandbox setup: a checklist per backend.** `observer sandbox setup` (`status`, `check`, `run`,
+  `undo`, `update`, `repair`, `records`), a setup panel in the New Terminal dialog, and "Set up" or
+  "Manage" in Terminals > Settings > Sandbox isolation take one step per click. Observer turns on
+  what it owns, runs a fixed command in a visible setup terminal, or shows the command for you to
+  run. A step that needs your password opens only with `[terminal.sandbox.setup].allow_elevated`
+  (default false, never turned on by an organization). The one download is Cloud Hypervisor v54.0,
+  pinned by sha256 (offline: `--from-file`). Setup on Windows 11 Pro (`hcs`) is labelled beta, and
+  that row still reads not available in this release. See `docs/sandbox-setup.md`.
+- **Enable and disable isolation backends from the dashboard.** The Backends list in Terminals >
+  Settings > Sandbox isolation gets an Enabled checkbox per backend. The last one stays checked,
+  since an empty list means bubblewrap. Moving a row no longer writes every offered backend into
+  `[terminal.sandbox].backends`. The New Terminal picker labels a backend "(not enabled)" with a
+  link to that list, or "(module not installed)" with a link to Settings > Components. Enabling a
+  backend, from setup or Settings, takes effect without a restart; only a changed `workspaces_dir`
+  still asks for one.
+- **Guard rules for sandbox widening and setup.** New rule R-167 is an integrity rule that no
+  layer below the organization can relax. It flags under observe, and denies under enforce, an agent
+  widening its own sandbox host list: the "Allow this host" route, a settings or config write that
+  sets `egress_allow_hosts`, or `observer config set terminal.sandbox.egress_allow_hosts`. R-165 now
+  covers an agent running `observer sandbox setup` `run`, `undo`, `update` or `repair`,
+  `observer sandbox hosted connect`, or writing to the setup routes. It asks on `setup check` and on
+  `observer sandbox org-shell opt-in`. R-168 asks about `observer sandbox org-shell resume`. See
+  `docs/guard.md`.
+- **A process inside a sandbox can no longer change anything through the dashboard.** A box built
+  with `[terminal.sandbox].egress = "host"` or an MXC row can reach the loopback dashboard. On
+  every route, every POST, PUT, PATCH, DELETE, WebSocket upgrade (however its `Upgrade` header
+  is spelt) and request under `/ws/` (the terminal writer lease included) from a local process
+  is now checked: the daemon finds the process behind the connection (Linux through `/proc`,
+  Windows through the TCP owner table) and refuses one that descends from a live box with 403
+  `sandbox_caller`, logging the first refusal of each path. On Linux your browser keeps working
+  while a bwrap box runs, a Windows browser under WSL2 included (its connection is held by a
+  process of another user, root's `/init`, which no box process opens itself, and the daemon reads
+  every process of the box and finds none holding it). While a box that can reach the
+  dashboard lives, a caller that cannot be identified is refused (fail closed), a connection of
+  your own user that no process can be found holding included. While an MXC box that can reach
+  the dashboard lives, the dashboard is read-only for every caller, your browser included: every
+  POST, PUT, PATCH and DELETE and every `/ws/` request is refused (no opening, typing into or
+  watching a terminal, that MXC one included), because an MXC box has no PID namespace of its
+  own and its processes cannot be told apart by ancestry; stop it with `observer terminals stop
+  <run>` from your own shell. This replaces the earlier refusal of nine launch routes for every
+  caller, and goes further than it for a live MXC box. Reads, the tailnet backend, a box
+  reaching the dashboard through a forwarder of any user (an `ssh -L` port, a dev proxy, a host
+  HTTP proxy run as root, a Windows-side proxy under WSL2; run none a host-network box can
+  reach) and unsandboxed agent shells are not covered (ledger LAUNCH-1).
+- Sandboxed CLI launches: a watch marker now records its CLI's start (Linux, Windows and macOS),
+  so a reused pid no longer keeps it alive; an older build's marker with no pid is dropped once
+  its run has ended and its box is gone; and a launch refused after its run was recorded ends that run with the new end
+  reason `launch_refused`.
+- Ledger row LAUNCH-1 also records that an unsandboxed process of your user can launch through
+  the loopback dashboard and `observer launch`; guard rule R-168 now asks before an agent does,
+  and ledger row LAUNCH-2 names what it and the recorded initiator cannot see.
+
+### Guard
+
+- **Guard recipes set up the developer guard in one step.** Pick a level (`none` to `lockdown`) and
+  any of eight packs (`frontend`, `backend-database`, `networking`, `regulated` and others), preview
+  every rule whose decision changes, with an optional 7 or 30 day replay, and apply to this machine
+  or to one project: Security > Rules > Recipes, or `observer guard recipe apply|remove|list|save`.
+  Packs only tighten, your own policy file and the org floor win over a recipe, and an agent cannot
+  apply or remove one (R-165). Nothing changes until you apply. `observer guard status` names the
+  applied recipe and notes a `[guard] level` that disagrees with it. See `docs/guard-recipes.md`.
+- **New database and network guard rules, on by default.** In enforce mode an `UPDATE` without
+  `WHERE` or a schema drop beyond `DROP TABLE` asks (R-121, R-122), a MongoDB, Redis, Cassandra or
+  etcd wipe denies (R-123), SQL run from a file is judged by its statements (R-126), a cloud
+  metadata endpoint or a `[guard.network] deny_hosts` host denies (R-174), a reverse shell denies
+  and a listener, tunnel or scanner asks (R-177 to R-179). R-125 is inert until you set
+  `[guard.database] prod_patterns`; R-175 and R-176 (`allow_hosts`) stay silent until a recipe or
+  override raises them. Every rule now also judges the command inside `docker exec`, `kubectl exec`
+  and `ssh`. The rules read the command line only and are not a firewall.
+- **The prompt guard follows the organization's guard mode.** While an organization's `guard.mode`
+  pin is in force, the node sets `[guard.prompt] enforce_independent = false` (shown as applied by
+  the organization): under an observe pin the prompt guard only warns about secrets in prompts,
+  under enforce it asks or blocks. Before, it acted on its own under an observe pin. An organization
+  prompt rule that can stop a prompt still acts. With no `guard.mode` pin the node's own value
+  stands. See `docs/guard-prompt.md`.
+- **Guard status says which rules your organization enforces.** An org-authored or org-overridden
+  rule follows the org's action whatever the local mode, so an org-locked deny blocked while every
+  surface read "observe". `observer guard status` now prints an `Org policy:` line (for example
+  "observe locally; 1 rule enforced by your organization (R-101)") and counts verdicts the org's
+  policy produced; the Security page's posture tile, Mode card and 24h verdict tile say the same. A
+  node with no org layer reads as before. A hook on an individual node no longer locks every rule
+  while the daemon repairs a tampered org lock. See `docs/guard.md` "Org lock vs local mode".
+- **Destructive deletes outside the repository are judged at cwd-only tool gates, the WSL bridge
+  included.** R-102 (a delete of the repository's `.git` or root) and R-141's `chown -R` arm now
+  judge against the git checkout around the hook's working directory and ask at the gate, as R-101
+  denies; before, they did not apply there. A Windows host whose hook runs on a WSL daemon through
+  `wsl.exe` (IBM Bob) has its `d:\repo` cwd read as `/mnt/d/repo`, so R-101 now denies a recursive
+  delete outside it, which was allowed. Outside a git tree, or with a WSL automount root other than
+  `/mnt`, these arms stay inert at the gate. See `docs/guard.md`.
+- **A broken guard audit chain names its repair.** When the failing rows lost their action id to old
+  maintenance, not tampering, `observer guard status`, `observer guard verify-audit` and the Security
+  page name `observer guard repair-anchors` instead of a bare "BROKEN", and the Coverage tab's
+  Repair audit chain card runs it (dry run first). `repair-anchors` now searches around hints within
+  `--radius` (default 4,194,304; 0 is every id) on `--workers` (default up to 4), prints progress to
+  stderr every `--progress` (default 10 s), and on Ctrl-C prints the partial report and writes
+  nothing.
+- **The guard catches more ways an agent could weaken it.** R-160 now sees more writers of
+  Observer's own files (perl and ruby `-i`, `vim -c`, `dd of=`, `ln -sf`, `tar -C`, `unzip -d`,
+  `sponge`, writing interpreter one-liners) and WSL UNC and `/mnt/c` paths to the protected home.
+  R-165 now covers removing the gate hooks (`observer uninstall`, `components remove`, their routes
+  and config keys), persisting `OBSERVER_GUARD_*`, loopback spellings such as `[::ffff:127.0.0.1]`
+  or `2130706433` on the guard routes, and such calls from inline python, node, ruby, perl or pwsh.
+  A user `[[rule]]` reusing an org rule id drops only that row, never the org layer. A quoted
+  heredoc body is no longer read as commands. See `docs/security.md` BOUNDARY-WRITE-1.
+- **Observer asks you before an agent launches another agent (guard rule R-168).** When a coding
+  agent runs `observer launch`, a launcher verb such as `observer claude`, or posts to the local
+  dashboard's launch routes, its own hook asks you first, on every launch and in both observe and
+  enforce mode. No approval covers it; on a tool that cannot ask, the call is denied and the reason
+  tells you to start the run yourself. Changing the launch policy (`/api/terminal/policy`, the
+  `[terminal.launch]` settings) is now an agent self-approval (R-165). See `docs/guard.md`
+  "Agent-initiated launches (R-168)".
+- **A launch an agent asks for waits for you.** When Observer traces a launch to a coding agent
+  (whichever way it came: `observer launch`, `observer <tool> --attach` or any dashboard launch
+  route), it holds it instead of starting it. Confirm it once, within 10 minutes, with `observer
+  terminals confirm <id>` in your own terminal or on the Terminals page ("Launches waiting for
+  you"); `observer terminals reject <id>` drops it. An agent's confirm is refused. `observer launch`
+  run by an agent prints the hold and exits 6. The confirm card and `observer terminals ls|show`
+  list everything the launch would run (the sandbox or "unsandboxed", the model, the tool's
+  arguments, a copied sign-in), and an agent cannot confirm its own launch: Observer reads the
+  agent's session marker from the caller's environment as well as asking its hook. R-168 now also asks about `observer ide`, a
+  benchmark spend run and the Tools card's launch, and reads `--help=false` as a launch.
+- **Project-scoped guard approvals now apply on the tool-gate hooks.** A grant made with
+  `observer guard approve --project` or the Security page's Project scope never downgraded a
+  Claude Code PreToolUse verdict (nor any gate whose payload carries only `cwd`): the lookup was
+  asked with an empty project hash. It now uses the root the hook derives from `cwd` (the same
+  spelling as the project's recorded root, a Windows `C:\` cwd seen through the WSL bridge
+  included). **After upgrading, an existing project grant starts applying**, to every session in
+  that repository; review the Approvals card and revoke any you no longer want.
+- **Guard approvals are idempotent.** Granting the same rule, scope and anchor again keeps the
+  existing grant and extends it to the later expiry (a never-expiring grant wins) instead of adding
+  a duplicate row, from the dashboard, `observer guard approve`, `observer guard prompt allow` and
+  the LLM judge alike. The dashboard POST answers `existing: true`. Agent migration 218 collapses
+  duplicates already in `guard_approvals` (the lowest id survives with the latest expiry) and adds
+  a unique key. Every create, extend and re-grant is also an audit event in `guard_events` (rule
+  `guard_approval`: who, through which surface, the old and new expiry, the previous grantor), so
+  the record of who approved what stays complete.
+- **A failed approval lookup is visible.** It still fails safe toward enforcement, but the verdict's
+  reason now records `[approval lookup failed: ...]`, and the hook reads grants read-only, without
+  running migrations, with a busy wait bounded inside the hook timeout.
+- **Security page approvals.** `approve…` reads "covered by #N" when an active grant already covers
+  the call, is disabled on flag-only rules (such as A-610), and names a subagent's parent session;
+  a blocking verdict that was not downgraded says why; the Approvals card dedupes, shows "last used"
+  and says "covered by grant #N" in the Grant form; the Mode card notes that the commit gate
+  (S-791 to S-794) asks in every mode.
+
+### Prompt judge and own agents
+
+- **The org prompt admission judge now covers every tool with a prompt gate.** On a managed node
+  whose grant holds `enforce.admission` and whose `planeb.admission` policy sets `node_lane`, the
+  prompt-gate hooks of every tool (31 of them, including Cursor and the other tools that do not
+  route through the proxy) ask the daemon, which judges with the same judge, cache and audit as the
+  proxy lane; a prompt the hook judged is not judged again by the proxy. The hook talks to the
+  daemon over an owner-only local endpoint, waits at most 12 s (and less than the tool's own hook
+  timeout), and follows the policy's strict flag when the daemon cannot answer. Individual nodes
+  never ask. The developer's own guard settings do not switch the organization's judge off, a
+  prompt too large to read whole is refused under a strict policy rather than skipped, and the
+  judge's local endpoint is hidden from sandboxed terminals. `docs/adapter-parity.md` lists each
+  tool's reach in a new "Org prompt judge" column.
+- **Org prompt admission judge on managed nodes.** An org's signed `planeb.admission` policy can
+  now have its LLM judge read the prompts developers type into proxy-routed coding agents on the
+  node itself, not only at the AI gateway. It runs only on a managed node whose grant holds
+  `enforce.admission` and whose policy sets `node_lane`; individual nodes never run it. The judge
+  is reached only through the org server (new relay purpose `coding_admission`, served by the
+  provider tagged `coding_admission_judge`). Refusals are a 403 with the reason; each refusal or
+  flag is a `guard_events` row (rule `J-801`) with a prompt digest, never the prompt.
+- **`scope` in the `planeb.admission` policy.** `user_prompts` (the default) judges only a request
+  whose newest turn is the developer's prompt; `all_calls` judges every request's new trailing
+  segment, tool results included. Any other value is refused at publish.
+- **The node Security page shows the organization's prompt judge.** A read-only card on the Prompt
+  guard tab says whether the judge reads your prompts on this machine, strict or not, what happens
+  when the daemon cannot answer, the last day's refusals and flags, and what it does not cover. The
+  enrolment consent text, `observer org status` and the daemon-start notice now say it covers every
+  tool with a prompt-gate hook, not only proxy-routed ones.
+- **The AI gateway's judged admission no longer judges every request of a tool loop.** It sent
+  empty text to the judge on every Anthropic tool-loop request and re-judged the original prompt on
+  every OpenAI tool-loop request; it now judges each prompt once (under `user_prompts`) and reuses
+  verdicts from a bounded cache. It also reads Responses API and Gemini bodies.
+- **Prompt admission cannot be skipped by faking a tool loop.** Under `user_prompts` a continuation
+  judges the prompt that opened the loop through the verdict cache (a real loop costs nothing
+  extra), and the AI gateway reads the request's wire shape from the upstream's kind instead of
+  guessing from the body. On the node, a prompt with a detected secret is never sent to the org
+  judge, an absent `latency_budget_ms` now gives the relay its 10 s default, a build without the
+  admission engine flags (or, strict under enforce, refuses) instead of admitting silently, and a
+  repeated refusal is recorded once per cached verdict. Known limit: the client controls the
+  request history, so under `user_prompts` a body that ends in a short user text gets only that
+  text judged.
+- **An `ask` verdict at the AI gateway is no longer silently admitted.** Under enforce it is
+  refused with its reason; under observe it is flagged. A judge timeout under a non-strict policy
+  is now flagged instead of admitted unrecorded.
+- **Track your own agents.** An agent you build on a raw provider API or SDK (Anthropic, OpenAI
+  Chat or Responses, Gemini) now shows up on the node dashboard as the `custom-agent` tool: point
+  its base URL at the Observer proxy and send `X-Superbased-Agent: <name>`, plus an optional
+  `X-Session-Id` to group calls. Its calls get sessions, session detail, the Messages tab, cost,
+  the proxy prompt guard and the budget cap. Sessions > Own agents groups them by agent name and
+  shows the setup snippet for curl, Python and TypeScript. Both headers are removed before the call
+  is forwarded. On an enrolled node the agent name crosses to the org as a hash unless the node
+  ships raw content. Remove `custom-agent` from `enabled_adapters` to turn it off. See
+  `docs/own-agents.md`.
+- **Own agents can send OpenTelemetry spans.** An agent traced with the stock OpenTelemetry SDK
+  can now report to the node's OTLP receiver (`[ingest.otel] enabled = true`) instead of, or as
+  well as, through the proxy: set the resource attribute `sbo.agent=<name>` (and optionally
+  `session.id`). GenAI model-call spans that carry `gen_ai.usage.*` become `custom-agent` turns,
+  `execute_tool` spans become tool calls, and their arguments and results follow
+  `[ingest.otel].content_capture`. A run that uses both paths with the same session value is one
+  session, and a call seen both ways is one turn with the proxy's exact figures. A span without
+  usage gives no turn; span counts are stored as the instrumentation reported them and never
+  replace a proxy figure. A resource that also names a hosted app's tenant or end user stays in
+  the hosted-app plane, and a resource naming an agent never reaches it. The Own agents view
+  shows which path saw each agent. See `docs/own-agents.md` "Send OpenTelemetry spans".
+
+### Code security and project quality
+
+- **Code security scans a container image's OS packages.** `observer security scan image <tar|dir>`
+  (manual only; component `security.scan.os`, on in the full distro with `security.deps` and
+  `security.scan.scalibr`) reads a `docker save` or OCI tar, or a root filesystem, with no container
+  daemon and no registry. It matches dpkg, apk and rpm packages against one OSV database per
+  release (Debian 11 to 13, Ubuntu LTS 20.04 to 26.04, Alpine 3.20 to 3.23, RHEL and Rocky 8 to 10;
+  the Red Hat family not on Windows). A release's database (up to 220 MB) downloads from
+  `superbased.app` only, when a scan needs it, after a separate one-time accept (`observer security
+  scan db accept --os` or the Scanners card); a managed node uses its org mirror. Kernel packages are
+  left out and named. Only the five releases with a self-test can be scanned today; the others read
+  "not scanned". An opt-in Trivy driver (`security.scan.image.trivy`) runs Trivy offline against a
+  database Observer downloads anonymously from Aqua Security's public Trivy database image after
+  its own accept (about 140 MB, 1.7 GB on disk);
+  managed nodes cannot use it yet. See `docs/dependency-scanning.md`.
+- **Dependency findings carry a reachability label.** Go, npm, PyPI and crates.io findings read
+  `imported` (or tests only), `not imported directly` or `unknown`; a Rust finding can also read
+  `called`, approximate, from a callee name match. Go reads the project's own imports; JS/TS,
+  Python and Rust need the code intelligence index (off by default) and read `unknown` without it.
+  The opt-in component `security.reach.go` (off in every distro) adds Go function-level answers
+  (`called`, `not called`): binary mode runs govulncheck over unstripped Go binaries with no
+  network, and source mode is a manual per-project check (`observer security scan reach enable`,
+  then `scan --reach go-source`) in an isolated run with no network, refused where isolation is
+  missing unless you pass `--allow-unisolated`. `not called` never means unreachable. Labels rank
+  only: they never close, hide or re-grade a finding. See `docs/dependency-scanning.md`.
+- **CISA KEV and FIRST EPSS exploit labels, and a ranked findings order.** Two signed content kinds,
+  `security.kev` (about 205 KB) and `security.epss` (about 454 KB), come from `superbased.app` with
+  the 6-hourly database refresh, under the existing OSV database accept; a managed node takes them
+  from its org mirror, and `observer security scan db import` installs them offline. Findings show
+  KEV listing, known ransomware use and the EPSS score. Missing data, or data older than 14 days,
+  reads "Exploit data unavailable", never "not exploited". The Code security list now sorts by rank
+  by default: KEV, then reachability, then EPSS, then severity. Labels never change severity,
+  status, the posture or the commit gate.
+- **A passive DAST check for a development server on your machine.** `observer security dast <url>`
+  (component `security.dast`, opt-in in every build, after a one-time `observer security dast
+  accept`) sends at most 16 plain GET requests to one loopback URL with an explicit port, a rule
+  checked on every connection. It reports missing security headers and cookie flags, reflected CORS
+  origins, an exposed `/.git/HEAD` or `/.env`, directory listings, served source maps, framework
+  debug pages and version banners. Nothing is submitted or fuzzed and no credential is sent.
+  Findings are printed only (`--json`), never stored, so they never reach the Code security page,
+  the commit gate or the org. An agent can neither accept nor run it (R-165). See
+  `docs/code-security.md` "Local passive DAST".
+- **Code rule pack 1.5.0: 107 rules, up from 61.** New XSS, open redirect, NoSQL injection and XXE
+  rules for JavaScript and TypeScript, Python, Go, Java and C#; the C# SQL and shell rules and the
+  Java shell rule are rewritten as taint rules that report only web request input (their old
+  findings close on the next complete full scan); and 27 Ruby, PHP and Kotlin rules. Every new rule
+  is flag only, at medium confidence. Full scans also run a second, intrafile taint pass
+  (`[security.scan.opengrep] taint_pass = "auto"`, budget 60 to 900 s, results cached per file); a
+  timeout or crash in it leaves the core results as they were. View templates are not scanned, and
+  Opengrep stays opt-in. See `docs/code-rules.md`.
+- **Six more dependency ecosystems, deeper .NET and Gradle reads, and git submodules checked
+  online.** Pub, SwiftURL, Hex, Hackage, Julia and CRAN join the OSV mirror (15 ecosystems, about
+  3.2 MB more, under the existing accept). NuGet now reads `obj/project.assets.json` and central
+  package management, and Maven reads Gradle's verification metadata and version catalogs; a range,
+  floating version or MSBuild property is a "no exact version" gap, never clean. An online scan
+  (`--online` or "Also check online") also sends the commit ids your git submodules are pinned to,
+  and nothing else about them, to `api.osv.dev`, so the online disclosure moves to version 3 and
+  every online check waits for a new accept. Managed nodes never check submodules. Conan, vcpkg and
+  CocoaPods are not checked.
+- **Build artifacts and a Go binary's standard library are scanned, opt-in per folder.** The SCALIBR
+  scan reads Go and `cargo auditable` Rust binaries, Java archives and Python wheels, but reads
+  executables only in an artifact folder you turned on (`observer security scan artifacts enable
+  <dir>`, the Scanners card, or `scan --artifacts <dir>` for one run). Every discovered folder
+  (`bin/`, `dist/`, `target/release/` and the like) starts off. A Go binary's embedded `stdlib` is
+  matched against the Go advisories and labelled "potentially affected". A binary whose Go version
+  is unknown, or any file over 256 MiB, is a gap.
+- **Package lookup without the database download, on individual nodes.** On the Privacy page's
+  Package lookup card, or with `observer security lookup mode local|remote|both`, you can look
+  dependencies up at SuperBased instead of the local databases (`remote`) or for what they lack
+  (`both`). The node fetches a signed shard manifest from `superbased.app` and hash-prefix shards
+  from `shards.superbased.app`; a request names a set and a digest, never a package name, version,
+  path or code, and matching stays local. Names that cannot be proven public (every ecosystem except
+  npm, PyPI, Go, crates.io and NuGet) are withheld unless you also consent to `send`. An install
+  that already accepted the OSV download reads `local`; a fresh install reads "not scanned" until
+  you pick. See `docs/dependency-scanning.md` "Remote lookup".
+- **OSV databases come from SuperBased's signed mirror first, and update incrementally.** With
+  `[security.deps] db_source = "auto"` (the default), an individual node takes
+  `security.osv_export` from `superbased.app` (a base plus a cumulative delta per ecosystem, merged
+  on the node) and falls back to the OSV bucket while `db_fallback_upstream = true` (the default).
+  `feed`, `upstream` and `import` each pin one source, and `observer security scan db import <dir>`
+  installs a signed set offline. From the bucket, a refresh fetches only the records that changed,
+  with a full download at least weekly. The accept text is now version 2, so every individual node
+  is asked to accept once more. This is the first release with the content-feed key that verifies
+  the mirror.
+- **The install gate's lists are published.** `security.malicious_packages` (from OSV `MAL-`
+  reports) and `security.popular_names` (the top 10,000 names per ecosystem from ecosyste.ms, CC
+  BY-SA 4.0) are served from `superbased.app`; before, the index part of every install verdict read
+  unknown. Individual nodes download them every 6 hours with no consent (`[security.deps]
+  index_download = false` stops this). See `docs/package-checks.md` "The signed index".
+- **The Code security page is rebuilt into seven tabs:** Overview, Findings, Projects, Coverage,
+  Scanners, Exceptions and Baselines. Findings filter by severity, status, scanner, ecosystem,
+  language, project, rule, package and path, group by issue, package, rule or project, and page on
+  the server (the list used to stop at 200 rows without saying so). A dependency finding's drawer
+  shows the package, how the lockfile uses it, the lockfile lines and the local OSV advisories, read
+  at view time and never stored or sent. "Suggest a fix" and `observer security explain <id> --fix`
+  ask the configured judge for a fix. MCP `get_security_findings` adds `confidence`, `package`,
+  `version`, `fixed_version`, `direct`, `dev`, `reach`, `kev` and `epss`.
+- **The Projects page's Quality tab shows coverage, duplication, complexity and a trend.** Line
+  coverage comes from reports your own test runs left at the usual paths (lcov, Cobertura, JaCoCo,
+  Go coverprofile; Observer runs no tests), duplicated lines from code intelligence's near-clone
+  index, and the share of functions over cyclomatic complexity 10 is counted at index time. A daily
+  trend is kept in a node-local table (agent migrations 219 and 221) that never reaches the org.
+  The tab is opt-in (`[projects].quality_metrics = false` by default); duplication and complexity
+  also need code intelligence (off by default). See `docs/projects-page.md` "Quality metrics".
+- **Process capture keeps a bounded number of rows per session, and every count stays exact.**
+  With `[observer.process.capture] enabled = true` (the default), runs not tied to a finding,
+  failure, side effect or tool call are kept within budgets: 200 per tool call, 5,000 per session
+  and 300 per minute. Console hosts and credential helpers fold into their parent, services an
+  agent starts are tracked under a service root, and the rest roll up into counted groups.
+  `observer process stats` and `observer process compact` (manual, with `--dry-run`) apply the
+  limits to stored sessions; `enabled = false` restores the old behaviour. The Processes panel
+  groups identical findings ten to a page, and the call stack takes the full width and zooms. See
+  `docs/process-observability.md` "11.3 Capture budget".
+- **Supply-chain rules for CI workflows and Dockerfiles, and advisories for the actions a
+  workflow uses.** Code security now checks build files natively, with no network. Workflows get
+  S-780 to S-784: an OS or language package install with no version in a `run:` script, remote
+  content piped into an interpreter, a moving runner label such as `ubuntu-latest`, and a container
+  or service image with no `@sha256:` digest. Dockerfiles get S-750 to S-755: a `FROM` with no tag
+  or `:latest`, a tag with no digest, a base past (or within 90 days of) its end of life, and the
+  same install and pipe checks in `RUN`. All of them flag and none blocks. They run in the commit,
+  staged and quick scans, in `observer security verify` (a new `container_config` detector, and
+  `ci_workflow` now covers S-771 to S-784) and in the MCP `check_change` tool. The SCALIBR
+  dependency scan also matches the actions a workflow uses against OSV's GitHub Actions ecosystem
+  (S-779). An action pinned by a commit SHA with no version comment, or by a branch, is a gap and
+  never reads as clean. The OSV database download gains that ninth export, about 100 KB: no new
+  host and no new consent. A feed or mirror that does not list it yet serves the other eight, and
+  GitHub Actions falls to the next source.
+- **An individually enrolled node now shares its Code security posture with its org by default.**
+  While `[org_client.share].security` is unset, the node sends the daily posture row: counts and
+  states only (findings by category, severity and status, which scanners run, scan freshness), no
+  path, project, rule or name. An existing individual node starts sending it after the upgrade
+  unless its developer picked Off on the Privacy page. Set it to `off` to send nothing; finding
+  rows still need `findings`, and the organization can never raise it. Managed nodes are unchanged.
+
+### Dashboard and CLI
+
+- **A You page on the node dashboard.** Configure > You (or the new avatar in the top bar) shows
+  this machine and its fingerprint, the AI tool accounts seen per tool (a tool with more than one is
+  flagged), the organization and cloud links, your consents and the keychain entries Observer
+  writes, each linking to the page that changes it. The only write is withdrawing a consent. Its
+  routes are read-only and owner-local, never return a credential value or the raw machine id, and
+  touch the keychain only on a presence check you ask for. An organization cannot hide the page.
+  See `docs/you-page.md`.
+- **Every CLI command or config the node dashboard offered now has a dashboard control.** Among
+  them: "Also check online" for scans and Coverage rows, Trivy and KICS install cards, status line,
+  start at login and browser capture cards, sandbox key add, hosted connect and image import, a
+  `[guard.cloud]` consent card, doctor fix buttons and an "Update automatically" switch. Settings
+  gains editors for launch binary paths, the Routing overrides, path classes, budget scopes, privacy
+  rules, local upstreams and fallbacks, and every prompt-detector override. Consent, credential and
+  loosening routes are owner-local and denied to agents (R-165); secret keys stay in `config.toml`.
+- **Plans & limits shows "Codex usage by day" on a Codex app-server account.** In the session that
+  already reads the rate limits, Observer asks for the login's account-wide token total per UTC day
+  and shows it beside what this machine captured. The difference reads "not captured here": Codex
+  cloud chats, other devices or sessions Observer did not run on, without saying which (OpenAI's
+  total also runs about 6% above the local logs). Tokens only, no dollar figure, one node's view,
+  and no new process or host. `observer plans usage <account-id> [--days N] [--json]` prints the
+  same. Agent migration 248. See `docs/plans-and-limits.md` "Daily usage reconciliation".
+- **`observer chart` draws usage charts in the terminal.** `observer chart spend` (spend per
+  bucket, AI spend and tool fees), `observer chart models` (tokens by model, ranked and over time)
+  and `observer chart cache-share` (cache read share per bucket on a fixed 0 to 100% axis, the share
+  card's formula; not the Cache page's cache ratio or Analysis's Cache Efficacy). Spend and tokens
+  come from the same cost engine and bucket rules as the dashboard's charts: window totals always agree,
+  and per-bucket numbers agree when the zones match (the dashboard buckets in the browser's zone,
+  the command in the system's local zone unless `--tz` says otherwise). Flags:
+  `--days`, `--since`/`--until`, `--gran`, `--tz`, `--project`, `--tool`, `--width`, `--ascii`,
+  `--color`, and `--json` for the series. Colour only on a terminal with `NO_COLOR` unset. When
+  your organization shows token usage instead of costs, spend is drawn in tokens and `--json` has
+  no dollar fields. See `docs/cli-chart.md`.
+- **`observer launch` and `observer terminals`: launch an agent through the daemon, headless,
+  with JSON output.** `observer launch <tool> [--sandbox auto|none|<backend>] [--workspace
+  live|clone-local|clone-remote|worktree] [--remote URL] [--branch B] [--model M] [--detach]
+  [--wait session|exit] [--json]` makes the same launch as the dashboard's New Terminal
+  (`[terminal.launch]`, the organization's terminal and sandbox policy and the launch gates all
+  apply) and prints the run id and, once correlated, the session id. `--sandbox auto` never takes
+  a beta backend; a requested sandbox that cannot be built refuses the launch, nothing runs
+  unsandboxed instead. `observer terminals ls|show|wait|stop [--json]` lists, inspects, waits on
+  and stops runs; `stop` records the new end reason `cli_stop`. Both talk to the daemon over the
+  owner-only attach endpoint and need no terminal, so they also work against a native-Windows
+  daemon. `observer <tool>` and `--observer-sandbox` are unchanged. See
+  `docs/sandboxed-terminals.md` "Detached launches from the CLI".
+- **Every terminal run records who started it.** `observer terminals ls` gains STARTED BY and
+  PARENT columns (`initiator` and `parent_session_id` in `show` and `--json`), and the Terminals
+  page's run history a "Started by" column: you from the dashboard, you from the CLI, an agent
+  (with a link to the session that launched it), or unknown when Observer could not identify the
+  caller. Detached (headless) runs show it like any other. The record stays on this machine
+  (agent migration 220). `observer <tool> --observer-sandbox` now checks a request with the same
+  rules as `observer launch`.
+- On Windows, `observer launch` and `observer terminals` check that the daemon's named pipe is
+  served by your own user (or SYSTEM) before sending anything (`daemon_unverified` otherwise).
+- The docs no longer say Admission was removed from the node dashboard (the Policies page and its
+  Activity tab carry it), and they now say the Python and TypeScript SDKs in `sdk/` are unpublished
+  and feed Plane A only. AWS Bedrock is documented as unsupported through the proxy.
+
+### Org and teams
+
+- **Each enrolled machine keeps its own agent key.** The org server held one agent key per member,
+  so a member enrolling a second machine locked the first out of org pushes (401
+  `binding_conflict`), its org-shell sign-in and its OpenShell grant. Server migration 312 /
+  PostgreSQL 0182 (`org_member_node_keys`) binds each key to its enrolment's bearer and backfills
+  every live bearer, so machines enrolled before the upgrade keep pushing; nothing changes on the
+  node. Revoke one bearer to remove one machine. Known limit: a re-enrolled machine's earlier
+  bearer stays valid until it expires or is revoked. See `docs/teams-operations.md` "A developer
+  with several machines".
+- **A My profile page for every org member.** `/me/profile` (nav and the sidebar name) shows the
+  member's name, email, roles and permissions in plain words, sign-in method and second-factor
+  signal, password change on local sign-in, their sign-in sessions with sign out one, others or
+  everywhere, their machines, activity and budgets, and the switch for message email copies. Routes
+  take the member from the session only and audit people reads as `view_own_profile`. Sign-ins now
+  record a session digest (server migrations 310 and 311 / PostgreSQL 0180 and 0181).
+- **Members' cloud sessions can ship to the org server with their own ship token.** A member mints
+  one per cloud environment on web2 under You > Cloud session tokens (or their node does with its
+  bearer); admins with `admin:bearers` list and revoke them but cannot mint one for someone else.
+  Every row lands for that member and machine whatever the batch says; a managed member's sandbox
+  ships full content, anyone else's metadata only. Settings > Cloud sessions turns it off org-wide
+  (default on, audited; a developer's own node destination is not affected). Server migrations 301,
+  302 and 306 / PostgreSQL 0171, 0172 and 0176.
+- **The org server can pull Cursor and Devin cloud sessions through an admin's vendor connection and
+  project them to members.** A Devin session reaches a member once an admin links the Devin user id.
+  A Cursor agent is attributed through the Admin API's cloud usage events, else the user key's
+  owner, else it stays org-level; two conflicting owners are held. A member's own node row wins.
+  Nodes now send `execution_location` in every share posture; web2 Sessions and Projects gain a Ran
+  column and a Where it ran picker, and the project page splits Spend by location. Copilot and Codex
+  have no org surface. Server migrations 300 and 303 to 305 / PostgreSQL 0170 and 0173 to 0175.
+- **Org-hosted OpenShell sandboxes for managed machines (beta).** The `openshell-org` row runs a
+  box on the organization's own OpenShell gateway, through its validating front. It is offered only
+  on a managed Linux or WSL2 machine whose grant holds `enforce.sandbox` and whose member is in the
+  allowed set. The `observer sandbox org-shell` verbs (`login`, `opt-in`, `check`, `held`, `resume`,
+  `fetch` and more) and a Settings card cover sign-in, the laptop relay (the only model route: the
+  laptop stays online for the run) and held boxes. This release has no refusal audit and no macOS or
+  Windows daemon for this row, and no node hook runs inside an org box. See
+  `docs/sandbox-openshell-org.md`.
+- **The org server can host the OpenShell gateway.** Component `org.openshell` is off by default
+  and inert while `[openshell].enabled = false`. When on, it adds the run-token issuer and mint, a
+  device sign-in page, a front (`observer-org serve --role openshell-front`), a worker that syncs,
+  reaps, collects and drains, a Settings, Sandboxes page and `observer-org openshell` verbs. The
+  allowed set starts empty. The gateway runs on a dedicated VM from `deploy/observer-openshell/`;
+  compose, Helm and the Azure and AWS OpenTofu modules render it. Server migrations 291 to 293 /
+  PostgreSQL 0161 to 0163.
+- **Caddy is pinned by digest in the OpenShell and caddy-on-box deployments.** The OpenShell overlay
+  and the planner's caddy-on-box compose renders now run
+  `caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee`
+  instead of the floating `caddy:2-alpine`. The OpenShell Caddyfiles set `read_body_idle 10m` (the
+  module template only with the `openshell` axis on), so a node without the stream heartbeat is not
+  cut after a minute. Change the tag and digest together, because a Caddy before 2.11.5 refuses the
+  key. See `docs/teams-operations.md` "Long agent streams and the TLS terminator".
+- **The Invite page says sandbox enforcement is off by default for managed enrolment.**
+  `enforce.sandbox` stays out of the default managed offer; the managed authority picker now says
+  so, links `docs/sandbox-openshell-org.md` and offers a one-click add (minting it stays super admin
+  only). On a node enrolled without it, the org sandbox probe now says "this enrolment does not hold
+  enforce.sandbox" with the next step instead of a generic not-offered reason.
+- **New isolation floors: `require_refusal_audit` and `gateway_modes`.** With "Require refusal
+  audit" on (web2 isolation floors), a sandboxed run starts only on a backend and tier that report
+  refused connections to the node's audit; `host`, `process_lite`, hosted rows and `openshell-org`
+  never qualify. A run started under the floor refuses new connections (503) while its link to the
+  daemon is down. `gateway_modes` limits the OpenShell gateway modes a managed node may use. Beta
+  backends meet a floor only with "Beta backends may meet the floors". A node built before a floor
+  refuses the policy. See `docs/sandbox-governance.md`.
+- **Managed nodes can look packages up through their org, and the org mirror syncs on a schedule.**
+  The signed security pull gains `package_lookup` (`off` by default, or `org_mirror`),
+  `package_lookup_private` (`withhold` by default) and `package_lookup_kinds`; only the super admin
+  can turn the lookup or private names on. With the lookup on, a node gets the shards from its org
+  server and never contacts `shards.superbased.app`. `observer-org security mirror sync` skips
+  artifacts it already holds by digest, and `[security.relay] mirror_sync_interval` and
+  `mirror_shards` (both off by default) sync on a schedule.
+- **Process capture counts reach the org.** A node that ships raw content also sends the capture
+  counts and rollups to the org's session drawer; a metadata-only node sends none. Server migration
+  276 / PostgreSQL 0143.
+- **A Prompt judge tab on the org dashboard's Coding agents Policies page.** Admins author the
+  `planeb.admission` policy with pickers (scope, node lane, the AI gateway judge upstream, mode,
+  strict, criteria), see which provider the managed machines' judge relay uses, and get a volume
+  and cost warning when they choose All calls (about 15 times the judge calls). Simulate runs a
+  sample prompt through the same path a live request takes, for the draft or the published version,
+  and stores nothing: the audit row records only the prompt's length. The node route runs the node
+  lane's own secret gate, so recognised secrets are withheld from the judge; each admin gets 10
+  simulations a minute. The server lint now carries the same authoring warnings for a body published
+  from the CLI.
+- **A Node Mode org can author a judged prompt judge policy without an AI gateway upstream.** With
+  the node lane on and no gateway judge upstream the policy is node lane only: managed machines
+  judge it through the organization's judge relay, and the gateway applies only its deterministic
+  checks (pre-filter, denied topics, jailbreak), skipping the LLM-judged criteria. Policies
+  already published compile and behave as before.
+- **The org dashboard can turn Code security on.** Security, Code security has a switch (who can
+  change it: `write:security`; audited), findings by project, agent, model and developer, and links
+  from each project and member to their page. Before, the server config's `[security].enabled` was
+  the only switch and the tab was hidden while it was off.
+- **A new org server can create its first administrator from a browser.** While the org has no
+  administrator, the server logs one `FIRST-RUN SETUP` line with a single-use link (24 hours, also
+  written to `<state_dir>/setup-token`; `[setup].log_token = false` keeps it out of the log). The
+  `/first-run` page asks for an email, a name and a password, makes that person the first admin and
+  super admin, and opens the Setup wizard. The page closes for good once a super admin exists;
+  recovering an org that lost its admins is still `observer-org users create` plus
+  `users set-password-link`. An org that already has members but no admin will start printing the
+  link after the upgrade. `observer-org doctor` reports whether setup is pending. New server
+  migration 274 / PostgreSQL 0141 (`org_setup_claim`).
+- **SSO can seat the first administrator.** While the org has no active admin, an address in
+  `[dashboard].admin_emails` signing in through SAML or OIDC is admitted and made admin instead of
+  being held for approval (on the dev compose stack, `user1@example.com` now signs in as admin).
+  Once any admin exists, every other sign-in follows normal approval.
+- **Set-password links carry the token after `#`** (`/set-password#token=...`) so it stays out of
+  access logs and `Referer` headers. Links issued earlier with `?token=` keep working until they
+  expire.
+
+### Website and legal
+
+- **The website and legal pages are updated.** The EULA moves to v1.1 with clause 6.1 (Usage
+  data): current versions of the software collect no usage data, and a future version that collects
+  pseudonymous usage data will say which data and why, before download or installation, in its terms
+  and the Product Privacy Policy. The Terms carry the same clause (1.1) and describe paid plans in
+  neutral words, with prices on the Pricing page, which shows the Personal paid plans as coming soon.
+  Privacy is split in two: the Product Privacy Policy at `/privacy` (version 2) and a new website
+  privacy notice at `/website-privacy`. The public deck at `/deck` is retired and redirects (301) to
+  `/enterprise`. The site now says "free for individuals" and that the Apache-2.0 source is public,
+  with the org server licensed separately.
+
+### Fixed
+
+- **A fixed dependency's finding now closes.** Before, a complete scan never closed one, so after
+  the upgrade those findings close on the next complete scan. Also fixed: osv-scanner no longer
+  fails a whole project when one ecosystem has no database (that ecosystem's files become gaps), Go
+  modules whose path has a capital letter are now matched, the Code security Findings tab's project
+  filter no longer leaks into the global project filter, and `observer process compact` no longer
+  counts a service the session started as session activity.
+- **Scheduled vendor connection runs now start on a running org server.** The vendor connections
+  runner and the Cursor admin, Cortex and Kimchi pollers were built but never started on the served
+  server, so with `[vendor_connections].runner_enabled` on only the manual Test and Run buttons
+  worked. They now run on their schedule.
+- **The `observer report share` card's cache-read share no longer counts 1-hour cache writes
+  twice.** 1-hour writes are part of the cache-write total, and the card added them again, which
+  lowered the share in a window with 1-hour writes. The card and `observer chart cache-share` now use one
+  formula.
+
 ## [1.37.1] - 2026-11-01
 
 Patch release on the `stable` channel. The program is the same as 1.37.0; this release exists
 because the 1.37.0 public GitHub release has no binaries.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
 
 ### Fixed
 

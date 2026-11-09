@@ -100,7 +100,14 @@ var expectedClassification = map[string]string{
 	"/api/cloud/sync":           "L",
 	"/api/cloud/sync/state":     "L",
 	"/api/cloud/session/":       "V",
-	"/api/cloud/status":         "V",
+	// Cloud-session ship tokens (lane CA-B3): the ingest route is Public
+	// because a vendor sandbox holds no device session; the handler
+	// authenticates every request with a ship token and answers 404 while
+	// the node holds none. Minting and revoking are owner-local.
+	"/api/cloud-session/ingest":  "P",
+	"/api/cloud-session/tokens":  "L",
+	"/api/cloud-session/tokens/": "L",
+	"/api/cloud/status":          "V",
 	// Cloud Intelligence parity (org plane, design 3.7): the status read is a
 	// view (it mints the confirm token like /api/enrolment/manage); accept and
 	// withdraw write this machine's config and consent record, owner-local.
@@ -151,6 +158,11 @@ var expectedClassification = map[string]string{
 	"/api/config/reload":              "L",
 	"/api/config/section/":            "L",
 	"/api/cost":                       "V",
+	"/api/cloud-agents":               "L",
+	"/api/cloud-agents/test":          "L",
+	"/api/cloud-agents/connect":       "L",
+	"/api/cloud-agents/sync":          "L",
+	"/api/cloud-agents/accounts/":     "L",
 	"/api/plans":                      "L",
 	"/api/plans/accounts":             "L",
 	"/api/plans/accounts/":            "L",
@@ -238,6 +250,7 @@ var expectedClassification = map[string]string{
 	"/api/guard/prompt/events":            "V",
 	"/api/guard/prompt/probe":             "L",
 	"/api/guard/prompt/status":            "V",
+	"/api/guard/prompt/judge":             "V",
 	"/api/guard/rules":                    "V",
 	"/api/guard/simulate":                 "V",
 	"/api/requests":                       "L",
@@ -247,8 +260,16 @@ var expectedClassification = map[string]string{
 	"/api/security/status":                "V",
 	"/api/security/org-notice":            "V",
 	"/api/security/findings":              "V",
+	"/api/security/findings/facets":       "V",
+	"/api/security/findings/groups":       "V",
+	"/api/security/coverage":              "V",
 	"/api/security/scanners":              "V",
 	"/api/security/scanners/db":           "L",
+	"/api/security/scanners/trivydb":      "L",
+	"/api/security/lookup":                "L",
+	"/api/security/artifacts":             "L",
+	"/api/security/reach/go-source":       "L",
+	"/api/security/reach/go-source/run":   "L",
 	"/api/security/import-sarif":          "L",
 	"/api/security/code/install":          "L",
 	"/api/security/iac/install":           "L",
@@ -259,6 +280,8 @@ var expectedClassification = map[string]string{
 	"/api/security/baseline":              "L",
 	"/api/security/editor":                "L",
 	"/api/security/scan-history":          "L",
+	"/api/security/scan":                  "L",
+	"/api/security/findings/{id}":         "V",
 	"/api/security/findings/{id}/explain": "L",
 	"/api/security/githooks":              "L",
 	"/api/security/scanners/custom":       "L",
@@ -290,6 +313,10 @@ var expectedClassification = map[string]string{
 	"/api/patterns/timeseries":    "V",
 	"/api/privacy/scrub-test":     "V",
 	"/api/process/enable-capture": "L",
+	// The capture-limits data-volume estimate: read-only, but it reads the
+	// saved config and summarises this machine's process capture for the
+	// Settings editor, so it is Local like the editor it serves.
+	"/api/process/capture/estimate": "L",
 	// Detection only: reads config, runs the read-only `schtasks /Query`
 	// probe, reads the daemon's own published health record. Registers
 	// nothing, spawns nothing — the elevation broker is a separate route.
@@ -310,8 +337,10 @@ var expectedClassification = map[string]string{
 	"/api/project/{id}":                           "V",
 	"/api/project/{id}/commits":                   "V",
 	"/api/project/{id}/skills":                    "V",
+	"/api/project/{id}/quality":                   "V",
 	"/api/project/{id}/prompts":                   "V",
 	"/api/project/{id}/cost":                      "V",
+	"/api/project/{id}/cloud":                     "V",
 	"/api/project/{id}/prompts/{action_id}/grade": "V",
 	"/api/project/{id}/commit-scan":               "L",
 	// Delivery (D-689): the tab and the mirror list are reads; every write
@@ -379,6 +408,8 @@ var expectedClassification = map[string]string{
 	"/api/session/":                           "V",
 	"/api/sessions":                           "V",
 	"/api/sessions/calendar":                  "V",
+	// Own agents (P-228): a pure read of custom-agent sessions by name.
+	"/api/own-agents": "V",
 	// Session classification (plan §4). The vocabulary + per-tag rollup is a
 	// pure read; MANAGING the vocabulary (rename/delete across every session) is
 	// a whole-route Execute mutation — user-authored review metadata a paired
@@ -401,14 +432,20 @@ var expectedClassification = map[string]string{
 	"/api/shell-wrap/status":         "L",
 	"/api/status":                    "V",
 	"/api/status/scoped":             "V",
-	"/api/statusline":                "V",
-	"/api/storage":                   "V",
-	"/api/storage/backup":            "L",
-	"/api/storage/vacuum":            "L",
-	"/api/suggest":                   "V",
-	"/api/suggest/write":             "L",
-	"/api/suggestions":               "V",
-	"/api/suggestions/state":         "L",
+	// The You page reads: vendor account emails, the machine fingerprint and keychain
+	// presence are install state a remote viewer must not see (owner-local).
+	"/api/me/tool-accounts":   "L",
+	"/api/me/machine":         "L",
+	"/api/me/credentials":     "L",
+	"/api/me/aggregate-share": "L",
+	"/api/statusline":         "V",
+	"/api/storage":            "V",
+	"/api/storage/backup":     "L",
+	"/api/storage/vacuum":     "L",
+	"/api/suggest":            "V",
+	"/api/suggest/write":      "L",
+	"/api/suggestions":        "V",
+	"/api/suggestions/state":  "L",
 	// The notification bell (D-323): the owner's own inbox and its
 	// read / dismiss state write.
 	"/api/notifications":       "L",
@@ -426,6 +463,8 @@ var expectedClassification = map[string]string{
 	"/api/terminal/launch":                "X",
 	"/api/terminal/launch/preflight":      "L", // runs a $SHELL -lc login-shell PATH capture + reveals binary paths/home layout — owner-local only (reclassified V→L, 2026-07-23 review)
 	"/api/terminal/launch/models":         "V", // reads token_usage model history + registry Known list only — same posture as /api/models (B5 model picker)
+	"/api/terminal/pending":               "L", // launches held for a human (lane cli-2 fixes-1): confirming one is the owner's call
+	"/api/terminal/pending/":              "L", // each hold's confirm and reject, owner-local
 	"/api/terminal/project-policy":        "L", // lane sec-p2b: takes a local directory path and says whether the org's project rules apply there; owner-local like preflight
 	"/api/terminal/sandbox":               "V", // B9 fail-soft sandbox probe — reads the daemon's cached bwrap probe result + [terminal.sandbox] config only, same posture as /api/terminal/launch/models
 	"/api/terminal/ssh":                   "L", // SSH remote-system terminals — GET discloses the operator's internal hostnames (the sessions.git_branch privacy class) and POST opens an interactive shell on a THIRD-PARTY machine; both stay owner-local until remote-driven SSH gets its own threat model (ssh-remote-profiles plan §6.2 / D1)
@@ -456,6 +495,14 @@ var expectedClassification = map[string]string{
 	// Lane LEFT-SBX: the install version picker makes the daemon read a
 	// vendor registry for the picked tool; owner-local.
 	"/api/terminal/sandbox/install-versions": "L",
+	// OpenShell build lanes N1 and N5 (classified by lane O4): the egress
+	// refusal audit read names the hosts a sandboxed agent tried to reach
+	// and the run's project root, so it is owner-local like the other
+	// sandbox reads that disclose paths; the advisor's PUT writes
+	// [terminal.sandbox].egress_allow_hosts through the config save
+	// pipeline (confirm-token-gated, guard rule R-167 denies an agent's PUT).
+	"/api/sandbox/refusals":       "L",
+	"/api/sandbox/refusals/allow": "L",
 	// W5 (enterprise update management). The STATUS read is View: it
 	// discloses this node's own version and update state to a viewer who can
 	// already see /api/status. The extension-version REPORT is Local: it is a
@@ -499,6 +546,24 @@ var expectedClassification = map[string]string{
 	"/api/config/adopt-defaults": "L",
 	"/api/benchmarks/run":        "L",
 	"/api/benchmarks/delete":     "L",
+	// Dashboard CLI parity (docs/plans/dashboard-cli-parity-plan-2026-11-06.md).
+	"/api/setup/statusline":                "L",
+	"/api/setup/login-start":               "L",
+	"/api/setup/browser":                   "L",
+	"/api/browser/sites":                   "L",
+	"/api/terminal/sandbox/readopt/attach": "L",
+	"/api/guard/cloud":                     "L",
+	"/api/guard/jobs/chain":                "L",
+	"/api/guard/recipes":                   "L",
+	"/api/guard/recipes/show":              "V",
+	"/api/guard/recipes/preview":           "V",
+	"/api/guard/recipes/apply":             "L",
+	"/api/guard/recipes/remove":            "L",
+	"/api/guard/recipes/user":              "L",
+	"/api/guard/recipes/user/delete":       "L",
+	"/api/health/update-terminal":          "L",
+	"/api/update/auto-apply":               "L",
+	"/api/launch/tool-paths":               "L",
 }
 
 // TestFullRegistryClassification is the codex-finding-2 backstop (plan §9): the
@@ -671,6 +736,21 @@ var mutationRoutes = []string{
 	"/api/components/purge/execute",
 	"/api/benchmarks/run",
 	"/api/benchmarks/delete",
+	// Dashboard CLI parity (docs/plans/dashboard-cli-parity-plan-2026-11-06.md).
+	"/api/setup/statusline",
+	"/api/setup/login-start",
+	"/api/setup/browser",
+	"/api/browser/sites",
+	"/api/terminal/sandbox/readopt/attach",
+	"/api/guard/cloud",
+	"/api/guard/jobs/chain",
+	"/api/guard/recipes/apply",
+	"/api/guard/recipes/remove",
+	"/api/guard/recipes/user",
+	"/api/guard/recipes/user/delete",
+	"/api/health/update-terminal",
+	"/api/update/auto-apply",
+	"/api/launch/tool-paths",
 }
 
 // TestNoConfigMutationRouteIsPlainView pins the §2A / §9.2 invariant: no route

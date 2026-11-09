@@ -177,3 +177,16 @@ func TestImportsArePure(t *testing.T) {
 		Reason:    "internal/orgenrol must stay pure",
 	})
 }
+
+// TestEnforceAdmissionDisclosesThePromptJudge pins F8 (fix round 1): the
+// consent sentence for enforce.admission tells the developer that the
+// organization's judge reads their coding-agent prompts, because the same
+// authority now governs the planeb.admission node lane.
+func TestEnforceAdmissionDisclosesThePromptJudge(t *testing.T) {
+	got := AuthorityPlainEnglish(govern.AuthorityEnforceAdmission)
+	for _, want := range []string{"prompts you type into coding agents", "organization's own server", "secret is never sent"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("enforce.admission disclosure %q lacks %q", got, want)
+		}
+	}
+}

@@ -80,6 +80,11 @@ type Leaf struct {
 	OwnedBy string `json:"owned_by,omitempty"`
 	// Enum is the closed vocabulary for a string leaf, when one exists.
 	Enum []string `json:"enum,omitempty"`
+	// KeysAreIDs marks a string map whose keys are ids from a closed
+	// vocabulary (prompt-guard detector names such as slack_token), never
+	// credential names: a credential word in one of its keys does not make
+	// the value a credential. The values are still checked by the detector.
+	KeysAreIDs bool `json:"keys_are_ids,omitempty"`
 	// Min / Max bound numeric leaves when set.
 	Min *float64 `json:"min,omitempty"`
 	Max *float64 `json:"max,omitempty"`

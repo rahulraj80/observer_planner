@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"net/netip"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/agentconfig"
 	"github.com/marmutapp/superbased-observer/internal/artifactstate"
 	"github.com/marmutapp/superbased-observer/internal/captureprogress"
+	"github.com/marmutapp/superbased-observer/internal/cloudagentssvc"
 	"github.com/marmutapp/superbased-observer/internal/componentstate"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
@@ -160,6 +163,25 @@ type Options struct {
 	// is the launch request's own sandbox flag. NIL has the same fail-open
 	// meaning as FeatureGate being nil.
 	TerminalFeatureGate func(requestedSandbox bool) (bool, string)
+	// LoopbackCallerGate is the caller check of every request from a local
+	// peer (security ledger LAUNCH-1, lane callerid): client and server are
+	// the connection's two ends as the listener saw them (client invalid
+	// when unparsable), mutating is an unsafe method or a WebSocket upgrade.
+	// It returns the refusal line and true to refuse with 403
+	// sandbox_caller. The daemon identifies the process behind the
+	// connection and refuses one that runs inside a live Observer box. NIL
+	// gates nothing (a dashboard without a terminal stack has no boxes).
+	LoopbackCallerGate func(ctx context.Context, client, server netip.AddrPort, mutating bool) (reason string, refuse bool)
+	// LaunchCaller resolves who started a dashboard launch from the
+	// connection's two ends (lane cli-2, migration 220): the initiator
+	// (termrun's closed set) and, for an agent, its parent session. Nil
+	// records every dashboard launch as human_dashboard.
+	LaunchCaller func(ctx context.Context, client, server netip.AddrPort) (initiator, parentSession string)
+	// PendingLaunches is the daemon's store of launches held for a human
+	// (lane cli-2 fixes-1): a launch route whose caller is an agent's is
+	// held there, never started. Nil refuses such a launch (it cannot be
+	// held, and it may not run unconfirmed).
+	PendingLaunches PendingLaunches
 	// MonthlyBudgetUSD surfaces on the Analysis tab as a spend-budget
 	// progress tile. Zero hides the budget readout. Sourced from
 	// `intelligence.monthly_budget_usd` in config.toml.
@@ -168,6 +190,12 @@ type Options struct {
 	// Settings page's GET /api/config + PUT /api/config/pricing
 	// endpoints. Empty disables the Settings save path (read-only).
 	ConfigPath string
+	// AggregateShareStatus reads the community aggregate-sharing switch and
+	// its consent receipt for the You page. It is filled by cmd/observer only
+	// in a build that carries the egress.aggregate-share component, so the
+	// dashboard never imports that component's packages; nil means the
+	// component is not in this build.
+	AggregateShareStatus func(ctx context.Context) (AggregateShareStatus, error)
 	// RecognizesSessionFile, when non-nil, filters parse_cursors rows
 	// in /api/health/watcher: paths NOT recognised by any current
 	// adapter are tagged orphan_unmatched and excluded from the
@@ -397,6 +425,11 @@ type Options struct {
 	// control (GET /api/setup/windows-homes, POST /api/setup/windows-homes/
 	// apply, T-421 item 4). Nil is the honest not-wired state (501).
 	WindowsHomes WindowsHomeService
+	// SetupExtras, when non-nil, serves the Settings controls for the Claude
+	// Code status line, start at login and browser-capture setup (GET and
+	// POST /api/setup/statusline, /login-start, /browser; dashboard CLI
+	// parity, lane L2). A nil field is the honest not-wired state (501).
+	SetupExtras *SetupExtras
 	// Reprice, when non-nil, serves the Settings "Re-price stored costs"
 	// card (GET /api/reprice/status, POST /api/reprice/plan, /apply and
 	// /revert; gap PRICE-REPRICE-1). Nil is the honest not-wired state (501).
@@ -526,6 +559,16 @@ type Options struct {
 	// decision-record chain. Nil answers the honest "not available in this
 	// process" body, never a 404.
 	MCPAccessStatus func(ctx context.Context, verifyChain bool) (any, error)
+	// PromptJudgeStatus, when non-nil, backs GET /api/guard/prompt/judge
+	// (lane adm-p2): the organization's coding-agent prompt judge on this
+	// node, composed by cmd/observer from the SAME facts `observer guard
+	// status` prints (whether it is on and why not, scope, strict, what a
+	// prompt-gate hook does when the daemon cannot answer, the last day's
+	// J-801 counts, the consent sentence and the named residuals). A plain
+	// func returning a JSON-encodable value, so this package never imports
+	// the policy family. Nil answers the honest "not available in this
+	// process" body, never a 404.
+	PromptJudgeStatus func(ctx context.Context) (any, error)
 	// Remote is the injected remote-access security substrate (plan §4).
 	// Nil (the default) means loopback-only: a non-loopback bind is REFUSED
 	// (§4.6 atomic-safety rule). A non-nil controller reporting Ready()
@@ -547,6 +590,11 @@ type Options struct {
 	// probe; nil (the default) is the honest disabled state, matching the
 	// LaunchManager/BuildHandoff seam pattern (CLAUDE.md #2).
 	SandboxProber SandboxProber
+	// SandboxSetup, when non-nil, backs the sandbox setup routes
+	// (/api/terminal/sandbox/setup..., sandbox installation lifecycle plan
+	// section 3.6) and the CLI's `observer sandbox setup`. Nil means the
+	// module or the feature is not in this build: the routes answer 501.
+	SandboxSetup SandboxSetup
 	// SandboxInstallVersions, when non-nil, backs GET
 	// /api/terminal/sandbox/install-versions (lane LEFT-SBX): the published
 	// versions of one install-source tool for the Container sandboxes card's
@@ -561,6 +609,20 @@ type Options struct {
 	// on the Settings card. nil (the default, and every build without the
 	// sandbox) reads as not forbidden.
 	SandboxSignInForbidden func() bool
+	// SandboxEgressHostCheck, when non-nil, is the egress gateway's own host
+	// check for a [terminal.sandbox] block (OpenShell lane N5): it returns
+	// the gateway rule that refuses host under ts, or "" when the gateway
+	// lets it through. /api/sandbox/refusals/allow asks it whether "allow
+	// this host" would change anything. nil (the default, and every build
+	// without the sandbox) offers nothing and the apply answers 501.
+	SandboxEgressHostCheck func(ts config.TerminalSandboxConfig, host string) string
+	// SandboxProviderHost, when non-nil, reports whether host is in the
+	// model-provider host set the egress gateway's provider block refuses
+	// under cfg (the closed provider list plus the proxy's configured
+	// upstreams; OpenShell lane N5, audit finding N5-A1). Such a host is
+	// never offered, even when its refusal was stored as an allow-list
+	// miss. nil (every build without the sandbox) reads as not a provider.
+	SandboxProviderHost func(cfg config.Config, host string) bool
 	// ProjectPolicy, when non-nil, backs GET /api/terminal/project-policy
 	// (lane sec-p2b): the New Terminal dialog's "project policy" line for a
 	// chosen directory, read from the daemon's project match record and the
@@ -598,6 +660,11 @@ type Options struct {
 	// page model, account lifecycle, refresh and the status line feed. Nil
 	// makes every /api/plans route answer 503.
 	Plans *planlimitssvc.Service
+	// CloudAgents is the cloud-agent connector service
+	// (internal/cloudagentssvc, docs/cloud-agents.md): linked accounts,
+	// per-signal coverage, connect / test / sync / disconnect. Nil makes
+	// every /api/cloud-agents route answer 503.
+	CloudAgents *cloudagentssvc.Service
 	// Projects carries the [projects] tunables (Projects-page spend/ROI/
 	// commit-alignment arc, docs/plans/projects-page-roi-and-commit-
 	// alignment-plan-2026-09-21.md). Consumed for CommitLinkWindowDays
@@ -647,6 +714,10 @@ type Options struct {
 	// file cap and the import. Nil answers 404 on
 	// /api/security/import-sarif.
 	SARIFImport *SARIFImport
+	// SecurityScanNow is the Code security page's "Scan now" seam: the
+	// selected scanners and one manual run of one of them on one project.
+	// Nil leaves the page's scan job with its own history step only.
+	SecurityScanNow *SecurityScanNow
 	// Opengrep is the code rules' seam (component security.scan.opengrep,
 	// lane SEC-G2): the Code rules card's state and the guided install.
 	// Nil answers 404 on /api/security/code/install.
@@ -692,6 +763,12 @@ type Options struct {
 	// (component security.feedback, lane sec-h): the configured judge's
 	// advisory explanation of one finding. Nil answers 404.
 	SecurityExplain SecurityExplain
+	// SecurityExplainFix is the same action's suggest-a-fix variant (the
+	// drawer's "Suggest a fix", `observer security explain --fix`, OS and CI
+	// plan section 14.8): the prompt also carries the rule's fix hint and,
+	// for a dependency finding, the versions (never advisory prose). Nil
+	// answers a fix request as compiled out.
+	SecurityExplainFix SecurityExplain
 	// SecurityOrgShare feeds the affected-worker notice (security plan
 	// 7.12, lane SEC-E3): what this node shares with its organization about
 	// code security. Nil hides the notice.
@@ -759,4 +836,29 @@ type BinaryInstall struct {
 	// manager's launcher, which survives an upgrade) or "binary" (the real
 	// path).
 	Registers string `json:"registers"`
+}
+
+// InitiatorHumanDashboard is the initiator a dashboard launch records when
+// no LaunchCaller is wired or it gives no answer (lane cli-2). It repeats
+// internal/termrun.InitiatorHumanDashboard, which this package does not
+// import: termrun belongs to the terminals component, and the dashboard
+// compiles without it (pinned equal by TestInitiatorVocabularyMatches in
+// cmd/observer).
+const InitiatorHumanDashboard = "human_dashboard"
+
+// AggregateShareStatus is the community aggregate-sharing posture the You
+// page shows: the [aggregate_share] switch, the consent check result and the
+// current receipt's date, author and schema. Plain values, so the dashboard
+// needs no import of the component that owns them.
+type AggregateShareStatus struct {
+	// Enabled is [aggregate_share].enabled (default off).
+	Enabled bool
+	// Status is the consent check: valid, disabled, missing, or a changed
+	// schema, endpoint or registry that suspends sharing until re-consent.
+	Status string
+	// ConsentedAt, Actor and SchemaVersion describe the current receipt;
+	// zero when there is none.
+	ConsentedAt   time.Time
+	Actor         string
+	SchemaVersion int
 }

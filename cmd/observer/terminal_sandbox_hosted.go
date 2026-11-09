@@ -507,9 +507,11 @@ func hostedConnectCredential(observerDir string, v sandboxremote.Vendor, fields 
 }
 
 // hostedDisconnectCredential removes the stored credential and the marker.
+// A keychain entry already gone still removes the marker, so a provider never
+// reads as connected with nothing behind it.
 func hostedDisconnectCredential(observerDir string, v sandboxremote.Vendor) error {
 	ks := hostedKeystoreOpen(v.KeystoreService, hostedCredDir(observerDir))
-	if err := ks.Delete(sandboxremote.KeystoreName); err != nil {
+	if err := ks.Delete(sandboxremote.KeystoreName); err != nil && !errors.Is(err, keystore.ErrNotFound) {
 		return err
 	}
 	err := os.Remove(hostedConnectedMarker(observerDir, v.ID))
@@ -530,6 +532,50 @@ type hostedVendorReg struct {
 	vendor    string
 	component string
 	newClient hostedClientFactory
+	// The optional hooks of a vendor whose row's capability flags ask for
+	// more than the shared core does (lane G4, the org-hosted row; nil for
+	// the three file-API vendors, which keep the core's own behaviour):
+	//   - mintSource builds the run's token source for a MintedCredential
+	//     vendor (the core then reads no keystore and no environment);
+	//   - localProbe adds the row's own local probe rows (no network call,
+	//     invariant I6), walked before the shared ladder's;
+	//   - endRun takes the run's end branch (hold, return and delete, or end
+	//     without a return) in place of the shared teardown, and reports
+	//     whether it did.
+	mintSource func(ctx context.Context, plan hostedPlanFile) (sandboxremote.CredentialSource, error)
+	localProbe func(d *hostedDriver) (verdict, reason string)
+	endRun     func(ctx context.Context, r *hostedRun) bool
+	//   - resumeBox names the held box a launch in this process takes over
+	//     ("" for a fresh box), and resumeArgs is the agent's native resume
+	//     tail for a session id (nil for a fresh session in the kept box).
+	resumeBox  func() string
+	resumeArgs func(tool, sessionID string) []string
+	//   - cloneSpec is the box-side clone of a remote_clone delivery: the
+	//     exact argv and environment and the token purpose it is sent
+	//     under (nil: the vendor has no box-side clone);
+	//   - runCap is the vendor's own lower cap of a box's run minutes (the
+	//     organization's max_run_minutes; 0 for none), applied as
+	//     min(local, vendor) at launch.
+	cloneSpec func(url string) (argv []string, env map[string]string, purpose string)
+	runCap    func(d *hostedDriver) int
+	//   - authVersion is the row's authenticated version source (FX1 item 1,
+	//     live finding F-L3-5): the version and true only when it was read
+	//     from an authenticated identity (for the org row, the org's signed
+	//     managed body); "" and false otherwise. A row that pins
+	//     RequireAuthenticatedVersion needs one, or selection rule S2b
+	//     refuses every launch. nil keeps the row's client contract version,
+	//     unauthenticated (E2B, Modal and Vercel do not pin the flag).
+	authVersion func(d *hostedDriver) (version string, ok bool)
+	//   - dailyQuota is the vendor's own per-member daily box-minutes quota
+	//     (for the org row, the organization's daily_box_minutes_per_member
+	//     from its verified body; 0 for none), shown on the consent screen
+	//     under the machine's own cap. nil: the vendor publishes none.
+	dailyQuota func(c config.TerminalSandboxHostedConfig) int
+	//   - cloneRepositories lists the repositories a clone-remote launch on
+	//     the row may name (for the org row, the organization's published
+	//     clone_repositories), for the clone consent's picker (FX3 item 3).
+	//     nil: the row offers no box-side clone list.
+	cloneRepositories func(c config.TerminalSandboxHostedConfig) []string
 }
 
 // hostedVendorRegs are the registered vendor drivers (vendor id ->
@@ -565,15 +611,29 @@ func hostedResolveRefusal(v sandboxremote.Vendor, pc config.TerminalSandboxHoste
 }
 
 func hostedVendorConfig(c config.TerminalSandboxHostedConfig, vendor string) config.TerminalSandboxHostedProviderConfig {
-	switch vendor {
-	case sandboxremote.VendorE2B:
-		return c.E2B
-	case sandboxremote.VendorModal:
-		return c.Modal
-	case sandboxremote.VendorVercel:
-		return c.Vercel
+	for _, row := range hostedVendorConfigTable {
+		if row.vendor == vendor {
+			return row.read(c)
+		}
 	}
 	return config.TerminalSandboxHostedProviderConfig{}
+}
+
+// hostedVendorConfigTable maps a vendor id to its provider table in
+// [terminal.sandbox.hosted] (a table, not a switch on the vendor id; lane
+// G4). A driver whose table is composed from the verified managed body
+// appends its own row from its file's init.
+var hostedVendorConfigTable = []hostedVendorConfigRow{
+	{sandboxremote.VendorE2B, func(c config.TerminalSandboxHostedConfig) config.TerminalSandboxHostedProviderConfig { return c.E2B }},
+	{sandboxremote.VendorModal, func(c config.TerminalSandboxHostedConfig) config.TerminalSandboxHostedProviderConfig { return c.Modal }},
+	{sandboxremote.VendorVercel, func(c config.TerminalSandboxHostedConfig) config.TerminalSandboxHostedProviderConfig { return c.Vercel }},
+}
+
+// hostedVendorConfigRow is one row of hostedVendorConfigTable; a driver
+// whose provider table is composed elsewhere appends its own from init.
+type hostedVendorConfigRow = struct {
+	vendor string
+	read   func(config.TerminalSandboxHostedConfig) config.TerminalSandboxHostedProviderConfig
 }
 
 // ---- the probe (local only, invariant I6) -----------------------------------
@@ -598,6 +658,10 @@ type hostedProbeFacts struct {
 	// consentChange is the consent verdict of a recorded consent that no
 	// longer matches ("" when none is recorded or it matches).
 	consentChange string
+	// version and versionAuthenticated are the row's version as its driver
+	// read it ("" keeps the client contract version, unauthenticated).
+	version              string
+	versionAuthenticated bool
 }
 
 // hostedProbeLadder decides a hosted row's probe verdict from local facts
@@ -605,6 +669,9 @@ type hostedProbeFacts struct {
 func hostedProbeLadder(v sandboxremote.Vendor, cfg config.TerminalSandboxHostedConfig, f hostedProbeFacts) sandboxselect.Probe {
 	row, _ := sandboxbackend.Get(v.ID)
 	p := sandboxselect.Probe{Compiled: true, Version: row.Control.Pins.RequiredMin, Sources: []string{"live"}}
+	if f.version != "" {
+		p.Version, p.VersionAuthenticated = f.version, f.versionAuthenticated
+	}
 	pc := hostedVendorConfig(cfg, v.ID)
 	_, _, regionOK := hostedResolve(v, pc)
 	rules := []struct {
@@ -663,6 +730,9 @@ func hostedProbeLadder(v sandboxremote.Vendor, cfg config.TerminalSandboxHostedC
 // running binary when it is a Linux binary (the box architecture is checked
 // at launch, against what the box reports).
 func hostedBoxBinaryCheck(pc config.TerminalSandboxHostedProviderConfig, observerBin string) error {
+	if pc.BoxBinaryInImage {
+		return nil // the box image carries it; the box checks its version at launch
+	}
 	if b := strings.TrimSpace(pc.BoxBinary); b != "" {
 		fi, err := os.Stat(b)
 		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o111 == 0 {
@@ -687,12 +757,23 @@ type hostedDriver struct {
 	vendor sandboxremote.Vendor
 	reg    hostedVendorReg
 	now    func() time.Time
-	// homeRelayOK: a key the proxy adds itself is configured (a routing key
-	// pool or the org AI Gateway route), so home_relay custody can work.
+	// homeRelayOK: a key the proxy adds itself is configured (the org AI
+	// Gateway route, homeRelayServedAtHome) or credential injection is
+	// ready, so home_relay custody can work.
 	homeRelayOK bool
 	// homeRelayNote names why credential injection cannot serve home_relay
 	// on this node although it is selected (audit F10); "" otherwise.
 	homeRelayNote string
+}
+
+// homeRelayServedAtHome reports whether the proxy itself puts a credential
+// on a request that carries none of the user's: the org AI Gateway route,
+// which strips every credential header and attaches the org's virtual key.
+// A routing key pool does not: it only rotates among keys a request already
+// presented (internal/proxy keypool.go's membership guard), so a box with no
+// key gets none from it (FX3 item 5, live finding F-L3P4-4).
+func homeRelayServedAtHome(full config.Config) bool {
+	return full.Proxy.OrgRoute.Mode != ""
 }
 
 // newHostedDriver builds a hosted driver; nothing is probed, read or dialled
@@ -702,7 +783,7 @@ func newHostedDriver(r *sandboxRuntime, full config.Config, reg hostedVendorReg)
 	recordHostedListed(full.Terminal.Sandbox)
 	return &hostedDriver{
 		r: r, cfg: full.Terminal.Sandbox.Hosted, vendor: v, reg: reg, now: time.Now,
-		homeRelayOK:   len(full.Routing.KeyPool) > 0 || full.Proxy.OrgRoute.Mode != "" || hostedCredReadyFor(full),
+		homeRelayOK:   homeRelayServedAtHome(full) || hostedCredReadyFor(full),
 		homeRelayNote: hostedCredNotReadyFor(full),
 	}
 }
@@ -732,6 +813,9 @@ func (d *hostedDriver) consentFactsStatic() (sandboxremote.ConsentFacts, bool) {
 // the version the box must report, never this binary's version as that
 // file's (live run 2, finding N3).
 func hostedBoxBinaryLabel(pc config.TerminalSandboxHostedProviderConfig) string {
+	if pc.BoxBinaryInImage {
+		return "observer from the box image (nothing is uploaded; the box refuses it unless it reports " + version + ")"
+	}
 	if b := strings.TrimSpace(pc.BoxBinary); b != "" {
 		return "observer from box_binary " + b + " (its version is unchecked here; the box refuses it unless it reports " + version + ")"
 	}
@@ -742,10 +826,23 @@ func hostedBoxBinaryLabel(pc config.TerminalSandboxHostedProviderConfig) string 
 // value).
 func (d *hostedDriver) probe(context.Context) sandboxselect.Probe {
 	f := hostedProbeFacts{listed: d.listed(), host: sandboxHostKind()}
+	f.version, f.versionAuthenticated = d.probeVersion()
+	if d.reg.localProbe != nil {
+		// The row's own local rows come first (the org-hosted row's R0: a
+		// node not offered the row says so before anything else).
+		if v, why := d.reg.localProbe(d); v != "" {
+			return sandboxselect.Probe{Compiled: true, Version: f.version, VersionAuthenticated: f.versionAuthenticated, Sources: []string{"live"}, Verdict: v, Reason: why}
+		}
+	}
 	if !f.listed {
 		return hostedProbeLadder(d.vendor, d.cfg, f)
 	}
 	f.credential = hostedCredentialSource(d.r.observerDir, d.vendor)
+	if d.vendor.MintedCredential {
+		// No stored credential: every call carries a token the org mints at
+		// launch (the local sign-in check is the row's own probe row R3).
+		f.credential = sandboxremote.SourceMinted
+	}
 	f.usedToday = hostedLedgerUsed(d.r.observerDir, d.vendor.ID, d.now(), d.cfg.DailyBoxMinutes)
 	f.boxBinaryErr = hostedBoxBinaryCheck(hostedVendorConfig(d.cfg, d.vendor.ID), d.r.observerBin)
 	if static, ok := d.consentFactsStatic(); ok {
@@ -767,10 +864,26 @@ func hostedStaticConsentVerdict(rec sandboxremote.ConsentRecord, static sandboxr
 	return sandboxremote.CheckConsent(&rec, static)
 }
 
-// version is the row's client contract version.
+// version is the row's version: the authenticated one its driver read, else
+// the client contract version.
 func (d *hostedDriver) version() string {
+	v, _ := d.probeVersion()
+	return v
+}
+
+// probeVersion is the version a probe reports and whether it is
+// authenticated (FX1 item 1, live finding F-L3-5): the row's own
+// authenticated source when it registers one and that source answers, else
+// the client contract version, unauthenticated. Only a source that read the
+// version from an authenticated identity may answer true.
+func (d *hostedDriver) probeVersion() (string, bool) {
+	if d.reg.authVersion != nil {
+		if v, ok := d.reg.authVersion(d); ok && v != "" {
+			return v, true
+		}
+	}
 	row, _ := sandboxbackend.Get(d.vendor.ID)
-	return row.Control.Pins.RequiredMin
+	return row.Control.Pins.RequiredMin, false
 }
 
 // sandboxRequestRegion is the region a selection request carries for a

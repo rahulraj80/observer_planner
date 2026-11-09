@@ -162,7 +162,7 @@ func (s *Server) handleCloudLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !st.ClientIDConfigured {
-			http.Error(w, "no WorkOS client id is configured - set [cloud].workos_client_id in config.toml or the WORKOS_CLIENT_ID environment variable, then try again", http.StatusConflict)
+			http.Error(w, "no WorkOS client id is configured - enter it under Advanced in Settings > Cloud Intelligence ([cloud].workos_client_id) and save, or set the WORKOS_CLIENT_ID environment variable, then try again", http.StatusConflict)
 			return
 		}
 	}

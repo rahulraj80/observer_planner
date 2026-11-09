@@ -113,6 +113,12 @@ var componentSections = []componentSection{
 		reset:     func(c *Config) { c.Terminal.Sandbox.Landlock = Default().Terminal.Sandbox.Landlock },
 	},
 	{
+		component: "terminals.sandbox.openshell",
+		section:   "terminal.sandbox.openshell",
+		validate:  func(c *Config) error { return validateTerminalSandboxOpenShell(c.Terminal.Sandbox.OpenShell) },
+		reset:     func(c *Config) { c.Terminal.Sandbox.OpenShell = Default().Terminal.Sandbox.OpenShell },
+	},
+	{
 		component: "terminals.sandbox.vm",
 		section:   "terminal.sandbox.vm",
 		validate:  func(c *Config) error { return validateTerminalSandboxVM(c.Terminal.Sandbox.VM) },
@@ -162,6 +168,21 @@ var componentSections = []componentSection{
 			return validateSecurityIaC("security.scan.trivy", c.Security.Scan.Trivy.ScheduleHours)
 		},
 		reset: func(c *Config) { c.Security.Scan.Trivy = SecurityTrivyConfig{} },
+	},
+	{
+		// The Go source check's caps (3b-src).
+		component: "security.reach.go",
+		section:   "security.reach.go",
+		validate:  func(c *Config) error { return validateSecurityReachGo(c.Security.Reach.Go) },
+		reset:     func(c *Config) { c.Security.Reach.Go = SecurityReachGoConfig{} },
+	},
+	{
+		// The image OS package driver (lane OS-2 T): both drivers need
+		// security.deps, so the section is its own.
+		component: "security.deps",
+		section:   "security.scan.image",
+		validate:  func(c *Config) error { return validateSecurityImage(c.Security.Scan.Image) },
+		reset:     func(c *Config) { c.Security.Scan.Image = SecurityImageScanConfig{} },
 	},
 	{
 		component: "security.scan.kics",
