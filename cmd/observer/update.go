@@ -345,9 +345,6 @@ func methodText(rep updateStatusReport) string {
 	return rep.InstallMethod + " (cannot update itself)"
 }
 
-// orDash renders an empty string as a dash.
-func orDash(s string) string { return orText(s, "—") }
-
 // updateStatePath resolves <state_dir>/state.json.
 func updateStatePath() (string, error) {
 	if dir := strings.TrimSpace(os.Getenv(updateStateDirEnv)); dir != "" {
@@ -428,6 +425,6 @@ func dirIsWritable(dir string) bool {
 // fileExistsIn is the SiblingExists seam for the install-method table's
 // virtualenv rule.
 func fileExistsIn(dir, name string) bool {
-	_, err := os.Stat(filepath.Join(dir, name))
+	_, err := os.Stat(filepath.Join(dir, name)) //nolint:gosec // G703: false positive; an existence check only, nothing is read or written
 	return err == nil
 }

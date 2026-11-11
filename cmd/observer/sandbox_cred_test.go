@@ -26,19 +26,48 @@ import (
 
 const credTestKey = "sk-ant-api03-REAL-USER-KEY-for-tests-only"
 
+// credTestStore is these tests' in-memory keystore; Set and Delete also
+// keep the ids-only providers list, as credAdd and credRemove do (the list
+// is what credKeyStored reads, F-010 A6).
+type credTestStore struct {
+	*keystore.MemStore
+	obs string
+}
+
+func (s *credTestStore) Set(name, value string) error {
+	if err := s.MemStore.Set(name, value); err != nil {
+		return err
+	}
+	if id, ok := strings.CutPrefix(name, "provider:"); ok {
+		return credMarkProvider(s.obs, id, true)
+	}
+	return nil
+}
+
+func (s *credTestStore) Delete(name string) error {
+	if err := s.MemStore.Delete(name); err != nil {
+		return err
+	}
+	if id, ok := strings.CutPrefix(name, "provider:"); ok {
+		return credMarkProvider(s.obs, id, false)
+	}
+	return nil
+}
+
 // credEnvForTest makes the component active with an in-memory keystore
 // under a fresh observer dir.
-func credEnvForTest(t *testing.T, active bool) (string, *keystore.MemStore) {
+func credEnvForTest(t *testing.T, active bool) (string, *credTestStore) {
 	t.Helper()
 	obs := filepath.Join(t.TempDir(), ".observer")
-	ks := &keystore.MemStore{}
-	oldActive, oldKeys, oldObs, oldOther := credActive, credKeysFn, credObserverDir, credOtherHomeRelay
+	ks := &credTestStore{MemStore: &keystore.MemStore{}, obs: obs}
+	oldActive, oldKeys, oldObs, oldOther, oldPool := credActive, credKeysFn, credObserverDir, credOtherHomeRelay, credKeyPoolSet
 	credActive = func(context.Context) bool { return active }
 	credKeysFn = func(string) keystore.Store { return ks }
 	credObserverDir = func() string { return obs }
 	credOtherHomeRelay = func() bool { return false }
+	credKeyPoolSet = func() bool { return false }
 	t.Cleanup(func() {
-		credActive, credKeysFn, credObserverDir, credOtherHomeRelay = oldActive, oldKeys, oldObs, oldOther
+		credActive, credKeysFn, credObserverDir, credOtherHomeRelay, credKeyPoolSet = oldActive, oldKeys, oldObs, oldOther, oldPool
 		credStates.Range(func(k, _ any) bool { credStates.Delete(k); return true })
 	})
 	return obs, ks
@@ -119,7 +148,7 @@ func TestCredHomeRelayInjection(t *testing.T) {
 
 // TestCredSetupNeedsTheRunsProvider: home_relay through injection needs a
 // key for the run's own provider; without one the launch is refused
-// custody_unsatisfiable, unless a pool or the org route serves it.
+// custody_unsatisfiable, unless the org route serves it.
 func TestCredSetupNeedsTheRunsProvider(t *testing.T) {
 	obs, ks := credEnvForTest(t, true)
 	_ = ks.Set(sandboxcred.KeyName("openai"), "sk-openai")
@@ -129,7 +158,7 @@ func TestCredSetupNeedsTheRunsProvider(t *testing.T) {
 	}
 	credOtherHomeRelay = func() bool { return true }
 	if err := credSetup(context.Background(), credPlan(obs, "run-cred-2")); err != nil {
-		t.Fatalf("a pool-served home_relay was refused: %v", err)
+		t.Fatalf("an org-route-served home_relay was refused: %v", err)
 	}
 }
 

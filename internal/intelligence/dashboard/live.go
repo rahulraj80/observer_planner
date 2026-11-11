@@ -109,7 +109,7 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		// Active sessions, newest activity first. last_activity is the
 		// max timestamp across the three activity tables; all are
 		// RFC3339 UTC strings, so MAX() string comparison is correct.
-		rows, err := s.db().QueryContext(r.Context(),
+		rows, err := s.db().QueryContext(r.Context(), //nolint:gosec // G701: the query text is code constants plus constant-column fragments (modelfilter, timebucket); every request value is a bound ? arg
 			`SELECT s.id, s.tool, COALESCE(p.root_path, ''), s.started_at,
 			        MAX(COALESCE((SELECT MAX(a.timestamp) FROM actions a WHERE a.session_id = s.id), ''),
 			            COALESCE((SELECT MAX(t.timestamp) FROM api_turns t WHERE t.session_id = s.id), ''),

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -176,7 +177,11 @@ func TestHostedAdoptE2BReopensTheRelay(t *testing.T) {
 // the old one is gone, and refuses a record that names neither.
 func TestHostedRekeyRelayRun(t *testing.T) {
 	obs := t.TempDir()
-	old, err := sandboxrelayd.NewRunRecord(sandboxrelayd.RunRecord{RunID: "k1", Tool: "claude-code", ProjectRoot: "/w", WorkspaceDir: "/w", Roots: []string{"/w"}, Delivery: sandboxrelayd.DeliveryCopy, CopyHostPath: "/w"})
+	// A record written before FX4: no RemoteBox, this machine's tool state
+	// among its roots, a path map (FX4 fix round 2, FX4-R2).
+	stateRoots := []string{"/home/dev/.claude", "/home/dev/.claude.json", "/home/dev/.claude.json.backup"}
+	pm := []sandboxrelayd.PathPrefix{{Box: "/sandbox/workspace", Host: "/w"}, {Box: "/home/sandbox/.claude", Host: "/q/0"}}
+	old, err := sandboxrelayd.NewRunRecord(sandboxrelayd.RunRecord{RunID: "k1", Tool: "claude-code", ProjectRoot: "/w", WorkspaceDir: "/w", Roots: append([]string{"/w", "/q/0"}, stateRoots...), PathMap: pm, Delivery: sandboxrelayd.DeliveryCopy, CopyHostPath: "/w"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,6 +199,17 @@ func TestHostedRekeyRelayRun(t *testing.T) {
 	if bytes.Equal(fresh.BoxSecret, old.BoxSecret) || bytes.Equal(fresh.LinkSecret, old.LinkSecret) {
 		t.Fatal("the relay was not re-keyed")
 	}
+	// FX4-R2: the re-key marks the record remote, keeps its path map, and
+	// drops this machine's tool-state roots (the run's workspace and mapped
+	// hosts only).
+	if !fresh.RemoteBox || !slices.Equal(fresh.PathMap, pm) || !slices.Equal(fresh.Roots, []string{"/w", "/q/0"}) {
+		t.Fatalf("re-keyed record remote %v, path map %v, roots %v", fresh.RemoteBox, fresh.PathMap, fresh.Roots)
+	}
+	for _, s := range stateRoots {
+		if slices.Contains(fresh.Roots, s) {
+			t.Errorf("the re-key kept this machine's %s as a root", s)
+		}
+	}
 	if got, err := sandboxrelayd.ReadRun(obs, "k1"); err != nil || !bytes.Equal(got.BoxSecret, fresh.BoxSecret) {
 		t.Fatalf("stored record %v %v", got.RunID, err)
 	}
@@ -202,7 +218,7 @@ func TestHostedRekeyRelayRun(t *testing.T) {
 		t.Fatal("re-keyed a run whose records name no tool or workspace")
 	}
 	rec.Extra = map[string]string{sandboxremote.ExtraTool: "claude-code", sandboxremote.ExtraRoot: "/w"}
-	if f, err := hostedRekeyRelayRun(obs, rec); err != nil || f.WorkspaceDir != "/w" {
+	if f, err := hostedRekeyRelayRun(obs, rec); err != nil || f.WorkspaceDir != "/w" || !f.RemoteBox {
 		t.Fatalf("rebuilt = %+v %v", f, err)
 	}
 }

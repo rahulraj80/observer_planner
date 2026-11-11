@@ -219,10 +219,10 @@ function ModelFitContent({
             <strong>Cost/turn</strong> = total USD ÷ turns. Lower is more cost-efficient for this kind.
           </li>
           <li>
-            <strong>Error rate</strong> = turns with error_class ÷ total turns. {'>'}5% warrants investigation.
+            <strong>Error rate</strong> = turns with an error class ÷ total turns. {'>'}5% warrants investigation.
           </li>
           <li>
-            <strong>TTFT / Latency</strong> = average from api_turns (ms). Lower = snappier.
+            <strong>TTFT / Latency</strong> = average over API turns (ms). Lower = snappier.
           </li>
           <li>
             <strong>Cache read/write</strong> = prompt-cache utilization. High read = good; high write without read = churn.

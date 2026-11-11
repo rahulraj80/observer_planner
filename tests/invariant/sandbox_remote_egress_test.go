@@ -20,7 +20,7 @@ import (
 
 // sandboxRemoteClients are the vendor wire clients that exist in this
 // build's source tree.
-var sandboxRemoteClients = []string{"internal/sandboxremote/e2b", "internal/sandboxremote/modal", "internal/sandboxremote/vercel"}
+var sandboxRemoteClients = []string{"internal/sandboxremote/e2b", "internal/sandboxremote/modal", "internal/sandboxremote/vercel", "internal/sandboxremote/openshellorg"}
 
 // sandboxRemotePure are the hosted packages held to no network import.
 var sandboxRemotePure = []string{"internal/sandboxremote", "internal/sandboxremote/relaymux"}

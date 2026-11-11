@@ -83,8 +83,11 @@ var docSources = []string{
 
 // keyPattern is what a dotted key must look like to be emitted into a
 // TypeScript literal union; a key with other punctuation is a mistake
-// upstream, not something to render faithfully.
-var keyPattern = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)
+// upstream, not something to render faithfully. A hyphen is allowed in a
+// segment: it is a legal bare TOML key and a TypeScript string literal
+// holds it, and a table named after a backend row id carries one
+// ([terminal.sandbox.hosted.openshell-org], the org-hosted OpenShell row).
+var keyPattern = regexp.MustCompile(`^[a-z0-9_-]+(\.[a-z0-9_-]+)*$`)
 
 func main() {
 	jsonOut := flag.String("json", defaultJSONOut, "path of the generated schema JSON")

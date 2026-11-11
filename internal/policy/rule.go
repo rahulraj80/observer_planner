@@ -70,6 +70,10 @@ type MatchContext struct {
 	// Cfg is the engine configuration (Home, allowlists, protected
 	// branches, known roots) shared with matchers read-only.
 	Cfg *Config
+	// sqlEval is the R-126 rows' per-evaluation state (rules_database.go:
+	// each SQL file read once, the read budget spent across the
+	// evaluation). nil until a database rule first needs it.
+	sqlEval *sqlEvalState
 }
 
 // MatchFn is an event-scoped matcher: it inspects the whole

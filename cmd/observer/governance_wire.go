@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
@@ -123,6 +124,36 @@ func governanceShareProvider(cfg config.OrgClientConfig, ngov *nodeGovernanceHan
 	return func() store.ShareOptions {
 		eff := ngov.Effective(context.Background())
 		return lowerShareOptions(base, eff)
+	}
+}
+
+// cliGovernanceShareProvider is governanceShareProvider for a client built
+// outside the daemon (buildOrgBundleWith): `observer org push-now`, the
+// dashboard's push-now and every other org CLI verb. Without it such a client
+// shipped the raw [org_client.share] block, so a one-shot push ignored an
+// organization's lowering and missed a managed node's signed extraction
+// raise, and disagreed with the daemon's own pushes.
+//
+// The governance handle is built and its last-known-good body loaded on the
+// FIRST resolve, not when the bundle is built: buildOrgClient runs on the
+// daemon's readiness path on every node, and the daemon replaces this
+// provider with the one over its live handle (start.go).
+func cliGovernanceShareProvider(cfg config.Config, st *store.Store, logger *slog.Logger) func() store.ShareOptions {
+	var (
+		once    sync.Once
+		resolve func() store.ShareOptions
+	)
+	return func() store.ShareOptions {
+		once.Do(func() {
+			if logger == nil {
+				logger = slog.Default()
+			}
+			ctx := context.Background()
+			ngov := newNodeGovernanceHandle(governanceIdentityLoader(st), logger)
+			loadNodeGovernanceLKG(ctx, cfg, st, ngov, logger)
+			resolve = governanceShareProvider(cfg.OrgClient, ngov)
+		})
+		return resolve()
 	}
 }
 

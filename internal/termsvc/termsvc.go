@@ -242,7 +242,7 @@ type LaunchRequest struct {
 	// repository trust check honours the source repository's accepts.
 	SourceDir string
 	// SandboxEnvAllow and SandboxEnvPassed are PrepareResult.EnvAllow and
-	// EnvPassed for a sandboxed launch (WINFIX2 R-167): variable NAMES the
+	// EnvPassed for a sandboxed launch (WINFIX2, ledger SBX-WIN-ENV-1): variable NAMES the
 	// Launcher hands the box helper. Empty for every other launch.
 	SandboxEnvAllow  []string
 	SandboxEnvPassed []string
@@ -358,7 +358,7 @@ type PrepareResult struct {
 	Isolation termrun.Isolation
 	// EnvAllow names (never values) the variables the box may receive from
 	// the launching environment beyond its OS table: the tool's provider
-	// variables and the user's pass_env (WINFIX2 R-167). EnvPassed is the
+	// variables and the user's pass_env (WINFIX2, ledger SBX-WIN-ENV-1). EnvPassed is the
 	// pass_env part alone, for the run's posture. Additive.
 	EnvAllow  []string
 	EnvPassed []string
@@ -435,6 +435,10 @@ type runMeta struct {
 	// (MarkEnding), else set from the exit code at EndRunByHandle; retained
 	// past exit so the dashboard's exit frame can name it (endreason.go).
 	endReason string
+	// origin is who started the run, as recorded (lane cli-2): read by
+	// Origin for the live rows of `observer terminals ls` and the
+	// dashboard's Terminals list, with no store read.
+	origin termrun.Origin
 }
 
 // endedHandleGrace is how long a run's retained classification metadata (byMeta)
@@ -716,6 +720,9 @@ type FreshRequest struct {
 	// starting unseeded. Ignored when Sandbox is false. Additive.
 	SignInSeed *bool
 	SignInAsk  bool
+	// Origin is who started the run (lane cli-2, migration 220), recorded
+	// on its terminal_run row. The zero value records nothing. Additive.
+	Origin termrun.Origin
 }
 
 // SignInConsentError re-exports termcore's consent question (lane
@@ -809,6 +816,7 @@ func (s *Service) LaunchFresh(ctx context.Context, req FreshRequest) (LaunchResu
 		Kind:            termrun.KindFresh,
 		ProjectRootHash: termrun.HashProjectRoot(dir),
 		LaunchedAt:      s.now(),
+		Origin:          req.Origin,
 		Isolation:       iso,
 	}
 	var extraArgs, extraEnv []string
@@ -927,6 +935,9 @@ type SSHRequest struct {
 	// Rows / Cols are the initial PTY size (0 = OS default).
 	Rows uint16
 	Cols uint16
+	// Origin is who started the run (lane cli-2, migration 220), recorded
+	// on its terminal_run row. The zero value records nothing. Additive.
+	Origin termrun.Origin
 }
 
 // LaunchSSH authorizes and starts an outbound SSH shell to an operator-
@@ -969,6 +980,7 @@ func (s *Service) LaunchSSH(ctx context.Context, req SSHRequest) (LaunchResult, 
 		Tool:       SSHTool,
 		Kind:       termrun.KindSSH,
 		LaunchedAt: s.now(),
+		Origin:     req.Origin,
 	}
 	return s.launch(ctx, run, LaunchRequest{
 		Kind:    termrun.KindSSH,
@@ -1010,6 +1022,9 @@ type HandoffRequest struct {
 	FromMessage int
 	Rows        uint16
 	Cols        uint16
+	// Origin is who started the run (lane cli-2, migration 220), recorded
+	// on its terminal_run row. The zero value records nothing. Additive.
+	Origin termrun.Origin
 }
 
 // LaunchHandoff mints a run + starts a --continue-from launch. The source
@@ -1027,6 +1042,7 @@ func (s *Service) LaunchHandoff(ctx context.Context, req HandoffRequest) (Launch
 		Kind:            termrun.KindHandoff,
 		SourceSessionID: req.SessionID,
 		LaunchedAt:      s.now(),
+		Origin:          req.Origin,
 	}
 	return s.launch(ctx, run, LaunchRequest{
 		Subcommand:  req.Subcommand,
@@ -1062,6 +1078,9 @@ type AttachRequest struct {
 	// hatch + `--` tool remainder). Explicit + allow-listed, never a blind argv
 	// copy (B2/B3).
 	ExtraArgs []string
+	// Origin is who started the run (lane cli-2, migration 220), recorded
+	// on its terminal_run row. The zero value records nothing. Additive.
+	Origin termrun.Origin
 }
 
 // LaunchAttachable mints a KindAttach run and spawns a daemon-owned PTY on
@@ -1103,6 +1122,7 @@ func (s *Service) LaunchAttachable(ctx context.Context, req AttachRequest) (Laun
 		Kind:            termrun.KindAttach,
 		ProjectRootHash: termrun.HashProjectRoot(req.Dir),
 		LaunchedAt:      s.now(),
+		Origin:          req.Origin,
 	}
 	return s.launch(ctx, run, LaunchRequest{
 		Subcommand: req.Subcommand,
@@ -1133,6 +1153,9 @@ type ResumeRequest struct {
 	ExtraArgs       []string
 	Rows            uint16
 	Cols            uint16
+	// Origin is who started the run (lane cli-2, migration 220), recorded
+	// on its terminal_run row. The zero value records nothing. Additive.
+	Origin termrun.Origin
 }
 
 // LaunchResume authorizes and starts a NATIVE resume of a closed session. It
@@ -1173,6 +1196,7 @@ func (s *Service) LaunchResume(ctx context.Context, req ResumeRequest) (LaunchRe
 		SourceSessionID: req.SourceSessionID,
 		ProjectRootHash: termrun.HashProjectRoot(dir),
 		LaunchedAt:      s.now(),
+		Origin:          req.Origin,
 	}
 	res, err := s.launch(ctx, run, LaunchRequest{
 		Subcommand: req.Subcommand,
@@ -1282,6 +1306,7 @@ func (s *Service) launch(ctx context.Context, run termrun.Run, lr LaunchRequest)
 		sandboxed: lr.Sandboxed,
 		isolation: run.Isolation,
 		startedAt: s.now(),
+		origin:    run.Origin.Normalized(),
 	}
 	s.mu.Unlock()
 
@@ -1466,6 +1491,16 @@ func (s *Service) Sandboxed(handle string) (sandboxed bool, ok bool) {
 	defer s.mu.Unlock()
 	m, ok := s.byMeta[handle]
 	return m.sandboxed, ok
+}
+
+// Origin returns who started a live-or-lingering handle's run, as its
+// row recorded it (lane cli-2, migration 220). ok=false for an unknown
+// handle; a zero Origin means not recorded.
+func (s *Service) Origin(handle string) (termrun.Origin, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.byMeta[handle]
+	return m.origin, ok
 }
 
 // Isolation returns the G19 evidence a live-or-lingering handle's run

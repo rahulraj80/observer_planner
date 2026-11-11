@@ -21,8 +21,8 @@ import (
 // The route is whole-route Local: a lookup makes ONE outbound HTTPS request
 // to registry.npmjs.org, which a remote viewer must never be able to cause,
 // and the POST carries the owner-local confirm token like every other
-// owner-local action. The verb has no mutation; the opt-in itself stays a
-// [guard.cloud] config decision (Settings never edits [guard.cloud]).
+// owner-local action. The verb has no mutation; the opt-in itself is the
+// consent card's write (PUT /api/guard/cloud, guard_cloud.go), human-only.
 
 // guardReputationDoer is the dashboard lookup transport; a var so tests can
 // stub the registry (nil = the egress worker's production client).

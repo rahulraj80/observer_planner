@@ -230,6 +230,13 @@ export const GUARD_RULE_CATALOG: GuardRuleCatalogEntry[] = [
   { id: "R-110", category: "destructive", severity: "critical", observe: "flag", enforce: "deny", doc: "Force push to a protected branch." },
   { id: "R-111", category: "destructive", severity: "warn", observe: "flag", enforce: "ask", doc: "Deletion of a protected branch or tag." },
   { id: "R-120", category: "destructive", severity: "critical", observe: "flag", enforce: "deny", doc: "Destructive SQL through a database CLI (DROP/TRUNCATE/DELETE without WHERE)." },
+  // Database family: internal/policy/rules_database.go ([guard.database])
+  { id: "R-121", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "UPDATE without WHERE through a database CLI." },
+  { id: "R-122", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Schema destruction beyond DROP TABLE through a database CLI (DROP INDEX/VIEW/USER/ROLE, ALTER ... DROP)." },
+  { id: "R-123", category: "destructive", severity: "critical", observe: "flag", enforce: "deny", doc: "NoSQL or key-value store destruction (dropDatabase, deleteMany({}), FLUSHALL/FLUSHDB, DROP KEYSPACE)." },
+  { id: "R-124", category: "destructive", severity: "warn", observe: "flag", enforce: "flag", doc: "ORM or migration reset (prisma migrate reset, rails db:drop, alembic downgrade base, django flush, knex migrate:rollback --all)." },
+  { id: "R-125", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Database command whose host, connection string, database name or profile matches [guard.database] prod_patterns; off while the list is empty." },
+  { id: "R-126", category: "destructive", severity: "critical", observe: "flag", enforce: "deny", doc: "SQL run from a file (psql -f, mysql < file.sql) that drops, truncates, or updates or deletes without WHERE." },
   { id: "R-130", category: "destructive", severity: "critical", observe: "flag", enforce: "ask", doc: "Cloud-infrastructure destruction command." },
   { id: "R-140", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Package registry publish/yank." },
   { id: "R-141", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Bulk permission/ownership change (chmod -R 777 / chown -R outside project)." },
@@ -251,13 +258,25 @@ export const GUARD_RULE_CATALOG: GuardRuleCatalogEntry[] = [
   { id: "R-112", category: "boundary", severity: "critical", observe: "flag", enforce: "deny", doc: "Git command that skips the repository's hooks (--no-verify, -n, core.hooksPath for one command, injected git config, or an alias that does so)." },
   { id: "R-113", category: "boundary", severity: "high", observe: "flag", enforce: "deny", doc: "Git command run with a hook manager's skip switch in its environment (HUSKY=0, SKIP=, LEFTHOOK=0); an export of one alone asks." },
   { id: "R-114", category: "boundary", severity: "high", observe: "flag", enforce: "deny", doc: "Change to where or whether git hooks run: git config core.hooksPath or core.fsmonitor, writes into .git/config, refs or objects or the global git config (deny); hook-manager config and .gitattributes custom drivers (ask)." },
-  { id: "R-165", category: "boundary", severity: "high", observe: "flag", enforce: "deny", doc: "Agent approving its own guard exception or loosening the guard (observer guard approve, the dashboard's approval routes, a write into guard_approvals); an exception request is recorded." },
+  { id: "R-165", category: "boundary", severity: "high", observe: "ask", enforce: "deny", doc: "Agent approving its own guard exception or loosening the guard (observer guard approve, the dashboard's approval routes, a write into guard_approvals); an exception request is recorded, and the laptop-relay opt-in (observer sandbox org-shell opt-in) asks in both modes." },
   { id: "R-166", category: "boundary", severity: "high", observe: "flag", enforce: "deny", doc: "Agent write to a protected test, CI or coverage path; off until [guard.boundary].protected_path_classes names a class (tests, ci, coverage)." },
+  // Sandbox egress allow-list: internal/policy/rules_sandboxallow.go
+  { id: "R-167", category: "boundary", severity: "high", observe: "flag", enforce: "deny", doc: "Agent calling the local dashboard (the refusal advisor's apply or a settings route) or running observer config set to add a host to the sandbox egress allow-list." },
+  // Agent-initiated launches: internal/policy/rules_agentlaunch.go (lane cli-2)
+  { id: "R-168", category: "boundary", severity: "high", observe: "ask", enforce: "ask", doc: "Agent launching another agent (observer launch, a launcher verb or a loopback launch route); asked on every launch, no approval covers it." },
   // Exfil — internal/policy/rules_exfil.go
   { id: "R-170", category: "exfil", severity: "critical", observe: "flag", enforce: "deny", doc: "Remote content piped into an interpreter (curl|sh-class remote-code execution)." },
   { id: "R-171", category: "exfil", severity: "high", observe: "flag", enforce: "ask", doc: "Shell command uploading file contents to a remote destination." },
   { id: "R-172", category: "exfil", severity: "critical", observe: "flag", enforce: "deny", doc: "Secret-shaped value in a network command, an outbound LLM API request, or the developer's own prompt.", coverageLanes: CL_PROMPT_TOOL },
   { id: "R-173", category: "exfil", severity: "warn", observe: "flag", enforce: "flag", doc: "DNS lookup of an encoded-looking subdomain (DNS-tunnel exfil shape)." },
+  // Network family: internal/policy/rules_network.go ([guard.network]). The
+  // rules judge the hosts a command line names; they are not a firewall.
+  { id: "R-174", category: "exfil", severity: "critical", observe: "flag", enforce: "deny", doc: "Network command to a cloud metadata endpoint (169.254.169.254, metadata.google.internal) or a [guard.network] deny_hosts host." },
+  { id: "R-175", category: "exfil", severity: "warn", observe: "allow", enforce: "allow", doc: "Network command to a private, link-local, CGNAT or raw-IP target; silent until a level or pack raises it." },
+  { id: "R-176", category: "exfil", severity: "high", observe: "allow", enforce: "allow", doc: "Network command to a host not on [guard.network] allow_hosts (loopback always passes); silent until a level or pack raises it." },
+  { id: "R-177", category: "exfil", severity: "high", observe: "flag", enforce: "deny", doc: "Reverse shell or network listener (nc -l, socat, bash -i >& /dev/tcp/...)." },
+  { id: "R-178", category: "exfil", severity: "high", observe: "flag", enforce: "ask", doc: "Tunnel exposing this machine (ngrok, cloudflared tunnel, ssh -R)." },
+  { id: "R-179", category: "exfil", severity: "warn", observe: "flag", enforce: "ask", doc: "Network scanner (nmap, masscan)." },
   { id: "R-190", category: "pii", severity: "warn", observe: "flag", enforce: "deny", doc: "Deterministic PII (credit card, SSN, IBAN, ...) in the developer's own prompt text.", coverageLanes: CL_PROMPT },
   // Injection — internal/policy/rules_inject.go
   { id: "R-180", category: "injection", severity: "high", observe: "flag", enforce: "flag", doc: "Inbound tool-result/web content carries injection-shaped instruction patterns." },
@@ -309,15 +328,18 @@ export function guardMinDecisionFor(id: string): Decision | undefined {
 
 // isGuardIntegrityRuleId names the guard's own INTEGRITY rules — R-160 (agent
 // modifying observer/guard/hook config), R-161 (agent modifying the project
-// guard file), R-162 (agent turning a coding agent's hooks off, T-910) and
-// R-165 (agent approving its own guard exception, D-761).
-// Mirrors internal/policy/engine.go::IsIntegrityRuleID, a closed
-// set. The policy engine is a HARD BACKSTOP that refuses to disable or weaken
+// guard file), R-162 (agent turning a coding agent's hooks off, T-910),
+// R-165 (agent approving its own guard exception, D-761), R-167 (agent
+// adding a host to its own sandbox egress allow-list, OB-029) and R-168
+// (agent launching another agent, asked on every launch, lane cli-2).
+// Mirrors internal/policy/engine.go::IsIntegrityRuleID, a closed set;
+// internal/policy/integrity_ts_mirror_test.go fails when the two differ.
+// The policy engine is a HARD BACKSTOP that refuses to disable or weaken
 // these below the org floor at merge time regardless of layer, so the picker
 // must never OFFER a weaken it can't apply — even in a weaken-allowed layer.
 export function isGuardIntegrityRuleId(id: string): boolean {
   const needle = id.trim();
-  return needle === "R-160" || needle === "R-161" || needle === "R-162" || needle === "R-165";
+  return needle === "R-160" || needle === "R-161" || needle === "R-162" || needle === "R-165" || needle === "R-167" || needle === "R-168";
 }
 
 // guardDecisionOptionsFor returns the decisions legal for a given rule id
@@ -325,8 +347,8 @@ export function isGuardIntegrityRuleId(id: string): boolean {
 // free-text one). This is a UI hint only — the org/user lint is the real
 // gate. NOTE: a weaken-allowed layer (the trusted-project layer §3, or the
 // user/global structured picker) offers all four decisions — EXCEPT for an
-// integrity rule (R-160/R-161/R-162/R-165), which stays escalate-only even when weakening
-// is allowed, matching the policy engine's hard backstop.
+// integrity rule (isGuardIntegrityRuleId), which stays escalate-only even
+// when weakening is allowed, matching the policy engine's hard backstop.
 export function guardDecisionOptionsFor(id: string, allowWeaken = false): Decision[] {
   if (allowWeaken && !isGuardIntegrityRuleId(id)) return DECISIONS;
   const floor = guardMinDecisionFor(id);
@@ -447,6 +469,17 @@ export const GUARD_TAINT_SOURCES = [
 
 export const GUARD_SINKS = ["shell_exec", "git_push", "out_of_project_write", "mcp_call"] as const;
 
+// GUARD_FILE_ACCESS is match.access's vocabulary: a file rule narrowed to
+// reads or to writes (a write or edit, or any config change), the
+// classification R-150 uses. Empty (the editor's "either") matches both.
+export const GUARD_FILE_ACCESS = ["read", "write"] as const;
+export type GuardFileAccess = (typeof GUARD_FILE_ACCESS)[number];
+
+// GUARD_RULE_TEXT_MAX mirrors internal/guard/policyfile.go maxRuleDocLen: a
+// [[rule]]'s doc and advice are each one line of at most this many
+// characters.
+export const GUARD_RULE_TEXT_MAX = 300;
+
 // Command-scoped matcher fields (evaluated per parsed command, after the
 // shellparse unwrap). Implies applies_to = ["shell_exec"].
 export type GuardCommandMatch = {
@@ -464,6 +497,9 @@ export type GuardEventMatch = {
   path_not: string[];
   path_outside_project: boolean;
   path_sensitive: boolean;
+  // access narrows a file rule to reads or writes; "" matches both. It
+  // implies the file_access and config_change kinds, like the path matchers.
+  access: GuardFileAccess | "";
   url_domain: string;
   mcp_server: string;
   mcp_tool: string;
@@ -486,6 +522,11 @@ export type GuardRuleRow = {
   scope: GuardMatchScope;
   command: GuardCommandMatch;
   event: GuardEventMatch;
+  // doc is the rule's one-liner, the verdict reason's prefix the agent reads
+  // ("" keeps the guard's "<layer> rule <id>"); advice is the one sentence a
+  // verdict carries on what to do instead ("" = none). Both optional.
+  doc: string;
+  advice: string;
 };
 
 export function emptyGuardCommandMatch(): GuardCommandMatch {
@@ -498,6 +539,7 @@ export function emptyGuardEventMatch(): GuardEventMatch {
     path_not: [],
     path_outside_project: false,
     path_sensitive: false,
+    access: "",
     url_domain: "",
     mcp_server: "",
     mcp_tool: "",
@@ -520,6 +562,8 @@ export function emptyGuardRuleRow(): GuardRuleRow {
     scope: "event",
     command: emptyGuardCommandMatch(),
     event: emptyGuardEventMatch(),
+    doc: "",
+    advice: "",
   };
 }
 
@@ -536,6 +580,7 @@ export function guardRuleRowHasMatcher(r: GuardRuleRow): boolean {
     e.path_not.length ||
     e.path_outside_project ||
     e.path_sensitive ||
+    e.access ||
     e.url_domain.trim() ||
     e.mcp_server.trim() ||
     e.mcp_tool.trim() ||
@@ -560,6 +605,7 @@ export function guardRuleRowIsPureCondition(r: GuardRuleRow): boolean {
     e.path_not.length ||
     e.path_outside_project ||
     e.path_sensitive ||
+    e.access ||
     e.url_domain.trim() ||
     e.mcp_server.trim() ||
     e.mcp_tool.trim() ||
@@ -583,6 +629,15 @@ export function guardRuleRowProblems(r: GuardRuleRow): string[] {
     problems.push(
       "A pure-condition rule (taint_source / session_cost_usd_gt / repeat_count_gt) implies no event kind - set Applies to explicitly.",
     );
+  }
+  for (const [label, text] of [
+    ["Doc", r.doc],
+    ["Advice", r.advice],
+  ] as const) {
+    const t = text.trim();
+    if (/[\r\n]/.test(t) || t.length > GUARD_RULE_TEXT_MAX) {
+      problems.push(`${label} must be one line of at most ${GUARD_RULE_TEXT_MAX} characters.`);
+    }
   }
   return problems;
 }
@@ -619,6 +674,8 @@ export function composeRuleToml(
     lines.push(`decision   = ${tomlStr(r.decision)}`);
     if (r.enforce) lines.push("enforce    = true");
     if (r.applies_to.length) lines.push(`applies_to = ${tomlStrArray(r.applies_to)}`);
+    if (r.doc.trim()) lines.push(`doc        = ${tomlStr(r.doc.trim())}`);
+    if (r.advice.trim()) lines.push(`advice     = ${tomlStr(r.advice.trim())}`);
     if (r.scope === "command") {
       const c = r.command;
       if (c.command_regex.trim()) lines.push(`match.command_regex = ${tomlStr(c.command_regex.trim())}`);
@@ -630,6 +687,7 @@ export function composeRuleToml(
       if (e.path_not.length) lines.push(`match.path_not = ${tomlStrArray(e.path_not)}`);
       if (e.path_outside_project) lines.push("match.path_outside_project = true");
       if (e.path_sensitive) lines.push("match.path_sensitive = true");
+      if (e.access) lines.push(`match.access = ${tomlStr(e.access)}`);
       if (e.url_domain.trim()) lines.push(`match.url_domain = ${tomlStr(e.url_domain.trim())}`);
       if (e.mcp_server.trim()) lines.push(`match.mcp_server = ${tomlStr(e.mcp_server.trim())}`);
       if (e.mcp_tool.trim()) lines.push(`match.mcp_tool = ${tomlStr(e.mcp_tool.trim())}`);
@@ -766,6 +824,10 @@ export function parseRules(toml: string): ParsedGuardPolicy | null {
       const arr = parseTomlStringArray(val);
       if (arr === null) return null;
       curRule.applies_to = arr;
+    } else if (key === "doc" || key === "advice") {
+      const s = tomlUnquote(val);
+      if (s === null) return null;
+      curRule[key] = s;
     } else if (key.startsWith("match.")) {
       const field = key.slice("match.".length);
       const commandFields = new Set(["command_regex", "command_base", "arg_contains"]);
@@ -805,6 +867,12 @@ export function parseRules(toml: string): ParsedGuardPolicy | null {
           if (val !== "true" && val !== "false") return null;
           e.path_sensitive = val === "true";
           break;
+        case "access": {
+          const s = tomlUnquote(val);
+          if (s === null || !(GUARD_FILE_ACCESS as readonly string[]).includes(s)) return null;
+          e.access = s as GuardFileAccess;
+          break;
+        }
         case "url_domain": {
           const s = tomlUnquote(val);
           if (s === null) return null;

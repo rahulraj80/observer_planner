@@ -99,7 +99,7 @@ func parseRelayStdioArgs(args []string) (relayStdioArgs, error) {
 // readRelaySecret reads the per-run mux secret (an owner-only regular file
 // the home side uploaded) and removes it.
 func readRelaySecret(p string) ([]byte, error) {
-	fi, err := os.Lstat(p)
+	fi, err := os.Lstat(p) //nolint:gosec // G703: false positive; the secret file path the home side passed, checked owner-only and regular below
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func readRelaySecret(p string) ([]byte, error) {
 		return nil, fmt.Errorf("the secret file %s is not an owner-only regular file", p)
 	}
 	b, err := os.ReadFile(p) //nolint:gosec // G304: the path the home side passed, lstat-checked above
-	_ = os.Remove(p)
+	_ = os.Remove(p)         //nolint:gosec // G703: false positive; the secret file just read, removed as the protocol requires
 	if err != nil {
 		return nil, err
 	}

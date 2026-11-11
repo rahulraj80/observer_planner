@@ -139,6 +139,14 @@ func OutsideProjectPath(ctx *MatchContext) (bool, string) {
 	return true, "path " + ctx.Event.Target + " is outside the project root"
 }
 
+// IsWriteEvent reports whether a file-access or config-change event writes
+// (a write or edit verb, or any config change): the same classification
+// R-150's write row uses. Exported for the user-rule `access` matcher so
+// "is this a write" stays defined in one place.
+func IsWriteEvent(ev *Event) bool {
+	return ev != nil && isWriteEvent(ev)
+}
+
 // OutsideProjectWrite reports whether the event is a WRITE landing
 // outside its project root (the user-rule `sink =
 // "out_of_project_write"` condition). desc is the hit description.

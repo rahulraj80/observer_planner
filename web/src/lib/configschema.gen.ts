@@ -77,6 +77,21 @@ export type ConfigKeyPath =
   "observer.process.etw.token" |
   "observer.process.etw.token_path" |
   "observer.process.etw.handshake_timeout_ms" |
+  "observer.process.capture.enabled" |
+  "observer.process.capture.budget.per_tool_call" |
+  "observer.process.capture.budget.per_session" |
+  "observer.process.capture.budget.per_minute" |
+  "observer.process.capture.services.track" |
+  "observer.process.capture.services.detach_after_minutes" |
+  "observer.process.capture.services.exemplars_per_service" |
+  "observer.process.capture.services.tail_minutes" |
+  "observer.process.capture.services.extra_basenames" |
+  "observer.process.capture.fold.enabled" |
+  "observer.process.capture.fold.extra_basenames" |
+  "observer.process.capture.metrics.ring_min_lifetime_seconds" |
+  "observer.process.capture.rollups.bucket_seconds" |
+  "observer.process.capture.unattributed.pending_hours" |
+  "observer.process.capture.unattributed.mode" |
   "observer.db.hard_heap_limit_mb" |
   "observer.db.temp_store" |
   "observer.db.max_open_conns" |
@@ -246,6 +261,7 @@ export type ConfigKeyPath =
   "projects.alignment_judge" |
   "projects.skill_history" |
   "projects.skill_history_skew_seconds" |
+  "projects.quality_metrics" |
   "delivery.local" |
   "delivery.poll_minutes" |
   "delivery.mirror_cap_mb" |
@@ -330,6 +346,7 @@ export type ConfigKeyPath =
   "terminal.sandbox.pass_env" |
   "terminal.sandbox.sign_in_seed_tools" |
   "terminal.sandbox.allow_osc52_clipboard" |
+  "terminal.sandbox.seccomp" |
   "terminal.sandbox.backends" |
   "terminal.sandbox.min_isolation" |
   "terminal.sandbox.oci.allow_rootful" |
@@ -373,12 +390,18 @@ export type ConfigKeyPath =
   "terminal.sandbox.hosted.vercel.box_binary" |
   "terminal.sandbox.hosted.vercel.endpoint" |
   "terminal.sandbox.hosted.vercel.endpoint_spki_sha256" |
+  "terminal.sandbox.hosted.openshell-org.laptop_relay" |
+  "terminal.sandbox.hosted.openshell-org.hold_on_end" |
   "terminal.sandbox.readopt.bound_minutes" |
   "terminal.sandbox.readopt.checkpoint_cap_mib" |
   "terminal.sandbox.wslc.path" |
   "terminal.sandbox.wslc.image" |
   "terminal.sandbox.hcs.utility_vm_image" |
   "terminal.sandbox.windows.mxc_tier" |
+  "terminal.sandbox.openshell.gateway_mode" |
+  "terminal.sandbox.openshell.endpoint" |
+  "terminal.sandbox.openshell.version" |
+  "terminal.sandbox.openshell.state_dir" |
   "terminal.sandbox.vm.vmm" |
   "terminal.sandbox.vm.image_set" |
   "terminal.sandbox.vm.vcpus" |
@@ -387,6 +410,7 @@ export type ConfigKeyPath =
   "terminal.sandbox.vm.workspace_delivery" |
   "terminal.sandbox.vm.cloud_hypervisor_path" |
   "terminal.sandbox.vm.virtiofsd_path" |
+  "terminal.sandbox.setup.allow_elevated" |
   "terminal.ssh.enabled" |
   "terminal.ssh.connect_timeout_seconds" |
   "terminal.ssh.keepalive_seconds" |
@@ -427,6 +451,12 @@ export type ConfigKeyPath =
   "security.deps.index_download" |
   "security.deps.unknown_action" |
   "security.deps.online_unknown_action" |
+  "security.deps.db_source" |
+  "security.deps.db_fallback_upstream" |
+  "security.deps.match" |
+  "security.deps.remote_via" |
+  "security.deps.remote_kinds" |
+  "security.deps.remote_private" |
   "security.secrets.write_check" |
   "security.secrets.commit_check" |
   "security.secrets.postwrite_cap_kib" |
@@ -441,6 +471,10 @@ export type ConfigKeyPath =
   "security.scan.opengrep.schedule_hours" |
   "security.scan.opengrep.pause_on_battery" |
   "security.scan.opengrep.feed" |
+  "security.scan.opengrep.taint_pass" |
+  "security.scan.opengrep.taint_pass_budget_seconds" |
+  "security.scan.opengrep.taint_pass_jobs" |
+  "security.scan.opengrep.taint_pass_memory_mib" |
   "security.scan.trivy.post_write" |
   "security.scan.trivy.schedule_hours" |
   "security.scan.trivy.run_on_battery" |
@@ -451,6 +485,7 @@ export type ConfigKeyPath =
   "security.scan.kics.run_on_battery" |
   "security.scan.kics.allow_repo_config" |
   "security.scan.kics.allow_unpinned" |
+  "security.scan.image.driver" |
   "security.scanning.quick_scan_budget_s" |
   "security.scanning.max_scan_staleness_min" |
   "security.scanning.min_blocking_severity" |
@@ -458,6 +493,9 @@ export type ConfigKeyPath =
   "security.scanning.reflog_hold_max_age_days" |
   "security.scanning.reflog_hold_max_entries" |
   "security.trust.prelaunch" |
+  "security.reach.go.source_memory_mib" |
+  "security.reach.go.source_timeout_seconds" |
+  "security.reach.go.source_max_modules" |
   "messages.toast" |
   "messages.vscode" |
   "messages.statusline" |
@@ -511,6 +549,7 @@ export type ConfigKeyPath =
   "guard.enabled" |
   "guard.mode" |
   "guard.strict" |
+  "guard.level" |
   "guard.retention_days" |
   "guard.rules.disable" |
   "guard.rules.evasion_window_seconds" |
@@ -522,6 +561,9 @@ export type ConfigKeyPath =
   "guard.boundary.allow_paths" |
   "guard.boundary.protected_branches" |
   "guard.boundary.protected_path_classes" |
+  "guard.database.prod_patterns" |
+  "guard.network.allow_hosts" |
+  "guard.network.deny_hosts" |
   "guard.taint.enabled" |
   "guard.taint.decay_turns" |
   "guard.proxy.egress_scan" |

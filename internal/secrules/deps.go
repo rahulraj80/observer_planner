@@ -44,10 +44,11 @@ const reasonTooMany = "too_many_packages"
 
 // notSetUpDetail is the note's own wording (lane SEC-D1FIX2 milestone
 // 2d): it is not a finding about the package.
-const notSetUpDetail = "package checks are not set up yet: no package index is installed and online checks are off or not accepted (Code security > Package checks); this install was not checked"
+const notSetUpDetail = "package checks are not set up yet: no package index is installed and online checks are off or not accepted (Code security > Scanners > Package checks); this install was not checked"
 
-// depsAdvice is addressed to the human.
-const depsAdvice = "Check the package name and its source before installing; the developer can review it on Code security and approve it with `observer guard approve`."
+// depsAdvice is addressed to the human. The approve is on the verdict
+// (Security > Verdicts) or the CLI, as gateAdvice says.
+const depsAdvice = "Check the package name and its source before installing; the developer can review it on Code security and approve it from its verdict on Security > Verdicts or with `observer guard approve`."
 
 // depsRow is one row of the install gate table.
 type depsRow struct {

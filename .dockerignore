@@ -19,6 +19,12 @@
 .wrangler
 bin
 tmp
+# Local working state: Claude Code's .claude/worktrees holds full checkouts
+# (several GB on a dev box) and .tmp-* holds session scratch. Neither is a
+# build input; before this, one org build from a dev checkout copied ~8 GB of
+# them into the builder (2026-11-02).
+.claude
+.tmp-*
 marketing
 harness-gateway
 model-pricing
@@ -85,6 +91,21 @@ deploy/observer-gateway/config
 # The one template a build needs: observer-org go:embeds it for
 # `observer-org deploy export`.
 !deploy/observer-org/production/.env.example
+# The OpenShell bundle's template, embedded by name in deploy/embed.go: without
+# this the observer-org image build fails ("pattern
+# observer-openshell/.env.example: no matching files found").
+!deploy/observer-openshell/.env.example
+# The OpenShell gate's tracked test-bundle fixtures (stand-ins, never a real
+# secret, per their README; read by
+# deploy/modules/**/tests/*.tftest.hcl). They are under testdata/, not
+# tests/, so the export's prune does not take them; keeping them in the
+# context makes a working-tree observer-org image embed what a release
+# build does (TestDockerignoreKeepsTrackedEmbedRoots). Named one by one:
+# a wildcard exception makes BuildKit walk every excluded directory.
+!deploy/modules/_shared/openshell/testdata/bundle-on/.env
+!deploy/modules/_shared/openshell/testdata/bundle-on/openshell/.env
+!deploy/modules/_shared/openshell/testdata/bundle-tag-only/.env
+!deploy/modules/_shared/openshell/testdata/bundle-tag-only/openshell/.env
 # Local OpenTofu state, its provider cache and filled tfvars. The committed
 # tfvars fixtures live deeper (tests/fixtures/) and stay.
 **/*.tfstate

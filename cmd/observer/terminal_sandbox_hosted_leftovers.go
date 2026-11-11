@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/sandbox"
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
+	"github.com/marmutapp/superbased-observer/internal/termsvc"
+	"github.com/marmutapp/superbased-observer/internal/workspace"
 )
 
 // terminal_sandbox_hosted_leftovers.go holds the user actions of the hosted
@@ -107,9 +110,59 @@ func hostedVendorArg(id string) (sandboxremote.Vendor, error) {
 	return v, nil
 }
 
+// errHostedMinted refuses a stored-credential verb for a vendor whose every
+// call carries a token minted per run (Vendor.MintedCredential, lane G4 fix
+// round 1, A7): there is nothing to connect, disconnect or adopt.
+func errHostedMinted(v sandboxremote.Vendor) error {
+	return fmt.Errorf("%s has no stored credential and no reattach: every call carries a short-lived token your organization mints for the run; sign in with `observer sandbox org-shell login`", v.Name)
+}
+
+// hostedStoredVendorArg is hostedVendorArg for the verbs that store,
+// remove or use a stored credential.
+func hostedStoredVendorArg(id string) (sandboxremote.Vendor, error) {
+	v, err := hostedVendorArg(id)
+	if err == nil && v.MintedCredential {
+		return v, errHostedMinted(v)
+	}
+	return v, err
+}
+
+// hostedVendorDailyQuota is the registered vendor's own per-member daily
+// quota (hostedVendorReg.dailyQuota), 0 when the vendor publishes none or
+// its driver is not in this build.
+func hostedVendorDailyQuota(id string, c config.TerminalSandboxHostedConfig) int {
+	if reg, ok := hostedVendorRegs[id]; ok && reg.dailyQuota != nil {
+		return reg.dailyQuota(c)
+	}
+	return 0
+}
+
+// hostedApplyOrgQuota adds the organization's own daily quota under the
+// machine's spend cap, for a row whose endpoint only an organization
+// publishes (the vendor capability OrgEndpoint), in the one wording the
+// org's approve page uses (sandboxvocab.OrgDailyBoxMinutesPhrase), so the
+// two screens name the same quantity the same way. A body that names no
+// quota adds nothing. The line is shown, not bound: the org enforces it.
+func hostedApplyOrgQuota(scr *sandboxremote.ConsentScreen, v sandboxremote.Vendor, perMember int) {
+	if !v.OrgEndpoint || perMember <= 0 {
+		return
+	}
+	line := sandboxremote.ConsentLine{Label: "Organization quota", Value: vocab.OrgDailyBoxMinutesPhrase(perMember) + "; it applies as well as this machine's cap"}
+	for i := range scr.Lines {
+		if scr.Lines[i].Label == "Spend cap" {
+			scr.Lines = slices.Insert(scr.Lines, i+1, line)
+			return
+		}
+	}
+	scr.Lines = append(scr.Lines, line)
+}
+
 // hostedConsentFor computes the consent facts and screen for provider over
-// a workspace root under cfg.
-func hostedConsentFor(ctx context.Context, cfg config.TerminalSandboxConfig, observerDir string, v sandboxremote.Vendor, root string) (sandboxremote.ConsentScreen, error) {
+// a workspace root under cfg. A cloneURL (a clone-remote launch) scopes the
+// consent to that box-side clone instead of the root's upload, through the
+// launch's own delivery check and scope key, so the recorded consent is
+// exactly the one the launch asks for (FX3 item 3, F-L6P4-1).
+func hostedConsentFor(ctx context.Context, cfg config.TerminalSandboxConfig, observerDir string, v sandboxremote.Vendor, root, cloneURL string) (sandboxremote.ConsentScreen, error) {
 	pc := hostedVendorConfig(cfg.Hosted, v.ID)
 	region, endpoint, ok := hostedResolve(v, pc)
 	if !ok {
@@ -124,8 +177,17 @@ func hostedConsentFor(ctx context.Context, cfg config.TerminalSandboxConfig, obs
 		return sandboxremote.ConsentScreen{}, fmt.Errorf("%s has no %s tier; set [terminal.sandbox].egress to internet, proxy_only or none", v.Name, tier)
 	}
 	d := &hostedDriver{cfg: cfg.Hosted, vendor: v, r: &sandboxRuntime{cfg: cfg, observerDir: observerDir}}
-	m, err := d.manifest(ctx, root)
-	if err != nil {
+	var m sandboxremote.Manifest
+	if cloneURL != "" {
+		del, err := hostedSourceDelivery(v, termsvc.PrepareRequest{WorkspaceSource: string(workspace.SourceCloneRemote), WorkspaceRemote: cloneURL}, cfg)
+		if err != nil {
+			return sandboxremote.ConsentScreen{}, err
+		}
+		if del.Delivery != workspace.DeliveryRemoteClone {
+			return sandboxremote.ConsentScreen{}, fmt.Errorf("%s has no box-side clone", v.Name)
+		}
+		m = sandboxremote.Manifest{Root: root, ScopeKey: sandboxremote.RemoteCloneScopeKey(del.CloneURL)}
+	} else if m, err = d.manifest(ctx, root); err != nil {
 		return sandboxremote.ConsentScreen{}, err
 	}
 	capture := hostedConsentCapture(v.ID, tier, vocab.KeyCustody(cfg.Hosted.KeyCustody))
@@ -135,6 +197,7 @@ func hostedConsentFor(ctx context.Context, cfg config.TerminalSandboxConfig, obs
 		MemoryImages: cfg.Hosted.MemoryImages, MaxRunMinutes: cfg.Hosted.MaxRunMinutes, DailyBoxMinutes: cfg.Hosted.DailyBoxMinutes,
 	}
 	scr := sandboxremote.BuildConsentScreen(v, f, m, v.EstimateCost(cfg.Hosted.MaxRunMinutes))
+	hostedApplyOrgQuota(&scr, v, hostedVendorDailyQuota(v.ID, cfg.Hosted))
 	hostedApplyCredConsent(ctx, &scr, v.Name, capture)
 	return scr, nil
 }
@@ -232,8 +295,8 @@ func renderHostedRelayLogs(out io.Writer, logs []keptHostedRelayLog) {
 
 func newHostedConsentCmd() *cobra.Command {
 	var (
-		cfgPath, workspace string
-		yes, revoke        bool
+		cfgPath, workspace, cloneURL string
+		yes, revoke                  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "consent <provider>",
@@ -261,7 +324,7 @@ func newHostedConsentCmd() *cobra.Command {
 			if abs, err := filepath.Abs(workspace); err == nil {
 				workspace = abs
 			}
-			scr, err := hostedConsentFor(cmd.Context(), cfg, obs, v, workspace)
+			scr, err := hostedConsentFor(cmd.Context(), cfg, obs, v, workspace, cloneURL)
 			if err != nil {
 				return err
 			}
@@ -296,6 +359,7 @@ func newHostedConsentCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&cfgPath, "config", "", "config file")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "the workspace root to upload (default: the current directory)")
+	cmd.Flags().StringVar(&cloneURL, "clone-url", "", "record the consent for a clone-remote launch of this repository URL (the box clones it; nothing is uploaded), exactly as the launch passes it")
 	cmd.Flags().BoolVar(&yes, "yes", false, "agree without the prompt (after reading the screen)")
 	cmd.Flags().BoolVar(&revoke, "revoke", false, "remove the recorded agreement")
 	return cmd
@@ -307,7 +371,7 @@ func newHostedConnectCmd() *cobra.Command {
 		Short: "Store a provider credential in the OS keychain, bound to the configured region's endpoint (read from stdin)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, err := hostedVendorArg(args[0])
+			v, err := hostedStoredVendorArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -348,7 +412,7 @@ func newHostedDisconnectCmd() *cobra.Command {
 		Short: "Remove a stored provider credential",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			v, err := hostedVendorArg(args[0])
+			v, err := hostedStoredVendorArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -486,6 +550,12 @@ func hostedDeleteRun(ctx context.Context, observerDir, runID string, force bool,
 			return nil
 		}
 	}
+	if v, _ := sandboxremote.VendorFor(rec.Provider); v.MintedCredential {
+		// The box is the organization's (held, or collected and deleted by
+		// its worker): this machine only hands its record over, never
+		// deletes (fix round 1, A5).
+		return hostedHandOverRecord(observerDir, rec, out)
+	}
 	c, cred, err := hostedClientFor(observerDir, rec)
 	if err != nil {
 		return err
@@ -516,6 +586,19 @@ func hostedDeleteRun(ctx context.Context, observerDir, runID string, force bool,
 		what = fmt.Sprintf("deleted the %s box %s (confirmed by the provider)", rec.Provider, strings.Join(ids, ", "))
 	}
 	fmt.Fprintf(out, "run %s: %s; %s\n", runID, what, settled)
+	return nil
+}
+
+// hostedHandOverRecord ends this machine's record of a MintedCredential
+// vendor's run without a vendor call: the ledger settles, the record goes,
+// and the organization holds, or collects and deletes, the box.
+func hostedHandOverRecord(observerDir string, rec sandboxremote.Record, out io.Writer) error {
+	settled := hostedSettleLeftover(observerDir, rec, time.Now())
+	rec.State, rec.LastError = sandboxremote.StateGone, "handed to the organization"
+	if err := hostedRemoveRecord(observerDir, rec); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "run %s: this machine's record was handed to your organization (its box is held, or collected and deleted by the organization; nothing was deleted from here); %s\n", rec.RunID, settled)
 	return nil
 }
 
@@ -603,6 +686,9 @@ func hostedAdopt(ctx context.Context, observerDir, runID string, in io.Reader, o
 		return errHostedRunLive(runID)
 	}
 	v, _ := sandboxremote.VendorFor(rec.Provider)
+	if v.MintedCredential {
+		return errHostedMinted(v)
+	}
 	pid := rec.Extra["pty_pid"]
 	guest := hostedGuestReattachOn(v) && rec.Extra[sandboxremote.ExtraGuestAttach] == "1"
 	native := v.Reattach && pid != ""
@@ -689,6 +775,9 @@ type hostedProviderView struct {
 	ConsentVerdict string                       `json:"consent_verdict,omitempty"`
 	Unverified     []string                     `json:"unverified"`
 	EndpointDocs   []sandboxremote.EndpointDoc  `json:"endpoint_docs"`
+	// CloneRepositories are the repositories a clone-remote launch on this
+	// row may name (the picker of the clone consent, FX3 item 3).
+	CloneRepositories []string `json:"clone_repositories,omitempty"`
 }
 
 // hostedDashboardRoutes are the Hosted sandboxes panel's routes. Every one
@@ -709,7 +798,7 @@ func hostedDashboardRoutes(configPath string) []dashapi.ExtraRoute {
 			h(w, r)
 		}
 	}
-	return []dashapi.ExtraRoute{
+	routes := []dashapi.ExtraRoute{
 		{Pattern: "GET /api/terminal/sandbox/hosted", Capability: dashapi.CapabilityLocal, Handler: gate(func(w http.ResponseWriter, r *http.Request) {
 			hostedGetHandler(w, r, load)
 		})},
@@ -717,8 +806,25 @@ func hostedDashboardRoutes(configPath string) []dashapi.ExtraRoute {
 			hostedConsentHandler(w, r, load)
 		})},
 		{Pattern: "POST /api/terminal/sandbox/hosted/leftovers/delete", Capability: dashapi.CapabilityLocal, Handler: gate(hostedLeftoverDeleteHandler)},
+		// The Connect form (dashboard CLI parity item B-G2, ruling R5 of the
+		// sandbox installation lifecycle plan): one connect route for the
+		// Hosted sandboxes panel and the setup step
+		// (terminal_sandbox_hosted_connect_route.go), and its disconnect
+		// (terminal_sandbox_hosted_connect_routes.go).
+		hostedConnectRoute(configPath, gate),
+		{Pattern: "POST /api/terminal/sandbox/hosted/disconnect", Capability: dashapi.CapabilityLocal, Handler: gate(hostedDisconnectHandler)},
 	}
+	// A driver's own owner-local routes (lane G4: the org-hosted row's
+	// Settings card and held sessions), registered from its file's init.
+	for _, f := range hostedExtraDashboardRoutes {
+		routes = append(routes, f(configPath, gate)...)
+	}
+	return routes
 }
+
+// hostedExtraDashboardRoutes are the routes a hosted driver adds; each gets
+// the panel's own gate (404 while no hosted driver is active).
+var hostedExtraDashboardRoutes []func(configPath string, gate func(http.HandlerFunc) http.HandlerFunc) []dashapi.ExtraRoute
 
 func hostedGetHandler(w http.ResponseWriter, r *http.Request, load func(context.Context) (config.TerminalSandboxConfig, error)) {
 	tok := hostedConfirmToken(w, r)
@@ -733,6 +839,7 @@ func hostedGetHandler(w http.ResponseWriter, r *http.Request, load func(context.
 		return
 	}
 	workspace := strings.TrimSpace(r.URL.Query().Get("workspace"))
+	repository := strings.TrimSpace(r.URL.Query().Get("repository"))
 	ids := make([]string, 0, len(hostedVendorRegs))
 	for id := range hostedVendorRegs {
 		ids = append(ids, id)
@@ -742,8 +849,11 @@ func hostedGetHandler(w http.ResponseWriter, r *http.Request, load func(context.
 	for _, id := range ids {
 		v, _ := sandboxremote.VendorFor(id)
 		pv := hostedProviderView{ID: id, Name: v.Name, Credential: hostedCredentialSource(obs, v), CredentialEnv: v.EnvCredential, Consent: hostedLoadConsent(obs, id), Unverified: v.Unverified, EndpointDocs: v.Docs}
+		if reg := hostedVendorRegs[id]; reg.cloneRepositories != nil {
+			pv.CloneRepositories = reg.cloneRepositories(cfg.Hosted)
+		}
 		if workspace != "" && filepath.IsAbs(workspace) {
-			if scr, err := hostedConsentFor(r.Context(), cfg, obs, v, workspace); err != nil {
+			if scr, err := hostedConsentFor(r.Context(), cfg, obs, v, workspace, repository); err != nil {
 				pv.ScreenError = err.Error()
 			} else {
 				pv.Screen = &scr
@@ -771,7 +881,10 @@ func hostedConsentHandler(w http.ResponseWriter, r *http.Request, load func(cont
 	var body struct {
 		Provider  string `json:"provider"`
 		Workspace string `json:"workspace"`
-		Revoke    bool   `json:"revoke"`
+		// Repository, when set, records the consent for a clone-remote
+		// launch of that URL (FX3 item 3).
+		Repository string `json:"repository"`
+		Revoke     bool   `json:"revoke"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -798,7 +911,7 @@ func hostedConsentHandler(w http.ResponseWriter, r *http.Request, load func(cont
 		http.Error(w, "a loaded config and an absolute workspace are required", http.StatusBadRequest)
 		return
 	}
-	scr, err := hostedConsentFor(r.Context(), cfg, obs, v, body.Workspace)
+	scr, err := hostedConsentFor(r.Context(), cfg, obs, v, body.Workspace, strings.TrimSpace(body.Repository))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

@@ -188,8 +188,8 @@ Click any session to open its detail view. Four of its tabs:
 
 `observer_planner` is a feature fork of
 [`superbasedapp/observer`](https://github.com/superbasedapp/observer), maintained by
-`rahulraj80`. Upstream is merged in periodically (last: the 2026-10-14 public snapshot, after
-v1.36.0); everything else on this page describes the upstream product. The fork adds:
+`rahulraj80`. Upstream is merged in periodically (last: v1.38.0, released 2026-11-09);
+everything else on this page describes the upstream product. The fork adds:
 
 - **Daily Briefing** (`/briefing` in the node and org dashboards). One screen telling the story of
   the most recent completed day: KPIs, per-tool activity, top sessions, a narrative, and expandable

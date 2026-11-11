@@ -228,7 +228,7 @@ export function LLMConnectionsCard({
           Optional endpoints the daily briefing can point analysis at (narrative upgrade + grounded Q&amp;A).
           Nothing is configured by default - with no connections the briefing is data-only. A loopback host
           (Ollama / vLLM / llama.cpp) is keyless; a remote provider needs{" "}
-          <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">allow_remote</code> plus a key, which
+          <strong>Allow remote</strong> checked plus a key, which
           is stored in the OS keychain - <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">config.toml</code>{" "}
           holds only the label, never the key. Restart required after save.
         </p>
@@ -340,7 +340,7 @@ export function LLMConnectionsCard({
                   onChange={(e) => updateConn(id, { APIKeyEnv: e.target.value })}
                 />
               </Field>
-              <Field label="Knobs (timeout_ms / max_tokens / num_ctx)">
+              <Field label="Knobs (timeout ms / max tokens / context size)">
                 <div className="grid grid-cols-3 gap-2">
                   {(["TimeoutMS", "MaxTokens", "NumCtx"] as const).map((k) => (
                     <input

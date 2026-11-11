@@ -32,6 +32,9 @@ func serverRows() []Component {
 				"github.com/jackc/pgx/v5", "modernc.org/sqlite", "github.com/nats-io/nats-server/v2", "github.com/nats-io/nats.go",
 				"github.com/parquet-go/parquet-go", "github.com/BurntSushi/toml", "github.com/spf13/cobra", "github.com/google/uuid",
 				"golang.org/x/sys", "golang.org/x/crypto", "golang.org/x/text", "github.com/tailscale/hujson", "gopkg.in/yaml.v3",
+				// internal/policy's network rules normalise hosts with
+				// x/net/idna (NET-8, 2026-11-08).
+				"golang.org/x/net",
 				"github.com/oapi-codegen/runtime", "github.com/coder/websocket", "google.golang.org/grpc", "google.golang.org/protobuf",
 				"go.opentelemetry.io/proto/otlp",
 				// The neutral self-observability model (internal/selfobs/shape
@@ -197,6 +200,30 @@ func serverRows() []Component {
 			Note:          "Off by default and inert when off in every deployment shape (docs/agent-access.md). Without it (-tags sbo_omit_org_agentaccess) a node push is still accepted by member key: its MCP relay rows are dropped with a counted, logged reason, never a 400 (ruling D-504), and a tools.mcp_access policy publish is refused because its compiler is not in the image.",
 		},
 		{
+			// The org-hosted OpenShell gateway (tracker F-019,
+			// docs/plans/openshell/build/g1-design.md, lane G2): the issuer,
+			// device approval and grants, the mint, the box ledger and the
+			// internal decision API the front calls. -tags
+			// sbo_omit_org_openshell links server_openshell_off.go (no route,
+			// no listener, an enabled config refuses the boot) and the cmd
+			// verbs' off half. Lane G3 adds the validating front, the gateway
+			// client and the sync, and the OpenShell Go SDK they link (the
+			// tagged module's generated package, W9) as DirectModules.
+			ID: "org.openshell", Class: ClassServer, Binary: BinaryOrg,
+			Title:  "OpenShell (org-hosted)",
+			About:  "The org-hosted OpenShell gateway: the token issuer, per-machine sign-in grants, the run-token mint, the box ledger, the validating front, the gateway sync with its reaper, drain and collect, and the admin surfaces.",
+			Levels: l1Done,
+			Routes: []string{"/api/agent/sandbox/openshell", "/sandbox/openshell", "/sandbox-idp", "/api/org/openshell"},
+			Packages: []string{
+				"internal/orgserver/openshellctl", "internal/orgserver/openshellidp", "internal/orgserver/openshellfront",
+				"internal/orgserver/openshellgw", "internal/orgserver/openshellgw/gwclient",
+			},
+			DirectModules: []string{"github.com/NVIDIA/OpenShell/sdk/go", "google.golang.org/grpc", "google.golang.org/protobuf", "gopkg.in/yaml.v3"},
+			Stability:     StabilityPreview,
+			Images:        img(ImageOff, ImageOut),
+			Note:          "Off by default ([openshell].enabled in the server config) and inert when off: no route, no listener, no goroutine. Without it (-tags sbo_omit_org_openshell) its routes answer not_in_image and a config that enables it refuses the boot.",
+		},
+		{
 			// Security pillar Phase E (security plan 4.2, lane SEC-E): "off
 			// until configured". E1 builds the server half of the
 			// security.scanning family compiler (its pair file
@@ -225,20 +252,30 @@ func serverRows() []Component {
 			// mode (off, relay or mirror). Its declared egress is the server
 			// lane org.security.relay (tests/invariant/server_egress_lanes_test.go):
 			// the exact hosts of internal/secfeed/online, only in relay mode
-			// and for `observer-org security mirror sync`.
+			// and for `observer-org security mirror sync` (and its opt-in
+			// scheduled run, [security.relay].mirror_sync_interval). Lane
+			// RM-3 adds the SuperBased package lookup's shards: the agent
+			// shard route /api/agent/security/shards/ (served to a managed
+			// node whose org's signed security policy sets package_lookup =
+			// org_mirror) and the server lane org.security.shards
+			// (shards.superbased.app, `observer-org security mirror shards
+			// sync`, scheduled only with [security.relay].mirror_shards).
 			ID: "org.security.relay", Class: ClassServer, Binary: BinaryOrg,
 			Title:         "Code security relay and mirror",
-			About:         "Answers managed nodes' online package checks (relay mode, querying the public sources on their behalf) or from the org's imported mirror (mirror mode, air-gapped), and serves the mirrored security content.",
+			About:         "Answers managed nodes' online package checks (relay mode, querying the public sources on their behalf) or from the org's imported mirror (mirror mode, air-gapped), and serves the mirrored security content, including the SuperBased package lookup's advisory shards.",
 			Levels:        l1Done,
-			Routes:        []string{"/api/agent/security/lookup", "/api/agent/security/content", "/api/org/security/relay"},
-			Packages:      []string{"internal/orgserver/secrelay", "internal/secfeed", "internal/secfeed/online"},
+			Routes:        []string{"/api/agent/security/lookup", "/api/agent/security/content", "/api/agent/security/shards", "/api/org/security/relay"},
+			Packages:      []string{"internal/orgserver/secrelay", "internal/secfeed", "internal/secfeed/online", "internal/secscan/osvshard/shardnet"},
 			DirectModules: []string{"golang.org/x/mod", "github.com/BurntSushi/toml", "gopkg.in/yaml.v3"},
 			Requires:      []string{"org.security"},
-			Surface:       Surface{Egress: []Egress{{Host: "api.osv.dev, the public package registries, superbased.app", Purpose: "Relayed package checks and mirror sync", Gate: "config", Trigger: TriggerOptIn}}},
-			Ledger:        []string{"SECP-26"},
-			Stability:     StabilityPreview,
-			Images:        img(ImageOff, ImageOut),
-			Note:          "Off by default ([security.relay].enabled in the server config, then a relay mode chosen by the super admin). Without it, or in an image built with -tags sbo_omit_org_security_relay, the lookup and content routes answer 404 not_supported and a managed node keeps showing online_unknown or not scanned, never a public fallback (X19).",
+			Surface: Surface{Egress: []Egress{
+				{Host: "api.osv.dev, the public package registries, superbased.app", Purpose: "Relayed package checks and mirror sync", Gate: "config: [security.relay].enabled; the scheduled mirror sync also needs [security.relay].mirror_sync_interval (default off)", Trigger: TriggerOptIn},
+				{Host: "shards.superbased.app", Purpose: "Mirror the package lookup's advisory shards for managed nodes", Gate: "config: [security.relay].enabled; `observer-org security mirror shards sync`, or the scheduled sync with [security.relay].mirror_shards = true (default off)", Trigger: TriggerOptIn},
+			}},
+			Ledger:    []string{"SECP-26"},
+			Stability: StabilityPreview,
+			Images:    img(ImageOff, ImageOut),
+			Note:      "Off by default ([security.relay].enabled in the server config, then a relay mode chosen by the super admin). Without it, or in an image built with -tags sbo_omit_org_security_relay, the lookup and content routes answer 404 not_supported and a managed node keeps showing online_unknown or not scanned, never a public fallback (X19).",
 		},
 		{
 			// Security pillar Phase F2 (security plan 4.2, 7.9 F2 and 7.10,

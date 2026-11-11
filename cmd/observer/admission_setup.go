@@ -225,11 +225,11 @@ func listLocalJudgeModels(base string) []string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil) //nolint:gosec // G704: false positive; base passed IsLoopbackJudgeEndpoint above, so only a local model server is asked
 	if err != nil {
 		return nil
 	}
-	resp, err := (&http.Client{Timeout: 1500 * time.Millisecond}).Do(req)
+	resp, err := (&http.Client{Timeout: 1500 * time.Millisecond}).Do(req) //nolint:gosec // G704: false positive; the loopback request built above
 	if err != nil {
 		return nil
 	}

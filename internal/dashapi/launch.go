@@ -179,6 +179,10 @@ type LaunchSpec struct {
 	FromMessage int
 	Rows        uint16
 	Cols        uint16
+	// Initiator and ParentSessionID: who started this launch (lane cli-2),
+	// as FreshLaunchSpec. Additive.
+	Initiator       string
+	ParentSessionID string
 }
 
 // FreshLaunchSpec is the dashboard's server-derived FRESH-launch request (F1).
@@ -240,6 +244,12 @@ type FreshLaunchSpec struct {
 	// BOXSIGNIN; termsvc.FreshRequest). Ignored when Sandbox is false.
 	SignInSeed *bool
 	SignInAsk  bool
+	// Initiator and ParentSessionID are who started this launch (lane
+	// cli-2, migration 220): one of termrun's closed Initiator set and, for
+	// an agent, its parent session. The dashboard handler fills them from
+	// Options.LaunchCaller; "" records nothing. Additive.
+	Initiator       string
+	ParentSessionID string
 }
 
 // SSHLaunchSpec is the dashboard's server-derived SSH remote-system request.
@@ -249,6 +259,10 @@ type SSHLaunchSpec struct {
 	Profile string
 	Rows    uint16
 	Cols    uint16
+	// Initiator and ParentSessionID: who opened the shell (lane cli-2
+	// fixes-1, the caller's attribution rather than an assumed human).
+	Initiator       string
+	ParentSessionID string
 }
 
 // SSHProfileInfo is one picker row. It carries what the UI needs to let an
@@ -280,6 +294,10 @@ type ResumeLaunchSpec struct {
 	ExtraArgs   []string
 	Rows        uint16
 	Cols        uint16
+	// Initiator and ParentSessionID: who started this launch (lane cli-2),
+	// as FreshLaunchSpec. Additive.
+	Initiator       string
+	ParentSessionID string
 }
 
 // SetupSpec is a server-derived local operator setup command run in a PTY (the
@@ -351,6 +369,11 @@ type LaunchInfo struct {
 	// (sandbox plan v2 section 9): closed enums only, no path, so it is
 	// safe on the snapshot remote viewers see. Nil for an unsandboxed run.
 	Isolation *LaunchIsolation `json:"isolation,omitempty"`
+	// Initiator and ParentSessionID are who started the run, as recorded
+	// (lane cli-2, migration 220): the Terminals list shows them. "" when
+	// not recorded.
+	Initiator       string `json:"initiator,omitempty"`
+	ParentSessionID string `json:"parent_session_id,omitempty"`
 }
 
 // LaunchIsolation is the run pill's view of a sandboxed run: the class
@@ -371,6 +394,10 @@ type LaunchIsolation struct {
 	// is no longer complete).
 	CaptureDegraded bool     `json:"capture_degraded,omitempty"`
 	CaptureCauses   []string `json:"capture_causes,omitempty"`
+	// Seccomp is what the syscall filter gave the run (the closed
+	// sandboxvocab.SeccompRun vocabulary, tracker F-002); omitted when not
+	// recorded.
+	Seccomp string `json:"seccomp,omitempty"`
 }
 
 // ErrLaunchTooMany signals the concurrent-session cap was hit (429).

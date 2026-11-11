@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SandboxHostedStatusView, type HostedStatusResponse, type SandboxHostedStatusViewProps } from "@/components/SandboxHostedStatus";
+import { SandboxHostedStatusView, consentWording, type HostedStatusResponse, type SandboxHostedStatusViewProps } from "@/components/SandboxHostedStatus";
 
 // React warns that a layout effect does nothing on the server; the chips use
 // one, and the warning says nothing about these tests.
@@ -81,8 +81,31 @@ test("the hosted status names each selected provider's credential source, never 
   const html = view();
   assert.match(html, /E2B/);
   assert.match(html, /connected \(stored in this machine&#x27;s keychain\)/);
-  assert.match(html, /observer sandbox hosted connect modal/);
   assert.match(html, /MODAL_TOKEN_ID, MODAL_TOKEN_SECRET/);
+  assert.doesNotMatch(html, /run observer sandbox hosted connect/);
+});
+
+test("a provider without a credential gets a Connect form, one field per variable (B-G2)", () => {
+  const html = view({ connect: () => {}, onConnectDraft: () => {}, connectDraft: {} });
+  assert.match(html, /connect one below, or set MODAL_TOKEN_ID, MODAL_TOKEN_SECRET/);
+  assert.match(html, /Connect Modal/);
+  assert.match(html, /<input type="text"[^>]*value=""/);
+  assert.match(html, /<input type="password"[^>]*value=""/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Connect<\/button>/);
+  // The keychain-backed E2B credential can be replaced or disconnected.
+  assert.match(html, /Replace the E2B credential/);
+  assert.match(html, /Disconnect/);
+});
+
+test("Connect is pressable once every field has a value", () => {
+  const html = view({
+    selected: ["modal"],
+    connect: () => {},
+    onConnectDraft: () => {},
+    connectDraft: { modal: { MODAL_TOKEN_ID: "ak-1", MODAL_TOKEN_SECRET: "as-1" } },
+  });
+  assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>Connect<\/button>/);
+  assert.match(html, />Connect<\/button>/);
 });
 
 test("the consent screen lists the uploaded and excluded files and names a changed fact", () => {
@@ -111,4 +134,15 @@ test("a provider not selected is not shown, and no leftovers says so", () => {
 
 test("an error from a write is shown", () => {
   assert.match(view({ err: "consent refused" }), /consent refused/);
+});
+
+test("a clone-remote agreement never says it uploads (FX3-A10)", () => {
+  const clone = consentWording("E2B", "https://git.example.com/acme/app.git");
+  assert.match(clone.confirmLabel, /clone/);
+  assert.doesNotMatch(clone.confirmLabel + clone.armedNote, /will upload|allow uploads/);
+  assert.match(clone.armedNote, /https:\/\/git\.example\.com\/acme\/app\.git/);
+  assert.match(clone.armedNote, /nothing is uploaded from this machine/);
+  const upload = consentWording("E2B", "");
+  assert.equal(upload.confirmLabel, "Agree and allow uploads?");
+  assert.match(upload.armedNote, /will upload the files above/);
 });

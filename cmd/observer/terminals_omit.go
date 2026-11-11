@@ -124,6 +124,16 @@ func newWorkspacesCmd() *cobra.Command {
 	return compiledOutVerb("workspaces", "Sandbox workspaces (not in this build)", "terminals")
 }
 
+// newLaunchCmd registers `observer launch` as a compiled-out verb.
+func newLaunchCmd() *cobra.Command {
+	return compiledOutVerb("launch", "Launch an agent through the daemon (not in this build)", "terminals")
+}
+
+// newTerminalsCmd registers `observer terminals` as a compiled-out verb.
+func newTerminalsCmd() *cobra.Command {
+	return compiledOutVerb("terminals", "Terminal runs (not in this build)", "terminals")
+}
+
 // newIDECmd registers `observer ide` as a compiled-out verb.
 func newIDECmd() *cobra.Command {
 	return compiledOutVerb("ide", "Launch an IDE or desktop app (not in this build)", "terminals")

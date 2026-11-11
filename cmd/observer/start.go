@@ -393,6 +393,9 @@ func newStartCmd() *cobra.Command {
 			if lanePort, ok := proxyPortFromAddr(addr); ok {
 				routeLanes = installRouteLanesAtStart(p, lanePort, cmd.ErrOrStderr())
 			}
+			// Lane FU8 (OSH-43): a sandboxed run's provider block also refuses
+			// the hosts of the live lane table (gateway.providers lanes).
+			bindSandboxLiveProviderHosts(p)
 
 			// ONE daemon-lifetime gateway.providers install seam, shared by
 			// the LKG loader, the steady-state poller AND the P0-6 reporter.
@@ -610,6 +613,10 @@ func newStartCmd() *cobra.Command {
 							// S-15 (D17): a cached vendor org policy blocks
 							// Observer's MCP server or pins a tool's route.
 							addVendorPolicyRisks(home, os.Getenv, &rep)
+							// OpenShell lane O4 (R-17): a sandbox gateway
+							// config Observer owns was changed outside it
+							// (tamper-evident, never tamper-proof).
+							addSandboxGatewayPosture(configPath, &rep)
 							return rep
 						})
 					}
@@ -821,6 +828,11 @@ func newStartCmd() *cobra.Command {
 			// is pure file reads and lands regardless; only the remote-less-
 			// clone fold (resolver rule 6) needs the root commit.
 			w.SetRootCommitResolver(git.DefaultRootCommit)
+			// Every live writer files a session under one root: the watcher's
+			// store resolves a reported folder to its git root the way the hook
+			// processes do (hook_ingestroot.go), so an adapter that reports the
+			// folder a tool opened cannot move a session the hooks filed.
+			w.SetProjectRootResolver(daemonIngestRootResolver())
 
 			// OTel exporter (Teams M4) — constructed only when [exporter.otel]
 			// enabled = true, so a solo-local install builds no OTLP client and
@@ -934,6 +946,8 @@ func newStartCmd() *cobra.Command {
 					Projects:       cfg.Projects,
 					// Plans & limits: the same service the "plans" loop below runs.
 					Plans: processPlans(cfg, database, slog.Default()),
+					// Cloud agents: the same service the "cloud-agents" loop runs.
+					CloudAgents: processCloudAgents(cfg, database, slog.Default()),
 					// Custom scanners (security_custom_cmd.go): nil unless the
 					// security.scan.custom component is active.
 					CustomScanners: customScannersForDashboard(cmd.Context(), comps, configPath, store.New(database)),
@@ -956,6 +970,9 @@ func newStartCmd() *cobra.Command {
 					// SARIF upload (security_sarifimport.go): one file the
 					// developer picked, through the CLI's own import (lane SEC-P4).
 					SARIFImport: sarifImportDash(database),
+					// Code security "Scan now" (security_scan_now.go): one manual run of a
+					// selected scanner on one project, the same run its CLI verb starts.
+					SecurityScanNow: securityScanNowDash(resolvedConfigPath, database),
 					// Code rules card (security_opengrep_dash.go): the guided
 					// install with its size consent (lane SEC-G2).
 					Opengrep: opengrepDash(resolvedConfigPath, database),
@@ -1086,13 +1103,29 @@ func newStartCmd() *cobra.Command {
 					// GET /api/terminal/sandbox + the fail-closed launch
 					// validation. Nil unless [terminal.sandbox].enabled →
 					// endpoint reports disabled and a sandbox request 501s.
-					SandboxProber: surfaces.sandboxProber,
+					SandboxProber:      surfaces.sandboxProber,
+					LoopbackCallerGate: surfaces.loopbackCallerGate,
+					LaunchCaller:       surfaces.launchCaller,
+					PendingLaunches:    surfaces.pendingLaunches,
 					// The first-start install's version picker (lane LEFT-SBX):
 					// nil in a build without the container driver.
 					SandboxInstallVersions: sandboxInstallVersionsSeam(resolvedConfigPath),
 					// The Settings card's org forbid of sign-in seeding (lane
 					// BOXSIGNIN): the composed managed view, nil without the sandbox.
 					SandboxSignInForbidden: sandboxSignInForbiddenSeam(resolvedConfigPath),
+					// The refusal advisor's host check (OpenShell lane N5): the
+					// gateway's own, nil without the sandbox.
+					SandboxEgressHostCheck: sandboxEgressHostCheckSeam(),
+					SandboxProviderHost:    sandboxProviderHostSeam(),
+					// Sandbox setup (sandbox installation lifecycle plan, P-249): nil in a
+					// build without the sandbox module, so the setup routes answer 501.
+					SandboxSetup: newSandboxSetup(sandboxSetupOptions{ConfigPath: resolvedConfigPath, Surface: "dashboard", Ledger: surfaces.toolInstalls, Logger: slog.Default(), Spawn: func(_ context.Context, argv []string, label string) (string, int, error) {
+						if surfaces.launchMgr == nil {
+							return "", -1, errors.New("the dashboard terminal is off ([handoff].allow_dashboard_launch)")
+						}
+						h, err := surfaces.launchMgr.CreateSetup(dashapi.SetupSpec{Argv: argv, Label: label})
+						return h, -1, err
+					}}),
 					// The New Terminal "project policy" line (lane sec-p2b): reads the
 					// project match record; shown only when the node holds a project delivery.
 					ProjectPolicy: terminalProjectPolicySeam(cfg, store.New(database)),
@@ -1179,6 +1212,11 @@ func newStartCmd() *cobra.Command {
 					// VS Code status item - the `observer mcp status` body
 					// plus coverage rows, effective state and connect URL.
 					MCPAccessStatus: mcpAccessStatusSeam(resolvedConfigPath, database),
+					// Lane adm-p2 (planeb_admission_dashboard.go): GET
+					// /api/guard/prompt/judge for the Security page's
+					// organization prompt judge card, the `observer guard
+					// status` facts.
+					PromptJudgeStatus: promptJudgeStatusSeam(resolvedConfigPath, database),
 					// Settings > Enrolment management (backlog item 6): enrol / consent /
 					// status / grant / push-now / leave through the CLI's own code
 					// paths. Wired even when not enrolled - that is how a node enrols
@@ -1187,6 +1225,7 @@ func newStartCmd() *cobra.Command {
 					// leave show on /api/governance at once.
 					EnrolManager:       enrolManagerFor(resolvedConfigPath, orgClient != nil, ngov).withRetire(orgClient), // T-718: Leave retires the daemon's budget rail live
 					Components:         dashboardComponents(resolvedConfigPath, database),                                 // Settings > Components + route guard (MP-DASH)
+					SetupExtras:        dashboardSetupExtras(resolvedConfigPath),                                          // cli-parity L2: status line, start at login, browser capture setup
 					ComponentArtifacts: dashboardComponentArtifacts(resolvedConfigPath),                                   // artifact_states on /api/components (T-707)
 					BinaryInstall:      dashboardBinaryInstall,                                                            // binary_install on /api/components (U12)
 					// Settings > Cloud Intelligence (org plane): the same
@@ -1501,6 +1540,14 @@ func newStartCmd() *cobra.Command {
 				plansLoop(gctx, configPath)
 				return nil
 			})
+			// Cloud agents (internal/cloudagentssvc, docs/cloud-agents.md):
+			// pulls the cloud-agent sessions of accounts the user linked.
+			// With no linked account it reads the local database once a
+			// minute and makes no vendor call. P1 fail-soft.
+			ng.Go("cloud-agents", func() error {
+				cloudAgentsLoop(gctx, configPath)
+				return nil
+			})
 			// Commit-history capture (internal/commitscan): a read-only `git
 			// log` scanner over every active project root, feeding the
 			// Projects page's commit ledger and ROI proxies. Never installs a
@@ -1510,6 +1557,15 @@ func newStartCmd() *cobra.Command {
 			// scanner (doctor + the page surface the reason honestly).
 			ng.Go("commit-scan", func() error {
 				commitScanLoop(gctx, configPath)
+				return nil
+			})
+			// Projects-page quality trend (internal/codequalitysvc): one
+			// daily point per active project from the coverage reports its
+			// own test runs wrote and the codeintel near-clone index. Reads
+			// files only, never runs a test or a process, no network.
+			// Self-gating on [projects].quality_metrics; P1 fail-soft.
+			ng.Go("code-quality", func() error {
+				codeQualityLoop(gctx, configPath)
 				return nil
 			})
 			// Delivery (internal/deliverysvc, D-689): the code-host and
@@ -2131,13 +2187,19 @@ func newStartCmd() *cobra.Command {
 						return nil
 					}
 					opts.RequireToken, opts.ReceiverToken = true, tok
+					// CLOUDTEL-1 (CA-D18): an active per-environment
+					// cloud-session ship token is accepted too.
+					opts.AcceptToken = otlpShipTokenAcceptor(gctx, rdb, nil)
 					rlogger.Info("otlp receiver: non-loopback bind requires the receiver token header",
 						"header", otlpingest.HeaderEdgeToken, "token_file", otlpIngestTokenPath(rcfg))
 				}
 				// Plane A (internal/obs) gets every trace resource no
 				// coding-tool mapping row claims; Plane B (the vendor
 				// table) gets the claimed ones, plus every logs export.
-				planeA := newObsTraceHandler(gctx, rcfg, rdb, rlogger)
+				// guardPlaneA keeps a developer's own agent's spans
+				// (sbo.agent) out of Plane A in every configuration
+				// (PT-55, otlp_planeguard.go).
+				planeA := guardPlaneA(newObsTraceHandler(gctx, rcfg, rdb, rlogger), rlogger)
 				opts.TraceHandler = planeA
 				if rcfg.Ingest.OTel.Enabled {
 					// The vendor table and logs handler belong to
@@ -2237,6 +2299,13 @@ func newStartCmd() *cobra.Command {
 			// like every sibling: never cancels proxy/watcher/dashboard.
 			ng.Go("guard-posture", func() error {
 				guardPostureLoop(gctx, configPath)
+				return nil
+			})
+			// The organization's prompt judge, hook lane (P-228 phase 2):
+			// the owner-only ask endpoint every prompt-gate hook dials while
+			// the signed posture says the judge is active here.
+			ng.Go("prompt-judge", func() error {
+				servePromptJudge(gctx, configPath, newLogger("info"))
 				return nil
 			})
 			// Code security (security pillar Phase A): the signed posture

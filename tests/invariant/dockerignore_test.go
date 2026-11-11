@@ -183,6 +183,22 @@ func TestDockerignoreExcludesKitStateAndSecrets(t *testing.T) {
 	}
 }
 
+// TestDockerignoreExcludesLocalWorkingState: a dev checkout's worktrees and
+// session scratch stay out of the build context.
+func TestDockerignoreExcludesLocalWorkingState(t *testing.T) {
+	patterns := loadRootDockerignore(t)
+	for _, f := range []string{
+		".claude/worktrees/surface-gap-arc/go.mod",
+		".claude/settings.json",
+		".tmp-session-e/run-gate.ps1",
+		".tmp-verify/out.txt",
+	} {
+		if !excludedFromContext(patterns, f) {
+			t.Errorf("%s is in the docker build context; exclude it in .dockerignore", f)
+		}
+	}
+}
+
 // TestDockerignoreKeepsBuildInputs: the exclusions do not reach what an image
 // build reads.
 func TestDockerignoreKeepsBuildInputs(t *testing.T) {
@@ -259,7 +275,10 @@ func TestDockerignoreKeepsTrackedEmbedRoots(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	out, err := exec.Command("git", "-C", root, "ls-files", "--",
-		"deploy/observer-org/production", "deploy/supervisor", "deploy/modules", "deploy/catalog").Output()
+		"deploy/observer-org/production", "deploy/supervisor", "deploy/modules", "deploy/catalog",
+		// deploy/embed.go also embeds named files of the OpenShell bundle; its
+		// .env.example was excluded until 2026-11-07 and broke the image build.
+		"deploy/observer-openshell").Output()
 	if err != nil {
 		t.Skipf("not a git checkout (%v)", err)
 	}

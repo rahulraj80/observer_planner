@@ -31,7 +31,7 @@ export {
 // (internal/intelligence/dashboard/launch.go::errTerminalUnavailable): the
 // embedded terminal is either switched off or has no PTY backend on this OS.
 export const INSTALL_UNAVAILABLE_MSG =
-  "The in-dashboard terminal is unavailable on this daemon, so there is nowhere to run the installer. Either [handoff].allow_dashboard_launch is false in ~/.observer/config.toml, or this OS has no PTY backend (Windows before 10 version 1809 has no ConPTY).";
+  "The in-dashboard terminal is unavailable on this daemon, so there is nowhere to run the installer. Either dashboard launch is turned off (handoff.allow_dashboard_launch, under More settings in Settings > Session attach; it applies after a daemon restart), or this OS has no PTY backend (Windows before 10 version 1809 has no ConPTY).";
 
 // INSTALL_DISABLED_MSG maps the install route's 403 — the guided-install kill
 // switch. Distinct from every other 403 in the dialog (the remote
@@ -361,7 +361,7 @@ export function launchBlockedReason(
 // selection must stay open (the guided install is ungated by this allow-list on
 // purpose, so a deny-all fresh install must still be able to reach it).
 export const TOOL_NOT_ALLOWED_MSG =
-  "not in [terminal.launch].allowed_tools - enable it under Terminals › Fresh-agent launch policy";
+  "not in [terminal.launch].allowed_tools - allow it in Terminals > Settings > Fresh-agent launch policy";
 
 // toolNotAllowedReason is the Start-button / warn-line sentence for a tool the
 // launch allow-list refuses. It names the key, the fix, AND the fact that

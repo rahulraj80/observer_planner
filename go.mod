@@ -10,6 +10,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.3
 	github.com/BurntSushi/toml v1.6.0
 	github.com/Microsoft/go-winio v0.6.2
+	github.com/NVIDIA/OpenShell/sdk/go v0.1.6
 	github.com/agentgateway/agentgateway/api v0.0.0-20260827171613-fe6732474a96
 	github.com/anthropics/anthropic-sdk-go v1.82.0
 	github.com/billgraziano/dpapi v0.5.0
@@ -63,6 +64,7 @@ require (
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	golang.org/x/text v0.42.0
+	golang.org/x/vuln v1.7.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
@@ -107,6 +109,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elliotwutingfeng/asciiset v0.0.0-20260129054604-cfde2086bc57 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
+	github.com/erikvarga/go-rpmdb v0.0.0-20250523120114-a15a62cd4593 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/getkin/kin-openapi v0.135.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
@@ -170,6 +173,7 @@ require (
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/russellhaering/goxmldsig v1.6.0 // indirect
+	github.com/rust-secure-code/go-rustaudit v0.0.0-20250226111315-e20ec32e963c // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/speakeasy-api/jsonpath v0.6.3 // indirect
 	github.com/speakeasy-api/openapi v1.19.2 // indirect
@@ -197,6 +201,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect

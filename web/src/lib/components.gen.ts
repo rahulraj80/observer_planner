@@ -178,6 +178,12 @@ export const PAGE_ROUTES: readonly PageRoute[] = [
     Page: lazy(() => import("@/pages/Patterns").then((m) => ({ default: m.PatternsPage }))),
   },
   {
+    navId: "you",
+    path: "you",
+    component: "core",
+    Page: lazy(() => import("@/pages/You").then((m) => ({ default: m.YouPage }))),
+  },
+  {
     navId: "privacy",
     path: "privacy",
     component: "core",
@@ -255,6 +261,7 @@ export const NAV_COMPONENTS: Readonly<Record<string, string>> = {
   benchmarks: "benchmark",
   discovery: "analytics",
   patterns: "analytics",
+  you: "core",
   privacy: "core",
   messages: "org.client",
   requests: "org.client",
@@ -275,3 +282,11 @@ export const SANDBOX_SETTINGS_CARD: LazyExoticComponent<typeof import("@/compone
 /** SandboxIsolationPicker from @/components/SandboxIsolationPicker (component terminals.sandbox), or null when this build does not compile it. */
 export const SANDBOX_ISOLATION_PICKER: LazyExoticComponent<typeof import("@/components/SandboxIsolationPicker").SandboxIsolationPicker> | null =
   lazy(() => import("@/components/SandboxIsolationPicker").then((m) => ({ default: m.SandboxIsolationPicker })));
+
+/** SandboxSetupPanel from @/components/SandboxSetupPanel (component terminals.sandbox), or null when this build does not compile it. */
+export const SANDBOX_SETUP_PANEL: LazyExoticComponent<typeof import("@/components/SandboxSetupPanel").SandboxSetupPanel> | null =
+  lazy(() => import("@/components/SandboxSetupPanel").then((m) => ({ default: m.SandboxSetupPanel })));
+
+/** SandboxRefusalsCard from @/components/SandboxRefusals (component terminals.sandbox), or null when this build does not compile it. */
+export const SANDBOX_REFUSALS_CARD: LazyExoticComponent<typeof import("@/components/SandboxRefusals").SandboxRefusalsCard> | null =
+  lazy(() => import("@/components/SandboxRefusals").then((m) => ({ default: m.SandboxRefusalsCard })));

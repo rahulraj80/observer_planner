@@ -637,4 +637,47 @@ func TestCloudSectionWrite(t *testing.T) {
 	if code, _ = put(`{"BaseURL":"not a url"}`); code != http.StatusBadRequest {
 		t.Fatalf("bad base_url → %d, want 400", code)
 	}
+
+	// login_port (B-S2): editable from the Advanced fold, 1024-65535 or 0,
+	// and a change needs no daemon restart (the cloud command reads it).
+	for _, tc := range []struct {
+		body string
+		code int
+		want int
+	}{
+		{`{"LoginPort":9800}`, http.StatusOK, 9800},
+		{`{"LoginPort":0}`, http.StatusOK, 0},
+		{`{"LoginPort":80}`, http.StatusBadRequest, 0},
+		{`{"LoginPort":70000}`, http.StatusBadRequest, 0},
+		{`{"LoginPort":65535}`, http.StatusOK, 65535},
+	} {
+		code, out = put(tc.body)
+		if code != tc.code {
+			t.Fatalf("%s → %d %v, want %d", tc.body, code, out, tc.code)
+		}
+		if code != http.StatusOK {
+			continue
+		}
+		if out["restart_required"] != false {
+			t.Errorf("%s: login_port must not require a restart: %v", tc.body, out)
+		}
+		cfg, _ = loadConfigForDashboard(cfgPath)
+		if cfg.Cloud.LoginPort != tc.want || cfg.Cloud.BaseURL != "https://new.example" {
+			t.Fatalf("%s: cloud after PUT = %+v", tc.body, cfg.Cloud)
+		}
+	}
+}
+
+// TestValidCloudLoginPort pins the dashboard's port range.
+func TestValidCloudLoginPort(t *testing.T) {
+	for _, tc := range []struct {
+		port int
+		ok   bool
+	}{
+		{0, true}, {1023, false}, {1024, true}, {9797, true}, {65535, true}, {65536, false}, {-1, false},
+	} {
+		if err := validCloudLoginPort(tc.port); (err == nil) != tc.ok {
+			t.Errorf("validCloudLoginPort(%d) = %v, want ok=%v", tc.port, err, tc.ok)
+		}
+	}
 }

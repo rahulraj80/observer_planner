@@ -1,0 +1,27 @@
+# go-test-splits.tsv - test packages too slow for one CI shard, split by test
+# name into <parts> units that the shards schedule like packages.
+#
+# Columns: <module-relative package path> TAB <parts, at least 2>.
+# Lines starting with '#' and blank lines are ignored.
+#
+# Why (lane CICD, 2026-11-01): one package cannot be split across shards by
+# LPT, so the slowest package bounds the whole go test matrix. In the two
+# latest full runs cmd/observer took 4978 s, cmd/observer-org 3895 s and
+# tests/e2e/orgserver 2751 s under -race on a 2-vCPU runner, and the shard
+# holding cmd/observer ran 96 minutes against 29 for the fastest one.
+#
+# How: scripts/ci/go-test-shards.sh lists such a package as <import>#<i>/<k>
+# units, each weighing 1/k of the package's weight, and
+# scripts/ci/go-test-run.sh runs a unit as `go test <flag> <package>` where
+# the flag comes from `go run ./scripts/ci/cipkgs split <dir> <i> <k>`: parts
+# 0..k-2 run their groups of test names (-run), the last part runs whatever
+# the earlier parts do not (-skip), so the k parts cover the package exactly
+# once by construction (cipkgs TestSplitPartsCoverEveryTestOnce). Each part
+# builds the same test binary (shared through the build cache) and runs
+# TestMain once.
+#
+# Pick parts so a unit weighs well under one shard's target (go-test-shards.sh
+# plan, 5100 package-seconds): weight / parts <= about 2000.
+cmd/observer	3
+cmd/observer-org	2
+tests/e2e/orgserver	2

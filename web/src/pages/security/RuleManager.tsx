@@ -37,6 +37,13 @@ import {
 } from "@shared/lib/guardCatalog";
 import { VocabPill } from "@shared/lib/vocabPill";
 import { RuleCell } from "../Security";
+import {
+  canDisableRule,
+  guardDisableOptions,
+  integrityDisables,
+  withDisabledRule,
+  withIntegrityOverrides,
+} from "./integrityLock";
 import { RuleEditor } from "./RuleEditor";
 
 // RuleManager — the structured guard-rule editor (spec §1/§6 Track B). Two
@@ -44,7 +51,7 @@ import { RuleEditor } from "./RuleEditor";
 //   - "global" composes the USER layer (~/.observer/guard-policy.toml, the
 //     same file PolicyLayersCard's raw editor writes). The structured override
 //     picker MAY weaken as well as escalate here (parity with the raw editor);
-//     the org floor and the integrity-rule backstop (R-160/R-161) are still
+//     the org floor and the integrity-rule backstop (isGuardIntegrityRuleId) are still
 //     enforced server-side at merge time. Disabling a rule globally goes
 //     through the separate config seam (PUT /api/config/section/guard,
 //     Rules.Disable) per §5, not the TOML.
@@ -227,7 +234,7 @@ export function RuleManager({
     setSaved(false);
     try {
       if (scope === "global") {
-        const content = composeRuleToml(rows, overrides, [], { allowDisable: false });
+        const content = composeRuleToml(rows, withIntegrityOverrides(overrides), [], { allowDisable: false });
         const l = await runLint(content);
         setLint(l);
         if (!l.ok) {
@@ -262,7 +269,7 @@ export function RuleManager({
           setError("Pick a project first.");
           return;
         }
-        const content = composeRuleToml(rows, overrides, projectDisable, { allowDisable: true });
+        const content = composeRuleToml(rows, withIntegrityOverrides(overrides), projectDisable, { allowDisable: true });
         const l = await runLint(content);
         setLint(l);
         if (!l.ok) {
@@ -287,10 +294,10 @@ export function RuleManager({
     }
   };
 
-  const disableOptions: EntityMultiPickerOption[] = effectiveIds.map((id) => {
-    const info = guardRuleInfo(id);
-    return { id, label: id, sublabel: info?.doc };
-  });
+  // Integrity ids are left out of the picker (audit CF2-A1): the guard
+  // refuses to disable them in any layer.
+  const disableOptions: EntityMultiPickerOption[] = guardDisableOptions(effectiveIds);
+  const ignoredDisables = integrityDisables(scope === "global" ? globalDisable : projectDisable);
 
   const activeDisable = scope === "global" ? globalDisable : projectDisable;
   const setActiveDisable = (next: string[]) => {
@@ -403,6 +410,12 @@ export function RuleManager({
                   allowFreeId
                   placeholder="Disable a rule id…"
                 />
+                {ignoredDisables.length > 0 && (
+                  <p className="mt-1 text-[11px] text-warn">
+                    {ignoredDisables.join(", ")}: a guard integrity rule; the guard ignores a disable of it in every
+                    layer, so remove it here.
+                  </p>
+                )}
                 <p className="mt-1 text-[11px] text-fg-3">
                   {scope === "global"
                     ? "Global disables are unconditional - prefer a scoped approval or an override first."
@@ -430,7 +443,7 @@ export function RuleManager({
         </div>
       )}
 
-      <EffectiveRulesTable ruleDefs={ruleDefs} ids={effectiveIds} loading={rulesApi.loading} onOverride={(id) => setEditor({ kind: "override", mode: "preset", index: null, initial: { rule: id, decision: "", enforce: true } })} onDisable={(id) => setActiveDisable([...new Set([...activeDisable, id])])} />
+      <EffectiveRulesTable ruleDefs={ruleDefs} ids={effectiveIds} loading={rulesApi.loading} onOverride={(id) => setEditor({ kind: "override", mode: "preset", index: null, initial: { rule: id, decision: "", enforce: true } })} onDisable={(id) => setActiveDisable(withDisabledRule(activeDisable, id))} />
 
       {editor?.kind === "rule" && (
         <RuleEditor
@@ -528,7 +541,7 @@ function OverrideRow({ r, onEdit, onRemove }: { r: GuardOverrideRow; onEdit: () 
 // EffectiveRulesTable — the read side: every rule currently in effect
 // (builtins + user/project/trusted_project/org layers), with quick actions
 // that pre-fill the editor rather than mutating anything directly.
-function EffectiveRulesTable({
+export function EffectiveRulesTable({
   ruleDefs,
   ids,
   loading,
@@ -576,9 +589,15 @@ function EffectiveRulesTable({
                     <Button size="sm" variant="ghost" onClick={() => onOverride(id)}>
                       Override
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => onDisable(id)}>
-                      Disable
-                    </Button>
+                    {canDisableRule(id) ? (
+                      <Button size="sm" variant="ghost" onClick={() => onDisable(id)}>
+                        Disable
+                      </Button>
+                    ) : (
+                      <span className="px-2 text-[11px] text-fg-3" title="A guard integrity rule: no layer below the organization can disable it.">
+                        integrity rule
+                      </span>
+                    )}
                   </span>
                 </td>
               </tr>

@@ -16,7 +16,35 @@ const (
 	CodeWrongHost     Code = "wrong_host"
 	CodeWrongAuthForm Code = "wrong_auth_form"
 	CodeNoKey         Code = "no_key"
+	// The local-run codes (lane N3, SBX-NET-2).
+	CodeUnknownLane  Code = "unknown_lane"
+	CodeWrongCustody Code = "wrong_custody"
+	CodeHelperGone   Code = "helper_gone"
 )
+
+// Lane is how a run's model requests reach the proxy, as its injection
+// record says (the host side wrote it; the request cannot choose it).
+type Lane string
+
+// The closed Lane vocabulary.
+const (
+	// LaneHosted (the zero value, so a record written before lanes reads
+	// as hosted): the home side of a hosted run's relay stamps the run.
+	LaneHosted Lane = ""
+	// LaneLocal: the host helper of a local run (bwrap or oci-runc on the
+	// proxy_only tier, or on the internet tier with the provider-host
+	// block) stamps the run on its model-proxy forward.
+	LaneLocal Lane = "local"
+)
+
+// Valid reports whether l is in the closed vocabulary.
+func (l Lane) Valid() bool { return l == LaneHosted || l == LaneLocal }
+
+// CustodyLocal is the key custody a local run's selection records
+// (sandboxvocab.CustodyHostBound; a test in cmd/observer pins the two
+// spellings equal, this package is stdlib only): the key stays on the
+// host, and with injection the box holds only the sentinel.
+const CustodyLocal = "host_bound"
 
 // Request is what the proxy read from one model request.
 type Request struct {
@@ -43,6 +71,12 @@ type RunFacts struct {
 	TokenHash    string
 	// KeyStored: the user's key for the provider is in the keystore.
 	KeyStored bool
+	// Lane is the record's lane, Custody its key custody, and HelperLive
+	// whether the run's host helper still holds the run's liveness lock
+	// (read for a local record; a hosted record is judged by Live alone).
+	Lane       Lane
+	Custody    string
+	HelperLive bool
 }
 
 // Decision is a match outcome: inject (into Header with the key rendered
@@ -94,6 +128,13 @@ var matchRules = []matchRule{
 	{"no record", func(_ Request, f RunFacts, _ Provider) bool { return !f.Found }, CodeRunNotLive},
 	{"not relayed", func(r Request, f RunFacts, _ Provider) bool { return !equalHash(r.Token, f.TokenHash) }, CodeNotRelayed},
 	{"not live", func(_ Request, f RunFacts, _ Provider) bool { return !f.Live }, CodeRunNotLive},
+	{"unknown lane", func(_ Request, f RunFacts, _ Provider) bool { return !f.Lane.Valid() }, CodeUnknownLane},
+	{"local custody", func(_ Request, f RunFacts, _ Provider) bool {
+		return f.Lane == LaneLocal && f.Custody != CustodyLocal
+	}, CodeWrongCustody},
+	{"local helper gone", func(_ Request, f RunFacts, _ Provider) bool {
+		return f.Lane == LaneLocal && !f.HelperLive
+	}, CodeHelperGone},
 	{"provider", func(_ Request, f RunFacts, p Provider) bool { return p.ID == "" || p.ID != f.Provider }, CodeUnknownProv},
 	{"wrong auth form", func(r Request, _ RunFacts, p Provider) bool {
 		return presented(p, r) == "" && presentedAnywhere(r) != ""

@@ -1,5 +1,5 @@
-import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { SANDBOX_ISOLATION_PICKER } from "@/lib/components.gen";
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { SANDBOX_ISOLATION_PICKER, SANDBOX_SETUP_PANEL } from "@/lib/components.gen";
 import { Link } from "react-router-dom";
 import { EyeOff, Lock, PowerOff, type LucideIcon } from "lucide-react";
 import { ApiError, apiReason, fetchJSON, localConfirmHeaders } from "@/lib/api";
@@ -22,6 +22,9 @@ import {
   defaultIsolationChoice,
   isolationOptions,
 } from "@/lib/sandboxIsolation";
+import { setupCandidates } from "@/lib/sandboxSetup";
+import type { SandboxSetupPlan, SandboxSetupSummary, SandboxSetupSummaryResponse } from "@/lib/sandboxSetupTypes";
+import { LAUNCH_SWITCHES_OFF, launchSwitchesOff } from "@/lib/launchSwitches";
 import { SHELL_TOOL, isolationPickerProps, sandboxLaunchFields, sandboxStartBlock, sshSystemDisabledReason } from "@/lib/newTerminalSandbox";
 import { DashboardInstallRecord } from "@/components/DashboardInstallRecord";
 import type {
@@ -291,7 +294,27 @@ export type NewTerminalDraft = {
    * (isGUISelection); this field is not itself load-bearing for that.
    */
   kind?: "gui";
+  /**
+   * The sandbox backend whose setup panel was open (sandbox installation
+   * lifecycle plan section 3.7): a setup step's terminal resumes the dialog
+   * with the panel open on this row and a fresh plan. Absent: no panel.
+   */
+  setupBackend?: string;
 };
+
+/**
+ * withSetupBackend adds the open sandbox setup panel's row to a resume
+ * draft, so a setup step's terminal reopens the dialog with the panel on
+ * that row (and a closed panel leaves the draft as it was).
+ */
+export function withSetupBackend(draft: NewTerminalDraft, setupOpen: boolean, setupBackend: string | undefined): NewTerminalDraft {
+  if (!setupOpen || !setupBackend) {
+    const { setupBackend: _drop, ...rest } = draft;
+    void _drop;
+    return rest;
+  }
+  return { ...draft, setupBackend };
+}
 
 type Props = {
   onClose: () => void;
@@ -308,6 +331,18 @@ type Props = {
    * initialSandboxProbe).
    */
   initialWindowsPathsToWSL?: boolean;
+  /**
+   * initialSetupSummaries and initialSetupPlan seed the sandbox setup
+   * panel's row list and plan (component tests only, like
+   * initialSandboxProbe: no fetch answers under server rendering).
+   */
+  initialSetupSummaries?: SandboxSetupSummary[];
+  initialSetupPlan?: SandboxSetupPlan;
+  /**
+   * initialLaunchSwitches seeds fresh_enabled and shell_enabled from the
+   * sessions meta (component tests only, like initialSandboxProbe).
+   */
+  initialLaunchSwitches?: { fresh: boolean; shell: boolean };
   resumedAfterInstall?: boolean;
   /**
    * Called with the minted handle + tool once a fresh launch succeeds. The
@@ -336,6 +371,9 @@ export function NewTerminalDialog({
   initialDraft,
   initialSandboxProbe,
   initialWindowsPathsToWSL = false,
+  initialSetupSummaries,
+  initialSetupPlan,
+  initialLaunchSwitches,
   resumedAfterInstall = false,
 }: Props) {
   const [tools, setTools] = useState<string[]>([]);
@@ -385,7 +423,11 @@ export function NewTerminalDialog({
   // shell_enabled from GET /api/terminal/sessions — the SEPARATE
   // [terminal.launch].allow_shell opt-in that gates the Shell option below,
   // independent of allow_fresh_agent / allowed_tools.
-  const [shellEnabled, setShellEnabled] = useState(false);
+  const [shellEnabled, setShellEnabled] = useState(initialLaunchSwitches?.shell ?? false);
+  // fresh_enabled from the same reply (D-12): with it and shell_enabled both
+  // off nothing can start here, and the dialog says so. Undefined (an older
+  // daemon, or the reply not in yet) is unknown, never off.
+  const [freshEnabled, setFreshEnabled] = useState<boolean | undefined>(initialLaunchSwitches?.fresh);
   // windows_paths_to_wsl from the same reply: the custom-root hint about
   // Windows paths shows only for a daemon inside WSL (B4).
   const [windowsPathsToWSL, setWindowsPathsToWSL] = useState(initialWindowsPathsToWSL);
@@ -479,6 +521,16 @@ export function NewTerminalDialog({
   // True when the probe route answered 404 component_not_installed: the
   // Sandboxes and VMs module is not installed, so no Isolation picker shows.
   const [sandboxModuleAbsent, setSandboxModuleAbsent] = useState(false);
+  // Bumped to re-probe the sandbox (and the setup rows) after a setup row
+  // became ready; readyChoice is the row the re-probe then selects.
+  const [probeNonce, setProbeNonce] = useState(0);
+  const readyChoice = useRef<string | null>(null);
+  // The sandbox setup panel (lane sbxinstall-ui): the offered rows on this
+  // host, whether the panel is open, and the row it is on. A resumed draft
+  // that names a row reopens the panel there.
+  const [setupSummaries, setSetupSummaries] = useState<SandboxSetupSummary[] | null>(initialSetupSummaries ?? null);
+  const [setupOpen, setSetupOpen] = useState(!!initialDraft?.setupBackend);
+  const [setupBackend, setSetupBackend] = useState<string | undefined>(initialDraft?.setupBackend);
   const [workspaceSource, setWorkspaceSource] = useState(
     initialDraft?.workspaceSource ?? "live",
   );
@@ -521,6 +573,7 @@ export function NewTerminalDialog({
         });
         setAllowedRoots(d.allowed_project_roots ?? []);
         setShellEnabled(d.shell_enabled ?? false);
+        setFreshEnabled(d.fresh_enabled);
         setWindowsPathsToWSL(d.windows_paths_to_wsl === true);
       })
       .catch((e) => {
@@ -643,6 +696,16 @@ export function NewTerminalDialog({
       .then((d) => {
         if (!cancelled) {
           setSandboxProbe(d);
+          // A re-probe after a setup row became ready selects that row;
+          // only the first probe applies the defaults.
+          const ready = readyChoice.current;
+          if (ready) {
+            readyChoice.current = null;
+            setIsolationChoice(ready);
+            setSandboxOn(true);
+            return;
+          }
+          if (probeNonce > 0) return;
           if (!initialDraft) setSandboxOn(d.default_on ?? false);
           const first = defaultIsolationChoice(isolationOptions(d));
           if (first) setIsolationChoice(first);
@@ -658,7 +721,30 @@ export function NewTerminalDialog({
     return () => {
       cancelled = true;
     };
-  }, []);
+    // initialDraft is read once; probeNonce re-probes after a setup step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probeNonce]);
+
+  // The sandbox setup panel's row list (sandbox installation lifecycle plan
+  // section 3.7), fetched with the probe. Null (no setup line, no panel)
+  // when this build has no panel, the routes answer 404 or 501, or the fetch
+  // failed: the picker then reads exactly as it did before setup existed.
+  useEffect(() => {
+    if (!SANDBOX_SETUP_PANEL || initialSetupSummaries) return;
+    let cancelled = false;
+    fetchJSON<SandboxSetupSummaryResponse>("/api/terminal/sandbox/setup")
+      .then((d) => {
+        if (!cancelled) setSetupSummaries(d.backends ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setSetupSummaries(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // initialSetupSummaries is a test seed, read once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probeNonce]);
 
   // installTool spawns the tool's grounded install command in a fresh embedded
   // terminal (POST /api/terminal/install), the guided fix for a not_found /
@@ -671,7 +757,7 @@ export function NewTerminalDialog({
   // install / uninstall terminal exits, so the dialog reopens where it was
   // with a fresh availability check.
   function currentDraft(): NewTerminalDraft {
-    return {
+    const draft: NewTerminalDraft = {
       tool,
       rootSel,
       customRoot,
@@ -682,7 +768,26 @@ export function NewTerminalDialog({
       workspaceBranch,
       ...(gui ? { kind: "gui" as const } : {}),
     };
+    return withSetupBackend(draft, setupOpen, setupBackend);
   }
+
+  // openSetup opens the sandbox setup panel, on a row when one is named
+  // (choosing a row in the picker that cannot run yet).
+  function openSetup(backend?: string) {
+    if (backend) setSetupBackend(backend);
+    setSetupOpen(true);
+  }
+
+  // A setup step settled while the dialog is open (or the dialog came back
+  // from a setup terminal): probe again so the Isolation text is fresh
+  // (D-R4-2). The choice is kept.
+  const onSetupSettled = useCallback(() => setProbeNonce((n) => n + 1), []);
+
+  // A setup row became ready: re-probe, then select it in the picker.
+  const onSetupReady = useCallback((backend: string) => {
+    readyChoice.current = backend;
+    setProbeNonce((n) => n + 1);
+  }, []);
 
   async function installTool() {
     if (!tool || installBusy) return;
@@ -999,6 +1104,10 @@ export function NewTerminalDialog({
     [tool, sandboxProbe, sandboxOn, isolationChoice],
   );
   const sandboxCheckboxDisabled = isolationPicker.disabled;
+  // Setup is offered when this build has the panel and the daemon answered
+  // the setup route; the one line counts setupCandidates' rows.
+  const setupOffered = !!SANDBOX_SETUP_PANEL && setupSummaries !== null;
+  const setupInfo = useMemo(() => setupCandidates(sandboxProbe, setupSummaries), [sandboxProbe, setupSummaries]);
   // A source the user has currently picked but that isn't actually available
   // (e.g. left on "clone-remote" after switching to a probe/tool where it's
   // gated off) blocks the client-side hint the same way an empty remote URL
@@ -1301,6 +1410,22 @@ export function NewTerminalDialog({
       {remoteBlocked && (
         <div className="mb-3 rounded-2 border border-warn/40 bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
           {REMOTE_TERMINAL_OFF_MSG}
+        </div>
+      )}
+
+      {launchSwitchesOff(freshEnabled, shellEnabled) && (
+        <div
+          data-testid="launch-switches-off"
+          className="mb-3 rounded-2 border border-warn/40 bg-warn/10 px-2 py-1.5 text-[11px] text-warn"
+        >
+          {LAUNCH_SWITCHES_OFF}{" "}
+          <Link
+            to={TERMINALS_LAUNCH_POLICY_HASH_PATH}
+            onClick={onClose}
+            className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
+          >
+            Open the launch policy
+          </Link>
         </div>
       )}
 
@@ -1759,10 +1884,38 @@ export function NewTerminalDialog({
             disabled={isolationPicker.disabled}
             reason={isolationPicker.reason}
             chip={isolationPicker.chip}
+            notes={isolationPicker.notes}
+            unavailable={isolationPicker.unavailable}
+            onNavigate={onClose}
             onChange={(v) => {
               if (v !== ISOLATION_NONE) setIsolationChoice(v);
               setSandboxOn(v !== ISOLATION_NONE);
             }}
+            onSetup={setupOffered ? openSetup : undefined}
+            setupBackends={setupInfo.rows.map((r) => r.backend)}
+            setupBeta={setupInfo.rows.filter((r) => r.beta).map((r) => r.label)}
+          />
+        </Suspense>
+      )}
+
+      {/* The sandbox setup panel (sandbox installation lifecycle plan
+          section 3.7), a compgen row of the same module, inline under the
+          picker once the person asks. A setup step's terminal opens in the
+          dock with this dialog's draft, so the dialog reopens on the same
+          row with a fresh plan when it exits. */}
+      {!sandboxModuleAbsent && setupOffered && setupOpen && SANDBOX_SETUP_PANEL && (
+        <Suspense fallback={null}>
+          <SANDBOX_SETUP_PANEL
+            compact
+            backend={setupBackend}
+            initialSummaries={initialSetupSummaries}
+            initialPlan={initialSetupPlan}
+            onBackendChange={setSetupBackend}
+            onTerminal={(handle, label) => onLaunched(handle, label, false, currentDraft())}
+            onReady={onSetupReady}
+            onSettled={onSetupSettled}
+            resumed={resumedAfterInstall}
+            onNavigate={onClose}
           />
         </Suspense>
       )}

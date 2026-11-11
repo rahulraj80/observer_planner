@@ -16,9 +16,9 @@ import {
 // MCPReputationCard is `observer guard mcp reputation <package>` on the
 // Security page's MCP tab (T-496): npm-registry metadata for an MCP server
 // package before you trust it. The server runs the same lookup the CLI runs
-// (notify.LookupNPMReputation): off until [guard.cloud] and
-// [guard.cloud.reputation] are both enabled, one outbound request per
-// lookup, nothing automatic.
+// (notify.LookupNPMReputation): off until Reputation lookups are turned on in
+// the Network features card above it (GuardCloudCard, B-G5), one outbound
+// request per lookup, nothing automatic.
 export function MCPReputationCard() {
   const status = useApi<MCPReputationStatus>("/api/guard/mcp/reputation");
   const [pkg, setPkg] = useState("");

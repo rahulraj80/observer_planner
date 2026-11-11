@@ -25,6 +25,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/secciwf"
 	"github.com/marmutapp/superbased-observer/internal/secdetect"
 	"github.com/marmutapp/superbased-observer/internal/secdiffobs"
+	"github.com/marmutapp/superbased-observer/internal/secdockerfile"
 	"github.com/marmutapp/superbased-observer/internal/secfeedback"
 	"github.com/marmutapp/superbased-observer/internal/secfinding"
 	"github.com/marmutapp/superbased-observer/internal/secipc"
@@ -128,7 +129,7 @@ const (
 // readFeedbackPending reads the pending offers' file, capped (a larger
 // file reads as none).
 func readFeedbackPending(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G703: false positive; the pending offers' file under this node's own security dir, read capped
 	if err != nil {
 		return nil, err
 	}
@@ -401,9 +402,12 @@ func feedbackSecretRule(id string) bool {
 	return ok && t != "" && secdetect.TypeWords(t) != secdetect.TypeWords("")
 }
 
-// feedbackCodeRule knows the security.code ids the workflow rules and the
-// diff observations produce.
+// feedbackCodeRule knows the security.code ids the workflow rules, the
+// Dockerfile rules and the diff observations produce.
 func feedbackCodeRule(id string) bool {
+	if rest, ok := strings.CutPrefix(id, "container."); ok {
+		return slices.ContainsFunc(secdockerfile.Rules, func(r secdockerfile.Rule) bool { return strings.ToLower(r.ID) == rest })
+	}
 	if rest, ok := strings.CutPrefix(id, "ci."); ok {
 		return slices.ContainsFunc(secciwf.Rules, func(r secciwf.Rule) bool { return strings.ToLower(r.ID) == rest })
 	}

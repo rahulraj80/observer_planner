@@ -21,7 +21,7 @@ import { vocabIcon } from "../lib/vocabIcons";
 // independent: SetSessionSurface fills each one separately).
 
 /** The closed capture-surface vocabulary. */
-export type SurfaceKind = "cli" | "ide" | "desktop" | "sdk" | "web";
+export type SurfaceKind = "cli" | "ide" | "desktop" | "sdk" | "web" | "mobile";
 
 type SurfaceMeta = {
   label: string;
@@ -54,11 +54,15 @@ const SURFACE_META: Record<SurfaceKind, SurfaceMeta> = {
     label: "web",
     gloss: "Captured from a browser / web-app surface.",
   },
+  mobile: {
+    label: "mobile",
+    gloss: "Driven from a phone or tablet app (the Claude mobile app starting a cloud session).",
+  },
 };
 
 /** isSurfaceKind narrows an arbitrary string to the closed vocabulary. */
 export function isSurfaceKind(v: string | null | undefined): v is SurfaceKind {
-  return v === "cli" || v === "ide" || v === "desktop" || v === "sdk" || v === "web";
+  return v === "cli" || v === "ide" || v === "desktop" || v === "sdk" || v === "web" || v === "mobile";
 }
 
 export type SurfaceBadgeProps = {

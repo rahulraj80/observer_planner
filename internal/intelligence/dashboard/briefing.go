@@ -1196,9 +1196,10 @@ func (s *Server) handleBriefingJustify(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleBriefingSession — GET /api/briefing/session/<id> : drill-down into
-// one top session, reusing the existing /api/session/<id> handler verbatim
-// (same enrichment, same shape) so there is exactly one session-detail
-// implementation.
+// one top session, reusing the /api/session/<id> detail read verbatim (same
+// enrichment, same shape) so there is exactly one session-detail
+// implementation. It calls the read itself, never the /api/session/ router,
+// so no session sub-route (launch, resume, tags) is reachable from here.
 func (s *Server) handleBriefingSession(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/briefing/session/")
 	if id == "" || strings.Contains(id, "/") {
@@ -1207,5 +1208,5 @@ func (s *Server) handleBriefingSession(w http.ResponseWriter, r *http.Request) {
 	}
 	cloned := r.Clone(r.Context())
 	cloned.URL.Path = "/api/session/" + id
-	s.handleSessionDetail(w, cloned)
+	s.serveSessionDetail(w, cloned, id)
 }

@@ -127,7 +127,14 @@ func (s *Server) handleSSHProfiles(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleSSHLaunch(w http.ResponseWriter, r *http.Request) {
 	seam, ok := s.sshSeam()
 	if !ok {
-		http.Error(w, "SSH remote-system terminals are not available on this daemon (run via `observer start`)", http.StatusNotImplemented)
+		// A nil launch manager is the terminal switch or the OS (the one
+		// sentence names the dashboard control); a manager without the SSH
+		// seam is a build without it.
+		why := "this daemon's terminal stack has no SSH launcher"
+		if s.opts.LaunchManager == nil {
+			why = errTerminalUnavailable
+		}
+		http.Error(w, "SSH remote-system terminals are not available: "+why, http.StatusNotImplemented)
 		return
 	}
 	var body sshLaunchRequest
@@ -150,7 +157,8 @@ func (s *Server) handleSSHLaunch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	handle, err := seam.CreateSSH(SSHLaunchSpec{Profile: profile})
+	initiator, parent := s.launchOrigin(r)
+	handle, err := seam.CreateSSH(SSHLaunchSpec{Profile: profile, Initiator: initiator, ParentSessionID: parent})
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrLaunchSSHDisabled):

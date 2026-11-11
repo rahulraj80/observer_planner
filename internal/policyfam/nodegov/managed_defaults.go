@@ -79,6 +79,7 @@ var ManagedNavDefaults = []ManagedDefault{
 	{"benchmarks", VisibilityVisible, "Results of the developer's own benchmark runs (read-only)."},
 	{"discovery", VisibilityVisible, "Wasted-effort signals in the developer's own sessions."},
 	{"patterns", VisibilityVisible, "Habits from the developer's own sessions, written into their own project files."},
+	{"you", VisibilityVisible, "The developer's own identity, accounts, consents and stored credentials. Can never be hidden."},
 	{"policies", VisibilityHidden, "Authoring Plane-A admission and egress policy: organization policy."},
 	{"agent-config", VisibilityReadOnly, "The developer's AI tool settings and instruction files: readable, but on a managed machine the organization decides who may edit them (read-only until it grants editing, D-102)."},
 	{"privacy", VisibilityVisible, "Transparency: what is captured and shared. Can never be hidden."},

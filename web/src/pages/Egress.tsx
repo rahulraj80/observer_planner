@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Button,
   ChartShell,
@@ -111,7 +112,17 @@ export function EgressPage() {
       <PageHeader
         icon={navIcon("egress")}
         title="Egress"
-        sub="Plane-A policy egress routing: route a hosted app's end-user requests to another resource by admission verdict, end-user budget, or cohort. This audit log is node-local - it never rides the org push - so this page (and observer obs egress) is its only view. Read-only; policy is authored in config.toml."
+        sub={
+          <>
+            Plane-A policy egress routing: route a hosted app's end-user requests to another resource by admission
+            verdict, end-user budget, or cohort. This audit log is node-local - it never rides the org push - so this
+            page (and observer obs egress) is its only view. Read-only here; author the policy on{" "}
+            <Link to="/policies?tab=routing" className="text-accent hover:underline">
+              Policies &gt; Routing
+            </Link>
+            .
+          </>
+        }
       />
       {obsOff ? (
         <ObsDisabled>
@@ -174,7 +185,15 @@ export function EgressPage() {
           {st && st.enabled && (
             <ChartShell
               title="Policy"
-              sub="The installed (compiled) policy - authored node-side in [observability.egress]; there is no dashboard write path."
+              sub={
+                <>
+                  The installed (compiled) policy. Edit it on{" "}
+                  <Link to="/policies?tab=routing" className="text-accent hover:underline">
+                    Policies &gt; Routing
+                  </Link>{" "}
+                  (saved to [observability.egress]).
+                </>
+              }
             >
               <PolicyTables rules={st.rules ?? []} targets={st.targets ?? []} />
             </ChartShell>
@@ -292,8 +311,11 @@ function PolicyTables({ rules, targets }: { rules: EgressRule[]; targets: Egress
     <div className="space-y-4">
       {rules.length === 0 ? (
         <p className="py-2 text-[12px] text-fg-3">
-          No rules - add <code className="rounded-1 bg-bg-3 px-1 font-mono">[[observability.egress.rules]]</code>{" "}
-          entries to config.toml.
+          No rules yet - add them on{" "}
+          <Link to="/policies?tab=routing" className="text-accent hover:underline">
+            Policies &gt; Routing
+          </Link>
+          .
         </p>
       ) : (
         <DataTable<EgressRule>
@@ -461,17 +483,21 @@ function RealizedCell({ d }: { d: EgressDecision }) {
 
 // --- empty / error states ---------------------------------------------------
 
-// EgressDisabled names the exact gate: [observability.egress] enabled (and its
-// admission dependency — egress composes on the admission verdict).
+// EgressDisabled names where the policy is turned on: Policies > Routing
+// saves the rules and sets [observability.egress] enabled, and egress needs
+// admission on (it composes on the admission verdict), which the Policies
+// page's own empty state turns on (B-S1).
 function EgressDisabled() {
   return (
     <EmptyCard title="No egress policy installed">
       <p>
-        Egress is default-off. It needs{" "}
-        <code className="rounded-1 bg-bg-2 px-1 font-mono">[observability.egress] enabled = true</code>{" "}
-        plus at least one rule, and{" "}
-        <code className="rounded-1 bg-bg-2 px-1 font-mono">[observability.admission] enabled = true</code>{" "}
-        - egress composes on the admission verdict. A policy that fails to compile is also reported
+        Egress is off by default. Author a policy with at least one rule on{" "}
+        <Link to="/policies?tab=routing" className="text-accent hover:underline">
+          Policies &gt; Routing
+        </Link>{" "}
+        and save it (that turns egress on, [observability.egress] enabled); egress composes on the admission
+        verdict, so admission must be on too (the Policies page turns it on when it is off). A policy that fails to
+        compile is also reported
         here as not installed (the daemon logs the compile error and keeps admission running).
       </p>
       <EgressLintCheck />

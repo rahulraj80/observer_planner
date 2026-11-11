@@ -109,6 +109,8 @@ type ociDriver struct {
 	mu     sync.Mutex
 	last   sandboxoci.ProbeResult
 	lastAt time.Time
+	// lastGen is the probe-cache generation last was taken under.
+	lastGen uint64
 
 	// choices holds each created run's image and repository environment
 	// (run id -> ociRunChoice) until Attach composes it.
@@ -210,12 +212,13 @@ func (d *ociDriver) version() string {
 // probeResult runs (or reuses) the ladder and keeps what it established.
 func (d *ociDriver) probeResult(ctx context.Context) sandboxoci.ProbeResult {
 	d.mu.Lock()
-	if !d.lastAt.IsZero() && time.Since(d.lastAt) < sandboxProbeTTL {
+	if sandboxProbeFresh(d.lastAt, d.lastGen, time.Now()) {
 		res := d.last
 		d.mu.Unlock()
 		return res
 	}
 	d.mu.Unlock()
+	gen := sandboxProbeGeneration()
 	env := ociProbeEnvFn(ctx, d.cfg, d.r.observerDir)
 	env.Runtime = d.profile
 	res := sandboxoci.Probe(env)
@@ -227,6 +230,7 @@ func (d *ociDriver) probeResult(ctx context.Context) sandboxoci.ProbeResult {
 	if d.r.inDaemon {
 		if res.Verdict.OK() {
 			if id, err := ociInstallID(d.r.observerDir); err == nil {
+				processOCIReaper.useLogger(d.r.logger)
 				processOCIReaper.ensure(res.Socket, res.Identity.APIVersion, id, d.r.observerDir, d.r.managedRoot)
 			}
 		} else {
@@ -234,7 +238,7 @@ func (d *ociDriver) probeResult(ctx context.Context) sandboxoci.ProbeResult {
 		}
 	}
 	d.mu.Lock()
-	d.last, d.lastAt = res, time.Now()
+	d.last, d.lastAt, d.lastGen = res, time.Now(), gen
 	d.mu.Unlock()
 	return res
 }
@@ -644,7 +648,7 @@ func (d *ociDriver) compose(created termsvc.CreateResult, res sandboxoci.ProbeRe
 
 	netReq := sandbox.NetRequest{Egress: r.egress.Mode, ProxyPort: r.proxyPort, EgressAllowCIDRs: r.cfg.EgressAllowCIDRs}
 	if capture := sandboxRunCaptureFor(d.row(), created.ProxyRouted, vocab.Tier(r.egress.Mode), r.cfg.EffectiveProviderDirect()); capture.ProviderBlock {
-		netReq.ProviderBlock, netReq.ProviderHosts = true, r.providerHosts
+		netReq.ProviderBlock, netReq.ProviderHosts = true, r.providerHostList()
 	}
 	netReq.HostSocketDir = filepath.Join(os.TempDir(), "observer-sbx-"+run.ID)
 

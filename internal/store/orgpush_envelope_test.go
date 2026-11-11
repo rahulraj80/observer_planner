@@ -21,6 +21,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/record"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/proccapture"
 	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
@@ -108,6 +109,10 @@ var envelopeWireFamilies = map[string]string{
 	"SessionCacheEvents":        "SelectSessionCacheEvents; per-session capped at 500 most-recent in SQL, then chronological — fitRows drops the trailing (session,timestamp) events",
 	"SessionProcesses":          "SelectSessionProcessRows; per-session most-recent-first, drops oldest runs",
 	"SessionNetworkEvents":      "SelectSessionNetworkEventsBounded; per-session most-recent-first, drops oldest events",
+	// The process capture budget's org wire (layer O1, fitSnapshot, one
+	// gated recompute feeding two slices).
+	"SessionProcessCaptureStats": "SelectSessionProcessCaptureStatsRows; oldest change first, drops the most recently changed sessions (composed before the rollups)",
+	"SessionProcessRollups":      "SelectSessionProcessRollupRows; per-session capped at 2,000 newest buckets in SQL, drops trailing (session, bucket) rows",
 
 	// --- node session-detail trickle-up (fitSnapshot; each under its OWN
 	// tier flag, with a SECOND shipsRawContent() gate on the content columns
@@ -413,6 +418,27 @@ func seedEveryWireFamily(t *testing.T, s *Store) {
 		runID := seedProcessRun(t, s, fmt.Sprintf("proc-%d", i), sessionID, 200+i,
 			now.Add(-time.Duration(i)*time.Minute), true)
 		seedProcessEvents(t, s, runID, fmt.Sprintf("proc-%d", i), sessionID, 2)
+	}
+
+	// process_rollups / process_capture_stats → SessionProcessRollups +
+	// SessionProcessCaptureStats (the process capture budget, layer O1).
+	{
+		rollups := make([]proccapture.Rollup, 0, 20)
+		for i := 0; i < 20; i++ {
+			rollups = append(rollups, proccapture.Rollup{
+				Key: proccapture.GroupKey{
+					SessionID: sessionID, BucketStart: proccapture.BucketStart(now.Add(-time.Duration(i)*time.Minute), time.Minute),
+					Kind: proccapture.GroupBudget, ExeBasename: "git", ArgvTemplateHash: fmt.Sprintf("h%d", i),
+				},
+				Count: int64(10 + i), FirstSeen: now, LastSeen: now, ExampleArgvPreview: "git status " + pad[:256],
+			})
+		}
+		if _, err := s.PersistCapture(ctx, nil, proccapture.Delta{
+			Rollups: rollups,
+			Stats:   map[string]proccapture.Stats{sessionID: {Observed: 300, Kept: 10, RolledUp: 290, BudgetHits: 1}},
+		}); err != nil {
+			t.Fatalf("seed process capture: %v", err)
+		}
 	}
 
 	// network events with bodies → SessionNetworkEvents (the incident wire).

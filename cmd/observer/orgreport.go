@@ -14,6 +14,8 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/govern"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/orgenrol"
+	"github.com/marmutapp/superbased-observer/internal/policyfam"
 	"github.com/marmutapp/superbased-observer/internal/proxyroute"
 	"github.com/marmutapp/superbased-observer/internal/routeprov"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -51,6 +53,11 @@ type orgStatusReport struct {
 	// IntelLine is the org-plane Cloud Intelligence consent line (design
 	// 3.7 step 3), empty unless something is pending.
 	IntelLine string
+	// PromptJudgeLine says the organization's prompt judge may read this
+	// developer's coding-agent prompts here (P-228, fix round 1 F8): shown
+	// on a managed node whose grant holds enforce.admission, the authority
+	// that governs planeb.admission.
+	PromptJudgeLine string
 	// Oversized is the daemon's report of snapshot rows too large for any
 	// push (family names and sizes only; store.LoadOrgPushOversizedRows).
 	Oversized []store.OrgPushOversizedRow
@@ -77,6 +84,7 @@ func collectOrgStatus(ctx context.Context, b orgBundle) (orgStatusReport, error)
 		if grant, _, gerr := loader(ctx); gerr == nil && grant != nil {
 			rep.Governed = true
 			rep.TenancyLine = managedConsentRefusalLine(grant)
+			rep.PromptJudgeLine = promptJudgeStatusLine(rep.Tenancy == orgcontract.TenancyManaged, grant.Authority, b.cfg.OrgClient.Policy)
 		}
 	}
 	// Share mode - the v1.8.0 per-node opt-in, read through the SAME
@@ -169,6 +177,10 @@ func printOrgStatus(out io.Writer, rep orgStatusReport) {
 		fmt.Fprintln(out, rep.IntelLine)
 		fmt.Fprintln(out)
 	}
+	if rep.PromptJudgeLine != "" {
+		fmt.Fprintln(out, rep.PromptJudgeLine)
+		fmt.Fprintln(out)
+	}
 
 	fmt.Fprintf(out, "Share mode:       %s\n", rep.ShareLine)
 	if len(rep.TargetActions) > 0 {
@@ -236,6 +248,24 @@ type governedFamilyRow struct {
 	Family        string
 	Accepted      bool
 	Preauthorized bool
+}
+
+// promptJudgeStatusLine is the `observer org status` disclosure of the
+// organization's coding-agent prompt judge (P-228): empty unless the node is
+// managed and its grant holds enforce.admission. It says whether this
+// machine's config accepts the planeb.admission family (the start-time
+// backfill adds it once) and that the judge runs only while a signed body
+// turns its node lane on.
+func promptJudgeStatusLine(managed bool, authority []string, policy config.OrgClientPolicyConfig) string {
+	if !managed || !containsString(govern.AuthorityEnforceAdmission, authority) {
+		return ""
+	}
+	if !containsString(policyfam.FamilyPlaneBAdmission, policy.AcceptedFamilies()) {
+		return "Prompt judge:     your grant lets the organization judge the prompts you type into coding agents, " +
+			"but this machine's config.toml does not accept planeb.admission, so it does not run here."
+	}
+	return "Prompt judge:     your organization may let " + orgenrol.PromptJudgeDisclosure +
+		". See `observer guard status` or the Security page for whether it is on."
 }
 
 // governedFamilyRows computes the W-7 family table (config-side only).

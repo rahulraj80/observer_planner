@@ -550,6 +550,13 @@ func (s *Server) handleProjectCommits(w http.ResponseWriter, r *http.Request) {
 	agg := dashapi.AggregateByCommit(linkage)
 	promptByAction := indexPromptsByAction(prompts)
 	ownership := commitOwnershipForRows(linkage, linkCommits, rawCommits)
+	// Cloud-agent credit (CA-C5, docs/projects-page.md "Cloud-agent
+	// credit"): the same overlay store.LoadCommitOwnership applies, so a
+	// commit a cloud session's PR produced reads that session here too.
+	if ownership, err = st.CreditCloudCommits(ctx, projectID, ownership, rawCommits); err != nil {
+		writeErr(w, err)
+		return
+	}
 
 	rows := make([]apiProjectCommitRow, 0, len(rawCommits))
 	for _, c := range rawCommits {
@@ -770,11 +777,17 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 	}
 	since, until, _ := projectDetailWindow(r)
 
-	priced, err := dashapi.LoadProjectSpend(ctx, st, s.opts.CostEngine, projectID, since, until)
+	// CA-D21 (cloud-agents lane CA-C1): the session / tool / model / day
+	// buckets cover the folded spend (the project plus its synthetic cloud
+	// twins, CA-D12 precedence applied), the same rows as the Overview Spend
+	// tile. Task and commit attribution read the project's own rows: a twin
+	// has no checkout, tasks or commits of its own here.
+	folded, err := dashapi.LoadFoldedProjectSpend(ctx, st, s.opts.CostEngine, projectID, since, until)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
+	priced := folded.All
 	turns := priced.Turns
 
 	var rows []dashapi.APIProjectCostBucketRow
@@ -805,6 +818,15 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
+		// A folded cloud twin's sessions keep their own split (lane CA-C1),
+		// the same rows the detail panel's by_session reads.
+		twinEdits, twinTruncated, err := dashapi.LoadTwinAIEdits(ctx, st, folded, since, until)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		edits = append(edits, twinEdits...)
+		editsTruncated = editsTruncated || twinTruncated
 		codePerSession := make(map[string]int)
 		commentPerSession := make(map[string]int)
 		for _, e := range edits {
@@ -812,7 +834,7 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 			commentPerSession[e.SessionID] += e.CommentLines()
 		}
 		for _, sess := range priced.Sessions {
-			row := dashapi.APIProjectCostBucketRow{Key: sess.ID, Label: sess.Tool, CostUSD: sess.CostUSD, Turns: turnsPerSession[sess.ID], UnpricedTurns: unpricedPerSession[sess.ID]}
+			row := dashapi.APIProjectCostBucketRow{Key: sess.ID, Label: sess.Tool, CostUSD: sess.CostUSD, Turns: turnsPerSession[sess.ID], UnpricedTurns: unpricedPerSession[sess.ID], ExecutionLocation: folded.Locations[sess.ID]}
 			row.AISplit = optionalAuthoredSplit(codePerSession[sess.ID], commentPerSession[sess.ID])
 			rows = append(rows, row)
 		}
@@ -877,7 +899,7 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		linkage := projectroi.Link(prompts, edits, linkCommits, projectroi.Options{LinkWindow: s.commitLinkWindow()})
-		spend := projectroi.AttributeSpend(linkage, turns, prompts)
+		spend := projectroi.AttributeSpend(linkage, folded.Own.Turns, prompts)
 		for _, c := range rawCommits {
 			// 2026-09-22 review round 4 finding #9: commit buckets used
 			// to omit unpriced-turn coverage entirely, unlike every other

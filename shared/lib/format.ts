@@ -580,12 +580,22 @@ export function fmtYearMonth(value: string | null | undefined): string {
   return cachedDateTimeFormat("en-US", { year: "numeric", month: "long" }).format(d);
 }
 
+// SUBAGENT_ID_SEP separates a subagent session id from its parent's
+// (`<parent>:agent:<agent>`, internal/adapter/claudecode/subagent.go).
+const SUBAGENT_ID_SEP = ":agent:";
+
 // fmtShortId abbreviates an opaque identifier for a table cell or a caption:
 // the first `keep` characters plus an ellipsis. A short id is returned whole.
-// Pair it with the full id in a title/tooltip or a CopyOnClick so nothing is
-// lost, only hidden.
+// A subagent session id keeps both halves ("00392aa6… · subagent a0d28add…"):
+// its first characters are its parent's, so the plain cut showed every
+// subagent of one session as the same id. Pair it with the full id in a
+// title/tooltip or a CopyOnClick so nothing is lost, only hidden.
 export function fmtShortId(id: string | null | undefined, keep = 8): string {
   if (!id) return "—";
   const s = id.trim();
+  const i = s.indexOf(SUBAGENT_ID_SEP);
+  if (i > 0) {
+    return `${fmtShortId(s.slice(0, i), keep)} · subagent ${fmtShortId(s.slice(i + SUBAGENT_ID_SEP.length), keep)}`;
+  }
   return s.length <= keep + 1 ? s : s.slice(0, keep) + "…";
 }

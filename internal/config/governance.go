@@ -226,6 +226,8 @@ var governancePinnableKeys = []governancePinnableKey{
 	{Key: "terminal.sandbox.workspace_retention_days", Kind: "int", Direction: string(postureop.DirRetention), Max: 3650},
 	{Key: "terminal.sandbox.home_mode", Kind: "string", Enum: []any{"tmpfs", "readonly"}, Direction: governanceDirRestrictiveOnly, Safe: "tmpfs"},
 	{Key: "terminal.sandbox.default_on", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: true},
+	// lane FU4 (tracker F-002): the seccomp filter, required on, never off.
+	{Key: "terminal.sandbox.seccomp", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: true},
 	{Key: "terminal.sandbox.allow_remote_clone", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: false},
 	{Key: "terminal.sandbox.allow_worktree_source", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: false},
 	{Key: "terminal.sandbox.allow_tool_config_writes", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: false},
@@ -375,6 +377,41 @@ var governanceEmptied = map[string]func(cfg *Config){
 // sets, so they report as applied (set by the organization) too.
 var governanceEmptiedForces = map[string][]string{
 	"terminal.sandbox.remote_allowed_hosts": {"terminal.sandbox.allow_remote_clone"},
+}
+
+// governancePinFollowers is the table of settings an applied pin decides
+// beside its own field: when the pin's key is applied, each row sets its
+// follower and the follower reports as applied (set by the organization) too.
+// A row runs only when its pin was applied, so a skipped or excepted pin
+// leaves the follower as the node set it.
+var governancePinFollowers = map[string][]struct {
+	key   string
+	apply func(cfg *Config)
+}{
+	// The prompt guard takes its stance from the organization's guard mode
+	// (operator ruling 2026-11-08: "it should be based on the enterprise's
+	// posture"). Without this row the shipped enforce_independent = true kept
+	// the prompt lane asking or blocking under an org-pinned observe. With
+	// it, observe caps prompt outcomes at warn like every other channel, and
+	// enforce makes the lane act through the mode itself. An org prompt rule
+	// that can stop a prompt raises it back through the guard floor
+	// (guardposture "a stopping org prompt pin keeps prompt enforcement on",
+	// applied after this overlay), so the org's own prompt rule still holds.
+	"guard.mode": {{key: "guard.prompt.enforce_independent", apply: func(cfg *Config) {
+		cfg.Guard.Prompt.EnforceIndependent = false
+	}}},
+}
+
+// applyGovernancePinFollowers runs key's follower rows on cfg and returns the
+// follower keys, in table order.
+func applyGovernancePinFollowers(cfg *Config, key string) []string {
+	rows := governancePinFollowers[key]
+	keys := make([]string, 0, len(rows))
+	for _, r := range rows {
+		r.apply(cfg)
+		keys = append(keys, r.key)
+	}
+	return keys
 }
 
 // errGovernanceEmptied is governanceMerge's signal that the merge left
@@ -658,6 +695,7 @@ func applyGovernancePins(cfg *Config, pinned map[string]any, out *GovernanceOutc
 			continue
 		}
 		out.Applied = append(out.Applied, key)
+		out.Applied = append(out.Applied, applyGovernancePinFollowers(cfg, key)...)
 	}
 	sort.Strings(out.Applied)
 }

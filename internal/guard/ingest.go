@@ -150,6 +150,10 @@ type ActionVerdict struct {
 	// stampOrgOverride from SetRequestAccessBase, "" = the CLI command
 	// only). Derived state like Overridable/OrgLocked, never persisted.
 	RequestBase string
+	// BlockNotice is the guard's Options.BlockNotice (stamped by
+	// stampOrgOverride beside RequestBase): which human-first line
+	// HumanBlockLine renders. Derived state, never persisted.
+	BlockNotice BlockNotice
 	// softenedBy is a soften grant offered to the developer WITHOUT
 	// counting a use (orggrant.go approvalOutcome); it steers the deny
 	// text only. Derived state, never persisted.

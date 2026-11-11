@@ -4,11 +4,15 @@
 // rows (each beta). The card mounts it with one line and owns the save; this
 // panel edits its own block with pickers only, and renders nothing unless a
 // [components] block selects one of the hosted drivers (they are opt-in and
-// inactive in every distro). No credential is ever part of this block.
+// inactive in every distro). No credential is ever part of this block. Each
+// provider's template and in-box observer binary are typed here (dashboard
+// CLI parity plan item B-G6; both are checked again by the daemon's config
+// validation on save).
 
-import { ComboChip } from "@/components/primitives";
+import { ComboChip, Input } from "@/components/primitives";
 import { SandboxHostedStatus } from "@/components/SandboxHostedStatus";
 import type { ComponentsView } from "@/lib/componentState";
+import { absPathProblem, hostedTemplateProblem } from "@/lib/sandboxParity";
 
 export type SandboxHostedProvider = {
   region: string;
@@ -233,10 +237,31 @@ export function SandboxHostedPanel({
                 />
                 <span className="block text-[11px] text-fg-3">{d.regionNote}</span>
               </div>
-              <span className="block text-[11px] text-fg-3">
-                Template: <span className="font-mono">{p.template || "(the vendor default, which holds no agent CLI)"}</span>; in-box observer:{" "}
-                <span className="font-mono">{p.box_binary || "this running Linux binary"}</span>. Both are set in the config file.
-              </span>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Input
+                  label="Template"
+                  mono
+                  value={p.template}
+                  placeholder="the vendor default (holds no agent CLI)"
+                  disabled={!editable(`${d.table}.template`)}
+                  error={hostedTemplateProblem(p.template) ?? undefined}
+                  help="The vendor template, image or runtime that holds the agent tool. Empty: the tool installs from its vendor at first start, on the internet tier only."
+                  onChange={(e) => setP("template", e.target.value)}
+                />
+                <Input
+                  label="In-box observer"
+                  mono
+                  value={p.box_binary}
+                  placeholder="this running Linux binary"
+                  disabled={!editable(`${d.table}.box_binary`)}
+                  error={absPathProblem(p.box_binary) ?? undefined}
+                  help="An absolute path to a Linux observer binary of this version for the box. Empty: the running binary, when it is a Linux binary of the box's architecture."
+                  onChange={(e) => setP("box_binary", e.target.value)}
+                />
+              </div>
+              {(pinned.has(`${PIN_PREFIX}${d.table}.template`) || pinned.has(`${PIN_PREFIX}${d.table}.box_binary`)) && (
+                <span className="block text-[11px] text-fg-3">Set by your organization.</span>
+              )}
             </div>
           );
         })}

@@ -23,6 +23,13 @@ const SourceNativeOTel = "native_otel"
 // sourceCCOTel mirrors store.SourceCCOTel (pinned by a cmd/observer test).
 const sourceCCOTel = "cc_otel"
 
+// SourceAgentOTel is the api_turns.source tag of a developer's own agent's
+// span turns (PT-55). It mirrors store.SourceAgentOTel (pinned by a
+// cmd/observer test). The counts are what the developer's own
+// instrumentation reported, so the store ranks them approximate: the
+// proxy's row for the same call always wins.
+const SourceAgentOTel = "agent_otel"
+
 // GenAI semantic-convention keys (open-telemetry/semantic-conventions-genai,
 // Development status). Both the current and the renamed-away spellings are
 // listed so an exporter on either side of a rename maps the same way.
@@ -55,6 +62,41 @@ func genAIChatTurn() Rule {
 			CacheWrite: genAICacheWrite, Reasoning: genAIReasoning,
 		},
 	}
+}
+
+// genAIUsage lists every usage key a GenAI inference span may carry. The
+// own-agent turn rules require one of them, so a span that reports no usage
+// yields no turn (never a zero-token guess).
+var genAIUsage = func() []string {
+	var out []string
+	for _, ks := range [][]string{genAIInput, genAIOutput, genAICacheRead, genAICacheWrite, genAIReasoning} {
+		out = append(out, ks...)
+	}
+	return out
+}()
+
+// agentInferenceOps are the GenAI operation names whose spans are one model
+// call: "chat", "text_completion" and "generate_content" (the semconv span
+// name is "{operation} {model}"). invoke_agent and create_agent spans
+// carry sums or no usage and are deliberately not turns.
+var agentInferenceOps = []string{"chat", "text_completion", "generate_content"}
+
+// agentTurnRules maps a developer's own agent's GenAI inference spans to
+// turns, one rule per operation, each requiring a usage attribute.
+func agentTurnRules() []Rule {
+	out := make([]Rule, 0, len(agentInferenceOps))
+	for _, op := range agentInferenceOps {
+		out = append(out, Rule{
+			Signal: SignalSpans, Names: []string{op}, NamePrefix: true, Kind: KindTurn,
+			Where: []Cond{{Key: "gen_ai.operation.name", Equals: op}, {AnyOf: genAIUsage}},
+			F: Fields{
+				Session: genAISession, Request: genAIRequest, Model: genAIModel, Provider: genAIProvider,
+				Input: genAIInput, Output: genAIOutput, CacheRead: genAICacheRead,
+				CacheWrite: genAICacheWrite, Reasoning: genAIReasoning,
+			},
+		})
+	}
+	return out
 }
 
 // genAIToolSpan is the GenAI-semconv "execute_tool <name>" span as a tool
@@ -101,6 +143,23 @@ var vendors = []Vendor{
 		// export turn merges into the proxied row (TokensMergeWithProxy).
 		Owner:    Ownership{TokensWithTranscript: true, ContentWithTranscript: true, TokensMergeWithProxy: true},
 		Evidence: "doc: code.claude.com/docs/en/monitoring-usage; shape pinned since native-console Phase 2b",
+		// Claude Code cloud sessions (cloud-agents lane CA-B4): the vendor
+		// documents ccr.session.id on a cloud session's export, equal to
+		// CLAUDE_CODE_REMOTE_SESSION_ID (the `cse_...` id the hooks and the
+		// Rail S flush stamp), and joins cloud telemetry on it because
+		// session.id changes on /clear. Live-checked 2026-10-31 (lane
+		// CA-B4): a `claude -p` run (2.1.316) inside a cloud VM, exporting
+		// http/json to a loopback recorder, put ccr.session.id on every log
+		// record and metric data point (not on the resource), one value per
+		// run, equal to CLAUDE_CODE_REMOTE_SESSION_ID (`cse_`, 28 chars).
+		// That process inherited the session's environment; an exporter
+		// configured in a cloud environment's settings was not observed
+		// end to end. Resource placement stays accepted. A cloud run's transcript
+		// and hooks stay in the vendor's sandbox, so its session row is
+		// created here (CreatesSession) despite NoSessionRows.
+		Execution: []ExecutionMarker{
+			{Keys: []string{"ccr.session.id"}, Location: models.ExecutionVendorCloud, ValueIsVendorRef: true, CreatesSession: true},
+		},
 		Rules: []Rule{
 			{
 				Signal: SignalLogs, Names: claudeCodeEvents("api_request"), Kind: KindTurn, RequireRequest: true,
@@ -109,7 +168,10 @@ var vendors = []Vendor{
 					Session: []string{"session.id", "session_id"},
 					Input:   []string{"input_tokens"}, Output: []string{"output_tokens"},
 					CacheRead: []string{"cache_read_tokens"}, CacheWrite: []string{"cache_creation_tokens"},
-					Cost: []string{"cost_usd"}, Duration: []string{"duration_ms"},
+					// cache_creation_1h_tokens (v2.1.300+, monitoring-usage doc):
+					// the 1-hour part of cache_creation_tokens (CA-C7).
+					CacheWrite1h: []string{"cache_creation_1h_tokens"},
+					Cost:         []string{"cost_usd"}, Duration: []string{"duration_ms"},
 				},
 			},
 			ccContent("user_prompt", ContentPrompt, "prompt", "user_prompt", "content"),
@@ -583,6 +645,27 @@ var vendors = []Vendor{
 				},
 			},
 		},
+	},
+	{
+		// A developer's OWN agent (PT-55, docs/own-agents.md "Send
+		// OpenTelemetry spans"): not a vendor export but the developer's own
+		// code, traced with the stock OpenTelemetry SDK and a GenAI
+		// instrumentor. Claimed by the sbo.agent resource attribute through
+		// the own-agent claim table (ClaimByAgent), never by service.name,
+		// and never when the resource carries a hosted-app identity. Inference
+		// spans with usage become turns (GenAI semconv: input SHOULD include
+		// cache reads and writes); execute_tool spans become tool calls;
+		// their arguments and results are content under
+		// [ingest.otel].content_capture. gen_ai.response.id is the provider's
+		// response id, which is the request id the proxy stores, so a call
+		// that is also proxied merges into the proxy's row instead of
+		// counting twice (TokensMergeWithProxy); the self-reported counts rank
+		// approximate (SourceAgentOTel), so the proxy's figures win.
+		Tool: models.ToolCustomAgent, ClaimByAgent: true, AdapterGated: true,
+		SourceTag: SourceAgentOTel, Grain: GrainUser, Norm: semconvNorm,
+		Owner:    Ownership{TokensMergeWithProxy: true},
+		Evidence: "doc: OpenTelemetry GenAI semantic conventions (gen_ai.operation.name chat / text_completion / generate_content and execute_tool spans, gen_ai.usage.*, gen_ai.response.id), the shape the stock opentelemetry-instrumentation-openai-v2 and opentelemetry-instrumentation-anthropic instrumentors emit; fixture testdata/otlp/custom-agent",
+		Rules:    append(append(agentTurnRules(), genAIToolSpan()), genAIToolContent()...),
 	},
 }
 

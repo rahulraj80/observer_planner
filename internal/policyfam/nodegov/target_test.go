@@ -41,6 +41,31 @@ var releasedKeys = map[int]struct{ pinned, share, features []string }{
 	4: { // v1.36.0 (the held v1.35.0 shipped inside it)
 		pinned: []string{"guard.budget.fail_closed", "org_client.push_interval_seconds"},
 	},
+	5: { // v1.37.0 and v1.37.1 (identical sets)
+		pinned: []string{
+			"proxy.maintain_routes", "shell_wrap.org_maintain", "terminal.sandbox.allow_remote_clone",
+			"terminal.sandbox.allow_tool_config_writes", "terminal.sandbox.allow_worktree_source",
+			"terminal.sandbox.apple_container.cpus", "terminal.sandbox.apple_container.image",
+			"terminal.sandbox.apple_container.memory_mib", "terminal.sandbox.backends", "terminal.sandbox.default_on",
+			"terminal.sandbox.egress_allow_cidrs", "terminal.sandbox.egress_allow_hosts",
+			"terminal.sandbox.extra_ro_binds", "terminal.sandbox.extra_rw_binds", "terminal.sandbox.home_mode",
+			"terminal.sandbox.hosted.checkpoint_minutes", "terminal.sandbox.hosted.daily_box_minutes",
+			"terminal.sandbox.hosted.db_export", "terminal.sandbox.hosted.max_run_minutes",
+			"terminal.sandbox.hosted.memory_images", "terminal.sandbox.hosted.min_session_minutes",
+			"terminal.sandbox.landlock.min_abi", "terminal.sandbox.live_run_update_policy",
+			"terminal.sandbox.mask_paths", "terminal.sandbox.mxc.probe_timeout_seconds",
+			"terminal.sandbox.mxc.stop_grace_seconds", "terminal.sandbox.oci.allow_devcontainer_image",
+			"terminal.sandbox.oci.allow_rootful", "terminal.sandbox.oci.image", "terminal.sandbox.oci.install_cache",
+			"terminal.sandbox.oci.install_scripts", "terminal.sandbox.oci.podman_userns",
+			"terminal.sandbox.oci.stop_grace_seconds", "terminal.sandbox.prep_timeout_seconds",
+			"terminal.sandbox.provider_direct", "terminal.sandbox.readopt.bound_minutes",
+			"terminal.sandbox.readopt.checkpoint_cap_mib", "terminal.sandbox.remote_allowed_hosts",
+			"terminal.sandbox.seatbelt.allow_keychain", "terminal.sandbox.seatbelt.driver",
+			"terminal.sandbox.vendor_forced_native", "terminal.sandbox.windows.mxc_tier",
+			"terminal.sandbox.workspace_retention_days",
+		},
+		share: []string{"hook_activity"},
+	},
 }
 
 // TestKeyGenerationsCoverEveryKey fails when a pinned key, share key or

@@ -125,7 +125,7 @@ func TestOrgGrant_OrderAndInputs(t *testing.T) {
 	t.Parallel()
 	t.Run("org grant wins over a local approval", func(t *testing.T) {
 		g := enforceGuard(t)
-		g.SetApprovalLookup(func(string, string, string) bool { return true })
+		g.SetApprovalLookup(func(string, string, string) (bool, error) { return true, nil })
 		g.SetOrgGrantClaim((&fakeGrants{res: exemptResult(3)}).claim)
 		av, _ := g.EvaluateHook(rmEvent(askCaps))
 		if av.DegradedFrom != DegradedFromOrgGrant || av.GrantID != 3 {
@@ -134,7 +134,7 @@ func TestOrgGrant_OrderAndInputs(t *testing.T) {
 	})
 	t.Run("no grant falls through to the local approval", func(t *testing.T) {
 		g := enforceGuard(t)
-		g.SetApprovalLookup(func(string, string, string) bool { return true })
+		g.SetApprovalLookup(func(string, string, string) (bool, error) { return true, nil })
 		g.SetOrgGrantClaim((&fakeGrants{}).claim)
 		av, _ := g.EvaluateHook(rmEvent(askCaps))
 		if av.DegradedFrom != "approved" || av.GrantID != 0 {
@@ -249,7 +249,7 @@ func TestOrgGrant_Soften(t *testing.T) {
 	t.Run("deny-only host, then the confirmed retry", func(t *testing.T) {
 		g := enforceGuard(t)
 		confirmed := false
-		g.SetApprovalLookup(func(string, string, string) bool { return confirmed })
+		g.SetApprovalLookup(func(string, string, string) (bool, error) { return confirmed, nil })
 		fg := &fakeGrants{res: soften}
 		g.SetOrgGrantClaim(fg.claim)
 		av, _ := g.EvaluateHook(rmEvent(denyOnlyCaps))

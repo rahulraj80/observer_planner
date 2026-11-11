@@ -193,6 +193,9 @@ model-pricing/scripts/extract-cache/
 # labelled fake value); the global .env rule above must not hide them from git or CI.
 !deploy/modules/**/tests/bundles/*/.env
 
+# OpenShell build working files (decision OB-012 on openshell/integration)
+!docs/plans/openshell/build/
+
 # Internal docs — kept locally on the private repo for development
 # context, untracked from the public repo. The dashboard's runtime
 # walkthrough asset under internal/intelligence/dashboard/static/ is
@@ -286,6 +289,7 @@ model-pricing/scripts/extract-cache/
 /internal/orgmsg/
 /scripts/loadtest/
 /scripts/ci/perf/
+/scripts/ci/cicost/
 /.github/workflows/perf-smoke.yml
 # deploy/ except the sandbox image recipes (a public feature's inputs).
 /deploy/*
@@ -327,6 +331,10 @@ model-pricing/scripts/extract-cache/
 /.github/workflows/agent-access-images.yml
 /scripts/agent-access-supply-chain-check.sh
 /tests/invariant/agent_access_supply_chain_test.go
+# The on-demand half of release.sh's green-before-tag check (P-229).
+/scripts/ci/release-dispatch.sh
+/scripts/ci/release-dispatch-paths.tsv
+/tests/invariant/release_dispatch_test.go
 # The org-plane half of the copilot harness walkthrough. Its Phase-1
 # sibling (examples/copilot-harness/README.md) stays public.
 /examples/copilot-harness/README-orgplane.md

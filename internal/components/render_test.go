@@ -56,9 +56,12 @@ func TestCompiledRegistry(t *testing.T) {
 // a library-linked scanner driver (security.scan.scalibr, security plan
 // section 4.2) is compiled only into managed and full, so the developer
 // shape is full minus obs minus that driver; lane SEC-G5's linked
-// actionlint (security.scan.actionlint) is the second.
+// actionlint (security.scan.actionlint) is the second, and phase OS-2's
+// image OS package extractors (security.scan.os, in the SCALIBR facade)
+// the third, and the linked Go symbol check (security.reach.go, plan 14.5
+// item 3b, golang.org/x/vuln) the fourth.
 func TestFullWithoutObsIsDeveloper(t *testing.T) {
-	linkedDrivers := []string{"security.scan.scalibr", "security.scan.actionlint"}
+	linkedDrivers := []string{"security.scan.scalibr", "security.scan.actionlint", "security.scan.os", "security.reach.go"}
 	MarkOmitted("obs")
 	for _, id := range linkedDrivers {
 		MarkOmitted(id)

@@ -38,7 +38,13 @@ import { SURFACE_SETTINGS } from "@/lib/adminMessages";
 import { SchemaSection } from "./settings/SchemaSection";
 import { AntigravityHelperCard } from "./settings/AntigravityHelperCard";
 import { ETWCapturerCard } from "./settings/ETWCapturerCard";
+import { ProcessCaptureEstimateCard } from "./settings/ProcessCaptureEstimateCard";
 import { ShellWrapCard } from "./settings/ShellWrapCard";
+import { LaunchToolPathsCard } from "./settings/LaunchToolPathsCard";
+import { RoutingShapesCards } from "./settings/RoutingShapesCards";
+import { StatuslineCard } from "./settings/StatuslineCard"; // cli-parity L2
+import { StartAtLoginCard } from "./settings/StartAtLoginCard"; // cli-parity L2
+import { BrowserCaptureCard } from "./settings/BrowserCaptureCard"; // cli-parity L2
 import { CodeIntelCard } from "./settings/CodeIntelCard";
 import { ToolProfilesCard } from "./settings/ToolProfilesCard";
 import { ProjectProfilesCard } from "./settings/ProjectProfilesCard";
@@ -242,11 +248,11 @@ const SECTIONS: SectionDef[] = [
     icon: Cable,
     about: {
       summary:
-        "Per-tool integration matrix: every AI tool observer supports, with live detected / capturing / hooks / MCP / proxied state. All probes are read-only - nothing on this panel writes AI-client config.",
+        "Per-tool integration matrix: every AI tool observer supports, with live detected / capturing / hooks / MCP / proxied state. All probes are read-only - nothing on this panel writes AI-client config. Below it: code hosts, and cloud agents (connect a vendor's cloud agent account so its sessions are pulled, sync, disconnect, choose your own user).",
       whenModified:
-        "Checking why a tool isn't showing data, after installing a new AI tool, or before and after running Set up.",
+        "Checking why a tool isn't showing data, after installing a new AI tool, before and after running Set up, or connecting a cloud agent account.",
       behavior:
-        "Pure reads, computed per request: directory probes for detection, dry-run registry probes for hooks/MCP, routing-config reads for the proxy column. Refresh re-probes immediately.",
+        "Pure reads, computed per request: directory probes for detection, dry-run registry probes for hooks/MCP, routing-config reads for the proxy column. Refresh re-probes immediately. Cloud agents call a vendor only when you test, connect, sync or list users, and the daemon pulls linked accounts on its own schedule; an API key goes to the system keychain and is never shown back.",
     },
   },
   {
@@ -336,7 +342,7 @@ const SECTIONS: SectionDef[] = [
       whenModified:
         "Switching to a cheaper Haiku for summaries, raising/lowering the budget cap, or turning code intelligence on or off (codeintel.enabled).",
       behavior:
-        "Save writes config.toml; consumers bind the value at daemon startup, so a `observer serve` restart is required for the new value to take effect.",
+        "Save writes config.toml; consumers bind the value at daemon startup, so the new value takes effect after a daemon restart (Restart now in the banner that appears after the save, or Restart daemon in Settings > Health).",
     },
   },
   {
@@ -474,11 +480,11 @@ const SECTIONS: SectionDef[] = [
     icon: ShieldCheck,
     about: {
       summary:
-        "The security guard layer - posture (enabled / observe vs enforce / strict), rule disables, boundary allowlists, taint tracking, proxy egress + response scans, MCP pinning, budget limits, alerts, and native-dialect compilation. Cloud features ([guard.cloud] - LLM judge, reputation, webhooks) are deliberately NOT editable here: network egress stays a hand-written config decision.",
+        "The security guard layer - posture (enabled / observe vs enforce / strict), rule disables, boundary allowlists, taint tracking, proxy egress + response scans, MCP pinning, budget limits, alerts, and native-dialect compilation. Cloud features ([guard.cloud] - LLM judge, reputation, webhooks) are not in this form: they send data off the machine, so they are turned on through their own consent in the Network features card on the Security page's MCP tab, never by a plain save here.",
       whenModified:
         "Silencing a noisy rule (rules.disable), tuning the egress action, moving observe → enforce (the Security page's mode control shows the evidence first), or setting session/daily budget limits.",
       behavior:
-        "Restart required - the policy engine and proxy seams bind config at startup. Saves write config.toml + .bak; the boundary allowlists treat an empty list as 'keep engine defaults' (explicit 'none' is a config-file edit).",
+        "Restart required - the policy engine and proxy seams bind config at startup. Saves write config.toml + .bak. The allowed paths and protected branches each offer Engine defaults, a Custom list, or None (an explicit empty list).",
     },
   },
   {
@@ -489,7 +495,7 @@ const SECTIONS: SectionDef[] = [
     icon: Split,
     about: {
       summary:
-        "Model routing - the opt-in layer that picks (advise) or rewrites (enforce) the model per turn based on a policy template, with session stickiness, outcome calibration, and subscription-window headroom. Custom [[routing.rules]], tier overrides, budget scopes, privacy rules, key pools, and local upstreams are deliberately NOT editable here: complex shapes and secrets stay hand-written config decisions, preserved on every save.",
+        "Model routing - the opt-in layer that picks (advise) or rewrites (enforce) the model per turn based on a policy template, with session stickiness, outcome calibration, and subscription-window headroom. Edit custom rules, tier overrides, path classes, budget scopes, privacy rules, local upstreams and model fallbacks in the cards below; each card saves only its own part. Key pools hold API keys, so they stay in the config file and every save here keeps them.",
       whenModified:
         "Enabling routing for the first time (the Routing page's preview shows the value first), switching policy templates, tuning switch stickiness, or moving advise → enforce (the Shadow card's promote control shows the readiness evidence first).",
       behavior:
@@ -568,7 +574,7 @@ const SECTIONS: SectionDef[] = [
       whenModified:
         "Disabling the engine, switching how whole-list-rewrite tools are matched across snapshots, changing how concurrent in-progress tasks are attributed, folding sub-agent usage into the parent's open task, backfilling on start, or bounding retention.",
       behavior:
-        "Restart required - SetTasksEnabled/SetTasksOptions bind once at daemon startup, same as every section except pricing/profiles. Retrofit historical sessions with `observer backfill --tasks` (also in the Backfill panel below).",
+        "Restart required - SetTasksEnabled/SetTasksOptions bind once at daemon startup, same as every section except pricing/profiles. Retrofit historical sessions with the tasks backfill in Settings > Backfill (the same as `observer backfill --tasks`).",
     },
   },
   {
@@ -582,7 +588,7 @@ const SECTIONS: SectionDef[] = [
       summary:
         "Generalized observability (admin plane) - the OTLP /v1/traces receiver, trajectory capture, and the eval plane for an admin/org-hosted LLM app whose END-USER requests route through SuperBased. This is NOT your own coding-agent usage (every other section is); the captured traces + evals are viewed on the admin/org dashboard, not this node dashboard. Opt-in and node-local: trace data never leaves this machine unless you opt into an obs share tier under Org sharing.",
       whenModified:
-        "Turning the subsystem on or off. The judge model + online-sampling eval knobs ([observability.eval]) stay hand-edited config decisions.",
+        "Turning the subsystem on or off. The judge model + online-sampling eval knobs ([observability.eval]) are under More settings in this section.",
       behavior:
         "Restart required - the OTLP receiver and obs_* schema bind at `observer start`. The receiver is SHARED: it also binds whenever [ingest.otel] is enabled (for logs), so turning this toggle off does not stop the receiver if [ingest.otel] is on. Saves write config.toml + .bak.",
     },
@@ -667,7 +673,7 @@ const SECTIONS: SectionDef[] = [
       summary:
         "Optional LLM analysis connections for the daily briefing - the narrative upgrade and grounded Q&A. Each connection is one endpoint (anthropic / OpenAI-compatible / local); keys are saved to the OS keychain, so config.toml holds only the label.",
       whenModified:
-        "Pointing analysis at a new endpoint (Ollama, OpenRouter, a provider), editing a base_url or default model, or saving an API key from the browser.",
+        "Pointing analysis at a new endpoint (Ollama, OpenRouter, a provider), editing a base URL or default model, or saving an API key from the browser.",
       behavior:
         "Restart required - the briefing runner binds connections at daemon start. Save writes config.toml + .bak. Keys go to the OS keychain (0600 file fallback), never into config.toml; the Test button probes reachability + model list.",
     },
@@ -829,7 +835,9 @@ export function SettingsPage() {
           {active === "pricing" && <RepriceCard />}
           {active === "backfill" && <BackfillSection />}
           {active === "tools" && <ConnectedToolsSection icon={sectionIcon("tools")} />}
+          {active === "tools" && <StatuslineCard readOnly={readOnly} />}
           {active === "health" && <HealthSection icon={sectionIcon("health")} />}
+          {active === "health" && <StartAtLoginCard readOnly={readOnly} />}
           {active === "storage" && <StorageSection icon={sectionIcon("storage")} />}
           {active === "enrolment" && <EnrolmentSection icon={sectionIcon("enrolment")} />}
           {active === "cloud" && <CloudIntelligenceSection icon={sectionIcon("cloud")} readOnly={readOnly} />}
@@ -937,6 +945,15 @@ function AboutSectionRail({ def }: { def: SectionDef }) {
       <AboutBlock label={def.label.toUpperCase()} body={def.about.summary} />
       <AboutBlock label="WHEN MODIFIED" body={def.about.whenModified} />
       <AboutBlock label="HOT-RELOAD BEHAVIOR" body={def.about.behavior} />
+      {def.status === "restart" && (
+        <p className="text-[11px] leading-snug text-fg-3" data-testid="settings-restart-hint">
+          To restart: Restart now in the banner that appears after a save, or{" "}
+          <Link to="/settings?section=health#daemon" className="text-accent hover:underline">
+            Restart daemon in Settings &gt; Health
+          </Link>
+          .
+        </p>
+      )}
     </aside>
   );
 }
@@ -2146,7 +2163,7 @@ function IntelligenceSection({
       setSave({
         state: "ok",
         message: res.restart_required
-          ? "Saved · restart daemon to apply"
+          ? "Saved · applies after a restart (Restart now in the banner)"
           : "Saved",
       });
       onReload();
@@ -2328,6 +2345,9 @@ function SectionView({
   readOnly?: boolean;
 }) {
   const spec = SECTION_SPECS[section];
+  // The process section's unsaved edit, for the data-volume card beside the
+  // capture limits.
+  const [processDraft, setProcessDraft] = useState<Record<string, unknown> | null>(null);
   const componentState = useComponentState().data;
   const componentView = componentState?.view;
   const showCodeSecurity = section === "guard" && codeSecurityCardVisible(componentView);
@@ -2345,12 +2365,16 @@ function SectionView({
         icon={sectionIcon(section)}
         config={config}
         readOnly={readOnly}
+        onDraftChange={section === "process" ? setProcessDraft : undefined}
         footer={
           <>
             {section === "antigravity" ? (
               <AntigravityHelperCard />
             ) : section === "process" ? (
-              <ETWCapturerCard />
+              <>
+                <ProcessCaptureEstimateCard draft={processDraft} />
+                <ETWCapturerCard />
+              </>
             ) : section === "retention" ? (
               <PruneNowCard />
             ) : section === "profiles" ? (
@@ -2363,9 +2387,17 @@ function SectionView({
             ) : section === "mcp" ? (
               <MCPValueMeterCard />
             ) : section === "routing" ? (
-              <RoutingRulesEditorCard readOnly={readOnly} />
+              <>
+                <RoutingRulesEditorCard readOnly={readOnly} />
+                <RoutingShapesCards readOnly={readOnly} />
+              </>
             ) : section === "terminal" ? (
-              <ShellWrapCard readOnly={readOnly} />
+              <>
+                <ShellWrapCard readOnly={readOnly} />
+                <LaunchToolPathsCard readOnly={readOnly} />
+              </>
+            ) : section === "browser" ? (
+              <BrowserCaptureCard readOnly={readOnly} />
             ) : section === "org" ? (
               <MessageSurfacesCard config={config} readOnly={readOnly} onSaved={onReload} />
             ) : showCodeSecurity ? (
@@ -2541,7 +2573,7 @@ function RoutingRulesEditorCard({ readOnly }: { readOnly?: boolean }) {
         custom rules (an empty editor clears them); the save is lint-gated - a fragment that would fail the next
         daemon start is refused with the file untouched. Worked examples:{" "}
         <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">docs/model-routing.md</code> (recipe
-        gallery). Tiers, budgets, privacy rules, key pools and local upstreams stay config-file-only.
+        gallery). Tier overrides, path classes, budgets, privacy rules, local upstreams and fallbacks have their own cards on this page; key pools hold API keys and stay in config.toml.
       </p>
       {policy.error && <p className="m-0 mt-2 text-danger">{String(policy.error)}</p>}
       <Textarea
@@ -2598,7 +2630,7 @@ function RoutingRulesEditorCard({ readOnly }: { readOnly?: boolean }) {
         >
           Save rules
         </Button>
-        {saved && <Pill variant="warn">saved - restart the daemon to apply</Pill>}
+        {saved && <Pill variant="warn">saved - applies after a restart (Restart now in the banner)</Pill>}
         {policy.data && !saved && (
           <span className="text-fg-3">
             {policy.data.rules} rule(s) on disk · policy {policy.data.policy} @{" "}

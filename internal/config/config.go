@@ -23,6 +23,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/notifycfg"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/proccapture"
 	"github.com/marmutapp/superbased-observer/internal/sandboxcidr"
 	"github.com/marmutapp/superbased-observer/internal/sandboxenv"
 	"github.com/marmutapp/superbased-observer/internal/sandboxvocab"
@@ -913,8 +914,21 @@ type GuardConfig struct {
 	Mode string `toml:"mode"`
 	// Strict inverts the Q2 fail-open default: a guard internal
 	// error then blocks instead of approving. Enterprise posture;
-	// default false.
+	// default false. It is NOT a strictness level (that is Level): the
+	// dashboard labels it "Fail closed when the guard itself errors".
 	Strict bool `toml:"strict"`
+	// Level is the guard recipe level applied to the whole machine: one of
+	// the catalog's level recipes ("none", "loose", "balanced", "strict",
+	// "lockdown") or a user level recipe from the guard-recipes directory.
+	// Empty (the default) means no level was applied: the built-in rules,
+	// the mode and the policy files decide alone, exactly as before levels
+	// existed. `observer guard recipe apply` and the Security page's
+	// Recipes card write it together with mode and [guard.prompt] mode and
+	// the recipe file beside the user policy (docs/guard-recipes.md);
+	// remove clears it. The rows a level sets live in that recipe file,
+	// not here, so a hand edit of this key changes no rule by itself
+	// (`observer guard recipe list` reports the mismatch).
+	Level string `toml:"level"`
 	// RetentionDays is the guard_events / expired-approvals prune
 	// horizon (spec §10.3). Default 365 — audit data wants ≥1y for
 	// compliance buyers. ≤0 disables the guard prune.
@@ -922,6 +936,8 @@ type GuardConfig struct {
 
 	Rules    GuardRulesConfig    `toml:"rules"`
 	Boundary GuardBoundaryConfig `toml:"boundary"`
+	Database GuardDatabaseConfig `toml:"database"`
+	Network  GuardNetworkConfig  `toml:"network"`
 	Taint    GuardTaintConfig    `toml:"taint"`
 	Proxy    GuardProxyConfig    `toml:"proxy"`
 	MCP      GuardMCPConfig      `toml:"mcp"`
@@ -991,6 +1007,37 @@ type GuardBoundaryConfig struct {
 	// (rule R-166): "tests", "ci" and "coverage". Empty, the default,
 	// leaves R-166 off, because ordinary test maintenance is common.
 	ProtectedPathClasses []string `toml:"protected_path_classes"`
+}
+
+// GuardDatabaseConfig is [guard.database]: the inputs of the database rule
+// family (R-120 to R-126, docs/guard.md "Database rules").
+type GuardDatabaseConfig struct {
+	// ProdPatterns names the production databases R-125 asks about: a
+	// database command whose host, connection string, database name or
+	// profile matches one of these. A pattern with no `*` or `?` matches
+	// as a case-insensitive substring ("prod" matches db.prod.example.com);
+	// one with them is a case-insensitive glob over the whole value
+	// ("*.prod.internal"). Empty, the default, leaves R-125 inert.
+	ProdPatterns []string `toml:"prod_patterns"`
+}
+
+// GuardNetworkConfig is [guard.network]: the host lists of the network rule
+// family (R-174 to R-179, docs/guard.md "Network rules"). A host pattern is a
+// host name ("example.com" also matches its subdomains, "*.example.com" only
+// them), an IP address or a CIDR block ("10.0.0.0/8"). The rules judge the
+// hosts a command names on its command line; they are not an egress
+// firewall (the sandboxed terminal's egress gateway is).
+type GuardNetworkConfig struct {
+	// AllowHosts is the allow-list R-176 compares against: a network
+	// command to a host not on it (loopback always passes) hits the rule.
+	// R-176 is silent until a level or pack raises it (lockdown, the
+	// networking pack); then an empty list means every non-loopback host.
+	AllowHosts []string `toml:"allow_hosts"`
+	// DenyHosts is the deny list of R-174 (the never-reach hosts, beside
+	// the cloud metadata endpoints): a network command to a host on it is
+	// flagged in observe and denied in enforce. Empty, the default, leaves
+	// that row inert.
+	DenyHosts []string `toml:"deny_hosts"`
 }
 
 // GuardTaintConfig is [guard.taint] (spec §4.5, §16).
@@ -1435,6 +1482,24 @@ type ProjectsConfig struct {
 	// Covers clock skew between the AI tool's clock and the repository's
 	// (e.g. a Windows tool and a WSL daemon). Default 120.
 	SkillHistorySkewSeconds int `toml:"skill_history_skew_seconds"`
+	// QualityMetrics gates the Projects page's quality metrics
+	// (docs/projects-page.md "Quality metrics", plan item 8 M3L-2 and
+	// M3L-4): line coverage read from the coverage report files a
+	// project's own test runs already wrote at their default locations
+	// (read under a byte cap, never through a symbolic link; only the
+	// numbers are stored), duplication rolled up from the codeintel
+	// near-clone index, complexity rolled up from the per-function
+	// cyclomatic complexity code intelligence counts at index time (both
+	// need [codeintel].enabled; counting is a second tree-sitter query
+	// pass, so the indexer runs it only while this is on, and turning it
+	// on re-parses each indexed file once at the next index pass), and one
+	// daily trend point per active project (internal/codequalitysvc).
+	// Default FALSE, opt-in as plan 14.13's editions table rules for item
+	// 8 (it is local, passive, read-only and network-free; Observer never
+	// runs a project's tests). False makes the Quality tab say "off",
+	// records no points and stops counting; stored history and counted
+	// figures stay.
+	QualityMetrics bool `toml:"quality_metrics"`
 }
 
 // DeliveryConfig is the [delivery] surface: commit to PR to merge tracking
@@ -2410,6 +2475,15 @@ type TerminalSandboxConfig struct {
 	// fleet-wide value for it and cannot pin it. A run that allows it says
 	// so in its posture.
 	AllowOSC52Clipboard bool `toml:"allow_osc52_clipboard"`
+	// Seccomp turns on Observer's syscall filter (internal/sandboxseccomp,
+	// the "observer_default" deny list answered with EPERM) for the bwrap
+	// and process_lite rows (gap G16, lane N2). Default FALSE (D7): opt-in
+	// until a clean live register across the tool matrix. When true, a
+	// launch on either row is refused if the filter cannot be built,
+	// applied or read back from /proc; it never runs unfiltered. Rows
+	// whose engine applies its own default filter (the OCI rows) are not
+	// affected. An absent key changes nothing.
+	Seccomp bool `toml:"seccomp"`
 	// Backends is the backend preference order (sandbox plan v2 section 10),
 	// for example ["bwrap"]. When set it wins over Backend; empty means
 	// Backend as a one-element list. Each entry is a registry backend id; an
@@ -2467,11 +2541,38 @@ type TerminalSandboxConfig struct {
 	// Windows is [terminal.sandbox.windows]: the MXC tier floor (R-034).
 	Windows TerminalSandboxWindowsConfig `toml:"windows"`
 
+	// OpenShell is [terminal.sandbox.openshell], the OpenShell row
+	// (internal/config/sandbox_openshell.go; lane O1A; beta). Read only
+	// while the terminals.sandbox.openshell component is active AND
+	// "openshell" is in Backends.
+	OpenShell TerminalSandboxOpenShellConfig `toml:"openshell"`
+
 	// VM is [terminal.sandbox.vm], the Cloud Hypervisor microVM driver
 	// (sandbox plan v2 sections 10 and 10.1, lane SBX-P4; beta). Read only
 	// while the terminals.sandbox.vm component is active AND
 	// "cloud-hypervisor" is in Backends.
 	VM TerminalSandboxVMConfig `toml:"vm"`
+
+	// Setup is [terminal.sandbox.setup], the sandbox installation lifecycle
+	// (plan docs/plans/sandbox-installation-lifecycle-plan-2026-11-06.md):
+	// how far the setup steps of the New Terminal dialog, Settings and
+	// `observer sandbox setup` may go on this machine.
+	Setup TerminalSandboxSetupConfig `toml:"setup"`
+}
+
+// TerminalSandboxSetupConfig is the [terminal.sandbox.setup] block. Every
+// key is local and never distributed by an organization.
+type TerminalSandboxSetupConfig struct {
+	// AllowElevated lets a setup step that needs your password (sudo on
+	// Linux, WSL and macOS; a User Account Control prompt on Windows) run in
+	// a visible setup terminal, where you type the password yourself. Only
+	// allow-listed shapes are ever elevated: a named package from the host's
+	// own repositories, a vendor's documented registration command, a
+	// verified local package file and Windows optional features. Default
+	// FALSE (decision P-250): while it is off, every such step is shown as a
+	// command to run yourself. Observer never stores, reads or pipes a
+	// password, and never adds you to a group.
+	AllowElevated bool `toml:"allow_elevated"`
 }
 
 // TerminalSandboxVMConfig is the [terminal.sandbox.vm] block. Every key is
@@ -2554,6 +2655,8 @@ type TerminalSandboxHostedConfig struct {
 	E2B    TerminalSandboxHostedProviderConfig `toml:"e2b"`
 	Modal  TerminalSandboxHostedProviderConfig `toml:"modal"`
 	Vercel TerminalSandboxHostedProviderConfig `toml:"vercel"`
+	// OpenShellOrg is the org-hosted OpenShell row's block (lane G4).
+	OpenShellOrg TerminalSandboxHostedOrgShellConfig `toml:"openshell-org"`
 }
 
 // TerminalSandboxHostedProviderConfig is one provider's table.
@@ -2584,6 +2687,12 @@ type TerminalSandboxHostedProviderConfig struct {
 	// OrgPublished marks an Endpoint the org's managed pull set (never read
 	// from a file): only such an endpoint may leave the vendor's domain.
 	OrgPublished bool `toml:"-" json:"-"`
+	// BoxBinaryInImage marks a row whose box image already carries the in-box
+	// observer at the vendor's binary path, so nothing is uploaded and only
+	// its version is checked in the box (never read from a file: the
+	// organization's published box_binary = "image" sets it; FX3 item 2,
+	// live finding F-L3P4-6).
+	BoxBinaryInImage bool `toml:"-" json:"-"`
 }
 
 // TerminalSandboxSeatbeltConfig is the [terminal.sandbox.seatbelt] block.
@@ -3660,9 +3769,10 @@ type OrgClientShareConfig struct {
 	// manage.
 	MCPActivity bool `toml:"mcp_activity"`
 	// Security is the security pillar's share level on an INDIVIDUAL node
-	// (security plan 6.5 and 7.4, ruling Q7): "off" (the default, also what
-	// an empty or unknown value means), "posture" (the enum-and-count daily
-	// posture row) or "findings" (posture plus finding rows; their paths and
+	// (security plan 6.5 and 7.4, ruling Q7): "off" (also what an unknown
+	// value means), "posture" (the enum-and-count daily posture row; the
+	// default when the key is unset, ruling R1 of lane CODESEC-ORG,
+	// 2026-11-03) or "findings" (posture plus finding rows; their paths and
 	// redacted evidence still need full_content). Rows ship only while the
 	// security module is active. Node-side only, never raised remotely: a
 	// MANAGED node ignores it and follows the finding_share of its in-force
@@ -4037,6 +4147,153 @@ type ProcessConfig struct {
 	Filesystem ProcessFilesystemConfig `toml:"filesystem"`
 	Metrics    ProcessMetricsConfig    `toml:"metrics"`
 	ETW        ProcessETWConfig        `toml:"etw"`
+	Capture    ProcessCaptureConfig    `toml:"capture"`
+}
+
+// ProcessCaptureConfig is the [observer.process.capture] surface: the process
+// capture budget (docs/process-observability.md §11 "Capture budget", plan
+// docs/plans/process-capture-budget-plan-2026-11-04.md §9.1). It bounds how
+// many process rows one session stores: every captured run goes through one
+// ordered decision table (internal/proccapture) that keeps it as a row, folds
+// it into its parent, tracks it under a service the agent started, rolls it up
+// into a counted group, or drops it (counted). Findings, failures and
+// tool-call links are always kept; counts stay exact either way.
+//
+// Partial-merge like the sibling process blocks: Default() seeds every value,
+// so a block that sets one key inherits the rest. LOCAL-ONLY, never
+// distributed. Restart-bound (read once at daemon start).
+type ProcessCaptureConfig struct {
+	// Enabled applies the capture budget. Default true. False restores the
+	// pre-budget behaviour: every captured process becomes its own row with a
+	// metric ring, which on a busy session is tens of thousands of rows a day
+	// (one measured session stored 92,428). With it on, the same session keeps
+	// a few thousand rows and the rest become a few hundred rollup rows.
+	Enabled bool `toml:"enabled"`
+
+	Budget       ProcessCaptureBudgetConfig       `toml:"budget"`
+	Services     ProcessCaptureServicesConfig     `toml:"services"`
+	Fold         ProcessCaptureFoldConfig         `toml:"fold"`
+	Metrics      ProcessCaptureMetricsConfig      `toml:"metrics"`
+	Rollups      ProcessCaptureRollupsConfig      `toml:"rollups"`
+	Unattributed ProcessCaptureUnattributedConfig `toml:"unattributed"`
+}
+
+// ProcessCaptureBudgetConfig is [observer.process.capture.budget]: how many
+// individual process rows (exemplars) are kept before further short-lived runs
+// are rolled up into counted groups. Findings, failures, tool-call roots and
+// runs alive 30 s or more never count against a full budget.
+type ProcessCaptureBudgetConfig struct {
+	// PerToolCall is the number of individual rows kept per tool call before
+	// the call's remaining short-lived children roll up. Default 200. Raising
+	// it stores more rows for big build or test fan-outs (each row is about
+	// 1.5 KB); 0 removes the cap.
+	PerToolCall int `toml:"per_tool_call"`
+	// PerSession is the number of individual rows kept per session. Default
+	// 5000. It is the ceiling on one session's process rows; 0 removes the
+	// cap (unbounded rows on a busy session).
+	PerSession int `toml:"per_session"`
+	// PerMinute is the burst guard: individual rows kept per session per
+	// minute. Default 300. Lower it to flatten bursts; 0 removes the cap.
+	PerMinute int `toml:"per_minute"`
+}
+
+// ProcessCaptureServicesConfig is [observer.process.capture.services]:
+// services and GUI apps the agent starts (Docker Desktop, an editor, a dev
+// server that outlives its tool call). They are tracked, not hidden: the
+// service's root row and its first exemplars are kept, the rest of its
+// subtree is rolled up under the root, and tracking stops a while after the
+// session's last activity.
+type ProcessCaptureServicesConfig struct {
+	// Track tracks services the agent spawns. Default true. False keeps only
+	// each service's root row and drops (counts) everything it starts, the
+	// smallest volume, at the cost of not seeing what the service did.
+	Track bool `toml:"track"`
+	// DetachAfterMinutes: a process that outlives the tool call that started
+	// it by this many minutes and keeps starting children becomes a service
+	// root, so its later children are capped like a service's. Default 10.
+	// Lower values cap long-running dev servers sooner; 0 disables the
+	// heuristic (only the built-in service list applies).
+	DetachAfterMinutes int `toml:"detach_after_minutes"`
+	// ExemplarsPerService is how many individual rows are kept under one
+	// service root before the rest roll up. Default 20. Each extra exemplar is
+	// one more stored row per service.
+	ExemplarsPerService int `toml:"exemplars_per_service"`
+	// TailMinutes stops tracking a service this many minutes after the
+	// session's last activity; later runs are dropped and counted. Default
+	// 30. A service polling every few seconds adds about one rollup row a
+	// minute until then; 0 tracks it for as long as it runs.
+	TailMinutes int `toml:"tail_minutes"`
+	// ExtraBasenames adds executables (for example "mydaemon.exe") to the
+	// built-in service list (Docker Desktop, com.docker.backend, Code,
+	// explorer, devenv, idea64). Matching ignores case and ".exe".
+	ExtraBasenames []string `toml:"extra_basenames"`
+}
+
+// ProcessCaptureFoldConfig is [observer.process.capture.fold]: helper
+// processes that carry no meaning of their own (console hosts, plugin
+// metadata probes, credential helpers) are folded into their parent row as a
+// count instead of being stored.
+type ProcessCaptureFoldConfig struct {
+	// Enabled applies the fold list. Default true. On Windows every console
+	// program has a conhost.exe child, so turning this off roughly doubles the
+	// stored rows of a Windows session.
+	Enabled bool `toml:"enabled"`
+	// ExtraBasenames adds executables that always fold into their parent row.
+	// Matching ignores case and ".exe".
+	ExtraBasenames []string `toml:"extra_basenames"`
+}
+
+// ProcessCaptureMetricsConfig is [observer.process.capture.metrics].
+type ProcessCaptureMetricsConfig struct {
+	// RingMinLifetimeSeconds keeps the CPU/memory chart samples only for
+	// processes alive at least this long; shorter ones keep their totals.
+	// Default 30. The samples are the largest column (about 165 bytes per
+	// stored row on the measured session), so 0 stores a ring for every row.
+	RingMinLifetimeSeconds int `toml:"ring_min_lifetime_seconds"`
+}
+
+// ProcessCaptureRollupsConfig is [observer.process.capture.rollups].
+type ProcessCaptureRollupsConfig struct {
+	// BucketSeconds is the rollup bucket width: runs of the same program and
+	// argument shape under the same parent are summed per bucket. Default 60.
+	// A wider bucket means fewer rollup rows and a coarser timeline.
+	BucketSeconds int `toml:"bucket_seconds"`
+}
+
+// ProcessCaptureUnattributedConfig is [observer.process.capture.unattributed]:
+// what happens to process rows that are stored without a session so a later
+// correlation pass can join them (the cross-OS bridge, AI-tool subtrees).
+type ProcessCaptureUnattributedConfig struct {
+	// PendingHours is how long an unattributed row waits for correlation
+	// before the policy below applies. Default 24. Longer waits keep more
+	// session-less rows on disk at any time.
+	PendingHours int `toml:"pending_hours"`
+	// Mode is what happens once the wait is over: "rollup" (default) sums the
+	// rows into a machine-level rollup and deletes them; "drop" deletes them
+	// without a rollup.
+	Mode string `toml:"mode"`
+}
+
+// CaptureConfig maps the block onto the pure proccapture.Config the decision
+// table runs on (the one boundary between the TOML and the capture core).
+func (c ProcessCaptureConfig) CaptureConfig() proccapture.Config {
+	return proccapture.Config{
+		Enabled:               c.Enabled,
+		PerToolCall:           c.Budget.PerToolCall,
+		PerSession:            c.Budget.PerSession,
+		PerMinute:             c.Budget.PerMinute,
+		TrackServices:         c.Services.Track,
+		DetachAfter:           time.Duration(c.Services.DetachAfterMinutes) * time.Minute,
+		ExemplarsPerService:   c.Services.ExemplarsPerService,
+		ServiceTail:           time.Duration(c.Services.TailMinutes) * time.Minute,
+		ExtraServiceBasenames: c.Services.ExtraBasenames,
+		FoldEnabled:           c.Fold.Enabled,
+		ExtraFoldBasenames:    c.Fold.ExtraBasenames,
+		RingMinLifetime:       time.Duration(c.Metrics.RingMinLifetimeSeconds) * time.Second,
+		Bucket:                time.Duration(c.Rollups.BucketSeconds) * time.Second,
+		PendingHours:          c.Unattributed.PendingHours,
+		UnattributedMode:      c.Unattributed.Mode,
+	}
 }
 
 // ProcessETWConfig is the [observer.process.etw] surface: the daemon-side
@@ -5032,7 +5289,7 @@ func Default() Config {
 				MaxFileSizeMB:       50,
 				HomeWalk:            true,
 				EnabledAdapters: []string{
-					"claude-code", "codex", "cline", "cline-cli", "roo-code", "zoo-code", "cursor", "copilot", "copilot-cli", "cowork", "opencode", "openclaw", "pi", "gemini-cli", "antigravity", "antigravity-cli", "hermes", "kilo-code", "kilo-code-cli", "qwen-code", "kiro-cli", "crush", "kimi-code", "grok", "devin", "qoder", "aider", "goose", "chatgpt-web", "claude-web", "perplexity-web", "gemini-web", "copilot-web", "droid", "open-interpreter", "command-code", "muse", "prime-agent", "deepseek", "junie", "zcode", "mistral-code", "freebuff", "grokbot", "kiro-crew", "poolside", "zed", "autohand", "ibm-bob", "cortex-code", "codebuddy", "deepagents-code", "dimcode", "dirac", "kimchi", "stakpak", "vtcode",
+					"claude-code", "codex", "cline", "cline-cli", "roo-code", "zoo-code", "cursor", "copilot", "copilot-cli", "cowork", "opencode", "openclaw", "pi", "gemini-cli", "antigravity", "antigravity-cli", "hermes", "kilo-code", "kilo-code-cli", "qwen-code", "kiro-cli", "crush", "kimi-code", "grok", "devin", "qoder", "aider", "goose", "chatgpt-web", "claude-web", "perplexity-web", "gemini-web", "copilot-web", "droid", "open-interpreter", "command-code", "muse", "prime-agent", "deepseek", "junie", "zcode", "mistral-code", "freebuff", "grokbot", "kiro-crew", "poolside", "zed", "autohand", "ibm-bob", "cortex-code", "codebuddy", "deepagents-code", "dimcode", "dirac", "kimchi", "stakpak", "vtcode", "custom-agent",
 				},
 			},
 			Freshness: FreshnessConfig{
@@ -5129,6 +5386,27 @@ func Default() Config {
 					ListenAddr:         "127.0.0.1:8823", // == processobs/bridge.DefaultListenAddr
 					AllowNonLoopback:   false,
 					HandshakeTimeoutMS: 10000,
+				},
+				// Process capture budget (plan §9.1 defaults). Seeded in
+				// full so a partial [observer.process.capture] block
+				// inherits the rest (the partial-merge rule).
+				Capture: ProcessCaptureConfig{
+					Enabled: true,
+					Budget: ProcessCaptureBudgetConfig{
+						PerToolCall: 200,
+						PerSession:  5000,
+						PerMinute:   300,
+					},
+					Services: ProcessCaptureServicesConfig{
+						Track:               true,
+						DetachAfterMinutes:  10,
+						ExemplarsPerService: 20,
+						TailMinutes:         30,
+					},
+					Fold:         ProcessCaptureFoldConfig{Enabled: true},
+					Metrics:      ProcessCaptureMetricsConfig{RingMinLifetimeSeconds: 30},
+					Rollups:      ProcessCaptureRollupsConfig{BucketSeconds: 60},
+					Unattributed: ProcessCaptureUnattributedConfig{PendingHours: 24, Mode: "rollup"},
 				},
 			},
 			// SQLite connection/pragma tuning (docs/plans/observer-disk-
@@ -5269,6 +5547,7 @@ func Default() Config {
 			AlignmentJudge:          "off",
 			SkillHistory:            true,
 			SkillHistorySkewSeconds: 120,
+			QualityMetrics:          false,
 		},
 		// Delivery (commit to PR to merge, D-689): local landing detection
 		// is default-ON for the same reasons as the commit scan (local,
@@ -5475,6 +5754,9 @@ func Default() Config {
 				AppleContainer:         TerminalSandboxAppleContainerConfig{MemoryMiB: 4096, CPUs: 4},
 				Landlock:               TerminalSandboxLandlockConfig{MinABI: 9},
 				VM:                     TerminalSandboxVMConfig{VMM: "cloud-hypervisor", VCPUs: 2, MemoryMB: 4096, WorkspaceDelivery: "virtiofs"},
+				// [terminal.sandbox.setup]: elevated setup steps stay guide
+				// steps until the person turns the key on (P-250).
+				Setup: TerminalSandboxSetupConfig{AllowElevated: false},
 				Hosted: TerminalSandboxHostedConfig{
 					MinSessionMinutes: 30, KeyCustody: "home_relay", MemoryImages: "avoid",
 					CheckpointMinutes: 5, MaxRunMinutes: 60, DailyBoxMinutes: 240,
@@ -7473,7 +7755,30 @@ func validateGuidance(g GuidanceConfig) error {
 // (one hour): the A-613 tracker keeps that much history per session.
 const maxEvasionWindowSeconds = 3600
 
+// guardLevelNameRx is the shape of a [guard] level value: a recipe name
+// (internal/guardrecipe.NameRx carries the same pattern for recipe files).
+var guardLevelNameRx = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// validGuardHostPattern checks one [guard.network] host pattern's shape: a
+// host name (optionally "*." or "*"-prefixed), an IP address or a CIDR
+// block. The network rules own the matching and tolerate surrounding space,
+// a scheme and path, a :port, brackets and a trailing dot, so this refuses
+// only a value no rule could ever honour (guardHostPatternProblem): a
+// stricter check would fail config.Load, and with it the daemon, on upgrade.
+func validGuardHostPattern(h string) error {
+	if why := guardHostPatternProblem(h); why != "" {
+		return fmt.Errorf("host pattern %q %s", h, why)
+	}
+	return nil
+}
+
 func validateGuard(g GuardConfig) error {
+	// The keys guard recipes write or read are refused even while the
+	// guard is off: a recipe apply or a later enable would otherwise meet
+	// them first (sweep finding CFG-5).
+	if err := validateGuardRecipeInputs(g); err != nil {
+		return err
+	}
 	if !g.Enabled {
 		return nil
 	}
@@ -7526,6 +7831,33 @@ func validateGuard(g GuardConfig) error {
 	}
 	if err := validateGuardPrompt(g.Prompt); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateGuardRecipeInputs validates the keys guard recipes write or read:
+// [guard] level (a recipe name), [guard.database] prod_patterns (no empty
+// pattern, no credential) and the [guard.network] host lists (a host, an IP
+// or a CIDR). validateGuard runs it whether or not the guard is enabled.
+func validateGuardRecipeInputs(g GuardConfig) error {
+	if g.Level != "" && !guardLevelNameRx.MatchString(g.Level) {
+		return fmt.Errorf("config: guard.level %q is not a recipe name (lowercase letters, digits and dashes)", g.Level)
+	}
+	for i, p := range g.Database.ProdPatterns {
+		if strings.TrimSpace(p) == "" {
+			return errors.New("config: guard.database.prod_patterns has an empty pattern")
+		}
+		if guardProdPatternHasCredential(p) {
+			// The value is not repeated: it holds the credential.
+			return fmt.Errorf("config: guard.database.prod_patterns entry %d carries a credential (a user:password@ or a password= part): name the host, database or profile without it; config.toml keeps the value in plain text", i+1)
+		}
+	}
+	for key, hosts := range map[string][]string{"allow_hosts": g.Network.AllowHosts, "deny_hosts": g.Network.DenyHosts} {
+		for _, h := range hosts {
+			if err := validGuardHostPattern(h); err != nil {
+				return fmt.Errorf("config: guard.network.%s: %w", key, err)
+			}
+		}
 	}
 	return nil
 }

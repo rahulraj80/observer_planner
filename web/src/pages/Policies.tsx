@@ -153,8 +153,8 @@ export function PoliciesPage() {
       />
 
       {obsOff ? (
-        <ObsDisabled toml={"[observability]\nenabled = true\n\n[observability.admission]\nenabled = true"}>
-          Admission + egress policy authoring needs the observability subsystem.
+        <ObsDisabled needs={["observability", "admission"]}>
+          Admission and egress policy authoring needs the observability subsystem with admission on.
         </ObsDisabled>
       ) : (
         <>

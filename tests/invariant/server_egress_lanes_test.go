@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/secfeed/online"
+	"github.com/marmutapp/superbased-observer/internal/secscan/osvshard/shardnet"
 )
 
 // server_egress_lanes_test.go is the ONE owner of the org server's
@@ -76,8 +77,14 @@ var serverEgressLanes = []serverEgressLane{
 	{
 		ID: "org.security.relay", Pkg: "internal/secfeed/online", Kind: egressRemote,
 		Reaches:  "api.osv.dev, crates.io, proxy.golang.org, pypi.org, registry.npmjs.org, api.nuget.org, rubygems.org, repo.packagist.org, superbased.app (HTTPS, exact host allow-list, no redirects, capped answers; ecosystem, public package name and version only, with the server's IP and a User-Agent of superbased-observer)",
-		Triggers: []serverEgressTrigger{srvTrigNode, srvTrigOperator},
-		Gate:     "component org.security.relay ([security.relay].enabled, off until configured) with the relay mode set to relay by the org's super admin; queries only for a managed enrolment's lookup cache miss, public names only (private names refused at the server too); `observer-org security mirror sync` fetches the vendor's signed content from superbased.app only when the operator runs it; never in mirror mode",
+		Triggers: []serverEgressTrigger{srvTrigNode, srvTrigOperator, srvTrigBackground},
+		Gate:     "component org.security.relay ([security.relay].enabled, off until configured) with the relay mode set to relay by the org's super admin; queries only for a managed enrolment's lookup cache miss, public names only (private names refused at the server too); `observer-org security mirror sync` fetches the vendor's signed content from superbased.app when the operator runs it, and the leader's scheduled mirror sync does the same only when [security.relay].mirror_sync_interval is set (default off, at least 1h); no relayed lookup in mirror mode",
+	},
+	{
+		ID: "org.security.shards", Pkg: "internal/secscan/osvshard/shardnet", Kind: egressRemote,
+		Reaches:  "shards.superbased.app only (HTTPS, exact host, no redirects, every body capped at the size the verified descriptor or index file lists): GETs of <Set>/index/<sha256>.json and <Set>/obj/<sha256>.json.gz, the SuperBased package lookup's advisory shards, which the org mirror stores for its managed nodes (lane RM-3); the paths are the digests the vendor-signed security.osv_shards descriptors pin, the same for every org, so nothing about a node, a project or a package is sent; User-Agent superbased-observer",
+		Triggers: []serverEgressTrigger{srvTrigOperator, srvTrigBackground},
+		Gate:     "component org.security.relay ([security.relay].enabled, off until configured); `observer-org security mirror shards sync` when the operator runs it, and the leader's scheduled mirror sync only with [security.relay].mirror_sync_interval set AND [security.relay].mirror_shards = true (both default off); only objects the mirror does not already hold verified; an air-gapped org uses `observer-org security mirror shards import <dir>` and this lane sends nothing. Never on a node request: a managed node's shard fetch is served from the mirror, never relayed",
 	},
 	{
 		ID: "org.updates", Pkg: "internal/orgserver/updateartifact", Kind: egressRemote,
@@ -266,6 +273,18 @@ var serverEgressLanes = []serverEgressLane{
 		Gate:     "component org.selfobs",
 	},
 	{
+		ID: "org.openshell.front", Pkg: "internal/orgserver/openshellfront", Kind: egressRemote,
+		Reaches:  "the org's own OpenShell gateway at [openshell].gateway_url (private network, TLS, the optional gateway_tls_spki_sha256 pin, the member gateway token the api role issued) and the api role's internal decision API at api_internal_url (loopback or https with api_internal_ca_file, every request signed by the front service key); it serves the developers' gRPC on front_listen",
+		Triggers: []serverEgressTrigger{srvTrigNode},
+		Gate:     "component org.openshell with [openshell].enabled, in a process started with --role openshell-front only (never part of all); every forwarded call needs a run token the api role's decide allows",
+	},
+	{
+		ID: "org.openshell.gateway", Pkg: "internal/orgserver/openshellgw/gwclient", Kind: egressRemote,
+		Reaches:  "the org's own OpenShell gateway at [openshell].gateway_url (private network, TLS, the optional gateway_tls_spki_sha256 pin); the generated openshellv1 client of the tagged SDK",
+		Triggers: []serverEgressTrigger{srvTrigBackground, srvTrigAdmin, srvTrigNode},
+		Gate:     "component org.openshell with [openshell].enabled: the worker's sync, reaper, drain and collect (sync admin token), and the front's forwarding (member gateway token)",
+	},
+	{
 		ID: "org.server", Pkg: "internal/orgserver", Kind: egressRemote,
 		Reaches:  "the composition layer: its own listeners, admin-supplied endpoints it tests on request (connection tests), and every lane above it composes",
 		Triggers: []serverEgressTrigger{srvTrigAdmin, srvTrigBackground, srvTrigNode},
@@ -279,7 +298,7 @@ var serverEgressLanes = []serverEgressLane{
 	},
 
 	// --- listen-only: serves, never dials ---------------------------------
-	{ID: "org.security.relay.http", Pkg: "internal/orgserver/secrelay", Kind: egressListen, Reaches: "POST /api/agent/security/lookup, the agent content route and the relay admin API (its upstream is injected: org.security.relay)"},
+	{ID: "org.security.relay.http", Pkg: "internal/orgserver/secrelay", Kind: egressListen, Reaches: "POST /api/agent/security/lookup, the agent content and shard routes and the relay admin API (its upstream and its shard source are injected: org.security.relay, org.security.shards)"},
 	{ID: "org.security.managed", Pkg: "internal/orgserver/secmanaged", Kind: egressListen, Reaches: "the security managed pull's admin API"},
 	{ID: "org.security.manifests", Pkg: "internal/orgserver/secmanifests", Kind: egressListen, Reaches: "the custom driver manifest catalog's admin API"},
 	{ID: "org.security.fleet", Pkg: "internal/orgserver/secorg", Kind: egressListen, Reaches: "the security fleet views' admin API (findings, rollup, coverage, exceptions, settings, triage, evidence export)"},
@@ -293,6 +312,11 @@ var serverEgressLanes = []serverEgressLane{
 	{ID: "org.gateway", Pkg: "internal/orgserver/gateway", Kind: egressListen, Reaches: "the Plane A OTLP gateway receivers"},
 	{ID: "org.machinekey", Pkg: "internal/orgserver/machinekey", Kind: egressListen, Reaches: "machine key routes"},
 	{ID: "org.mcpgwadmin", Pkg: "internal/orgserver/mcpgwadmin", Kind: egressListen, Reaches: "Agent Access admin routes"},
+	// The org-hosted OpenShell gateway's control half (lane G2): it serves
+	// and never dials (the front-to-gateway and sync lanes are lane G3's).
+	{ID: "org.openshell.control", Pkg: "internal/orgserver/openshellctl", Kind: egressListen, Reaches: "the org-hosted OpenShell agent routes, the device-approval page and the front's internal decision API on internal_listen"},
+	{ID: "org.openshell.admin", Pkg: "internal/orgserver/openshellgw", Kind: egressListen, Reaches: "the org-hosted OpenShell admin routes /api/org/openshell/* and the member's collect fetch (its gateway calls go through org.openshell.gateway)"},
+	{ID: "org.openshell.issuer", Pkg: "internal/orgserver/openshellidp", Kind: egressListen, Reaches: "the org-hosted OpenShell issuer's public discovery document and JWKS"},
 	{ID: "org.orgmsg", Pkg: "internal/orgserver/orgmsg", Kind: egressListen, Reaches: "messaging routes"},
 	{ID: "org.scim", Pkg: "internal/orgserver/scim", Kind: egressListen, Reaches: "SCIM provisioning routes"},
 	{ID: "org.aigateway.providerext", Pkg: "internal/aigateway/providerext", Kind: egressListen, Reaches: "provider request shaping (header types)"},
@@ -304,6 +328,8 @@ var serverEgressLanes = []serverEgressLane{
 	{ID: "org.mcpgw.truststore", Pkg: "internal/mcpgw/truststore", Kind: egressAddress, Reaches: "address checks"},
 	{ID: "org.mcpintel.discover", Pkg: "internal/mcpintel/discover", Kind: egressAddress, Reaches: "endpoint formatting"},
 	{ID: "org.netpolicy", Pkg: "internal/netpolicy", Kind: egressAddress, Reaches: "IP classification and dial control"},
+	{ID: "org.ipclass", Pkg: "internal/ipclass", Kind: egressAddress, Reaches: "IP classification"},
+	{ID: "org.policy", Pkg: "internal/policy", Kind: egressAddress, Reaches: "host and IP parsing for the guard network rules"},
 	{ID: "org.agentaccessdiag", Pkg: "internal/orgserver/agentaccessdiag", Kind: egressAddress, Reaches: "address checks"},
 	{ID: "org.authcfg", Pkg: "internal/orgserver/authcfg", Kind: egressAddress, Reaches: "address checks"},
 	{ID: "org.config", Pkg: "internal/orgserver/config", Kind: egressAddress, Reaches: "host and port validation"},
@@ -497,5 +523,25 @@ func TestServerSecurityRelayHostsExact(t *testing.T) {
 	}
 	if !slices.Contains(hosts, online.OSVHost) {
 		t.Error("the relay client lost the OSV host")
+	}
+}
+
+// TestServerSecurityShardsHostsExact: the org.security.shards row names the
+// one host the shard client allows (internal/secscan/osvshard/shardnet,
+// lane RM-3), and only the server packages that schedule or run the sync
+// link it.
+func TestServerSecurityShardsHostsExact(t *testing.T) {
+	var row serverEgressLane
+	for _, l := range serverEgressLanes {
+		if l.ID == "org.security.shards" {
+			row = l
+		}
+	}
+	if row.Pkg != "internal/secscan/osvshard/shardnet" || row.Kind != egressRemote {
+		t.Fatalf("org.security.shards row: %+v", row)
+	}
+	hosts := shardnet.AllowedHosts()
+	if len(hosts) != 1 || !strings.HasPrefix(row.Reaches, hosts[0]+" only") {
+		t.Fatalf("org.security.shards names %q, its client allows %v", row.Reaches, hosts)
 	}
 }

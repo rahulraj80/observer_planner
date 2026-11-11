@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +79,10 @@ type hostedPlanFile struct {
 	Files    []sandboxremote.ManifestFile `json:"files"`
 	// BoxBinary is the host path of the in-box observer to upload.
 	BoxBinary string `json:"box_binary"`
+	// BoxBinaryInImage: the box image carries the in-box observer at the
+	// layout's binary path (the row's published box_binary = "image"), so
+	// nothing is uploaded and the box only checks its version.
+	BoxBinaryInImage bool `json:"box_binary_in_image,omitempty"`
 	// ToolStateRel are the tool's HOME-relative state dirs (pulled at each
 	// checkpoint and at teardown).
 	ToolStateRel []string `json:"tool_state_rel"`
@@ -97,6 +102,15 @@ type hostedPlanFile struct {
 	RetentionDays int    `json:"retention_days,omitempty"`
 	ObserverDir   string `json:"observer_dir"`
 	Tool          string `json:"tool"`
+	// Source, Delivery and CloneURL are the launch's resolved workspace
+	// delivery (lane G4: a vendor with Deliveries; "" sync on the others).
+	// A remote_clone run uploads nothing and clones CloneURL in the box.
+	Source   string `json:"source,omitempty"`
+	Delivery string `json:"delivery,omitempty"`
+	CloneURL string `json:"clone_url,omitempty"`
+	// ResumeBoxRunID names the held box a resume launch takes over (the
+	// org-hosted row's resume, design 3.6); "" for a fresh box.
+	ResumeBoxRunID string `json:"resume_box_run_id,omitempty"`
 }
 
 // hostedForwardEnvNames are the provider API-key variables an
@@ -176,16 +190,17 @@ func hostedEgressHostsKey(cfg config.TerminalSandboxConfig) string {
 }
 
 // custodyCheck refuses a custody this node cannot satisfy (S7d): home_relay
-// needs a key the proxy injects (a routing key pool or the org gateway
-// route); in_box_oauth_seed needs the auth seed projection, not built for
-// hosted rows yet; provider_injected is offered by no hosted row.
+// needs a key the proxy injects (a stored key for credential injection or
+// the org gateway route; a routing key pool never adds one, FX3 item 5);
+// in_box_oauth_seed needs the auth seed projection, not built for hosted
+// rows yet; provider_injected is offered by no hosted row.
 func hostedCustodyCheck(homeRelayOK bool, custody vocab.KeyCustody) error {
 	switch custody {
 	case vocab.CustodyHomeRelay:
 		if homeRelayOK {
 			return nil
 		}
-		return fmt.Errorf("terminal_sandbox: %s: key custody home_relay keeps the model credential on this machine, which works only for a key the proxy adds itself (a [routing].key_pool key or the org AI Gateway route), and neither is configured; choose in_box_api_key in Terminals > Settings > Hosted sandboxes (disclosed before the first upload)", verdictHostedCustody)
+		return fmt.Errorf("terminal_sandbox: %s: key custody home_relay keeps the model credential on this machine, which works only for a key the proxy adds itself (a key stored with `observer sandbox credentials add`, or the org AI Gateway route; a [routing].key_pool never adds one), and neither is configured; choose in_box_api_key in Terminals > Settings > Hosted sandboxes (disclosed before the first upload)", verdictHostedCustody)
 	case vocab.CustodyInBoxAPIKey:
 		return nil
 	case vocab.CustodyInBoxOAuthSeed:
@@ -348,12 +363,18 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 	if len(spec.Sandbox.StateRW) == 0 {
 		return termsvc.CreateResult{}, fmt.Errorf("terminal_sandbox: tool %q is not sandbox-launchable: %s", req.Tool, spec.Sandbox.Note)
 	}
-	if src := strings.TrimSpace(req.WorkspaceSource); src != "" && src != "live" {
-		return termsvc.CreateResult{}, fmt.Errorf("terminal_sandbox: %s: a hosted box receives the live workspace as an upload; the %s source is not offered", sandboxselect.VerdictSourceUnsupported, src)
-	}
-	m, err := d.manifest(ctx, req.ProjectRoot)
+	delivery, err := hostedSourceDelivery(d.vendor, req, d.r.cfg)
 	if err != nil {
 		return termsvc.CreateResult{}, err
+	}
+	var m sandboxremote.Manifest
+	if delivery.uploads() {
+		if m, err = d.manifest(ctx, req.ProjectRoot); err != nil {
+			return termsvc.CreateResult{}, err
+		}
+	} else {
+		// A box-side clone uploads nothing from this machine.
+		m = sandboxremote.Manifest{Root: req.ProjectRoot, ScopeKey: sandboxremote.RemoteCloneScopeKey(delivery.CloneURL)}
 	}
 	routed, _ := d.r.launchRouted(req.Tool, req.ProjectRoot, req.ToolArgs)
 	capture := hostedRunCapture(d.vendor.ID, tier, custody, routed)
@@ -361,12 +382,16 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 	if v := sandboxremote.CheckConsent(hostedLoadConsent(d.r.observerDir, d.vendor.ID), facts); v != sandboxremote.ConsentOK {
 		return termsvc.CreateResult{}, fmt.Errorf("terminal_sandbox: %s (%s): review what leaves this machine and agree in Terminals > Settings > Hosted sandboxes, or run `observer sandbox hosted consent %s`", verdictHostedConsentRequired, v, d.vendor.ID)
 	}
-	minutes, err := sandboxremote.PlanTimeout(d.cfg.MaxRunMinutes, d.cfg.DailyBoxMinutes, hostedLedgerUsed(d.r.observerDir, d.vendor.ID, d.now(), d.cfg.DailyBoxMinutes))
+	minutes, err := sandboxremote.PlanTimeout(d.maxRunMinutes(), d.cfg.DailyBoxMinutes, hostedLedgerUsed(d.r.observerDir, d.vendor.ID, d.now(), d.cfg.DailyBoxMinutes))
 	if err != nil {
 		return termsvc.CreateResult{}, fmt.Errorf("terminal_sandbox: %w", err)
 	}
 	minutes = hostedBoxMinutes(d.vendor, minutes)
-	ws, err := d.r.prepareWorkspace(ctx, req)
+	// The host side never clones for a hosted row: an upload sends the
+	// tree as consented, and a remote_clone delivery clones in the box.
+	wsReq := req
+	wsReq.WorkspaceSource, wsReq.WorkspaceRemote = "", ""
+	ws, err := d.r.prepareWorkspace(ctx, wsReq)
 	if err != nil {
 		return termsvc.CreateResult{}, err
 	}
@@ -377,10 +402,16 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 	plan := hostedPlanFile{
 		Version: hostedPlanVersion, RunID: ws.id, Provider: d.vendor.ID, Endpoint: endpoint, EndpointSPKISHA256: pc.EndpointSPKISHA256, Region: region,
 		Template: pc.Template, Tier: string(tier), Custody: string(custody), TimeoutMinutes: minutes,
-		Root: m.Root, ScopeKey: m.ScopeKey, Files: m.Files, BoxBinary: hostedBoxBinaryPath(pc, d.r.observerBin),
+		Root: m.Root, ScopeKey: m.ScopeKey, Files: m.Files, BoxBinary: hostedBoxBinaryPath(pc, d.r.observerBin), BoxBinaryInImage: pc.BoxBinaryInImage,
 		ToolStateRel: spec.Sandbox.StateRW, ToolInstall: install, ForwardEnv: forward,
 		CheckpointMinutes: d.cfg.CheckpointMinutes, DailyBoxMinutes: d.cfg.DailyBoxMinutes, ObserverDir: d.r.observerDir, Tool: req.Tool,
 		DBExport: d.cfg.DBExport, RetentionDays: d.r.cfg.WorkspaceRetentionDays,
+		Source: string(delivery.Source), Delivery: string(delivery.Delivery), CloneURL: delivery.CloneURL,
+	}
+	if d.reg.resumeBox != nil {
+		// A resume launch takes over a held box (the row's resume, design
+		// 3.6): a new run id here, the box's own run id in the mint.
+		plan.ResumeBoxRunID = d.reg.resumeBox()
 	}
 	hostedChoices.Store(ws.id, hostedChoice{plan: plan})
 	iso := termrun.Isolation{
@@ -413,6 +444,75 @@ func hostedRunCapture(id string, tier vocab.Tier, custody vocab.KeyCustody, rout
 	})
 }
 
+// hostedPathInput is what the box-path class table reads.
+type hostedPathInput struct {
+	vendor     sandboxremote.Vendor
+	runDir     string   // the run's directory on this machine
+	quarantine string   // the run's quarantine directory (the transcript pull's)
+	stateRel   []string // the tool's HOME-relative state dirs, in the pull's order
+}
+
+// hostedPathClass is one class of box path a relayed hook payload may name,
+// and the directory on this machine the relay serves it from.
+type hostedPathClass struct {
+	class string
+	rows  func(hostedPathInput) []sandboxrelayd.PathPrefix
+}
+
+// hostedPathClasses is the box-path class table of a hosted run, walked in
+// order (FX4 item 3, live L3-07). The relay rewrites a payload's working
+// directory and file keys through the rows before any binding check or
+// confined read (sandboxrelayd pathmap.go), so a box path is never a root
+// on this machine, and a path under no row is left as written and refused
+// path_outside_run, as any other path outside the run (fail closed):
+//
+//   - the workspace: the box's own fixed workspace is the run's directory
+//     (G4-R2). A working directory may name it (sandboxrelayd runDirs);
+//   - the agent's state: each of the tool's HOME-relative state dirs in the
+//     box's agent home (Claude Code's ~/.claude, where its transcript_path
+//     points) is the matching directory of the run's quarantine, where the
+//     transcript pull copies it (<quarantine>/<index>, the pull's LocalRel
+//     root). Only a FILE key may name it: a working directory there is
+//     still refused, because the binding's working-directory rule reads the
+//     run's workspace and project only. The rest of the agent home (any
+//     other dot directory, the home itself) has no row.
+//
+// Before FX4 the agent-state class had no row, so a committed project hook
+// in an org box was refused for its transcript_path and Claude Code turned
+// the refusal into a failed tool call.
+var hostedPathClasses = []hostedPathClass{
+	{class: "workspace", rows: func(in hostedPathInput) []sandboxrelayd.PathPrefix {
+		if in.vendor.BoxWorkspace == "" {
+			return nil // a same-path vendor: the box's workspace is the run's own path
+		}
+		return []sandboxrelayd.PathPrefix{{Box: in.vendor.BoxWorkspace, Host: in.runDir}}
+	}},
+	{class: "agent state", rows: func(in hostedPathInput) []sandboxrelayd.PathPrefix {
+		if in.vendor.BoxHome == "" || in.quarantine == "" {
+			return nil
+		}
+		var out []sandboxrelayd.PathPrefix
+		for i, rel := range in.stateRel {
+			box := path.Join(in.vendor.BoxHome, filepath.ToSlash(rel))
+			if box == in.vendor.BoxHome || !strings.HasPrefix(box, in.vendor.BoxHome+"/") {
+				continue // never the home itself, never outside it
+			}
+			out = append(out, sandboxrelayd.PathPrefix{Box: box, Host: filepath.Join(in.quarantine, strconv.Itoa(i))})
+		}
+		return out
+	}},
+}
+
+// hostedPathMap is the run record's box-to-host path map: the rows of every
+// class in hostedPathClasses.
+func hostedPathMap(in hostedPathInput) []sandboxrelayd.PathPrefix {
+	var out []sandboxrelayd.PathPrefix
+	for _, c := range hostedPathClasses {
+		out = append(out, c.rows(in)...)
+	}
+	return out
+}
+
 // hostedBoxBinaryPath is the host path of the in-box observer.
 func hostedBoxBinaryPath(pc config.TerminalSandboxHostedProviderConfig, observerBin string) string {
 	if b := strings.TrimSpace(pc.BoxBinary); b != "" {
@@ -429,7 +529,13 @@ func (d *hostedDriver) Attach(_ context.Context, created termsvc.CreateResult) (
 		return termsvc.AttachResult{}, fmt.Errorf("terminal_sandbox: run %s has no hosted plan (Create did not run)", created.Run.ID)
 	}
 	plan := v.(hostedChoice).plan
-	if err := d.r.writeRunRecord(created.Run); err != nil {
+	// The agent-state rows name the directories the transcript pull writes
+	// (the plan's run id, observer dir and state dirs, as the pull reads them).
+	pm := hostedPathMap(hostedPathInput{
+		vendor: d.vendor, runDir: created.Run.Dir,
+		quarantine: hostedQuarantineDir(plan.ObserverDir, plan.RunID), stateRel: plan.ToolStateRel,
+	})
+	if err := d.r.writeRemoteRunRecord(created.Run, pm); err != nil {
 		return termsvc.AttachResult{}, err
 	}
 	netReq := sandbox.NetRequest{Egress: hostedHostEgress(vocab.Tier(plan.Tier)), ProxyPort: d.r.proxyPort}
@@ -543,4 +649,17 @@ func hostedBoxMinutes(v sandboxremote.Vendor, planned int) int {
 		return lc
 	}
 	return planned
+}
+
+// maxRunMinutes is the box's run cap: the local max_run_minutes, lowered by
+// the vendor's own cap when its registration names one (fix round 1, A8:
+// the organization's max_run_minutes); it never raises the local cap.
+func (d *hostedDriver) maxRunMinutes() int {
+	m := d.cfg.MaxRunMinutes
+	if d.reg.runCap != nil {
+		if c := d.reg.runCap(d); c > 0 && c < m {
+			m = c
+		}
+	}
+	return m
 }

@@ -4,7 +4,17 @@
 // return; they own the honest disabled copy, so a test can pin every branch
 // without rendering the dialog.
 
-import { ISOLATION_NONE, isolationChoiceSummary, isolationOptions, launchBackend, type IsolationOption } from "./sandboxIsolation.ts";
+import {
+  ISOLATION_AUTO,
+  ISOLATION_NONE,
+  backendNotes,
+  isolationChoiceSummary,
+  isolationOptions,
+  launchBackend,
+  unavailableRows,
+  type IsolationOption,
+  type UnavailableRow,
+} from "./sandboxIsolation.ts";
 import type { SandboxAvailability, SandboxSourceAvail } from "./types.ts";
 
 // SHELL_TOOL is the reserved pseudo-tool sentinel for a fresh PLAIN SHELL
@@ -92,6 +102,10 @@ export type IsolationPickerProps = {
   disabled: boolean;
   reason: string | null;
   chip: string | null;
+  /** The daemon's sentences about the chosen row (backendNotes). */
+  notes: string[];
+  /** The offered rows that cannot run here, each with its reason. */
+  unavailable: UnavailableRow[];
 };
 
 /**
@@ -111,7 +125,16 @@ export function isolationPickerProps(
   const reason = sandboxDisabledReason(tool, probe);
   const picked = options.find((o) => o.id === choice);
   const value = sandboxOn && !picked?.disabled ? choice : ISOLATION_NONE;
-  return { options, value, disabled: reason !== null, reason, chip: isolationChoiceSummary(probe, choice) };
+  const chosen = value === ISOLATION_NONE ? undefined : probe?.backends?.find((b) => b.id === (value === ISOLATION_AUTO ? probe?.backend : value));
+  return {
+    options,
+    value,
+    disabled: reason !== null,
+    reason,
+    chip: isolationChoiceSummary(probe, choice),
+    notes: backendNotes(chosen),
+    unavailable: unavailableRows(probe),
+  };
 }
 
 /**

@@ -104,7 +104,7 @@ func exfilRules() []Rule {
 			Match:     matchSecretsOnAPIRequest,
 			Observe:   DecisionFlag, Enforce: DecisionDeny,
 			Doc:    "secret-shaped content in an outbound LLM API request",
-			Advice: "Check what placed the secret in the conversation (a file read, a shell output); rotate it if it already left, and add an [guard.proxy] egress_allow pattern only for known-fake fixtures.",
+			Advice: "Check what placed the secret in the conversation (a file read, a shell output); rotate it if it already left, and add an Egress allow pattern (Observer dashboard Settings > Guard, Proxy scans; [guard.proxy] egress_allow) only for known-fake fixtures.",
 		},
 		{
 			// F1 (phase-3a review): the prompt-submit-intervention
@@ -135,7 +135,7 @@ func exfilRules() []Rule {
 			Match:     matchSecretsOnAPIRequest,
 			Observe:   DecisionFlag, Enforce: DecisionDeny,
 			Doc:    "secret-shaped content typed directly into a prompt to your coding-agent tool, before it reaches the model",
-			Advice: "Check what placed the secret in the conversation (a file read, a shell output, a pasted value); rotate it if it's real, and add a [guard.prompt] allow pattern only for known-fake test data.",
+			Advice: "Check what placed the secret in the conversation (a file read, a shell output, a pasted value); rotate it if it's real, and add an Allow pattern (Observer dashboard Settings > Guard, Prompt-submit intervention; a [guard.prompt] allow pattern) only for known-fake test data.",
 		},
 		{
 			ID: "R-173", Category: CategoryExfil, Severity: SeverityWarn,
@@ -178,9 +178,17 @@ func exfilRules() []Rule {
 			Match:     matchPromptFindings,
 			Observe:   DecisionFlag, Enforce: DecisionDeny,
 			Doc:    "deterministic PII (credit card, SSN, IBAN, ...) in the developer's own prompt text",
-			Advice: "Remove or redact the value before sending, or add a [guard.prompt] allow pattern only for known-fake test data.",
+			Advice: "Remove or redact the value before sending, or add an Allow pattern (Observer dashboard Settings > Guard, Prompt-submit intervention; a [guard.prompt] allow pattern) only for known-fake test data.",
 		},
 	}
+}
+
+// RemoteCodePipe reports whether parsed command units pipe remote content
+// into an interpreter, by R-170's own shapes, with R-170's reason. It is the
+// one matcher internal/secshellrisk reuses for scripts in CI workflows and
+// Dockerfiles, so the two never drift.
+func RemoteCodePipe(cmds []Command) (bool, string) {
+	return matchRemoteCodePipe(&MatchContext{Cmds: cmds})
 }
 
 // matchRemoteCodePipe implements R-170 over three shapes (documented

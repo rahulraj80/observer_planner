@@ -29,7 +29,7 @@ func newLLMCmd() *cobra.Command {
 			"grounded Q&A) run against connections you point them at. Loopback\n" +
 			"servers (Ollama/vLLM/llama.cpp) are keyless and make ZERO network\n" +
 			"calls. Remote providers need an explicit allow_remote=true plus an\n" +
-			"api_key_env (an ENV VAR NAME — never the key). Nothing is configured\n" +
+			"api_key_env (an ENV VAR NAME - never the key). Nothing is configured\n" +
 			"by default: with no connections the briefing is data-only.\n\n" +
 			"  observer llm list\n" +
 			"  observer llm setup\n" +
@@ -114,11 +114,11 @@ func newLLMStatusCmd() *cobra.Command {
 			}
 			conn, ok := findLLMConnection(cfg, id)
 			if !ok {
-				return fmt.Errorf("no connection %q — see `observer llm list`", id)
+				return fmt.Errorf("no connection %q - see `observer llm list`", id)
 			}
 			out := cmd.OutOrStdout()
 			if !conn.Enabled {
-				fmt.Fprintln(out, "connection disabled — never selected")
+				fmt.Fprintln(out, "connection disabled - never selected")
 			}
 			if conn.Remote() && !conn.AllowRemote {
 				fmt.Fprintln(out, "remote connection inert: allow_remote=false")
@@ -135,7 +135,7 @@ func newLLMStatusCmd() *cobra.Command {
 				}
 			}
 			if conn.Remote() && hv == "" {
-				fmt.Fprintf(out, "no credential for env %q / keychain %q — set it before this connection can be used\n", conn.APIKeyEnv, conn.APIKeyKeychain)
+				fmt.Fprintf(out, "no credential for env %q / keychain %q - set it before this connection can be used\n", conn.APIKeyEnv, conn.APIKeyKeychain)
 			}
 			client := llmconn.NewClient(conn, hv)
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
@@ -201,20 +201,20 @@ func newLLMAddCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "saved %q (config: %s)\n", connID, path)
 			if pokeReload() {
-				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded — the briefing picks this up immediately")
+				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded - the briefing picks this up immediately")
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected — applies on next start")
+				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected - applies on next start")
 			}
 			return nil
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&connID, "id", "", "Connection id (slug, e.g. local-ollama) — required")
+	f.StringVar(&connID, "id", "", "Connection id (slug, e.g. local-ollama) - required")
 	f.StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
 	f.StringVar(&conn.Name, "name", "", "Human label (defaults to the id)")
 	f.StringVar(&conn.Kind, "kind", "", "Kind: anthropic | openai_compat (default) | local_openai_compat")
-	f.StringVar(&conn.BaseURL, "base-url", "", "Endpoint base, e.g. http://127.0.0.1:11434/v1 — required")
-	f.StringVar(&conn.APIKeyEnv, "api-key-env", "", "ENV VAR NAME holding the key (never the key) — required for remote")
+	f.StringVar(&conn.BaseURL, "base-url", "", "Endpoint base, e.g. http://127.0.0.1:11434/v1 - required")
+	f.StringVar(&conn.APIKeyEnv, "api-key-env", "", "ENV VAR NAME holding the key (never the key) - required for remote")
 	f.StringVar(&conn.APIKeyKeychain, "api-key-keychain", "", "OS-keychain label holding the key (alternative to api_key_env)")
 	f.StringSliceVar(&conn.Models, "models", nil, "Available models (comma-separated)")
 	f.StringVar(&conn.DefaultModel, "default-model", "", "Default model for analysis calls")
@@ -241,7 +241,7 @@ func newLLMRemoveCmd() *cobra.Command {
 				return err
 			}
 			if _, ok := cfg.LLM.Connections[id]; !ok {
-				return fmt.Errorf("no connection %q — nothing removed", id)
+				return fmt.Errorf("no connection %q - nothing removed", id)
 			}
 			delete(cfg.LLM.Connections, id)
 			if err := config.WriteToml(path, cfg); err != nil {
@@ -251,7 +251,7 @@ func newLLMRemoveCmd() *cobra.Command {
 			if pokeReload() {
 				fmt.Fprintln(cmd.OutOrStdout(), "daemon reloaded")
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected — applies on next start")
+				fmt.Fprintln(cmd.OutOrStdout(), "no running daemon detected - applies on next start")
 			}
 			return nil
 		},
@@ -290,7 +290,7 @@ func newLLMSetupCmd() *cobra.Command {
 			for _, srv := range servers {
 				id := slugFromURL(srv.BaseURL)
 				if _, exists := cfg.LLM.Connections[id]; exists {
-					fmt.Fprintf(out, "%s already configured — leaving as-is\n", id)
+					fmt.Fprintf(out, "%s already configured - leaving as-is\n", id)
 					continue
 				}
 				conn := config.LLMConnectionConfig{
@@ -308,7 +308,7 @@ func newLLMSetupCmd() *cobra.Command {
 					conn.DefaultModel = models[0]
 				}
 				cfg.LLM.Connections[id] = conn
-				fmt.Fprintf(out, "added %s (%s) — default model %q\n", id, srv.Label, conn.DefaultModel)
+				fmt.Fprintf(out, "added %s (%s) - default model %q\n", id, srv.Label, conn.DefaultModel)
 			}
 			if err := config.Validate(cfg); err != nil {
 				return fmt.Errorf("refusing to save: %w", err)
@@ -318,9 +318,9 @@ func newLLMSetupCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out, "saved (config: %s)\n", path)
 			if pokeReload() {
-				fmt.Fprintln(out, "daemon reloaded — the briefing picks this up immediately")
+				fmt.Fprintln(out, "daemon reloaded - the briefing picks this up immediately")
 			} else {
-				fmt.Fprintln(out, "no running daemon detected — applies on next start")
+				fmt.Fprintln(out, "no running daemon detected - applies on next start")
 			}
 			return nil
 		},

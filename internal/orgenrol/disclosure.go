@@ -33,7 +33,7 @@ func AuthorityPlainEnglish(tok string) string {
 	case govern.AuthorityEnforceRouting:
 		return "FORCE model-routing enforcement on this machine (managed tenancy only)"
 	case govern.AuthorityEnforceAdmission:
-		return "FORCE input-admission guardrail enforcement on this machine (managed tenancy only)"
+		return "FORCE input-admission guardrail enforcement on this machine, and let " + PromptJudgeDisclosure + " (managed tenancy only)"
 	case govern.AuthorityEnforceEgress:
 		return "FORCE egress-policy enforcement on this machine (managed tenancy only)"
 	case govern.AuthorityEnforceBudget:
@@ -84,6 +84,18 @@ func AuthorityPlainEnglish(tok string) string {
 		return "UNKNOWN to this version of Observer - no description is available, though it is still recorded on this grant"
 	}
 }
+
+// PromptJudgeDisclosure is the ONE developer-facing sentence that says the
+// organization's coding-agent prompt judge (planeb.admission, P-228) reads
+// typed prompts on a managed machine (lane adm-p2). It is disclosure, not a
+// toggle: a managed node ships full content by operator ruling. The consent
+// screen (AuthorityPlainEnglish), `observer org status`, the daemon-start
+// family notice and the node Security page all render these words; it
+// completes "let ..." and "Your organization may let ...".
+const PromptJudgeDisclosure = "the organization's LLM judge read the prompts you type into coding agents on this machine, " +
+	"through each tool's prompt-gate hook and through this machine's proxy for proxy-routed tools " +
+	"(sent to the organization's own server; a prompt with a detected secret is never sent; a refused prompt never reaches the model; " +
+	"it runs only while the organization's signed policy turns its node lane on)"
 
 // TOMLStringList renders items as a TOML inline array of quoted strings, e.g.
 // ["admission.input", "node.governance"].

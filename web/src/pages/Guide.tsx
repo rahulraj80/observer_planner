@@ -58,7 +58,7 @@ const BUILT_UPON: { title: string; detail: string }[] = [
   },
   {
     title: "The reverse proxy",
-    detail: "internal/proxy is the api_turns producer; the briefing scan consumes its rows with the exact proxy-origin dedup the analysis uses.",
+    detail: "internal/proxy produces the API turn rows; the briefing scan consumes its rows with the exact proxy-origin dedup the analysis uses.",
   },
   {
     title: "The dashboard SPA shell",
@@ -68,8 +68,8 @@ const BUILT_UPON: { title: string; detail: string }[] = [
 
 const TWEAKED: { title: string; detail: string }[] = [
   {
-    title: "api_turns now carry latency + error detail",
-    detail: "TTFT / total response / http_status / error_class / error_message columns feed error-rate, TTFT-p95 and failure-pattern cards.",
+    title: "API turns now carry latency + error detail",
+    detail: "TTFT, total response, HTTP status, error class and error message columns feed error-rate, TTFT-p95 and failure-pattern cards.",
   },
   {
     title: "Top sessions carry their model mix + errors",
@@ -108,7 +108,7 @@ const ADDED_NEW: { title: string; detail: string }[] = [
   },
   {
     title: "Backbone migrations 074-084",
-    detail: "api_turns latency/error columns, briefing snapshots, failure contexts, routing realized-delta and the FTS session-summary index.",
+    detail: "API turn latency/error columns, briefing snapshots, failure contexts, routing realized-delta and the FTS session-summary index.",
   },
 ];
 

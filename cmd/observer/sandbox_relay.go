@@ -145,17 +145,19 @@ func sandboxRelayReachable(observerDir string) bool {
 }
 
 // startSandboxRelay serves the link endpoint for the daemon's life, only
-// while the Sandboxes and VMs module is active (inert otherwise: no
-// listener, no goroutine) and only on an operating system a sandbox runs on
-// (sandboxRelayOnThisOS: Linux, or a selected driver's own OS).
+// while the Sandboxes and VMs module is active (no listener otherwise) and
+// only on an operating system a sandbox runs on (sandboxRelayOnThisOS:
+// Linux, or a selected driver's own OS).
 //
 // It follows the EFFECTIVE sandbox switch (the local block with the in-force
 // managed body composed onto it, effectiveSandboxConfig), not the local one
 // alone (SBX-P1C merge finding 1): with the sandbox off it listens on
 // nothing, and starts the moment the managed overlay turns the sandbox on
-// while the daemon runs. Once serving it stays up, idle, if a later body
-// turns the sandbox off: a box launched while it was on still reports
-// through it, and an idle endpoint answers no one.
+// while the daemon runs, or a local write applies (sandbox_live_apply.go:
+// setup's Enable, the Settings save) with the module selected and a driver
+// for this OS, so turning the sandbox on needs no restart. Once serving it
+// stays up, idle, if the sandbox is later turned off: a box launched while
+// it was on still reports through it, and an idle endpoint answers no one.
 //
 // deps.SessionOwner looks up the project the node records for a session id
 // (the store's ProjectRootForSession), so a box cannot write rows under
@@ -165,21 +167,26 @@ func startSandboxRelay(ctx context.Context, cfg config.Config, binPath string, l
 	// relay's and the oci reaper's) ends the run it left behind (D7).
 	onGone := relayGoneRunEnd(sandboxObserverDirFor(cfg), deps.EndGoneRun, logger)
 	relayGoneRunEnder.Store(&onGone)
-	// Only while sandboxed terminals are switched on: an install with no
-	// [components] block resolves the module active, and it must not gain a
-	// listener for a feature it never turned on (plans decision log P-026).
-	if !sandboxModuleActive(componentSnapshotForConfig(cfg)) || !sandboxRelayOnThisOS(cfg) || !localipc.Supported() {
+	if !localipc.Supported() {
 		return
 	}
 	serve := func() bool { return serveSandboxRelay(ctx, cfg, binPath, logger, deps) }
-	if sandboxRelayWanted(cfg) {
+	if sandboxRelayGate(cfg) {
 		serve()
 		return
 	}
 	// The seam is read here, on the caller's goroutine, so a test that
 	// restores it at cleanup never races the waiting goroutine.
 	relayConfig := sandboxRelayConfig
-	go awaitSandboxRelay(ctx, func() bool { return sandboxRelayWanted(relayConfig(cfg)) }, serve)
+	go awaitSandboxRelay(ctx, func() bool { return sandboxRelayGate(relayConfig(cfg)) }, serve)
+}
+
+// sandboxRelayGate is the relay's whole gate over one config: the module is
+// active (an install with no [components] block resolves the module active,
+// and it must not gain a listener for a feature it never turned on, plans
+// decision log P-026), a driver serves this OS, and the sandbox is wanted.
+func sandboxRelayGate(cfg config.Config) bool {
+	return sandboxModuleActive(componentSnapshotForConfig(cfg)) && sandboxRelayOnThisOS(cfg) && sandboxRelayWanted(cfg)
 }
 
 // sandboxRelayGOOS is the operating system the relay gate judges (a test
@@ -222,7 +229,7 @@ func sandboxRelayOnOS(goos string, cfg config.Config) bool {
 func sandboxRelayWanted(cfg config.Config) bool { return effectiveSandboxConfig(cfg).Enabled }
 
 // sandboxRelayConfig is the config the gate reads after the managed overlay
-// moves: the daemon's config.toml as it is now, or the boot config when it
+// moves or a local write applies: the daemon's config.toml as it is now, or the boot config when it
 // cannot be read. A seam for tests.
 var sandboxRelayConfig = func(boot config.Config) config.Config {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: daemonConfigPath()})
@@ -232,11 +239,12 @@ var sandboxRelayConfig = func(boot config.Config) config.Config {
 	return cfg
 }
 
-// awaitSandboxRelay waits on the managed overlay until wanted holds, then
-// serves once. A start that fails waits for the next move (no retry loop).
+// awaitSandboxRelay waits on the managed overlay and the local-apply signal
+// until wanted holds, then serves once. A start that fails waits for the
+// next move (no retry loop).
 func awaitSandboxRelay(ctx context.Context, wanted, serve func() bool) {
 	for {
-		moved := processSandboxManaged.changed()
+		moved, applied := processSandboxManaged.changed(), processSandboxLocal.changed()
 		if wanted() && serve() {
 			return
 		}
@@ -244,6 +252,7 @@ func awaitSandboxRelay(ctx context.Context, wanted, serve func() bool) {
 		case <-ctx.Done():
 			return
 		case <-moved:
+		case <-applied:
 		}
 	}
 }
@@ -252,6 +261,32 @@ func awaitSandboxRelay(ctx context.Context, wanted, serve func() bool) {
 // daemon's Observer directory (a driver's own start work: the mxc-process
 // driver's box folder sweep, RERUN2 D4).
 var sandboxRelayStartHooks []func(ctx context.Context, observerDir string, logger *slog.Logger)
+
+// sandboxEgressRefusalSources are a driver's own refusal feeds outside the
+// relay link (lane O3: a backend whose own proxy exports its denials), each
+// handed the daemon's one refusal hook when the relay starts serving (nil:
+// refusals are not recorded), so every feed shares the one receiver, its
+// flood bound and its store seam.
+var sandboxEgressRefusalSources []func(sink func(sandboxrelayd.RunRecord, sandboxrelay.EgressRefusalReport))
+
+// sandboxEgressRefusalDropSources are the same feeds' dropped-count hooks
+// (lane OC, audit finding O3-W2): a feed that drops a run's refusals past
+// its own bound hands the count to the refusal audit, which keeps it
+// beside the run's rows (nil: not recorded).
+var sandboxEgressRefusalDropSources []func(drop func(sandboxrelayd.RunRecord, egressRefusalDropCount))
+
+// sandboxRelaySweepHooks run after the relay's prune of dead helpers'
+// records, once at start and after every sweep of the relay daemon
+// (sandboxrelayd.Daemon.OnSweep), so what a dead run left beside its relay
+// record goes with it (its credential files, tracker F-055).
+var sandboxRelaySweepHooks []func(observerDir string)
+
+// runSandboxRelaySweepHooks runs every sweep hook for observerDir.
+func runSandboxRelaySweepHooks(observerDir string) {
+	for _, hook := range sandboxRelaySweepHooks {
+		hook(observerDir)
+	}
+}
 
 // serveSandboxRelay prunes stale run records and serves the endpoint; false
 // when it could not listen.
@@ -267,6 +302,7 @@ func serveSandboxRelay(ctx context.Context, cfg config.Config, binPath string, l
 	if n, err := sandboxrelayd.PruneRuns(observerDir, relayRecordMaxAge, time.Now()); err == nil && n > 0 {
 		logger.Info("sandbox relay: removed stale run records", "count", n)
 	}
+	runSandboxRelaySweepHooks(observerDir)
 	for _, hook := range sandboxRelayStartHooks {
 		hook(ctx, observerDir, logger)
 	}
@@ -285,6 +321,15 @@ func serveSandboxRelay(ctx context.Context, cfg config.Config, binPath string, l
 	// the daemon's teardown, a sandboxed CLI launch through its end request
 	// (relayCLIRunEnder).
 	endRun := relayFirstEnder(deps.EndRun, relayCLIRunEnder(observerDir, deps.StampEndReason, logger))
+	refusalReceiver := newEgressRefusalReceiver(ctx, deps.Refusals, logger)
+	refusals := refusalReceiver.onEgressRefusal()
+	for _, src := range sandboxEgressRefusalSources {
+		src(refusals)
+	}
+	drops := refusalReceiver.onDropped()
+	for _, src := range sandboxEgressRefusalDropSources {
+		src(drops)
+	}
 	d := &sandboxrelayd.Daemon{
 		ObserverDir:  observerDir,
 		Exec:         relayExecutor(cfgPath, binPath),
@@ -292,6 +337,7 @@ func serveSandboxRelay(ctx context.Context, cfg config.Config, binPath string, l
 		Peer:         sandboxrelayd.PeerSameUser,
 		Gated:        relayRequestGated,
 		SessionOwner: deps.SessionOwner,
+		FreshStore:   relayFreshStoreFor(observerDir),
 		CloneOrigin:  relayCloneOrigin(deps.ManagedRoot),
 		// A box running an earlier binary sends version 1 requests and
 		// cannot read a refusal: it gets the answer it would have given.
@@ -304,15 +350,21 @@ func serveSandboxRelay(ctx context.Context, cfg config.Config, binPath string, l
 		OnRunEnd: relayOnRunEnd,
 		// A run whose helper died ends its stored row (D7).
 		OnPruned: func(rec sandboxrelayd.RunRecord) { endGoneRelayRuns([]sandboxrelayd.RunRecord{rec}) },
+		// What a dead run left beside its record goes after each sweep
+		// (its credential files, tracker F-055).
+		OnSweep: func() { runSandboxRelaySweepHooks(observerDir) },
+		// A run's gateway refusals land in the refusal audit (lane N1).
+		OnEgressRefusal: refusals,
 		// A call the transcript shows as run with no gate event is drift
 		// (sandbox plan section 5.2 (2)).
 		Drift: relayGateDrift(),
 		// Every link the daemon closes unanswered and every request it
 		// refuses is one line with the run id (Windows 11 Pro run 3).
-		Log: func(runID, reason string) {
-			logger.Warn("sandbox relay: "+reason, "run", runID)
-		},
+		// A hosted run's line also goes to its kept relay log, where the
+		// in-box answer points (lane FX6, F-P7-5).
+		Log: relayDaemonLog(logger, observerDir),
 	}
+	relaySessionClaims.Store(d)
 	// A floor published while runs are live ends the ones already drifted.
 	sweep := relayFloorSweep(endRun, logger)
 	relayFloorSweeper.Store(&sweep)
@@ -322,6 +374,18 @@ func serveSandboxRelay(ctx context.Context, cfg config.Config, binPath string, l
 		}
 	}()
 	return true
+}
+
+// relayDaemonLog is the relay daemon's Log: one warning in the daemon's
+// own log, and, for a run the daemon names, the same line in that run's
+// kept relay log (noteHostedRelayLog). The daemon names a run only once
+// its handshake proved it (sandboxrelayd.Daemon.Log, fold audit N4), so a
+// box cannot write into another run's kept log by claiming its id.
+func relayDaemonLog(logger *slog.Logger, observerDir string) func(runID, reason string) {
+	return func(runID, reason string) {
+		logger.Warn("sandbox relay: "+reason, "run", runID)
+		noteHostedRelayLog(observerDir, runID, reason)
+	}
 }
 
 // sandboxRelayDeps are the daemon facts the relay endpoint is wired with.
@@ -345,6 +409,9 @@ type sandboxRelayDeps struct {
 	// EndGoneRun ends the stored row of a run whose process is gone
 	// (store.EndTerminalRunGone), once; nil: such rows stay as they are.
 	EndGoneRun func(ctx context.Context, runID, reason string) (bool, error)
+	// Refusals is the store seam the egress refusal receiver writes
+	// through (lane N1); nil: refusals are not recorded.
+	Refusals egressRefusalStore
 }
 
 // relayMaxMeta caps a managed workspace's meta.json read.
@@ -462,7 +529,7 @@ func relayExecutor(configPath, binPath string) sandboxrelayd.Executor {
 			return sandboxrelay.HookResponse{}, fmt.Errorf("relay: no executor for kind %q", req.Kind)
 		}
 		rec, err := json.Marshal(relayChildRecord{
-			V: 1, RunID: run.RunID, Tool: run.Tool, Roots: run.Roots, Env: req.Env, Cwd: req.Cwd,
+			V: 1, RunID: run.RunID, Tool: run.Tool, Roots: run.ReadRoots(), Env: req.Env, Cwd: req.Cwd,
 			ProjectRoot: relayRunProjectRoot(run), CheckoutRoot: relayRunCheckoutRoot(run),
 			Delivery: string(run.Delivery), CopyHostPath: run.CopyHostPath,
 			TrustAcceptRoot: relayRunTrustAcceptRoot(run),
@@ -605,7 +672,7 @@ func relayChildDir(run sandboxrelayd.RunRecord, cwd string) string {
 		return run.WorkspaceDir
 	}
 	resolved, err := filepath.EvalSymlinks(cwd)
-	if err != nil || !sandboxrelayd.RootsContain(run.Roots, resolved) {
+	if err != nil || !sandboxrelayd.RootsContain(run.ReadRoots(), resolved) {
 		return run.WorkspaceDir
 	}
 	if fi, err := os.Stat(resolved); err != nil || !fi.IsDir() {

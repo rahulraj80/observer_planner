@@ -18,10 +18,13 @@ import { GUARD_RULE_OPTIONS, useMCPServerOptions } from "@/lib/usePickerSources"
 import {
   type Decision,
   type GuardOverrideRow,
+  type GuardFileAccess,
   type GuardRuleRow,
   DECISIONS,
   GUARD_CATEGORIES,
   GUARD_EVENT_KINDS,
+  GUARD_FILE_ACCESS,
+  GUARD_RULE_TEXT_MAX,
   GUARD_SINKS,
   GUARD_TAINT_SOURCES,
   SEVERITIES,
@@ -33,6 +36,7 @@ import {
   guardRuleRowProblems,
   isGuardIntegrityRuleId,
 } from "@shared/lib/guardCatalog";
+import { withIntegrityEnforce } from "./integrityLock";
 
 // RuleEditor — the SlideOver form for authoring ONE `[[rule]]` (a brand-new
 // custom rule) or tuning ONE `[[override]]` (escalate/loosen a built-in).
@@ -44,10 +48,12 @@ import {
 // `allowWeaken` widens the override decision picker past the built-in's
 // escalate-only floor: true for the trusted-project layer (§2/§3) AND the
 // user/global layer (both may weaken or disable, at parity with the raw TOML
-// editor). guardDecisionOptionsFor still keeps integrity rules (R-160/R-161)
+// editor). guardDecisionOptionsFor still keeps the integrity rules (isGuardIntegrityRuleId)
 // escalate-only even when allowWeaken is true, and the org floor + integrity
 // backstop are enforced server-side at merge time. The org bundle itself is
-// authored escalate-only (it passes allowWeaken=false).
+// authored escalate-only (it passes allowWeaken=false). The Enforce toggle is
+// locked on for an integrity rule in every layer (withIntegrityEnforce, audit
+// CF2-A1): `enforce = false` is a cap the engine refuses for these.
 
 const EVENT_KIND_OPTIONS: EntityMultiPickerOption[] = GUARD_EVENT_KINDS.map((k) => ({ id: k, label: k }));
 
@@ -85,8 +91,11 @@ function OverrideEditor({
   allowWeaken,
   onSave,
 }: Extract<RuleEditorProps, { kind: "override" }>) {
-  const [row, setRow] = useState<GuardOverrideRow>(initial ?? { rule: "", decision: "", enforce: true });
+  const [row, setRow] = useState<GuardOverrideRow>(() =>
+    withIntegrityEnforce(initial ?? { rule: "", decision: "", enforce: true }),
+  );
   const info = guardRuleInfo(row.rule);
+  const integrity = isGuardIntegrityRuleId(row.rule);
   const decisionOpts = guardDecisionOptionsFor(row.rule, allowWeaken);
   const view = overrideEditorView(mode, initial?.rule ?? row.rule);
 
@@ -105,7 +114,9 @@ function OverrideEditor({
             value={row.rule}
             onChange={(rule) => {
               const opts = guardDecisionOptionsFor(rule, allowWeaken);
-              setRow((r) => ({ ...r, rule, decision: r.decision && opts.includes(r.decision) ? r.decision : "" }));
+              setRow((r) =>
+                withIntegrityEnforce({ ...r, rule, decision: r.decision && opts.includes(r.decision) ? r.decision : "" }),
+              );
             }}
             allowFree
             freeLabel="Custom rule id"
@@ -136,8 +147,21 @@ function OverrideEditor({
           />
         </SettingRow>
 
-        <SettingRow label="Enforce" layout="stack" help="Block/hold even while the global mode stays observe.">
-          <Toggle on={row.enforce} onChange={(enforce) => setRow((r) => ({ ...r, enforce }))} label={row.enforce ? "on" : "off"} />
+        <SettingRow
+          label="Enforce"
+          layout="stack"
+          help={
+            integrity
+              ? "Locked on: this is a guard integrity rule, and the guard refuses to turn its enforcement off in any layer."
+              : "Block/hold even while the global mode stays observe."
+          }
+        >
+          <Toggle
+            on={row.enforce || integrity}
+            onChange={(enforce) => setRow((r) => withIntegrityEnforce({ ...r, enforce }))}
+            disabled={integrity}
+            label={row.enforce || integrity ? "on" : "off"}
+          />
         </SettingRow>
       </div>
       <div className="flex items-center gap-2 border-t border-line-1 px-5 py-3">
@@ -145,7 +169,7 @@ function OverrideEditor({
           variant="primary"
           iconLeft={view.isNew ? Plus : undefined}
           disabled={!row.rule.trim()}
-          onClick={() => onSave(row)}
+          onClick={() => onSave(withIntegrityEnforce(row))}
         >
           {view.saveLabel}
         </Button>
@@ -210,6 +234,23 @@ function CustomRuleEditor({ open, onClose, initial, onSave }: Extract<RuleEditor
 
         <SettingRow label="Enforce" layout="stack" help="Block/hold even while the global mode stays observe.">
           <Toggle on={row.enforce} onChange={(enforce) => setRow((r) => ({ ...r, enforce }))} label={row.enforce ? "on" : "off"} />
+        </SettingRow>
+
+        <SettingRow label="Doc" layout="stack" help="Optional one line the agent reads when the rule fires. Empty keeps the guard's own wording.">
+          <Input
+            value={row.doc}
+            onChange={(e) => setRow((r) => ({ ...r, doc: e.target.value }))}
+            maxLength={GUARD_RULE_TEXT_MAX}
+            placeholder="What this rule catches"
+          />
+        </SettingRow>
+        <SettingRow label="Advice" layout="stack" help="Optional one sentence on what to do instead.">
+          <Input
+            value={row.advice}
+            onChange={(e) => setRow((r) => ({ ...r, advice: e.target.value }))}
+            maxLength={GUARD_RULE_TEXT_MAX}
+            placeholder="What to do instead"
+          />
         </SettingRow>
 
         <SettingRow
@@ -300,6 +341,13 @@ function CustomRuleEditor({ open, onClose, initial, onSave }: Extract<RuleEditor
                 label="path_sensitive"
               />
             </div>
+            <SettingRow label="access" layout="stack" help="Narrow a file rule to reads or to writes (a write, an edit or a config change). Either matches both.">
+              <Select
+                value={row.event.access}
+                onChange={(e) => setRow((r) => ({ ...r, event: { ...r.event, access: e.target.value as GuardFileAccess | "" } }))}
+                options={[{ value: "", label: "either" }, ...GUARD_FILE_ACCESS]}
+              />
+            </SettingRow>
             <div className="grid grid-cols-2 gap-3">
               <SettingRow label="url_domain" layout="stack">
                 <Input

@@ -840,9 +840,12 @@ export function RoutingPage() {
             body={
               <>
                 Routing is opt-in and advise-first - preview the value first (the Overview tab, while routing is
-                off), enable advise via Settings → Routing, route traffic through the proxy, then watch decisions
-                land here (<code className="rounded-1 bg-bg-3 px-1">observer routing advise</code> for the CLI
-                view).
+                off), enable advise in{" "}
+                <Link to="/settings?section=routing" className="text-accent hover:underline">
+                  Settings &gt; Routing
+                </Link>
+                , route traffic through the proxy, then watch decisions land here (
+                <code className="rounded-1 bg-bg-3 px-1">observer routing advise</code> for the CLI view).
               </>
             }
           />
@@ -1110,7 +1113,7 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
   if (saved) {
     return (
       <div className="mt-3">
-        <Pill variant="warn">saved: enforce mode - restart the daemon to apply</Pill>
+        <Pill variant="warn">saved: enforce mode - applies after a restart (Restart now in the banner)</Pill>
       </div>
     );
   }
@@ -1644,7 +1647,7 @@ function RoutingPreviewCard() {
           )}
           <p className="text-[11px] leading-snug text-fg-3">{maskDollarAmounts(result!.note)}</p>
           {enabled ? (
-            <Pill variant="warn">saved: advise mode ({template}) - restart the daemon to apply</Pill>
+            <Pill variant="warn">saved: advise mode ({template}) - applies after a restart (Restart now in the banner)</Pill>
           ) : confirming ? (
             <div className="rounded-2 border border-line-2 bg-bg-3 p-3 text-[11.5px]">
               <p className="text-fg-2">

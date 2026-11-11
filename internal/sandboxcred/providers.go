@@ -36,7 +36,9 @@ func (a AuthForm) Value(key string) string {
 
 // Provider is one model provider injection can serve: its model host (the
 // one host the real key is ever sent to), its auth form, the variable a
-// tool reads its key from, and the API reference that documents the form.
+// tool reads its key from, the API reference that documents the form, and
+// every variable that carries a credential for it (CredEnv, KeyEnv among
+// them: the credential table boxEnvRules reads).
 type Provider struct {
 	ID       string
 	Host     string
@@ -44,6 +46,7 @@ type Provider struct {
 	KeyEnv   string
 	Docs     string
 	KeyLabel string
+	CredEnv  []string
 }
 
 // providers is the table (provider family ids as internal/integration's
@@ -53,22 +56,39 @@ var providers = []Provider{
 	{
 		ID: "anthropic", Host: "api.anthropic.com", Auth: AuthXAPIKey, KeyEnv: "ANTHROPIC_API_KEY",
 		Docs: "https://docs.anthropic.com/en/api/overview", KeyLabel: "Anthropic API key",
+		// Every Anthropic credential variable Claude Code reads (the
+		// agentconfig catalog marks each Secret; audit FU3-A2): the bearer
+		// token it sends in place of the key, its subscription OAuth
+		// tokens, and the Foundry, Claude Platform on AWS and Bedrock keys.
+		CredEnv: []string{
+			"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+			"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+			"ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+			"ANTHROPIC_AWS_API_KEY", "AWS_BEARER_TOKEN_BEDROCK",
+		},
 	},
 	{
 		ID: "openai", Host: "api.openai.com", Auth: AuthBearer, KeyEnv: "OPENAI_API_KEY",
 		Docs: "https://platform.openai.com/docs/api-reference/authentication", KeyLabel: "OpenAI API key",
+		CredEnv: []string{"OPENAI_API_KEY"},
 	},
 	{
 		ID: "google", Host: "generativelanguage.googleapis.com", Auth: AuthGoogKey, KeyEnv: "GEMINI_API_KEY",
 		Docs: "https://ai.google.dev/gemini-api/docs/api-key", KeyLabel: "Gemini API key",
+		// GOOGLE_API_KEY and GOOGLE_APPLICATION_CREDENTIALS (a service
+		// account key file): the Gemini CLI's other credential variables
+		// (its integration row's AuthEnv).
+		CredEnv: []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"},
 	},
 	{
 		ID: "xai", Host: "api.x.ai", Auth: AuthBearer, KeyEnv: "XAI_API_KEY",
 		Docs: "https://docs.x.ai/docs/api-reference", KeyLabel: "xAI API key",
+		CredEnv: []string{"XAI_API_KEY"},
 	},
 	{
 		ID: "openrouter", Host: "openrouter.ai", Auth: AuthBearer, KeyEnv: "OPENROUTER_API_KEY",
 		Docs: "https://openrouter.ai/docs/api-reference/authentication", KeyLabel: "OpenRouter API key",
+		CredEnv: []string{"OPENROUTER_API_KEY"},
 	},
 }
 

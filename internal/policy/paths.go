@@ -27,6 +27,16 @@ func isASCIILetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
+// isDriveRelative reports whether p is a drive-relative Windows path: a
+// drive letter and colon not followed by a separator ("d:foo", "C:"). Its
+// location depends on that drive's current directory, which nothing in an
+// event records; normPath still roots it at the drive (lexical best
+// effort), so a rule that needs the real location checks this first.
+func isDriveRelative(p string) bool {
+	return len(p) >= 2 && p[1] == ':' && isASCIILetter(p[0]) &&
+		(len(p) == 2 || (p[2] != '/' && p[2] != '\\'))
+}
+
 // isAbsPath reports whether p is absolute in either flavor: a leading
 // "/" (POSIX), a drive-letter prefix, or a UNC prefix.
 func isAbsPath(p string) bool {
@@ -133,6 +143,50 @@ func normUNC(rest string) string {
 // isUNCPath reports whether p names a UNC location (normalized or raw).
 func isUNCPath(p string) bool {
 	return strings.HasPrefix(normPath(p), uncPrefix)
+}
+
+// wslHosts are the two UNC hostnames Windows exposes a WSL distro's Linux
+// filesystem under: `\\wsl.localhost\<distro>\...` and `\\wsl$\<distro>\...`.
+var wslHosts = [...]string{"wsl.localhost", "wsl$"}
+
+// wslUNCFold rewrites a WSL UNC path (already normPath-folded to
+// `\\wsl.localhost/<distro>/<linux path>`) to the Linux path it names
+// (`/<linux path>`), so a Windows tool's `\\wsl.localhost\Ubuntu\home\u\x`
+// compares as one location with the WSL daemon's own `/home/u/x`, and the
+// guard-config and sensitive-path rows reach it (SA-3). The distro segment is
+// dropped because the daemon lives inside one distro's filesystem, where that
+// path IS `/<linux path>`. ok is false for any non-WSL path.
+func wslUNCFold(p string) (string, bool) {
+	rest, ok := strings.CutPrefix(normPath(p), uncPrefix)
+	if !ok {
+		return p, false
+	}
+	host := rest
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		host = rest[:i]
+	}
+	isWSL := false
+	for _, h := range wslHosts {
+		if strings.EqualFold(host, h) {
+			isWSL = true
+			break
+		}
+	}
+	if !isWSL {
+		return p, false
+	}
+	after, found := "", false
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		after = rest[i+1:] // "<distro>/<linux path>"
+		found = true
+	}
+	if !found {
+		return "/", true // `\\wsl$` with no distro
+	}
+	if d := strings.IndexByte(after, '/'); d >= 0 {
+		return "/" + after[d+1:], true
+	}
+	return "/", true // `\\wsl$\Ubuntu` — the distro root is `/`
 }
 
 // expandHome rewrites a leading home reference — "~", "~/", "$HOME",
@@ -358,6 +412,15 @@ func drvfsFold(p string) (string, bool) {
 // outside-the-project arms see a share as outside a drive or POSIX project,
 // as they always saw it outside a POSIX one.
 func alignFlavors(a, b string) (string, string, bool) {
+	// A WSL UNC path is really the daemon's own Linux path (SA-3): fold it
+	// to POSIX BEFORE the generic UNC branch, so it compares with the WSL
+	// home instead of being treated as an unrelated network share.
+	if fa, ok := wslUNCFold(a); ok {
+		a = fa
+	}
+	if fb, ok := wslUNCFold(b); ok {
+		b = fb
+	}
 	if isUNCPath(a) || isUNCPath(b) {
 		return a, b, true
 	}

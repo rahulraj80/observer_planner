@@ -20,10 +20,17 @@ import (
 
 // ApprovalLookup reports whether an active (non-expired) approval
 // grant covers the rule for this session/project. projectRootHash is
-// the sha256 hex of the project root ("" when unknown). Lookup
-// failures must report false (no approval) — fail-safe toward
-// enforcement, never toward a silent grant.
-type ApprovalLookup func(ruleID, sessionID, projectRootHash string) bool
+// the sha256 hex of the project root ("" when unknown).
+//
+// A lookup that could not be answered (the DB would not open, the query
+// timed out, the table is missing) returns false AND a non-nil error:
+// fail-safe toward enforcement, never toward a silent grant, but no
+// longer silent either. applyApprovals records the failure on the
+// verdict's reason (" [approval lookup failed: ...]", the tool lane's
+// counterpart of the prompt lane's store_error marker), so an operator
+// who granted the rule can see why it still asked (P-232). "No grant"
+// is (false, nil).
+type ApprovalLookup func(ruleID, sessionID, projectRootHash string) (bool, error)
 
 // SetApprovalLookup wires the grant lookup. Nil disables approvals
 // (every blocking verdict enforces). Set once at composition.
@@ -33,11 +40,12 @@ func (g *Guard) SetApprovalLookup(fn ApprovalLookup) {
 
 // SessionProjectRootLookup resolves the project root a session belongs
 // to ("" when unknown). It exists because the LANES DISAGREE about
-// what an event carries (adversarial review P2-7): a hook event names
-// its own ProjectRoot, while the proxy's egress/injection/budget
-// events are built from a request body that has no path in it at all,
-// so a scope='project' grant could never match on the proxy lane no
-// matter what the developer approved.
+// what an event carries (adversarial review P2-7): a host that names
+// its project sets ProjectRoot, a pre-tool hook whose payload carries
+// only cwd has the boundary's derived ProjectLookupRoot instead, while
+// the proxy's egress/injection/budget events are built from a request
+// body that has no path in it at all, so a scope='project' grant could
+// never match on the proxy lane no matter what the developer approved.
 //
 // Guard never imports store: the daemon composition wires this to
 // store.ProjectRootForSession - THE existing session-to-project
@@ -55,14 +63,31 @@ func (g *Guard) SetSessionProjectRootLookup(fn SessionProjectRootLookup) {
 }
 
 // approvalProjectRootHash is the projectRootHash the grant lookup is
-// asked with. The event's own root wins (the hook lane already carries
-// it, and resolving again would be a second answer); only an event
-// with no root at all - the proxy lane - falls through to the injected
-// session resolver, and only on the already-rare blocking path, so no
-// allow-path request pays the read.
+// asked with, an ordered table walked top down (P-232):
+//
+//	| # | the event carries                 | hashed root                         |
+//	|---|-----------------------------------|-------------------------------------|
+//	| 1 | ProjectRoot (the host named it)   | ProjectRoot                         |
+//	| 2 | ProjectLookupRoot (boundary-made) | ProjectLookupRoot                   |
+//	| 3 | neither, a session id             | the injected session resolver's     |
+//	| 4 | nothing                           | "" (matches no project grant)       |
+//
+// Row 2 is the Claude Code PreToolUse hook (and every tool gate whose
+// payload carries only cwd): ProjectRoot stays empty there by design
+// (internal/hook/guarded.go), and the boundary derives the root into
+// ProjectLookupRoot with git.FindRoot over the cwd translated the way
+// the watcher translates it, which is the spelling projects.root_path
+// holds and so the spelling the dashboard hashed when it anchored the
+// grant. Before P-232 this row was missing, the hash was always "" on
+// that lane, and a project grant never downgraded a hook verdict.
+// Row 3 is the proxy lane, and it runs only on the already-rare
+// blocking path, so no allow-path request pays the read.
 func (g *Guard) approvalProjectRootHash(ev *policy.Event) string {
 	if ev.ProjectRoot != "" {
 		return HashProjectRoot(ev.ProjectRoot)
+	}
+	if ev.ProjectLookupRoot != "" {
+		return HashProjectRoot(ev.ProjectLookupRoot)
 	}
 	if g.projectRootForSession == nil || ev.SessionID == "" {
 		return ""
@@ -70,17 +95,31 @@ func (g *Guard) approvalProjectRootHash(ev *policy.Event) string {
 	return HashProjectRoot(g.projectRootForSession(ev.SessionID))
 }
 
+// approvalLookupFailedNote is the reason suffix a verdict carries when the
+// grant lookup could not be answered. The error text is bounded: a reason
+// is written for the agent and lands in guard_events.reason.
+func approvalLookupFailedNote(err error) string {
+	msg := err.Error()
+	const maxLen = 160
+	if len(msg) > maxLen {
+		msg = msg[:maxLen] + "..."
+	}
+	return " [approval lookup failed: " + msg + "; any grant for this rule was not consulted]"
+}
+
 // applyApprovals is the exception layer: the ordered table of request-
 // grants design §3.2, walked top down, first row that decides wins.
 //
 //	| # | condition                                          | result                                   |
 //	|---|----------------------------------------------------|------------------------------------------|
+//	| 0 | rule asks every use (policy.AsksEveryUse: R-168)   | unchanged: no grant covers it            |
 //	| 1 | verdict below ask, or no rule id                   | unchanged                                |
 //	| 2 | ORG grant, effect exempt (gate lane only)          | flag, degraded_from=org_grant, grant_id  |
 //	| 3 | ORG grant, effect soften, verdict deny             | ask (orggrant.go: when a use is counted) |
 //	| 4 | local approval, rule not org-locked                | flag, degraded_from=approved             |
 //	| 5 | local approval, rule org-locked                    | unchanged + [org_locked ...]             |
-//	| 6 | else                                               | unchanged                                |
+//	| 6 | the lookup failed (error)                          | unchanged + [approval lookup failed ...] |
+//	| 7 | else                                               | unchanged                                |
 //
 // The org grant is checked BEFORE the org-lock gate because it is the
 // organization speaking, but only a grant issued under the locked-rule
@@ -104,20 +143,41 @@ func (g *Guard) applyApprovals(v policy.Verdict, ev *policy.Event, lane string) 
 	if v.Decision < policy.DecisionAsk || v.RuleID == "" {
 		return v, approvalOutcome{}
 	}
+	// Row 0 (lane cli-2): a rule that asks on every use is never lifted by
+	// a grant, local or org; one yes would otherwise cover every later
+	// launch in that scope.
+	if policy.AsksEveryUse(v.RuleID) {
+		return v, approvalOutcome{}
+	}
 	// The org layer changes only on a bundle reload, so reading the
 	// current snapshot here is stable in practice; the cost is one
 	// atomic pointer load on the already-rare blocking path.
 	es := g.set.Load()
 	locked := orgLockedVerdict(v, g.orgLocksVerdictRule(es, v.RuleID, eventProjectRoot(ev)))
+	var lookupErr error
 	localApproved := func() bool {
-		return g.approvals != nil && g.approvals(v.RuleID, ev.SessionID, g.approvalProjectRootHash(ev))
+		if g.approvals == nil {
+			return false
+		}
+		ok, err := g.approvals(v.RuleID, ev.SessionID, g.approvalProjectRootHash(ev))
+		if err != nil {
+			lookupErr = err
+			return false
+		}
+		return ok
 	}
 	gv, out, handled := g.applyOrgGrant(es, v, ev, lane, locked, localApproved)
 	if handled {
+		if lookupErr != nil && gv.Decision >= policy.DecisionAsk {
+			gv.Reason += approvalLookupFailedNote(lookupErr)
+		}
 		return gv, out
 	}
 	v = gv
 	if !localApproved() {
+		if lookupErr != nil {
+			v.Reason += approvalLookupFailedNote(lookupErr)
+		}
 		return v, approvalOutcome{}
 	}
 	if locked {
@@ -138,8 +198,9 @@ func eventProjectRoot(ev *policy.Event) string {
 // projectLookupRoot is the root the project layer (engineFor), the per-project
 // org lock and the project_unknown floor use for ev: the boundary's derived
 // ProjectLookupRoot when it set one (a pre-tool hook whose payload carries
-// only cwd), else ProjectRoot. "" for a nil event. Nothing else reads the
-// derived root: the rules and the persisted row keep ProjectRoot.
+// only cwd), else ProjectRoot. "" for a nil event. The approval lookup
+// reads the derived root too (approvalProjectRootHash, row 2); the rules and
+// the persisted row keep ProjectRoot.
 func projectLookupRoot(ev *policy.Event) string {
 	if ev == nil {
 		return ""

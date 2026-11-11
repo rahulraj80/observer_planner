@@ -28,6 +28,7 @@ export function Modal({
   zIndex = 60,
   dismissible = true,
   labelledBy,
+  describedBy,
   bodyClassName = "px-5 py-4",
   className,
   fullOnPhone = false,
@@ -48,6 +49,8 @@ export function Modal({
   dismissible?: boolean;
   /** id of an element that names the dialog when there is no `title`. */
   labelledBy?: string;
+  /** id of the element that describes the dialog (aria-describedby). */
+  describedBy?: string;
   bodyClassName?: string;
   className?: string;
   /** Below the sm breakpoint the card fills the whole screen (no gutter, no
@@ -147,6 +150,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={title != null ? titleId : labelledBy}
+        aria-describedby={describedBy}
         onKeyDown={onCardKeyDown}
         style={{
           width,

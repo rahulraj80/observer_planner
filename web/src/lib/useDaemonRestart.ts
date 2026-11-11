@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/useApi";
 import { ApiError, fetchJSON } from "@/lib/api";
 import type { StatusSnapshot } from "@/lib/types";
+import { confirmDialog } from "@shared/primitives/confirmDialogModel";
+import { restartConfirmBody, type RestartConfirm } from "@/lib/restartConfirm";
 
 // useDaemonRestart owns the on-demand daemon-restart flow shared by the
 // RestartPendingBanner and the Settings → Health control: POST
@@ -12,11 +14,12 @@ import type { StatusSnapshot } from "@/lib/types";
 // `error` so callers can render honest copy.
 //
 // Proxy-route honesty (dashboard-config-management plan §3.3 item 3): before
-// the confirm dialog, GET /api/admin/restart reports how many proxied API
-// turns landed in the last minute. The daemon IS the proxy on its port, so a
+// the confirm dialog (the shared confirmDialog), GET /api/admin/restart
+// reports how many proxied API turns landed in the last minute. The daemon IS the proxy on its port, so a
 // restart drops in-flight proxy requests; the dialog says so with the number
-// instead of a vague warning. It never automates the route OFF/ON dance —
-// scripts/restart-daemon.sh stays the belt-and-braces path and is named.
+// instead of a vague warning. It never automates the route OFF/ON dance (see
+// restartConfirm.ts for why); the dialog names scripts/restart-daemon.sh with
+// the reason it is a shell step.
 //
 // Live sandboxed runs (sandbox plan v2 section 5.5, SBX-UPD-1): a restart
 // with a live sandboxed run answers 409 live_sandboxed_runs with the runs.
@@ -95,34 +98,30 @@ export function useDaemonRestart() {
     }
   }, [restarting, status.data?.started_at]);
 
-  // restart optionally gates on a window.confirm message; returns nothing —
-  // observe `restarting`/`error`. The live-traffic line is appended to the
-  // confirm copy when the daemon reports proxied requests in the last minute.
-  async function restart(confirmMessage?: string) {
-    if (confirmMessage) {
-      let message = confirmMessage;
+  // restart optionally asks first (the shared confirmDialog, never a native
+  // window.confirm); returns nothing - observe `restarting`/`error`. The
+  // dialog's proxy line comes from the live-traffic probe (restartConfirm.ts).
+  async function restart(confirm?: RestartConfirm) {
+    if (confirm) {
+      let st: RestartStatus | null = null;
       try {
-        const st = await fetchJSON<RestartStatus>("/api/admin/restart");
-        if (st.live_sandboxed_runs && st.live_sandboxed_runs.length > 0) {
-          // The live-run question replaces the plain confirm.
-          window.dispatchEvent(new CustomEvent(LIVE_RUNS_EVENT, { detail: st.live_sandboxed_runs }));
-          return;
-        }
-        const n = st.proxy_recent_requests ?? 0;
-        if (n > 0) {
-          message +=
-            `\n\nA coding session is routing through this daemon right now (${n} request${n === 1 ? "" : "s"} in the last minute). ` +
-            "Restarting drops in-flight proxy requests. The daemon re-execs in place, so the gap is typically under a second." +
-            "\n\nHaving trouble? scripts/restart-daemon.sh performs the route-off → restart → route-on sequence from a shell.";
-        } else {
-          message += "\n\nNo proxied requests in the last minute - no coding session should notice.";
-        }
+        st = await fetchJSON<RestartStatus>("/api/admin/restart");
       } catch {
         // Status probe unavailable (older daemon, read-only surface): fall
         // back to the generic warning rather than blocking the restart.
-        message += "\n\nAn active proxied coding session may drop one in-flight request.";
       }
-      if (!window.confirm(message)) return;
+      if (st?.live_sandboxed_runs && st.live_sandboxed_runs.length > 0) {
+        // The live-run question replaces the plain confirm.
+        window.dispatchEvent(new CustomEvent(LIVE_RUNS_EVENT, { detail: st.live_sandboxed_runs }));
+        return;
+      }
+      const ok = await confirmDialog({
+        title: confirm.title,
+        body: restartConfirmBody(confirm.lead, st),
+        confirmLabel: "Restart daemon",
+        tone: "danger",
+      });
+      if (!ok) return;
     }
     setError(null);
     restartAtRef.current = Date.now();

@@ -305,6 +305,9 @@ type PromptVerdict struct {
 	// state, stamped by EvaluatePrompt.
 	OrgLocked   bool
 	RequestBase string
+	// BlockNotice is the guard's Options.BlockNotice (blocknotice.go),
+	// stamped with OrgLocked; derived state.
+	BlockNotice BlockNotice
 	// Verdict is the underlying policy evaluation (RuleID "R-190" or
 	// "R-172", Category, Severity, Reason, Source already carry the
 	// standard audit shape every other rule gets). Decision is
@@ -815,6 +818,7 @@ func (g *Guard) stampPromptOrgLock(pv *PromptVerdict) {
 	}
 	pv.OrgLocked = orgLockedVerdict(pv.Verdict, g.orgLocksVerdictRule(g.set.Load(), pv.Verdict.RuleID, ""))
 	pv.RequestBase = g.requestBase
+	pv.BlockNotice = g.blockNotice
 }
 
 // PromptRequestAccessHint is the request line for an org-locked prompt
@@ -823,12 +827,19 @@ func (g *Guard) stampPromptOrgLock(pv *PromptVerdict) {
 // without the "observer: " prefix, because the prompt house message
 // already starts with it. "" when the prompt is not an org-locked block.
 func PromptRequestAccessHint(pv PromptVerdict, sessionID string) string {
-	if !pv.OrgLocked || pv.Outcome != PromptOutcomeBlocked || pv.Verdict.Decision != policy.DecisionDeny || pv.GuardError {
+	if pv.Outcome != PromptOutcomeBlocked || pv.Verdict.Decision != policy.DecisionDeny || pv.GuardError {
 		return ""
 	}
 	what, ok := blockedWhatByKind[policy.KindUserPrompt]
 	if !ok {
 		what = blockedWhatFallback
+	}
+	if row, ok := blockNotices[pv.BlockNotice]; ok {
+		// A sandbox notice (blocknotice.go) replaces the request line.
+		return strings.TrimPrefix(row.line(pv.Verdict, what), "observer: ")
+	}
+	if !pv.OrgLocked {
+		return ""
 	}
 	return strings.TrimPrefix(requestAccessLine(pv.Verdict.RuleID, what), "observer: ")
 }

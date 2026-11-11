@@ -106,7 +106,7 @@ const defaultDashboardAddr = "127.0.0.1:8081"
 // portUp reports whether something is listening on a loopback addr.
 // Short timeout — this runs on every bare `observer` invocation.
 func portUp(addr string) bool {
-	conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond) //nolint:gosec // G704: false positive; a loopback liveness probe of the dashboard address, nothing is sent
 	if err != nil {
 		return false
 	}

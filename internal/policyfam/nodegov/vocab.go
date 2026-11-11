@@ -15,7 +15,7 @@ import "strings"
 // organization hid" reads the way the sidebar does.
 
 // NavSectionIDs is the closed set of hideable/lockable node-dashboard nav
-// sections (28 today; "plans" joined with the Plans & limits page, "requests" with the request-grants design, G6,
+// sections (29 today; "you" joined with the You page; "plans" joined with the Plans & limits page, "requests" with the request-grants design, G6,
 // "agent-config" with adapter config P4/P5, "messages" with admin and
 // developer messaging, T-854, and "code-security" with the security pillar's
 // Code security page).
@@ -23,7 +23,7 @@ var NavSectionIDs = []string{
 	"overview", "live", "sessions", "actions", "projects", "security", "code-security", "egress", "search",
 	"cost", "plans", "analysis", "tools",
 	"compression", "cache", "suggestions", "routing", "benchmarks", "discovery", "patterns",
-	"policies", "agent-config", "privacy", "terminals", "remote", "messages", "requests", "settings",
+	"you", "policies", "agent-config", "privacy", "terminals", "remote", "messages", "requests", "settings",
 }
 
 // SettingsSectionIDs is the closed set of node-dashboard Settings
@@ -56,7 +56,10 @@ var SettingsSectionIDs = []string{
 // is how a developer receives, so no policy may hide or lock it. Keeping it
 // on the floor also means no org body ever names it, so an older agent that
 // predates the id never meets it in a directive.
-var UnhideableNavSectionIDs = []string{"settings", "privacy", "requests", "messages"}
+// "you" joined it with the You page (2026-11-07): it carries the developer's
+// own consent withdrawals and the view of what this machine shares, so no
+// policy may hide or lock it; as with messages, no org body ever names it.
+var UnhideableNavSectionIDs = []string{"settings", "privacy", "requests", "messages", "you"}
 
 // UnhideableSettingsSectionIDs is the same floor one level down: the
 // Settings sub-sections that render the enrolment, the grant, and the org

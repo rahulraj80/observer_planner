@@ -37,6 +37,7 @@ import { TitleWithHelp } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import { GuardOverrideCard } from "@/components/GuardOverrideCard";
 import { useApi, type ApiState } from "@/lib/useApi";
+import { promptGuardLine, type PromptGuardPosture } from "@/lib/guardRecipes";
 import { fetchJSON } from "@/lib/api";
 import { saveConfigSection } from "@/lib/configSectionSave";
 import { markRestartPending } from "@/lib/restartPending";
@@ -50,6 +51,7 @@ import type {
   ProjectsResponse,
 } from "@/lib/types";
 import { RuleManager } from "./security/RuleManager";
+import { RecipesCard } from "./security/RecipesCard";
 import { keepSelected } from "@/lib/pickerOptions";
 import { useSessionOptions } from "@/lib/usePickerSources";
 import { MCPAccessSection } from "@/components/security/MCPAccessSection";
@@ -58,9 +60,27 @@ import { StatusTile } from "@/components/security/StatusTile";
 import { UserPolicyBanner } from "@/components/security/UserPolicyBanner";
 import type { GuardUserPolicyProblem } from "@/lib/userPolicyBanner";
 import { guardHookFailureLine, type GuardHookFailure } from "@/lib/guardHookFailure";
+import {
+  guardChainSub,
+  guardEnforcedSub,
+  guardOrgLine,
+  guardPostureValue,
+  type GuardChainState,
+  type GuardOrgPosture,
+} from "@/lib/guardOrgEnforcement";
 import { guardToolGateChannelLabel, guardToolGateLine, type GuardToolGate } from "@/lib/guardToolGates";
+import {
+  coveringGrant,
+  dedupeApprovals,
+  grantSession,
+  notDowngradedText,
+  ruleCanBlock,
+  whyNotDowngraded,
+} from "@/lib/guardApprovals";
 import { HookCoverageCard } from "@/components/security/HookCoverageCard";
-import { ApplyPolicyCard, MCPToolsBar, TestCommandCard } from "@/components/security/GuardTools";
+import { OrgPromptJudgeCard } from "@/components/security/OrgPromptJudgeCard";
+import { ApplyPolicyCard, ChainRepairCard, MCPToolsBar, TestCommandCard } from "@/components/security/GuardTools";
+import { GuardCloudCard } from "./security/GuardCloudCard";
 import {
   ChartColumnStacked,
   Check,
@@ -119,6 +139,9 @@ import { MetricIcon } from "@/components/MetricIcon";
 type GuardCounts = {
   total: number;
   enforced: number;
+  // The part of enforced the organization's policy layer produced
+  // (FU-235); older daemons never send it.
+  enforced_by_org?: number;
   by_decision: Record<string, number> | null;
   by_severity: Record<string, number> | null;
   by_category: Record<string, number> | null;
@@ -128,9 +151,15 @@ type GuardSummary = {
   enabled: boolean;
   mode: string;
   strict: boolean;
+  // The prompt guard's own state beside the guard mode; older daemons never send it.
+  prompt_guard?: PromptGuardPosture;
   counts_24h: GuardCounts;
   counts_7d: GuardCounts;
-  chain: { ok: boolean; checked: number; divergence_id?: number; detail?: string };
+  chain: GuardChainState & { detail?: string; breaks?: Record<string, number> };
+  // The organization's half of the posture (FU-235): rules the org layer
+  // enforces whatever the local mode. Absent with no org layer and on
+  // older daemons.
+  org?: GuardOrgPosture;
   // Present only when the user guard-policy.toml exists and does not load
   // (T-323); older daemons never send it.
   user_policy?: GuardUserPolicyProblem;
@@ -164,6 +193,9 @@ type GuardEvent = {
   // un-enrolled node and on older daemons.
   overridable?: boolean;
   org_locked?: boolean;
+  // sha256 hex of the row's session's project root (the anchor a project
+  // grant stores; never the path). Absent on older daemons (P-232).
+  project_root_hash?: string;
 };
 
 type GuardEventsResponse = { events: GuardEvent[] | null; count: number };
@@ -208,6 +240,10 @@ type GuardApproval = {
   project_root_hash?: string;
   granted_by?: string;
   expires_at?: string;
+  // The latest verdict this grant's scope covers that an approval
+  // downgraded since the grant was made (P-232). Absent = never used, or
+  // an older daemon.
+  last_used_at?: string;
 };
 
 type GuardApprovalsResponse = { approvals: GuardApproval[] | null };
@@ -230,8 +266,11 @@ type GuardMCPResponse = { servers: GuardMCPServer[] | null; issues: string[] | n
 // above); RuleManager.tsx and PolicyLayersCard below share them.
 
 // ApproveSeed hands a verdict row to the Approvals card's grant form
-// ("approve…" on a timeline row pre-fills rule + session).
-type ApproveSeed = { rule: string; session: string };
+// ("approve…" on a timeline row pre-fills rule + session). projectHash is
+// the row's project anchor (for "covered by grant #N" on project scope);
+// subagentOf is the row's own subagent session id when session was
+// rewritten to its parent (grantSession).
+type ApproveSeed = { rule: string; session: string; projectHash?: string; subagentOf?: string };
 
 type SeverityFilter = "all" | "warn" | "high" | "critical";
 type DecisionFilter = "all" | "flag" | "ask" | "deny";
@@ -264,6 +303,9 @@ export function SecurityPage() {
   const [ruleFilter, setRuleFilter] = useState("");
   const [sessionFilter, setSessionFilter] = useState("");
   const [approveSeed, setApproveSeed] = useState<ApproveSeed | null>(null);
+  // Bumped by the Network features card (B-G5) so the reputation card below
+  // it re-reads its opt-in after a consent change.
+  const [cloudGen, setCloudGen] = useState(0);
 
   // Lazy per tab (platform tabs plan §1.5): a tab's loaders run on its first
   // activation and the panel then stays mounted. The page-level loaders below
@@ -296,6 +338,9 @@ export function SecurityPage() {
   // picker, every verdict row and the Rules tab (whose count it gives).
   const rulesApi = useApi<GuardRulesResponse>("/api/guard/rules", { effective: 1 });
   const approvals = useApi<GuardApprovalsResponse>("/api/guard/approvals");
+  // One deduped register for every "covered by grant #N" check on the page
+  // (an older daemon can still serve duplicate rows, P-232).
+  const activeApprovals = useMemo(() => dedupeApprovals(approvals.data?.approvals ?? []), [approvals.data]);
   // Lifted here (rather than fetched inside RuleManager/PolicyLayersCard
   // separately) so the structured rule manager and the raw-TOML advanced
   // editor below it share ONE /api/guard/policy read — a save in either one
@@ -430,14 +475,20 @@ export function SecurityPage() {
       id: "reason",
       header: "Reason",
       enableSorting: false,
-      cell: ({ row }) => (
-        <span className="block max-w-[420px] text-fg-2">
-          {row.original.reason}
-          {row.original.taint_origin && (
-            <span className="ml-1.5 text-[10.5px] text-fg-3">taint: {row.original.taint_origin}</span>
-          )}
-        </span>
-      ),
+      cell: ({ row }) => {
+        // Why a blocking verdict was not softened by an approval (P-232):
+        // no grant, a grant for another scope, a failed lookup, an org lock.
+        const why = whyNotDowngraded(row.original, activeApprovals);
+        return (
+          <span className="block max-w-[420px] text-fg-2">
+            {row.original.reason}
+            {row.original.taint_origin && (
+              <span className="ml-1.5 text-[10.5px] text-fg-3">taint: {row.original.taint_origin}</span>
+            )}
+            {why && <span className="mt-0.5 block text-[10.5px] text-fg-3">{notDowngradedText(why)}</span>}
+          </span>
+        );
+      },
     },
     {
       id: "session",
@@ -460,15 +511,12 @@ export function SecurityPage() {
                 filter
               </button>
             </Tooltip>
-            <Tooltip content="Grant a scoped exception for this rule (opens Overview with the Approvals form pre-filled)">
-              <button
-                type="button"
-                className={miniBtn}
-                onClick={() => seedApproval({ rule: ev.rule_id, session: ev.session_id ?? "" })}
-              >
-                approve…
-              </button>
-            </Tooltip>
+            <VerdictApproveButton
+              ev={ev}
+              approvals={activeApprovals}
+              canBlock={ruleCanBlock(ruleDefs.get(ev.rule_id))}
+              onApprove={seedApproval}
+            />
             {(ev.org_locked || (ev.enforced && (ev.decision === "deny" || ev.decision === "ask"))) && (
               <Tooltip content="Ask your organization for a time-limited exception, starting from this exact command.">
                 <Link className={miniBtn} to={`/requests?event=${ev.id}`}>
@@ -522,14 +570,22 @@ export function SecurityPage() {
           helpId="tile.security.posture"
           icon={<MetricIcon metric="guardPosture" />}
           loading={summary.loading}
-          value={sum ? (sum.enabled ? sum.mode : "disabled") : "-"}
-          // What a FAILING gate hook does, per gate family (T-346): from the
-          // daemon's own hook failure derivation, never from [guard].strict.
-          // Then whether tool calls actually block by hook on THIS node
-          // (the node state, never the bare registry capability).
+          value={sum ? guardPostureValue(sum) : "-"}
+          // The organization's rules first (FU-235): they follow the org
+          // layer's action whatever the local mode. Then what a FAILING gate
+          // hook does, per gate family (T-346): from the daemon's own hook
+          // failure derivation, never from [guard].strict. Then whether tool
+          // calls actually block by hook on THIS node (the node state, never
+          // the bare registry capability).
           sub={
             sum ? (
               <>
+                {guardOrgLine(sum.org) && <span className="block">{guardOrgLine(sum.org)}</span>}
+                {sum.enabled && promptGuardLine(sum.mode, sum.prompt_guard) && (
+                  <span className="block" data-testid="posture-prompt-guard">
+                    {promptGuardLine(sum.mode, sum.prompt_guard)}
+                  </span>
+                )}
                 {guardHookFailureLine(sum)}
                 {guardToolGateLine(sum.tool_gates, sum) && (
                   <span className="block">{guardToolGateLine(sum.tool_gates, sum)}</span>
@@ -548,7 +604,7 @@ export function SecurityPage() {
           loading={summary.loading}
           stale={summary.isStale}
           value={sum ? String(sum.counts_24h.total) : "-"}
-          sub={sum ? `${sum.counts_24h.enforced} enforced (blocked or deferred)` : undefined}
+          sub={sum ? guardEnforcedSub(sum.counts_24h) : undefined}
           warn={!!sum && sum.counts_24h.total > 0}
         />
         <StatCard
@@ -567,13 +623,7 @@ export function SecurityPage() {
           loading={summary.loading}
           stale={summary.isStale}
           value={sum ? (sum.chain.ok ? "intact" : "BROKEN") : "-"}
-          sub={
-            sum
-              ? sum.chain.ok
-                ? `${sum.chain.checked} rows verified (tamper-evident, SHA-256 chained)`
-                : `first divergence at id ${sum.chain.divergence_id} - Verify audit chain on the Coverage tab walks it`
-              : undefined
-          }
+          sub={sum ? guardChainSub(sum.chain) : undefined}
           warn={!!sum && !sum.chain.ok}
         />
       </StatStrip>
@@ -591,10 +641,15 @@ export function SecurityPage() {
           exceptions in force, what enforce would block, the latest verdicts. */}
       <TabPanel id="overview" active={tab} idPrefix="security" className="space-y-6">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <GuardModeCard sum={sum} loading={summary.loading} />
+          <GuardModeCard
+            sum={sum}
+            loading={summary.loading}
+            commitGate={COMMIT_GATE_RULES.some((id) => ruleDefs.has(id))}
+          />
           <div id={SECURITY_APPROVALS_ANCHOR} className="scroll-mt-4">
             <ApprovalsCard
               api={approvals}
+              activeApprovals={activeApprovals}
               ruleDefs={ruleDefs}
               seed={approveSeed}
               onSeedConsumed={() => setApproveSeed(null)}
@@ -605,8 +660,10 @@ export function SecurityPage() {
         <EnforceReadinessCard
           sum={sum}
           ruleDefs={ruleDefs}
+          approvals={activeApprovals}
           onFilterRule={filterToRule}
           onApprove={setApproveSeed}
+          onOpenRules={pageTabs.ids.includes("rules") ? () => setTab("rules") : undefined}
         />
 
         <RecentVerdictsCard ruleDefs={ruleDefs} onSeeAll={() => setTab("verdicts")} onTryTest={openGuardTest} />
@@ -719,6 +776,16 @@ export function SecurityPage() {
       </TabPanel>
 
       <TabPanel id="rules" active={tab} idPrefix="security" className="space-y-6">
+        {/* Guard recipes: a level and packs per scope, previewed and replayed
+            before they are applied (plan 2026-11-07 section 3d). */}
+        <RecipesCard
+          projects={projectsApi.data?.rows ?? []}
+          onChanged={() => {
+            rulesApi.reload();
+            policyApi.reload();
+          }}
+        />
+
         <RuleManager rulesApi={rulesApi} policyApi={policyApi} projects={projectsApi.data?.rows ?? []} />
 
         <div id={SECURITY_GUARD_TEST_ANCHOR} className="scroll-mt-4">
@@ -741,6 +808,7 @@ export function SecurityPage() {
       </TabPanel>
 
       <TabPanel id="prompt-guard" active={tab} idPrefix="security" className="space-y-6">
+        <OrgPromptJudgeCard />
         <PromptGuardCard />
       </TabPanel>
 
@@ -751,8 +819,12 @@ export function SecurityPage() {
 
         <MCPPinsCard />
 
+        {/* B-G5 (decision P-2): the guard's network opt-ins ([guard.cloud])
+            as a consent card, human-only (R-165 pins its route). */}
+        <GuardCloudCard onChanged={() => setCloudGen((g) => g + 1)} />
+
         {/* T-496: `observer guard mcp reputation` as a control. */}
-        <MCPReputationCard />
+        <MCPReputationCard key={cloudGen} />
       </TabPanel>
 
       <TabPanel id="coverage" active={tab} idPrefix="security" className="space-y-6">
@@ -778,7 +850,20 @@ export function SecurityPage() {
                   <td className={clsx("py-1.5 pr-3", g.current ? "text-fg-1" : g.installed ? "text-warn" : "text-fg-3")}>
                     {guardToolGateChannelLabel(g.channel)}
                   </td>
-                  <td className="py-1.5 text-fg-3">{g.reason}</td>
+                  <td className="py-1.5 text-fg-3">
+                    {g.reason}
+                    {g.installed && !g.current && g.fixable && (
+                      <>
+                        {" "}
+                        <Link
+                          to={`/settings?section=tools&tool=${encodeURIComponent(g.tool)}&open=setup`}
+                          className="whitespace-nowrap text-accent hover:underline"
+                        >
+                          Set up its hook
+                        </Link>
+                      </>
+                    )}
+                  </td>
                 </tr>
               ))}
             </Table>
@@ -835,6 +920,10 @@ export function SecurityPage() {
         <HookCoverageCard />
 
         <EvidenceCard />
+
+        {/* B-G8: the audit chain repair beside Verify, entered from the
+            daemon's repair line. A finished apply re-reads the summary. */}
+        <ChainRepairCard chain={sum?.chain ?? null} onRepaired={summary.reload} />
       </TabPanel>
     </div>
   );
@@ -843,6 +932,79 @@ export function SecurityPage() {
 // The Approvals card's wrapper id: "approve…" on a verdict row (Verdicts
 // tab) switches to Overview and scrolls here.
 const SECURITY_APPROVALS_ANCHOR = "security-approvals";
+
+// COMMIT_GATE_RULES are the security pack's commit gate (S-791 to S-794,
+// internal/secrules/gates.go): they ask in observe mode as well as enforce.
+const COMMIT_GATE_RULES = ["S-791", "S-792", "S-793", "S-794"] as const;
+
+// VerdictApproveButton is a verdict row's approval action (P-232): "covered
+// by #N" when an active grant already covers the call (so the row offers no
+// duplicate), disabled on a rule that only flags (an approval softens only
+// ask and deny), else "approve…", seeding the grant form with the session a
+// session grant must name (a subagent's parent, which the hook reports) and
+// the row's project anchor.
+function VerdictApproveButton({
+  ev,
+  approvals,
+  canBlock,
+  onApprove,
+}: {
+  ev: GuardEvent;
+  approvals: GuardApproval[];
+  canBlock: boolean;
+  onApprove: (seed: ApproveSeed) => void;
+}) {
+  // An audit marker (an approval's own record, a chain repair) is not a
+  // verdict: there is nothing to approve.
+  if (ev.event_kind === "audit") return null;
+  const raw = ev.session_id ?? "";
+  const { session, subagent } = grantSession(raw);
+  const covered =
+    coveringGrant(approvals, { rule: ev.rule_id, session: raw, projectHash: ev.project_root_hash }) ??
+    (subagent ? coveringGrant(approvals, { rule: ev.rule_id, session, projectHash: ev.project_root_hash }) : null);
+  if (covered) {
+    return (
+      <Tooltip
+        content={`Grant #${covered.id} (${covered.scope}) already covers ${ev.rule_id} here; see Approvals. A new grant would only extend it.`}
+      >
+        <span className="text-[10.5px] text-fg-3">covered by #{covered.id}</span>
+      </Tooltip>
+    );
+  }
+  if (!canBlock) {
+    return (
+      <Tooltip content={`${ev.rule_id} only flags, in every mode. Approvals soften ask and deny verdicts, so a grant would never apply.`}>
+        <button type="button" className={miniBtn} disabled aria-disabled="true">
+          approve…
+        </button>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip
+      content={
+        subagent
+          ? "Grant a scoped exception for this rule. This is a subagent session: the form names its parent session, which the tool-gate hook reports for subagent calls."
+          : "Grant a scoped exception for this rule (opens Overview with the Approvals form pre-filled)"
+      }
+    >
+      <button
+        type="button"
+        className={miniBtn}
+        onClick={() =>
+          onApprove({
+            rule: ev.rule_id,
+            session,
+            projectHash: ev.project_root_hash,
+            subagentOf: subagent ? raw : undefined,
+          })
+        }
+      >
+        approve…
+      </button>
+    </Tooltip>
+  );
+}
 
 // The Test a command card's wrapper id: the empty verdict states' "Test a
 // command" switches to the Rules tab and scrolls here.
@@ -1134,7 +1296,7 @@ function EvidenceCard() {
             <div className="mt-1.5 text-danger">
               {job.error}
               {job.mode === "guard:verify-audit"
-                ? " - a non-zero exit from verify-audit means the chain walk found a divergence; the output below is the evidence."
+                ? " - a non-zero exit from verify-audit means the chain walk found a divergence; the output below is the evidence. Repair audit chain below fixes the shapes routine maintenance leaves."
                 : ""}
             </div>
           )}
@@ -1386,7 +1548,17 @@ const MCP_PIN_TONE: Readonly<Record<string, Tone>> = {
 // config seam (PUT /api/config/section/guard) and is restart-honest:
 // the RUNNING daemon keeps its mode until restarted, so the card
 // reports "saved — restart to apply" and feeds the restart banner.
-function GuardModeCard({ sum, loading }: { sum: GuardSummary | null; loading: boolean }) {
+function GuardModeCard({
+  sum,
+  loading,
+  commitGate,
+}: {
+  sum: GuardSummary | null;
+  loading: boolean;
+  // The security pack's commit gate (S-791 to S-794) is in the effective
+  // rules: it asks in observe mode too (internal/secrules/gates.go).
+  commitGate: boolean;
+}) {
   const current: GuardMode = sum ? (sum.enabled ? (sum.mode as GuardMode) : "off") : "observe";
   const [target, setTarget] = useState<GuardMode | null>(null);
   const [evidence, setEvidence] = useState<GuardSimulate | null>(null);
@@ -1462,6 +1634,10 @@ function GuardModeCard({ sum, loading }: { sum: GuardSummary | null; loading: bo
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-fg-3">Running:</span>
             <VocabPill vocab="guardMode" table={POLICY_MODE} value={current} />
+            {sum?.org && <span className="text-fg-3">locally</span>}
+            {sum?.enabled && promptGuardLine(sum.mode, sum.prompt_guard) && (
+              <span className="text-fg-3">· {promptGuardLine(sum.mode, sum.prompt_guard)}</span>
+            )}
             {savedAs && savedAs !== current && (
               <Pill variant="warn">saved: {savedAs} - restart the daemon to apply</Pill>
             )}
@@ -1478,6 +1654,18 @@ function GuardModeCard({ sum, loading }: { sum: GuardSummary | null; loading: bo
               />
             </span>
           </div>
+          {/* FU-235: the mode governs only the rules the org layer does not
+              reach; say so beside it, in the daemon's own words. */}
+          {guardOrgLine(sum?.org) && <div className="text-fg-2">{guardOrgLine(sum?.org)}</div>}
+          {commitGate && current !== "off" && (
+            // P-232: "Running: observe" alone reads as "nothing asks", but
+            // the commit gate asks by design in every mode.
+            <div className="text-fg-3">
+              The commit gate ({COMMIT_GATE_RULES[0]} to {COMMIT_GATE_RULES[COMMIT_GATE_RULES.length - 1]}) asks before
+              an agent commits or pushes in every mode, observe included. Approve it per session, project or
+              globally in Approvals.
+            </div>
+          )}
           {target && target !== current && (
             <div className="rounded-2 border border-line-2 bg-bg-3 p-3">
               {target === "enforce" ? (
@@ -1556,13 +1744,19 @@ function GuardModeCard({ sum, loading }: { sum: GuardSummary | null; loading: bo
 function EnforceReadinessCard({
   sum,
   ruleDefs,
+  approvals,
   onFilterRule,
   onApprove,
+  onOpenRules,
 }: {
   sum: GuardSummary | null;
   ruleDefs: Map<string, GuardRule[]>;
+  approvals: GuardApproval[];
   onFilterRule: (rule: string) => void;
   onApprove: (seed: ApproveSeed) => void;
+  // Opens the Rules tab's rule manager (per-rule override + enforce);
+  // undefined when the org hid the Rules tab.
+  onOpenRules?: () => void;
 }) {
   const [hours, setHours] = useState<"168" | "720">("168");
   const [busy, setBusy] = useState(false);
@@ -1641,11 +1835,22 @@ function EnforceReadinessCard({
                 filter
               </button>
             </Tooltip>
-            <Tooltip content="Grant a scoped exception for this rule (pre-fills the Approvals form)">
-              <button type="button" className={miniBtn} onClick={() => onApprove({ rule, session: "" })}>
-                approve…
-              </button>
-            </Tooltip>
+            {(() => {
+              // This button seeds a GLOBAL grant: only a global grant
+              // already covers that (P-232).
+              const covered = coveringGrant(approvals, { rule, scope: "global" });
+              return covered ? (
+                <Tooltip content={`A global grant for ${rule} is already active (grant #${covered.id}); see Approvals.`}>
+                  <span className="text-[10.5px] text-fg-3">covered by #{covered.id}</span>
+                </Tooltip>
+              ) : (
+                <Tooltip content="Grant a scoped exception for this rule (pre-fills the Approvals form)">
+                  <button type="button" className={miniBtn} onClick={() => onApprove({ rule, session: "" })}>
+                    approve…
+                  </button>
+                </Tooltip>
+              );
+            })()}
           </span>
         );
       },
@@ -1755,11 +1960,15 @@ function EnforceReadinessCard({
               ask and deny-with-reason elsewhere.
             </div>
             <div>
-              Not ready to flip everything? Ramp per rule:{" "}
-              <code className="rounded-1 bg-bg-3 px-1">[[override]] rule = "R-xxx" / enforce = true</code> in{" "}
-              <code className="rounded-1 bg-bg-3 px-1">~/.observer/guard-policy.toml</code> blocks just that rule
-              while the mode stays observe. When the list above reads as intended blocks, promote in the Mode card -
-              the same evidence is shown at its consent step.
+              Not ready to flip everything? Ramp per rule: in the Rules tab's rule manager, Override a rule under
+              Effective rules with Enforce on - it blocks just that rule while the mode stays observe.{" "}
+              {onOpenRules && (
+                <button type="button" className="text-accent hover:underline" onClick={onOpenRules}>
+                  Open the rule manager
+                </button>
+              )}{" "}
+              When the list above reads as intended blocks, promote in the Mode card - the same evidence is shown at
+              its consent step.
             </div>
           </div>
         </div>
@@ -2458,11 +2667,15 @@ const CUSTOM_RULE_OPTION = "__custom__";
 
 function ApprovalsCard({
   api,
+  activeApprovals,
   ruleDefs,
   seed,
   onSeedConsumed,
 }: {
   api: ApiState<GuardApprovalsResponse>;
+  // The register deduped by key (dedupeApprovals): the table's rows and
+  // the form's "covered by grant #N" check.
+  activeApprovals: GuardApproval[];
   // The effective /api/guard/rules catalog, keyed by id (same Map the
   // timeline's RuleCell reads) — so the grant form can offer a picker of
   // real rules with their descriptions instead of a bare code field.
@@ -2484,6 +2697,13 @@ function ApprovalsCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  // The seeded row's session and project anchor (project-scope coverage is
+  // known only for that session) and, for a subagent row, its own session
+  // id (the form names the parent).
+  const [seeded, setSeeded] = useState<{ session: string; projectHash?: string; subagentOf?: string } | null>(null);
+  // The last grant's outcome: says so when the POST kept an existing grant
+  // instead of adding one (existing: true, P-232).
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     if (!seed) return;
@@ -2492,10 +2712,23 @@ function ApprovalsCard({
     // user/project/org custom rule) drops into the free-text escape hatch.
     setCustom(seed.rule ? !ruleDefs.has(seed.rule) : false);
     setSessionId(seed.session);
+    setSeeded({ session: seed.session, projectHash: seed.projectHash, subagentOf: seed.subagentOf });
     setScope(seed.session ? "session" : "global");
+    setNotice("");
     setFormOpen(true);
     onSeedConsumed();
   }, [seed, onSeedConsumed, ruleDefs]);
+
+  // "Covered by grant #N" for the scope the form is about to grant. The
+  // project anchor is known only for the seeded session; for a typed one the
+  // server still answers existing.
+  const formSession = sessionId.trim();
+  const formCovered = coveringGrant(activeApprovals, {
+    rule: ruleId.trim(),
+    scope,
+    session: scope === "global" ? undefined : formSession,
+    projectHash: seeded && seeded.session === formSession ? seeded.projectHash : undefined,
+  });
 
   // One combobox option per unique catalog rule id, grouped by category and
   // sorted (category, then id). Label is "<id> — <doc>"; searchable folds in
@@ -2535,13 +2768,14 @@ function ApprovalsCard({
   // explanation panel beneath the picker.
   const selectedDefs = !custom && ruleId ? ruleDefs.get(ruleId) : undefined;
 
-  const rows = api.data?.approvals ?? [];
+  const rows = activeApprovals;
 
   const grant = async () => {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
-      await fetchJSON("/api/guard/approvals", undefined, {
+      const res = await fetchJSON<{ id?: number; existing?: boolean }>("/api/guard/approvals", undefined, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2551,9 +2785,13 @@ function ApprovalsCard({
           ttl_hours: ttl,
         }),
       });
+      if (res?.existing) {
+        setNotice(`Grant #${res.id} already covered this; it was kept, with the later of the two expiries.`);
+      }
       setRuleId("");
       setCustom(false);
       setSessionId("");
+      setSeeded(null);
       setFormOpen(false);
       api.reload();
     } catch (e: unknown) {
@@ -2621,6 +2859,20 @@ function ApprovalsCard({
         <span className="whitespace-nowrap text-fg-3">
           {row.original.expires_at ? fmtDateTime(row.original.expires_at) : "never"}
         </span>
+      ),
+    },
+    {
+      // P-232: a grant that never downgraded anything (the project grant
+      // the hook did not match) reads "never" here.
+      id: "last_used",
+      header: "Last used",
+      accessorFn: (a) => (a.last_used_at ? new Date(a.last_used_at).getTime() : 0),
+      cell: ({ row }) => (
+        <Tooltip content="The latest verdict this grant's scope covers that an approval downgraded since the grant was made. Overlapping grants share a use.">
+          <span className="whitespace-nowrap text-fg-3">
+            {row.original.last_used_at ? fmtDateTime(row.original.last_used_at) : "never"}
+          </span>
+        </Tooltip>
       ),
     },
     {
@@ -2768,6 +3020,22 @@ function ApprovalsCard({
               the same repo at different paths won't match.
             </div>
           )}
+          {seeded?.subagentOf && scope === "session" && formSession === seeded.session && (
+            <div className="text-[10.5px] text-fg-3">
+              The verdict came from subagent session{" "}
+              <span className="font-mono">{fmtShortId(seeded.subagentOf, 24)}</span>; the grant names its
+              parent session, which the tool-gate hook reports for a subagent&apos;s calls.
+            </div>
+          )}
+          {formCovered && (
+            <div className="text-[10.5px] text-warn">
+              Covered by grant #{formCovered.id} ({formCovered.scope}
+              {formCovered.expires_at ? `, expires ${fmtDateTime(formCovered.expires_at)}` : ", never expires"}).
+              {formCovered.scope === scope
+                ? " Granting again keeps that grant and only extends its expiry."
+                : " A narrower grant would add nothing while it is active."}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -2775,12 +3043,17 @@ function ApprovalsCard({
               disabled={busy || !ruleId.trim() || (scope !== "global" && !sessionId.trim())}
               onClick={grant}
             >
-              {busy ? "Granting…" : "Grant exception"}
+              {busy
+                ? "Granting…"
+                : formCovered && formCovered.scope === scope
+                  ? `Extend grant #${formCovered.id}`
+                  : "Grant exception"}
             </button>
             {error && <span className="text-danger">{error}</span>}
           </div>
         </div>
       )}
+      {notice && <div className="mb-2 text-[11.5px] text-fg-2">{notice}</div>}
       {api.loading ? (
         <InlineLoading label="Loading approvals" block />
       ) : rows.length === 0 ? (

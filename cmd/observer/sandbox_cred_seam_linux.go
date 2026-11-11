@@ -28,3 +28,9 @@ var hostedCredEnvHook func(plan hostedPlanFile, env map[string]string)
 // hostedCredStampHook stamps the run's relay token on a relayed model
 // request on the home side (any value the box sent is replaced).
 var hostedCredStampHook func(h http.Header, runID string)
+
+// hostedCredIsSentinelHook reports whether a key variable's value is a run
+// sentinel (never a real key): the hosted seed approves only a sentinel in
+// the tool's "use this API key?" record (FX4 fix round 1, F-P6B-2a). nil
+// without the credentials files: nothing is approved.
+var hostedCredIsSentinelHook func(v string) bool

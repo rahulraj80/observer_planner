@@ -345,6 +345,14 @@ type Capability struct {
 	// surface relation (invariant I2).
 	Enterprise EnterpriseAnswer
 	TokenTier  TokenTier
+	// ProxyOnlyCapture marks a row whose turns arrive ONLY through the
+	// node's own listeners (the proxy, and for custom-agent since PT-55 the
+	// OTLP receiver): there is no transcript or store to tail and no vendor
+	// process to attribute, because the "tool" is the developer's own code
+	// (custom-agent, P-228). Consumers that would otherwise expect a
+	// post-hoc watcher channel or a process basename skip a row carrying
+	// it. Zero value = the row has some non-proxy capture surface.
+	ProxyOnlyCapture bool
 	// Limit records an AUDITED negative finding for the 5h/weekly usage-
 	// limit gauge (docs/cost-predictor.md; LimitCapability's doc comment).
 	// Zero value = not audited, falls through to the existing proxy/
@@ -617,6 +625,10 @@ var registry = map[string]Capability{
 			ConfigHome: &SandboxConfigHome{
 				Env: "CLAUDE_CONFIG_DIR", Dir: ".claude", StateFile: ".claude.json", RelocatedStateFile: ".claude.json",
 				OnboardedKey: "hasCompletedOnboarding", SeedKeys: []string{"hasCompletedOnboarding", "theme"},
+				KeyApproval: &SandboxKeyApproval{
+					Env: "ANTHROPIC_API_KEY", Key: "customApiKeyResponses", Suffix: 20,
+					Grounding: "Claude Code asks \"Do you want to use this API key?\" (No preselected) for an ANTHROPIC_API_KEY it has no answer for, and records the answer in ~/.claude.json customApiKeyResponses {approved, rejected} by the key's last 20 characters; the screen seen live in hosted boxes on every interactive start (FX3-L5, FU12-L1 capture); the 20-character record to be confirmed live (FX4 fix round 1 re-check)",
+				},
 				Grounding: "Windows 11 Pro rerun 2026-10-25 D3 debug logs (raw win8b-diag-debug2/3): exit 1 at showSetupScreens without the flag, a running session with it",
 			},
 			// A call that ran has a tool_result block (keyed by the call's
@@ -6560,6 +6572,42 @@ var registry = map[string]Capability{
 		Model:   ModelSpec{Kind: ModelNone},
 		Sandbox: SandboxSpec{Note: "not sandbox-launchable: no observer launcher (capture-only)"},
 	},
+	// A developer's OWN agent on a raw provider API or SDK (P-228, docs/
+	// own-agents.md, design docs/plans/discovery-sdk-2026-11-03.md section
+	// 4.1). Proxy-only capture: the agent sets its provider base URL to the
+	// node proxy and sends X-Superbased-Agent (and optionally X-Session-Id);
+	// internal/ownagent turns the header into a capture session. Every other
+	// cell is an honest zero: there is no transcript, hook surface, MCP
+	// writer, launcher or binary, because the "tool" is the developer's code.
+	"custom-agent": {
+		Tool: "custom-agent",
+		// The proxy request-path prompt scan runs on every proxied request,
+		// and the proxy is this tool's only capture path, so it is the one
+		// prompt-submit lever (no hook exists).
+		PromptLane: PromptLaneProxyOnly,
+		Vocabulary: Vocabulary{Note: "no native tool vocabulary: an own agent's tools run inside the developer's code; only its model turns cross the proxy, so tooltax carries no rows for it"},
+		// Observer drives no route (Proxy nil): it never edits the
+		// developer's code. The developer sets the provider client's base
+		// URL to the node proxy themselves (Anthropic http://127.0.0.1:8820,
+		// OpenAI http://127.0.0.1:8820/v1, Gemini http://127.0.0.1:8820) and
+		// sends X-Superbased-Agent; the Sessions page's Own agents view and
+		// docs/own-agents.md print the snippet. The default provider lanes
+		// carry it, no /up lane. Every session of this tool came through the
+		// proxy by construction, so it has no bypass to detect.
+		Proxy:       nil,
+		Routability: RouteStatusRoutableNow,
+		Hook:        HookSpec{Mechanism: HookNone, Note: "no hook surface: an own agent is the developer's code; capture is the proxy turn only"},
+		MCP:         nil,
+		Native:      NativeRails{},
+		TokenTier:   TokenTier{Best: "proxy", Gap: "no transcript: a call sent neither through the proxy nor as an OTLP GenAI span with usage is not seen; span-reported tokens are self-reported and rank below the proxy row for the same call; tool-call rows come only from OTLP execute_tool spans"},
+		// No transcript, store or vendor process: capture is the proxy
+		// turn, and since PT-55 the agent's own OTLP spans (the OTLP
+		// column, otlpexport.go).
+		ProxyOnlyCapture: true,
+		Handoff:          HandoffCapability{},
+		Model:            ModelSpec{Kind: ModelNone},
+		Sandbox:          SandboxSpec{Note: "not sandbox-launchable: the developer runs their own agent; observer spawns no process"},
+	},
 }
 
 // RegistryVersion is the version of the adapter capability registry's
@@ -6580,8 +6628,10 @@ var registry = map[string]Capability{
 // on 2026-09-06 (zed, Zed's own native coding agent, joined the
 // vocabulary). Bumped 6 -> 7 on 2026-10-21 (the capture-only wave:
 // autohand, ibm-bob, cortex-code, codebuddy, deepagents-code, dimcode,
-// dirac, kimchi, stakpak and vtcode joined the vocabulary).
-const RegistryVersion = 7
+// dirac, kimchi, stakpak and vtcode joined the vocabulary). Bumped 7 -> 8
+// on 2026-11-03 (custom-agent, a developer's own proxy-captured agent,
+// joined the vocabulary, P-228).
+const RegistryVersion = 8
 
 // Tools returns every registered tool name, sorted. It is the canonical,
 // closed tool vocabulary (NOT config.EnabledAdapters, which is a

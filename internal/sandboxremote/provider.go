@@ -32,6 +32,11 @@ var (
 	// template, image or runtime it was given is not one it can start (no
 	// box was made).
 	ErrTemplateUnavailable = errors.New("template not available")
+	// ErrRefused: the provider (or the organization in front of it)
+	// refused the call with one of its closed reasons: the run's own end,
+	// a revoke, a drain. A stream that ends with it was ended on purpose,
+	// never a transport cut (FX3-A3).
+	ErrRefused = errors.New("refused by the provider")
 )
 
 // LabelKey is the metadata key every box carries, valued with the run id.
@@ -88,6 +93,31 @@ type ExecSpec struct {
 	// it, as before). The relay process's stderr reaches the run's kept
 	// relay log through it (lane SBX-UPD, finding H1).
 	Stderr io.Writer
+	// StdinData is a one-shot stdin, sent whole with the request (lane G4:
+	// an UploadViaExec vendor's file parts). Only with Stdin false; a vendor
+	// bounds its size (the org-hosted row: openshellorg.MaxOneShotStdin).
+	StdinData []byte
+	// PacedStdin (lane G4): the process is the in-box paced-stdin wrapper,
+	// which reports its consumption as credit lines on stderr, so a
+	// streaming stdin can be flow-controlled. A BoundedStdin vendor refuses
+	// a streaming, non-PTY stdin without it.
+	PacedStdin bool
+}
+
+// tokenPurposeKey keys a call's token purpose in a context.
+type tokenPurposeKey struct{}
+
+// WithTokenPurpose returns ctx carrying the purpose a MintedCredential
+// vendor's call needs its token minted for (lane G4: create, attach,
+// return, teardown, resume). The source reads it (TokenPurpose).
+func WithTokenPurpose(ctx context.Context, purpose string) context.Context {
+	return context.WithValue(ctx, tokenPurposeKey{}, purpose)
+}
+
+// TokenPurpose returns the purpose ctx carries ("" when none).
+func TokenPurpose(ctx context.Context) string {
+	p, _ := ctx.Value(tokenPurposeKey{}).(string)
+	return p
 }
 
 // Process is one running process in a box. Read returns its output (stdout

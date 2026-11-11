@@ -132,7 +132,10 @@ func newHostedHarness(t *testing.T, vendor string) *hostedHarness {
 		},
 		now: time.Now,
 		ingest: func(context.Context) (hostedIngester, func(), error) {
-			return func(context.Context, string, string, []string) (int, error) { hh.ingests++; return 1, nil }, func() {}, nil
+			return func(context.Context, string, hostedCaptureRuns, []string) (hostedIngestOut, error) {
+				hh.ingests++
+				return hostedIngestOut{Actions: 1}, nil
+			}, func() {}, nil
 		},
 	}
 	return hh

@@ -186,8 +186,9 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 	g.SetGitAliasLookup(fileGitAliasLookup(gitalias.Path(cfg.Observer.DBPath), logger))
 	// §6.3 approvals: blocking verdicts consult the grant register.
 	// The daemon's store handle is long-lived, so the lookup is one
-	// indexed read; errors report false (fail-safe to enforcement).
-	g.SetApprovalLookup(func(ruleID, sessionID, rootHash string) bool {
+	// indexed read; an error reports no grant (fail-safe to enforcement)
+	// and the guard records it on the verdict (P-232).
+	g.SetApprovalLookup(func(ruleID, sessionID, rootHash string) (bool, error) {
 		lctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		return st.ApprovalActiveFor(lctx, ruleID, sessionID, rootHash, time.Now().UTC())

@@ -248,6 +248,16 @@ type Options struct {
 	// ReceiverToken is the shared secret compared against the request token when
 	// RequireToken is set. Ignored when RequireToken is false.
 	ReceiverToken string
+	// AcceptToken, when set (and RequireToken is set), is a SECOND way a
+	// request token may authorize: a value that does not match ReceiverToken
+	// is offered to it, and a true answer admits the request. The node sets
+	// it to the active-ship-token check so a cloud environment's exporter can
+	// carry a per-environment, short-lived, revocable ship token instead of
+	// the node's one shared receiver token (CLOUDTEL-1, cloud-agents decision
+	// CA-D18). nil (the edge, and every node without a ship token) keeps the
+	// shared-token comparison as the only check. It runs per request, before
+	// decode; it must be cheap and must not log the value.
+	AcceptToken func(token string) bool
 
 	// GRPCMaxRecvBytes, when > 0, sets grpc.MaxRecvMsgSize on the gRPC server so
 	// an oversized message is rejected pre-service (a size reject) and the
@@ -330,6 +340,7 @@ func New(opts Options) (*Receiver, error) {
 				onOutcome:    opts.OnOutcome,
 				requireToken: opts.RequireToken,
 				token:        opts.ReceiverToken,
+				accept:       opts.AcceptToken,
 			}))
 		}
 		if opts.RequireToken {
@@ -486,7 +497,7 @@ func (r *Receiver) withIngressGuards(signal string, next http.HandlerFunc) http.
 		}
 		if r.opts.RequireToken {
 			got := []byte(req.Header.Get(HeaderEdgeToken))
-			if subtle.ConstantTimeCompare(got, want) != 1 {
+			if !tokenMatches(got, want, r.opts.AcceptToken) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				r.report(signal, OutcomeRejected, ReasonAuth)
 				return
@@ -857,6 +868,8 @@ type outcomeStatsHandler struct {
 	// even installed) is a no-op.
 	requireToken bool
 	token        string
+	// accept is Options.AcceptToken (nil-safe).
+	accept func(string) bool
 }
 
 // rpcAccounting is the per-RPC state carried in the TagRPC context. It tracks the
@@ -889,7 +902,7 @@ func (h *outcomeStatsHandler) report(signal string, outcome Outcome, reason stri
 func (h *outcomeStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
 	acc := &rpcAccounting{method: info.FullMethodName}
 	if h.requireToken {
-		acc.authed = tokenAuthorized(ctx, h.token)
+		acc.authed = tokenAuthorized(ctx, h.token, h.accept)
 	} else {
 		acc.authed = true
 	}
@@ -936,9 +949,9 @@ func (h *outcomeStatsHandler) HandleRPC(ctx context.Context, s stats.RPCStats) {
 }
 
 // tokenAuthorized reports whether the incoming gRPC metadata carries a receiver
-// token matching want (constant-time compared). A missing metadata / missing key
-// is unauthorized.
-func tokenAuthorized(ctx context.Context, want string) bool {
+// token matching want (constant-time compared), or one accept admits. A missing
+// metadata / missing key is unauthorized.
+func tokenAuthorized(ctx context.Context, want string, accept func(string) bool) bool {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return false
@@ -947,7 +960,17 @@ func tokenAuthorized(ctx context.Context, want string) bool {
 	if len(vals) == 0 {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(vals[0]), []byte(want)) == 1
+	return tokenMatches([]byte(vals[0]), []byte(want), accept)
+}
+
+// tokenMatches is the one token rule both transports apply: the shared
+// receiver token (constant-time compared), else Options.AcceptToken when set.
+// An empty presented value never reaches accept.
+func tokenMatches(got, want []byte, accept func(string) bool) bool {
+	if subtle.ConstantTimeCompare(got, want) == 1 {
+		return true
+	}
+	return accept != nil && len(got) > 0 && accept(string(got))
 }
 
 // tokenGateInterceptor is the post-decode half of the two-part gRPC auth: it

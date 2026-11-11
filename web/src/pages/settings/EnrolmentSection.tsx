@@ -1,5 +1,6 @@
 import { Check, Copy, ExternalLink, History, LogIn, LogOut, RefreshCw, Send, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Button,
   ChartShell,
@@ -18,6 +19,7 @@ import {
   Stagger,
 } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
+import { HelpTooltip } from "@shared/primitives/HelpTooltip";
 import { ObsJobRider, ObsLanding } from "@shared/primitives/ObsFlight";
 import { apiCache, useApi, type ApiState } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
@@ -1176,9 +1178,18 @@ function PushPaused({ paused }: { paused?: EnrolmentStatus["push_paused"] }) {
       </div>
       {paused.reason && <div className="mt-1 text-fg-3">{paused.reason}</div>}
       <div className="mt-1 text-fg-3">
-        Raise <Mono>[org_client].max_push_bytes</Mono>, narrow <Mono>[org_client.scope]</Mono>, or turn off a large{" "}
-        <Mono>[org_client.share]</Mono> tier. The org server enforces its own body limit too, so raising the
-        node-side value alone may not be enough.
+        In{" "}
+        <Link to="/settings?section=org" className="text-accent hover:underline">
+          Settings &gt; Org sharing
+        </Link>
+        : raise Max push batch, narrow Project scope, or turn off a large share tier.{" "}
+        <HelpTooltip
+          technical
+          subject="the push limit settings"
+          content="[org_client].max_push_bytes, [org_client.scope], [org_client.share]"
+          className="align-middle"
+        />{" "}
+        The org server enforces its own body limit too, so raising the node-side value alone may not be enough.
       </div>
     </div>
   );
@@ -1198,7 +1209,11 @@ function RetentionHeld({ held }: { held?: EnrolmentStatus["retention_held"] }) {
         accepted them yet, so they stay on this machine until it does.
       </div>
       <div className="mt-1 text-fg-3">
-        Check the last push below and <Mono>observer doctor</Mono>; the next retention pass after a successful push removes them.
+        Check the last push below and the checks in{" "}
+        <Link to="/settings?section=health" className="text-accent hover:underline">
+          Settings &gt; Health
+        </Link>
+        ; the next retention pass after a successful push removes them.
       </div>
     </div>
   );

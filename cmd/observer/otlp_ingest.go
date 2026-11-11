@@ -15,6 +15,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/db"
 	otlpingest "github.com/marmutapp/superbased-observer/internal/ingest/otlp"
 	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/otlpvendor"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -44,7 +45,11 @@ func wireVendorOTLPIngest(ctx context.Context, cfg config.Config, database *sql.
 	// capture.proxy, or with it inactive, and the export's token rows would
 	// be dropped with no proxy row to hold them.
 	serving := proxyServingReason(cfg, componentSnapshotForConfig(cfg).Active("capture.proxy")) == ""
-	ing := newOTLPIngest(store.New(database), logger, cfg.Ingest.OTel.CapturesContent(), cfg.Ingest.OTel.MaxContentBytes(),
+	// The receiver files a session under the root the watcher and the hooks
+	// use (hook_ingestroot.go).
+	st := store.New(database)
+	st.SetProjectRootResolver(daemonIngestRootResolver())
+	ing := newOTLPIngest(st, logger, cfg.Ingest.OTel.CapturesContent(), cfg.Ingest.OTel.MaxContentBytes(),
 		enabledAdapterSet(cfg.Observer.Watch.EnabledAdapters)).
 		withProxyRoutes(newProxyRouteResolver(serving, userHomeOrEmpty()).Routed)
 	go ing.runGenTimingRetry(ctx)
@@ -139,14 +144,20 @@ func (o *otlpIngest) logs(ctx context.Context, req *collogspb.ExportLogsServiceR
 	return o.apply(ctx, res)
 }
 
-// traces returns the trace handler: spans from a resource a mapping row
-// claims are Plane B and are mapped here; every other resource (an
-// application's own GenAI spans, Observer's echo) goes to the Plane A
-// handler unchanged when one is configured. The two planes never share a
-// resource.
+// traces returns the trace handler: spans from a resource a Plane B row
+// claims (a coding tool's service.name, or the developer's own agent named
+// by sbo.agent) are mapped here; every unclaimed resource (an application's
+// own GenAI spans, a hosted app, Observer's echo) goes to the Plane A
+// handler unchanged when one is configured; a resource the own-agent claim
+// table drops (a malformed sbo.agent) goes to neither. The two planes never
+// share a resource, and the one table that decides is
+// otlpvendor.ClaimTraceResource (internal/ownagent's claim rules).
 func (o *otlpIngest) traces(planeA otlpingest.TraceHandler) otlpingest.TraceHandler {
 	return func(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) error {
-		mine, rest := splitClaimedTraces(req)
+		mine, rest, dropped := splitClaimedTraces(req)
+		if dropped > 0 {
+			o.warnOnce("own-agent:malformed", "otlp ingest: dropped spans whose sbo.agent resource attribute is not a usable agent name (see docs/own-agents.md)", "resources", dropped)
+		}
 		var err error
 		if mine != nil {
 			err = o.apply(ctx, otlpvendor.ParseSpans(mine))
@@ -158,32 +169,28 @@ func (o *otlpIngest) traces(planeA otlpingest.TraceHandler) otlpingest.TraceHand
 	}
 }
 
-// splitClaimedTraces partitions a trace export by resource: resources whose
-// service.name a mapping row claims (and that are not Observer's own echo)
-// versus everything else. Either side is nil when empty.
-func splitClaimedTraces(req *coltracepb.ExportTraceServiceRequest) (mine, rest *coltracepb.ExportTraceServiceRequest) {
+// splitClaimedTraces partitions a trace export by resource through the
+// claim table: Plane B resources (mine), unclaimed ones (rest, Plane A's)
+// and the number dropped from both. Either side is nil when empty.
+func splitClaimedTraces(req *coltracepb.ExportTraceServiceRequest) (mine, rest *coltracepb.ExportTraceServiceRequest, dropped int) {
 	for _, rs := range req.GetResourceSpans() {
-		attrs := rs.GetResource().GetAttributes()
-		svc := ""
-		for _, kv := range attrs {
-			if kv.GetKey() == "service.name" {
-				svc = kv.GetValue().GetStringValue()
-				break
-			}
-		}
-		if !otlpvendor.IsEcho(attrs) && otlpvendor.ClaimsService(svc) {
+		c := otlpvendor.ClaimTraceResource(rs)
+		switch {
+		case c.Plane.PlaneB():
 			if mine == nil {
 				mine = &coltracepb.ExportTraceServiceRequest{}
 			}
 			mine.ResourceSpans = append(mine.ResourceSpans, rs)
-			continue
+		case c.Plane.KeptFromPlaneA():
+			dropped++
+		default:
+			if rest == nil {
+				rest = &coltracepb.ExportTraceServiceRequest{}
+			}
+			rest.ResourceSpans = append(rest.ResourceSpans, rs)
 		}
-		if rest == nil {
-			rest = &coltracepb.ExportTraceServiceRequest{}
-		}
-		rest.ResourceSpans = append(rest.ResourceSpans, rs)
 	}
-	return mine, rest
+	return mine, rest, dropped
 }
 
 // otlpTransientWrite reports whether a store write error is worth a resend of
@@ -241,6 +248,18 @@ func (o *otlpIngest) apply(ctx context.Context, res otlpvendor.Result) error {
 		return v, a
 	}
 
+	// Cloud-execution stamps (cloud-agents lane CA-B4) first, so a marked
+	// session's row exists before its turns land. A vendor this node
+	// refuses (team grain) stamps nothing.
+	for _, ex := range res.Executions {
+		v, a := admit(ex.Tool, false)
+		if a.Refused != "" {
+			continue
+		}
+		o.noteWrite(&retry, o.stampExecution(ctx, v, ex),
+			"otlp ingest: execution stamp failed", "tool", ex.Tool, "session", ex.SessionID)
+	}
+
 	sessionModel := map[string]string{} // session -> model, for the tool-call rows
 	for _, t := range res.Turns {
 		v, a := admit(t.Tool, t.ViaProxyRoute)
@@ -250,10 +269,9 @@ func (o *otlpIngest) apply(ctx context.Context, res otlpvendor.Result) error {
 		if t.Model != "" && t.SessionID != "" {
 			sessionModel[t.SessionID] = t.Model
 		}
-		o.noteWrite(&retry, o.ensureSession(ctx, v, t.SessionID, t.Model, t.Timestamp),
+		o.noteWrite(&retry, o.ensureSession(ctx, v, t.SessionID, t.Agent, t.Model, t.Timestamp),
 			"otlp ingest: session not created", "tool", v.Tool, "session", t.SessionID)
-		_, _, err := o.st.UpsertTurnByRequestID(ctx, apiTurnFromOTLP(t))
-		o.noteWrite(&retry, err, "otlp ingest: upsert failed", "tool", t.Tool, "request_id", t.RequestID)
+		o.noteWrite(&retry, o.upsertTurn(ctx, t), "otlp ingest: upsert failed", "tool", t.Tool, "request_id", t.RequestID)
 	}
 
 	var events []models.ToolEvent
@@ -262,9 +280,19 @@ func (o *otlpIngest) apply(ctx context.Context, res otlpvendor.Result) error {
 		if !a.Tools || tc.SessionID == "" {
 			continue
 		}
-		o.noteWrite(&retry, o.ensureSession(ctx, v, tc.SessionID, sessionModel[tc.SessionID], tc.Timestamp),
+		o.noteWrite(&retry, o.ensureSession(ctx, v, tc.SessionID, tc.Agent, sessionModel[tc.SessionID], tc.Timestamp),
 			"otlp ingest: session not created", "tool", v.Tool, "session", tc.SessionID)
-		events = append(events, toolEventFromOTLP(v, tc, sessionModel[tc.SessionID]))
+		ev := toolEventFromOTLP(v, tc, sessionModel[tc.SessionID])
+		if tc.Agent != "" {
+			// An own agent's session may already carry the working
+			// directory the proxy resolved; the action lands under that
+			// project instead of moving the session to the placeholder
+			// (store.Ingest upserts the session with the event's project).
+			if root, rerr := o.st.ProjectRootForSession(ctx, tc.SessionID); rerr == nil && root != "" {
+				ev.ProjectRoot = root
+			}
+		}
+		events = append(events, ev)
 	}
 	if len(events) > 0 {
 		_, err := o.st.Ingest(ctx, events, nil, store.IngestOptions{})
@@ -296,12 +324,59 @@ func (o *otlpIngest) apply(ctx context.Context, res otlpvendor.Result) error {
 }
 
 // ensureSession makes sure a session row exists for a capture the vendor's
-// row lets create sessions (EnsureCaptureSession only ever inserts).
-func (o *otlpIngest) ensureSession(ctx context.Context, v otlpvendor.Vendor, sessionID, model string, ts time.Time) error {
+// row lets create sessions (EnsureCaptureSession only ever inserts). A
+// record that names a developer's own agent (agent non-empty, only the
+// own-agent row's records) goes through the own-agent seam instead, the one
+// the proxy's X-Superbased-Agent path uses, so the session carries the same
+// tool, surface "sdk" and host "agent:<name>" whichever path saw it first.
+func (o *otlpIngest) ensureSession(ctx context.Context, v otlpvendor.Vendor, sessionID, agent, model string, ts time.Time) error {
 	if sessionID == "" || v.NoSessionRows {
 		return nil
 	}
+	if agent != "" {
+		return o.st.EnsureOwnAgentSession(ctx, sessionID, agent, otlpvendor.PlaceholderProjectRoot(v.Tool), model, ts)
+	}
 	_, err := o.st.EnsureCaptureSession(ctx, sessionID, v.Tool, otlpvendor.PlaceholderProjectRoot(v.Tool), model, ts)
+	return err
+}
+
+// upsertTurn writes one mapped turn. A turn of a developer's own agent
+// (t.Agent set, only the own-agent row's) goes through the store's own-agent
+// span seam, which never touches another tool's or plane's row and never
+// leaves two rows for a call the proxy also wrote (sdk-2 fix round 1, M1 and
+// L4); every other vendor's turn keeps the request-id merge.
+func (o *otlpIngest) upsertTurn(ctx context.Context, t otlpvendor.Turn) error {
+	if t.Agent != "" {
+		_, err := o.st.UpsertOwnAgentSpanTurn(ctx, apiTurnFromOTLP(t))
+		return err
+	}
+	_, _, err := o.st.UpsertTurnByRequestID(ctx, apiTurnFromOTLP(t))
+	return err
+}
+
+// stampExecution writes one export's cloud-execution attribution through
+// the one writer Store.SetSessionExecution. A marker that proves the run's
+// transcript is not on this node (CreatesSession) creates the session row
+// first, under the tool's placeholder root, even on a NoSessionRows vendor;
+// otherwise a session the node has not seen yet is a silent no-op. A
+// reference that fails the wire grammar is dropped and the location is
+// still stamped, so one odd attribute value never loses the location.
+func (o *otlpIngest) stampExecution(ctx context.Context, v otlpvendor.Vendor, ex otlpvendor.Execution) error {
+	if ex.SessionID == "" || !models.KnownExecutionLocation(ex.Location) {
+		return nil
+	}
+	if ex.CreatesSession {
+		if _, err := o.st.EnsureCaptureSession(ctx, ex.SessionID, v.Tool, otlpvendor.PlaceholderProjectRoot(v.Tool), ex.Model, ex.Timestamp); err != nil {
+			return err
+		}
+	}
+	ref := ex.VendorRef
+	if ref != "" && !orgcontract.ValidVendorSessionRef(ref) {
+		ref = ""
+	}
+	_, err := o.st.SetSessionExecution(ctx, models.SessionExecution{
+		SessionID: ex.SessionID, ExecutionLocation: ex.Location, VendorSessionRef: ref,
+	})
 	return err
 }
 
@@ -324,10 +399,13 @@ func apiTurnFromOTLP(t otlpvendor.Turn) models.APITurn {
 		OutputTokens:        t.OutputTokens,
 		CacheReadTokens:     t.CacheReadTokens,
 		CacheCreationTokens: t.CacheWriteTokens,
-		CostUSD:             t.CostUSD,
-		TotalResponseMS:     t.DurationMS,
-		TimeToFirstTokenMS:  t.TimeToFirstTokenMS,
-		Source:              t.SourceTag,
+		// The 1-hour part (a subset), so a turn folded against its
+		// transcript twin keeps the twin's TTL split (CA-C7).
+		CacheCreation1hTokens: t.CacheWrite1hTokens,
+		CostUSD:               t.CostUSD,
+		TotalResponseMS:       t.DurationMS,
+		TimeToFirstTokenMS:    t.TimeToFirstTokenMS,
+		Source:                t.SourceTag,
 	}
 }
 

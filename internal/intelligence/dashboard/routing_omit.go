@@ -74,3 +74,9 @@ func checkRoutingRulesTOML(config.RoutingConfig, string) ([]config.RoutingRuleCo
 // routingTemplateKnown is routing.go's twin: with proxy.routing omitted there
 // are no policy templates, so the Briefing CTA offers no policy lever.
 func routingTemplateKnown(string) bool { return false }
+
+// newRoutingLintErrors finds nothing: the compiler is not in this build. A
+// shape save still passes the dashboard's row checks and the loader's
+// [routing] checks (routing_shapes.go); a daemon without routing only loads
+// these shapes, it never compiles them.
+func newRoutingLintErrors(config.RoutingConfig, config.RoutingConfig) []string { return nil }

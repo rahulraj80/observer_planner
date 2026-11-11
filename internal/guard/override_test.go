@@ -400,7 +400,7 @@ func TestApprovals_OrgLockGate(t *testing.T) {
 		t.Fatalf("guard.New: %v", err)
 	}
 	// Every rule has a grant: only an org-granted one may use it.
-	g.SetApprovalLookup(func(string, string, string) bool { return true })
+	g.SetApprovalLookup(func(string, string, string) (bool, error) { return true, nil })
 
 	// R-101 is a built-in deny the org bundle never marked
 	// overridable, so the bundle's mere presence locks it.
@@ -553,7 +553,7 @@ func TestApprovals_BlastRadiusAtEvaluation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("guard.New: %v", err)
 			}
-			g.SetApprovalLookup(func(string, string, string) bool { return true })
+			g.SetApprovalLookup(func(string, string, string) (bool, error) { return true, nil })
 
 			// R-101 (rm -rf ~) is a built-in the bundle never names.
 			av, _ := g.EvaluateHook(policy.Event{
@@ -591,9 +591,9 @@ func TestApprovals_ProjectScopeOnALaneWithNoProjectRoot(t *testing.T) {
 		cfg.Mode = "enforce"
 		g := newTestGuard(t, cfg, nil)
 		seen := &[]string{}
-		g.SetApprovalLookup(func(_, _, rootHash string) bool {
+		g.SetApprovalLookup(func(_, _, rootHash string) (bool, error) {
 			*seen = append(*seen, rootHash)
-			return rootHash == wantHash
+			return rootHash == wantHash, nil
 		})
 		if resolver != nil {
 			g.SetSessionProjectRootLookup(resolver)

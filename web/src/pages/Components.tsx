@@ -5,6 +5,7 @@ import { navIcon } from "@/lib/nav";
 import { Button, Card, EmptyState, Icon, PageHeader, Pill, SegmentedControl } from "@/components/primitives";
 import { fetchJSON, localConfirmHeaders, ApiError } from "@/lib/api";
 import { componentRequestLink } from "@/lib/requestEntry";
+import { isInAppLink, teardownLinkText } from "@/lib/setupExtras";
 import { useComponentCatalog, useComponentState } from "@/lib/useComponents";
 import {
   ARTIFACT_STATE_LABEL,
@@ -37,7 +38,7 @@ type Preview = {
   activated: string[];
   deactivated: string[];
   cascade: string[];
-  teardown: { component: string; kind: string; tool?: string; what: string; command?: string }[];
+  teardown: { component: string; kind: string; tool?: string; what: string; command?: string; link?: string; link_label?: string }[];
   refused: string[];
   issues: string[];
   restart_required: boolean;
@@ -415,13 +416,27 @@ function PreviewCard({
                 {preview.teardown.map((t, i) => (
                   <li key={i}>
                     {t.what}
-                    {t.command && <span className="font-mono text-fg-3"> ({t.command})</span>}
+                    {isInAppLink(t.link) && (
+                      <>
+                        {" "}
+                        <Link className="text-accent hover:underline" to={t.link}>
+                          {teardownLinkText(t.link_label)}
+                        </Link>
+                      </>
+                    )}
+                    {t.command && (
+                      <span className="font-mono text-fg-3">
+                        {" "}
+                        ({isInAppLink(t.link) ? "command line: " : ""}
+                        {t.command})
+                      </span>
+                    )}
                   </li>
                 ))}
               </ol>
               <label className="mt-1 flex items-center gap-2 text-small text-fg-2">
                 <input type="checkbox" checked={undoWrites} onChange={(e) => setUndoWrites(e.target.checked)} />
-                Undo those writes now (otherwise they stay until you run the teardown)
+                Undo the automatic steps now (a step with a link is finished from that page; otherwise the writes stay as they are)
               </label>
             </div>
           )}
