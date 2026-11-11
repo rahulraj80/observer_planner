@@ -1,0 +1,14 @@
+{
+  "name": "device-token-denied",
+  "about": "The member refused.",
+  "method": "POST",
+  "path": "/v1/device/token",
+  "request": {
+    "device_code": "<device-code>"
+  },
+  "status": 400,
+  "response": {
+    "error": "access_denied",
+    "error_description": "the sign-in was refused in the browser"
+  }
+}

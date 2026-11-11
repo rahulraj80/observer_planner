@@ -1,0 +1,14 @@
+{
+  "name": "advise-refused",
+  "about": "An answer that is not one of the answers.",
+  "method": "POST",
+  "path": "/v1/advise",
+  "request": {
+    "trust": "maybe"
+  },
+  "status": 400,
+  "response": {
+    "error": "trust \"maybe\" is not one of the answers",
+    "fix": "say how much you trust the code: own, generated or unknown"
+  }
+}

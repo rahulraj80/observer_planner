@@ -1,0 +1,14 @@
+{
+  "name": "sandbox-create-refused",
+  "about": "A refusal says why and what to do.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "isolation": "moon"
+  },
+  "status": 400,
+  "response": {
+    "error": "no isolation is called \"moon\"",
+    "fix": "use shared, shielded, sealed or vault (or auto for the strongest that keeps what you asked for); GET /v1/targets shows what this node offers"
+  }
+}

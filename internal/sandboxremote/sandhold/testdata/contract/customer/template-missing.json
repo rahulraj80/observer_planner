@@ -1,0 +1,11 @@
+{
+  "name": "template-missing",
+  "about": "No such template.",
+  "method": "GET",
+  "path": "/v1/templates/nope",
+  "status": 404,
+  "response": {
+    "error": "no template is called \"nope\"",
+    "fix": "GET /v1/templates (or: sandhold template ls) lists the templates you may use; one that is not shared is its owner's only"
+  }
+}

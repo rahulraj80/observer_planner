@@ -1,0 +1,14 @@
+{
+  "name": "device-token-used",
+  "about": "A code gives one key: asking again is refused.",
+  "method": "POST",
+  "path": "/v1/device/token",
+  "request": {
+    "device_code": "<device-code>"
+  },
+  "status": 400,
+  "response": {
+    "error": "invalid_grant",
+    "error_description": "this sign-in was already completed; start again"
+  }
+}

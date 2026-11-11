@@ -1,0 +1,19 @@
+{
+  "name": "device-token-approved",
+  "about": "Approved: the API key, given once.",
+  "method": "POST",
+  "path": "/v1/device/token",
+  "request": {
+    "device_code": "<device-code>"
+  },
+  "status": 200,
+  "response": {
+    "access_token": "<api-key>",
+    "expires_at": "<time>",
+    "expires_in": 0,
+    "key_id": "<key-id>",
+    "org": "org_acme",
+    "token_type": "Bearer",
+    "user": "alice"
+  }
+}

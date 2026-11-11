@@ -1,0 +1,14 @@
+{
+  "name": "device-token-pending",
+  "about": "Not approved yet: ask again after the interval.",
+  "method": "POST",
+  "path": "/v1/device/token",
+  "request": {
+    "device_code": "<device-code>"
+  },
+  "status": 400,
+  "response": {
+    "error": "authorization_pending",
+    "error_description": "waiting for approval in the browser"
+  }
+}

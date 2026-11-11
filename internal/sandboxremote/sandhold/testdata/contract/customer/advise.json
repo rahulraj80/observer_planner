@@ -1,0 +1,61 @@
+{
+  "name": "advise",
+  "about": "A setup for this node, with the reason for each choice.",
+  "method": "POST",
+  "path": "/v1/advise",
+  "request": {
+    "reach": {
+      "hosts": [
+        "github.com"
+      ],
+      "packages": [
+        "pypi"
+      ]
+    },
+    "runs": "tests",
+    "trust": "generated"
+  },
+  "status": 200,
+  "response": {
+    "command": "sandhold create --isolation shielded --allow pypi.org --allow files.pythonhosted.org --allow github.com --timeout 30m",
+    "isolation": "shielded",
+    "isolationMeans": "a hardened container on the host's kernel",
+    "limits": [
+      "Shares the host's kernel",
+      "Cold start about <span> (the egress proxy starts with it)"
+    ],
+    "network": "limited",
+    "notes": [
+      "No sandbox has started on runc here lately, so there is no measured start time to show yet."
+    ],
+    "runsOn": "runc",
+    "setup": {
+      "isolation": "shielded",
+      "network": {
+        "allow": [
+          "pypi.org",
+          "files.pythonhosted.org",
+          "github.com"
+        ]
+      },
+      "timeoutSeconds": 1800
+    },
+    "why": [
+      {
+        "about": "isolation",
+        "because": "Nobody has checked this code. It may do something unintended, so it should not run with privileges or reach the host's files.",
+        "choice": "Shielded: a hardened container on the host's kernel"
+      },
+      {
+        "about": "network",
+        "because": "The sandbox reaches these hosts and nothing else, so code inside cannot send what it reads anywhere you did not name.",
+        "choice": "Limited: pypi.org, files.pythonhosted.org, github.com"
+      },
+      {
+        "about": "time",
+        "because": "A build or a test suite installs dependencies, then runs for a while. It ends by itself then, and can be given more time while it runs.",
+        "choice": "Ends after 30 minutes"
+      }
+    ]
+  }
+}

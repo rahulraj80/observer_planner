@@ -38,6 +38,7 @@ var services = []ServiceInfo{
 	{Service: "sbo-sandbox-e2b-v1", Purpose: "Hosted sandbox sign-in (E2B)", Owner: "/terminals"},
 	{Service: "sbo-sandbox-modal-v1", Purpose: "Hosted sandbox sign-in (Modal)", Owner: "/terminals"},
 	{Service: "sbo-sandbox-vercel-v1", Purpose: "Hosted sandbox sign-in (Vercel)", Owner: "/terminals"},
+	{Service: "sbo-sandbox-sandhold-v1", Purpose: "SandHold node sign-in (observer sandbox connect)", Owner: "/terminals", Records: []string{"credential"}},
 	{Service: "sbo-change-record-v1", Purpose: "Keys that sign your security change records", Owner: "/code-security?tab=baselines"},
 	{
 		Service: "sbo-exec-evidence-v1", Purpose: "Key that seals run evidence", Owner: "/terminals",

@@ -571,6 +571,7 @@ func TestRefusalAuditFloorPerBackend(t *testing.T) {
 		{sandboxbackend.BackendE2B, nil},
 		{sandboxbackend.BackendModal, nil},
 		{sandboxbackend.BackendVercelSandbox, nil},
+		{sandboxbackend.BackendSandHold, nil},
 		{sandboxbackend.BackendCodespaces, nil},
 		{sandboxbackend.BackendCoder, nil},
 		{sandboxbackend.BackendK8sAgentSandbox, nil},

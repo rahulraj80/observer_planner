@@ -111,6 +111,7 @@ prints this list, with each row's on/off state, for your configuration.
 | **Remote notify** | If `[remote.notify] enabled = true` | A webhook / ntfy call on terminal session events | TOML config |
 | **Guard cloud** | If `[guard.cloud] enabled = true` and a webhook, judge or reputation lookup is configured | Redacted guard event summaries to your webhooks; an ask-class event's context to your judge endpoint; package metadata GETs from `registry.npmjs.org` | TOML config |
 | **Generalized observability (Plane A)** | If `[observability] enabled = true` | Judge calls and alert webhooks for a hosted app you are observing | TOML config |
+| **SandHold connect** | When you run `observer sandbox connect <node-url>` or `observer sandbox disconnect`, and only to the SandHold node you named | The sign-in request (what this machine calls itself, "Observer on <hostname>"), then with the key the node gave: who the key belongs to (`/v1/whoami`), which isolation the node offers (`/v1/targets`), and revoking the key (`DELETE /v1/keys/{id}`). No session data, no files. https only (plain http for localhost only), no redirect is followed, and the key is sent only to the node that issued it | Your command; the key is kept in this machine's keychain until you disconnect |
 | **Antigravity gRPC fallback** | When parsing Antigravity sessions on macOS where keychain decrypt fails | Local IPC to a Google-installed gRPC socket, never the internet | Automatic; only fires on Antigravity sessions |
 
 Today, with the pricing feed and TLS warm-up turned off and none of the opt-in

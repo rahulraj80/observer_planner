@@ -1,0 +1,14 @@
+{
+  "name": "sandbox-timeout",
+  "about": "Give a sandbox a new lifetime.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/timeout",
+  "request": {
+    "seconds": 1200
+  },
+  "status": 200,
+  "response": {
+    "expiresAt": "<time>",
+    "id": "<id>"
+  }
+}

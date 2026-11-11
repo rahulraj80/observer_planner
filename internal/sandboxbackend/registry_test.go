@@ -18,6 +18,7 @@ func TestRowKeysMatchIDsAndVocabulary(t *testing.T) {
 		BackendModal: true, BackendVercelSandbox: true,
 		BackendMXCAppContainer: true, BackendWSLC: true, BackendHCS: true,
 		BackendOpenShell: true, BackendOpenShellOrg: true,
+		BackendSandHold: true,
 	}
 	for key, c := range registry {
 		if key != c.ID {
@@ -58,7 +59,7 @@ func TestPlannedRowsAreNeverOffered(t *testing.T) {
 	for _, c := range Offered() {
 		ids = append(ids, c.ID)
 	}
-	want := []string{BackendAppleContainer, BackendBwrap, BackendCloudHypervisor, BackendE2B, BackendHCS, BackendModal, BackendMXCAppContainer, BackendMXCProcess, BackendOCIRunc, BackendOCIRunsc, BackendOpenShell, BackendOpenShellOrg, BackendProcessLite, BackendSeatbelt, BackendVercelSandbox, BackendWSLC}
+	want := []string{BackendAppleContainer, BackendBwrap, BackendCloudHypervisor, BackendE2B, BackendHCS, BackendModal, BackendMXCAppContainer, BackendMXCProcess, BackendOCIRunc, BackendOCIRunsc, BackendOpenShell, BackendOpenShellOrg, BackendProcessLite, BackendSandHold, BackendSeatbelt, BackendVercelSandbox, BackendWSLC}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("offered rows = %v, want %v", ids, want)
 	}
@@ -405,6 +406,7 @@ func TestRefusalAuditIsGroundedPerRow(t *testing.T) {
 		{BackendOpenShellOrg, nil, "denials happen on the org's machine and are not carried to the node in v1 (g1-design.md section 6.4)"},
 		{BackendModal, nil, "the provider enforces egress"},
 		{BackendVercelSandbox, nil, "the provider enforces egress"},
+		{BackendSandHold, nil, "the node enforces egress, and runs are refused by name in this release"},
 		{BackendCodespaces, nil, "planned"},
 		{BackendCoder, nil, "planned"},
 		{BackendK8sAgentSandbox, nil, "planned"},
@@ -544,5 +546,33 @@ func TestSetupBetaRows(t *testing.T) {
 		if c.SetupBeta != want[id] {
 			t.Errorf("%s: SetupBeta = %q, want %q", id, c.SetupBeta, want[id])
 		}
+	}
+}
+
+// TestSandHoldRow (SandHold notes 41 D2 and D3): the sandhold row is an
+// offered preview remote row, explicit-only, probe only (setup is the
+// connect command, so the setup column says why there is no plan), whose
+// static class is the weakest a node offers and is claimed, never more, and
+// whose key lives in its own keychain service.
+func TestSandHoldRow(t *testing.T) {
+	t.Parallel()
+	c, ok := Get(BackendSandHold)
+	if !ok || !c.Offered() || c.Maturity != MaturityPreview || !c.ExplicitOnly {
+		t.Fatalf("row %+v", c)
+	}
+	if c.Iso.Location != vocab.LocationRemote || c.Iso.Class != vocab.ClassProcess || c.Iso.ClassSource != vocab.SourceClaimed {
+		t.Errorf("iso %+v", c.Iso)
+	}
+	if len(c.Setup) != 0 || !strings.Contains(c.SetupUnavailable, "observer sandbox connect") {
+		t.Errorf("setup %v / %q", c.Setup, c.SetupUnavailable)
+	}
+	if !slices.Equal(c.KeystoreServices, []string{"sbo-sandbox-sandhold-v1"}) {
+		t.Errorf("keystore services %v", c.KeystoreServices)
+	}
+	if !slices.Contains(c.Discloses, DiscloseDataLeaves) || !slices.Contains(c.Discloses, DiscloseAccountLogin) {
+		t.Errorf("discloses %v", c.Discloses)
+	}
+	if c.Net.Enforcer != EnforcerProvider || c.Net.AuditsRefusals() {
+		t.Errorf("net %+v", c.Net)
 	}
 }

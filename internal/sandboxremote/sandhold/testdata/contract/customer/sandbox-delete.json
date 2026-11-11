@@ -1,0 +1,7 @@
+{
+  "name": "sandbox-delete",
+  "about": "Remove a sandbox.",
+  "method": "DELETE",
+  "path": "/v1/sandboxes/<id>",
+  "status": 204
+}

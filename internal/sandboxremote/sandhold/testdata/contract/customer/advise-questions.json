@@ -1,0 +1,159 @@
+{
+  "name": "advise-questions",
+  "about": "The three questions and their answers, in the node's words.",
+  "method": "GET",
+  "path": "/v1/advise",
+  "status": 200,
+  "response": {
+    "questions": [
+      {
+        "ask": "What will run in it?",
+        "choices": [
+          {
+            "id": "script",
+            "label": "A command or a short script",
+            "means": "runs once and ends"
+          },
+          {
+            "id": "tests",
+            "label": "A build or a test suite",
+            "means": "installs dependencies, then runs for a while"
+          },
+          {
+            "id": "data",
+            "label": "Data analysis",
+            "means": "a session of commands over files"
+          },
+          {
+            "id": "agent",
+            "label": "An AI agent at work",
+            "means": "runs many commands over a long task"
+          },
+          {
+            "id": "app",
+            "label": "A web app or service to look at",
+            "means": "stays up and is opened in a browser"
+          }
+        ],
+        "id": "runs"
+      },
+      {
+        "ask": "How much do you trust the code?",
+        "choices": [
+          {
+            "id": "own",
+            "label": "Code you or your team wrote",
+            "means": "you know what it does"
+          },
+          {
+            "id": "generated",
+            "label": "Code an AI wrote, or code nobody has reviewed",
+            "means": "probably fine, not checked"
+          },
+          {
+            "id": "unknown",
+            "label": "Code from a stranger, or code that may be hostile",
+            "means": "assume it will try to get out"
+          }
+        ],
+        "id": "trust"
+      },
+      {
+        "ask": "What must it reach on the network? (Nothing, unless you say so.)",
+        "choices": [
+          {
+            "hosts": [
+              "pypi.org",
+              "files.pythonhosted.org"
+            ],
+            "id": "pypi",
+            "label": "Python packages (PyPI)"
+          },
+          {
+            "hosts": [
+              "registry.npmjs.org"
+            ],
+            "id": "npm",
+            "label": "JavaScript packages (npm)"
+          },
+          {
+            "hosts": [
+              "github.com",
+              "api.github.com",
+              "codeload.github.com",
+              "objects.githubusercontent.com",
+              "raw.githubusercontent.com"
+            ],
+            "id": "github",
+            "label": "GitHub repositories"
+          },
+          {
+            "hosts": [
+              "proxy.golang.org",
+              "sum.golang.org"
+            ],
+            "id": "go",
+            "label": "Go modules"
+          },
+          {
+            "hosts": [
+              "crates.io",
+              "index.crates.io",
+              "static.crates.io"
+            ],
+            "id": "crates",
+            "label": "Rust crates"
+          },
+          {
+            "hosts": [
+              "rubygems.org",
+              "index.rubygems.org"
+            ],
+            "id": "rubygems",
+            "label": "Ruby gems"
+          },
+          {
+            "hosts": [
+              "repo.maven.apache.org",
+              "repo1.maven.org"
+            ],
+            "id": "maven",
+            "label": "Java packages (Maven Central)"
+          },
+          {
+            "hosts": [
+              "deb.debian.org",
+              "security.debian.org",
+              "archive.ubuntu.com",
+              "security.ubuntu.com"
+            ],
+            "id": "debian",
+            "label": "Debian and Ubuntu packages (apt)"
+          },
+          {
+            "hosts": [
+              "api.anthropic.com"
+            ],
+            "id": "anthropic",
+            "label": "Anthropic API"
+          },
+          {
+            "hosts": [
+              "api.openai.com"
+            ],
+            "id": "openai",
+            "label": "OpenAI API"
+          },
+          {
+            "hosts": [
+              "generativelanguage.googleapis.com"
+            ],
+            "id": "gemini",
+            "label": "Google Gemini API"
+          }
+        ],
+        "id": "reach"
+      }
+    ]
+  }
+}

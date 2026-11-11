@@ -885,6 +885,35 @@ func nodeRows() []Component {
 		hostedDriverRow("terminals.sandbox.vercel", "Vercel hosted sandboxes (beta)",
 			"Runs sandboxed terminal launches in a Vercel Sandbox Firecracker microVM on Vercel's machines, through Vercel's REST API. Your workspace files are uploaded after you consent once; hooks reach this machine through the capture relay. Beta: built from Vercel's documentation, not yet run with a real account.",
 			"internal/sandboxremote/vercel", nil),
+		// The SandHold row (SandHold notes 41 D2 and D3): a SandHold node the
+		// user connects with `observer sandbox connect <node-url>`, a browser
+		// sign-in the person approves in the node's portal. Inactive in every
+		// distro and opt-in like the other hosted drivers; the connect and
+		// disconnect commands work while the sandbox module is active. Probe
+		// only in this release: the row reads its own state file and never
+		// calls the node; a run is refused by name.
+		{
+			ID: "terminals.sandbox.sandhold", Class: ClassFeature, Binary: BinaryNode,
+			Title:    "SandHold sandboxes (beta, probe only)",
+			About:    "Connects this machine to a SandHold node you name: `observer sandbox connect <node-url>` opens the node's approval page, you approve this machine there, and Observer keeps the key it is given in this machine's keychain. The backend list then says who you are signed in as and which isolation the node offers. Probe only in this release: a sandboxed run on the node is refused by name.",
+			Levels:   lv([]Level{L1, L3}, l1l2l3, "P2"),
+			Packages: []string{"internal/sandboxremote/sandhold"},
+			Requires: []string{"terminals.sandbox"},
+			Surface: Surface{
+				Egress: []Egress{
+					{Host: "<the SandHold node named by observer sandbox connect>", Purpose: "Browser sign-in (POST /v1/device/code and /v1/device/token), who the key belongs to (GET /v1/whoami), the isolation the node offers (GET /v1/targets), and revoking the key (DELETE /v1/keys/{id}); https only (http for localhost), no redirect followed, the key sent only to the node that issued it", Gate: "`observer sandbox connect` and `observer sandbox disconnect` only, run by you", Trigger: TriggerUserTriggered},
+				},
+				FilesWritten: []string{
+					"~/.observer/sandbox-hosted/sandhold/connection.json (owner only: the node address, key id, who you are signed in as and what the node offered; never the key)",
+				},
+				Credentials: []string{"the OS keychain, service sbo-sandbox-sandhold-v1 (the node's API key; the keystore's owner-only file fallback on a host with no keychain)"},
+				Processes:   []string{"the desktop's browser opener (xdg-open, open or start) for the node's approval page, only when the page is on the node you named and --no-browser is not given"},
+			},
+			ConfigKeys: []string{"terminal"},
+			Ledger:     []string{"SBX-BE-8"},
+			Stability:  StabilityPreview,
+			Distros:    dist(out, off, off, off),
+		},
 		// The org-hosted OpenShell row (tracker F-019, g1-design.md section
 		// 11.4, lane G4): the fourth hosted driver, whose "vendor" is the
 		// organization's own OpenShell gateway behind its validating front.

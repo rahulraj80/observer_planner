@@ -1,0 +1,15 @@
+{
+  "name": "whoami",
+  "about": "Who a key acts as; keyId lets a tool revoke the key it holds.",
+  "method": "GET",
+  "path": "/v1/whoami",
+  "status": 200,
+  "response": {
+    "admin": false,
+    "issuer": "",
+    "keyId": "<key-id>",
+    "org": "org_acme",
+    "user": "alice",
+    "via": "apikey"
+  }
+}

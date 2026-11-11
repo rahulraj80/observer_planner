@@ -1,0 +1,26 @@
+{
+  "name": "exec-stream",
+  "about": "Run a command; output as it arrives, then the exit.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "accept": "text/event-stream",
+  "request": {
+    "command": "echo hello"
+  },
+  "status": 200,
+  "stream": [
+    {
+      "data": {
+        "text": "ok\n"
+      },
+      "event": "stdout"
+    },
+    {
+      "data": {
+        "durationMs": 0,
+        "exitCode": 0
+      },
+      "event": "exit"
+    }
+  ]
+}

@@ -42,7 +42,19 @@ const (
 	// org's validating front. Explicit-only and preview; offered only on a
 	// managed node whose verified sandbox body publishes the gateway.
 	BackendOpenShellOrg = "openshell-org"
+	// BackendSandHold is a SandHold node the user connected with `observer
+	// sandbox connect <node-url>` (SandHold notes 41 D2 and D3): a sandbox
+	// on the user's or their team's own SandHold node, reached through its
+	// public API. Explicit-only and preview; probe only in this release (a
+	// run is refused by name until the launch path is built).
+	BackendSandHold = "sandhold"
 )
+
+// sandHoldDocSource names the grounding of the sandhold row.
+const sandHoldDocSource = "SandHold control/README.md (native API /v1: device sign-in, whoami, targets, sandboxes, exec, files, pty, keys) and notes 41 (D2 to D5) and 42 (browser sign-in, client-side security findings); internal/sandboxremote/sandhold httptest fake tests"
+
+// sandHoldRegister names what the sandhold row still owes.
+const sandHoldRegister = "SANDHOLD-1: the launch path on SandHold's native API (create, upload, exec, pty, delete) and its first live run"
 
 // ConnectorSSH is the SSH connector id.
 const ConnectorSSH = "ssh"
@@ -889,6 +901,42 @@ var registry = map[string]Capability{
 		[]HostKind{HostRemote}, "class is the RuntimeClass's (gVisor or Kata); org provisioned", false),
 	BackendAgentCore: planned(BackendAgentCore, "AWS Bedrock AgentCore Runtime", "P7", vocab.ClassHWVM, vocab.LocationRemote,
 		[]HostKind{HostRemote}, "org provisioned; managed and full distros only", false),
+	// sandhold (SandHold notes 41 D2 and D3): a SandHold node the user
+	// connected by browser sign-in (`observer sandbox connect <node-url>`).
+	// The node offers several isolations (Shared, Shielded, Sealed, Vault),
+	// so the row's static class is the weakest one a node can offer
+	// (process, claimed): the probe's note names what this node offers, per
+	// isolation, in Observer's classes. Probe only in this release: a run is
+	// refused by name until the launch path is built (owed: SANDHOLD-1).
+	BackendSandHold: {
+		ID: BackendSandHold, Label: "SandHold (your node)", Maturity: MaturityPreview, Phase: "P7",
+		SetupUnavailable: "connecting is one command, `observer sandbox connect <node-url>`, and the run path is not built in this release",
+		Verification: []Verified{
+			{Host: HostLinux, Kind: vocab.VerifiedDoc, Source: sandHoldDocSource, Date: "2026-11-11", RegisterRef: sandHoldRegister},
+			{Host: HostWSL2, Kind: vocab.VerifiedDoc, Source: sandHoldDocSource, Date: "2026-11-11", RegisterRef: sandHoldRegister},
+		},
+		Iso: Isolation{
+			Class: vocab.ClassProcess, ClassSource: vocab.SourceClaimed,
+			Location: vocab.LocationRemote, Tenancy: TenancyPerRun,
+			Hosts: []HostKind{HostLinux, HostWSL2}, CrossesKernel: true,
+		},
+		// The node's public REST API, version 1 (/v1).
+		Control: Control{Interface: InterfaceRESTRemote, Stability: StabilityVendorPreview, Pins: DriverPins{RequiredMin: "1", TestedLow: "1", TestedHigh: "1"}},
+		// The node documents a WebSocket terminal with a resize control
+		// frame (GET /v1/sandboxes/{id}/pty) and no reattach.
+		Term: Terminal{PTYOwner: PTYBackendExec, Resize: ResizeBackendAPI, Reattach: ReattachNone, RelayReattach: RelaySeparateStream, Transport: TransportExecStdio},
+		// The node enforces every tier: deny-by-default, an allow list
+		// (limited) or open; a name allowed but resolving to a private or
+		// metadata address gets no address (documented for limited).
+		Net:              hostedNet(vocab.SourceClaimed),
+		Capture:          Capture{Ceiling: vocab.CaptureFull, HookPath: HookRelay, Relay: RelayExecStdio},
+		ReadBack:         ReadBackProvider,
+		ExplicitOnly:     true,
+		KeystoreServices: []string{"sbo-sandbox-sandhold-v1"},
+		Discloses:        []Disclosure{DiscloseDataLeaves, DiscloseAccountLogin},
+		// The node's own maximum timeout caps a box; the row names none.
+		Note: "Beta, used only when chosen by name, and probe only in this release: a SandHold node you connect with `observer sandbox connect <node-url>` (you approve this machine in the node's portal; Observer keeps the key in this machine's keychain). The note on this row says who you are signed in as and which isolation the node offers (Shared, Shielded, Sealed, Vault) in Observer's classes. A run on it is refused by name until the launch path is built.",
+	},
 }
 
 // planned builds a row that is not offered yet: the class, location and

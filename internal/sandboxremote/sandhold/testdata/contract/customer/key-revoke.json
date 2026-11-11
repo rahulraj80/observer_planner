@@ -1,0 +1,7 @@
+{
+  "name": "key-revoke",
+  "about": "A tool revokes the key it holds.",
+  "method": "DELETE",
+  "path": "/v1/keys/<id>",
+  "status": 204
+}

@@ -1,0 +1,24 @@
+{
+  "name": "sandbox-list",
+  "about": "A member's sandboxes.",
+  "method": "GET",
+  "path": "/v1/sandboxes",
+  "status": 200,
+  "response": {
+    "sandboxes": [
+      {
+        "createdAt": "<time>",
+        "engine": "runc",
+        "expiresAt": "<time>",
+        "id": "<id>",
+        "image": "sandhold/sandbox:dev",
+        "isolation": "shielded",
+        "isolationMeans": "a hardened container on the host's kernel",
+        "network": "limited",
+        "owner": "alice",
+        "runsOn": "runc",
+        "state": ""
+      }
+    ]
+  }
+}

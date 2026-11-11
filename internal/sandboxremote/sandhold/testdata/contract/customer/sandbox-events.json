@@ -1,0 +1,90 @@
+{
+  "name": "sandbox-events",
+  "about": "The sandbox's story, oldest first.",
+  "method": "GET",
+  "path": "/v1/sandboxes/<id>/events",
+  "status": 200,
+  "response": {
+    "ended": false,
+    "events": [
+      {
+        "at": "<time>",
+        "by": "alice",
+        "data": {
+          "allow": [
+            "pypi.org",
+            "files.pythonhosted.org",
+            "github.com"
+          ],
+          "isolation": "shielded",
+          "isolationMeans": "a hardened container on the host's kernel",
+          "ms": 0,
+          "network": "limited",
+          "phases": [
+            {
+              "label": "choosing where it runs",
+              "ms": 0,
+              "name": "place"
+            },
+            {
+              "label": "working out its network policy",
+              "ms": 0,
+              "name": "policy"
+            },
+            {
+              "label": "making sure the node has room",
+              "ms": 0,
+              "name": "admit"
+            },
+            {
+              "label": "starting it",
+              "ms": 0,
+              "name": "engine"
+            },
+            {
+              "label": "waiting until it answers",
+              "ms": 0,
+              "name": "execd"
+            },
+            {
+              "label": "preparing its user and files",
+              "ms": 0,
+              "name": "prepare"
+            },
+            {
+              "label": "recording it",
+              "ms": 0,
+              "name": "store"
+            }
+          ],
+          "placed": "the template py-tests asks for shielded isolation",
+          "runsOn": "runc",
+          "start": "cold",
+          "timeoutSeconds": 600
+        },
+        "text": "Started cold in <span>: Shielded (a hardened container on the host's kernel), runs on runc, network limited to pypi.org, files.pythonhosted.org, github.com. It lives 10 min unless extended. It runs there because the template py-tests asks for shielded isolation.",
+        "type": "sandbox.ready"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: exit status 0",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: exit status 0",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Lifetime changed: 20 min from then",
+        "type": "sandbox.timeout"
+      }
+    ],
+    "id": "<id>",
+    "owner": "alice"
+  }
+}

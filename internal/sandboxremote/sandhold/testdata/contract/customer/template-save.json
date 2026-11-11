@@ -1,0 +1,43 @@
+{
+  "name": "template-save",
+  "about": "Save a setup under a name.",
+  "method": "PUT",
+  "path": "/v1/templates/py-tests",
+  "request": {
+    "about": "Python test runs",
+    "setup": {
+      "isolation": "shielded",
+      "network": {
+        "allow": [
+          "pypi.org",
+          "files.pythonhosted.org",
+          "github.com"
+        ]
+      },
+      "timeoutSeconds": 1800
+    },
+    "shared": true
+  },
+  "status": 201,
+  "response": {
+    "about": "Python test runs",
+    "command": "sandhold create --template py-tests",
+    "createdAt": "<time>",
+    "mine": true,
+    "name": "py-tests",
+    "owner": "alice",
+    "setup": {
+      "isolation": "shielded",
+      "network": {
+        "allow": [
+          "pypi.org",
+          "files.pythonhosted.org",
+          "github.com"
+        ]
+      },
+      "timeoutSeconds": 1800
+    },
+    "shared": true,
+    "updatedAt": "<time>"
+  }
+}

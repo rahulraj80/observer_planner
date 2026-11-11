@@ -1,0 +1,30 @@
+{
+  "name": "templates",
+  "about": "The templates a member may use.",
+  "method": "GET",
+  "path": "/v1/templates",
+  "status": 200,
+  "response": [
+    {
+      "about": "Python test runs",
+      "command": "sandhold create --template py-tests",
+      "createdAt": "<time>",
+      "mine": true,
+      "name": "py-tests",
+      "owner": "alice",
+      "setup": {
+        "isolation": "shielded",
+        "network": {
+          "allow": [
+            "pypi.org",
+            "files.pythonhosted.org",
+            "github.com"
+          ]
+        },
+        "timeoutSeconds": 1800
+      },
+      "shared": true,
+      "updatedAt": "<time>"
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "name": "targets",
+  "about": "Where sandboxes can run: isolation in members' words (tier, tierMeans, tierRank), network control, state.",
+  "method": "GET",
+  "path": "/v1/targets",
+  "status": 200,
+  "response": {
+    "targets": [
+      {
+        "about": {
+          "benefits": [
+            "A separate kernel in user space (gVisor): the host kernel's attack surface is cut",
+            "Network allow list enforced on the host",
+            "Fastest cold start of SandHold's engines (about <span>); warm about <span>"
+          ],
+          "limits": [
+            "Allow list only: no per-request HTTP rules or credential injection",
+            "Some system calls are unsupported or slower (heavy file and network I/O)"
+          ],
+          "maker": "SandHold",
+          "title": "SandHold Sealed"
+        },
+        "capabilities": {
+          "egressAllowlist": false,
+          "isolation": "user-kernel",
+          "pty": true,
+          "runtime": "gVisor (runsc, KVM platform)",
+          "separateKernel": true
+        },
+        "confirmedAt": "<time>",
+        "heavy": true,
+        "id": "gvisor",
+        "kind": "local",
+        "limits": {},
+        "name": "gvisor",
+        "product": "sandhold",
+        "sandboxes": 0,
+        "scope": "sb",
+        "state": "active",
+        "tier": "sealed",
+        "tierMeans": "its own kernel in user space",
+        "tierRank": 3
+      },
+      {
+        "about": {
+          "benefits": [
+            "Its own guest kernel in a hardware-virtualised VM (Kata Containers): the strongest separation",
+            "Network allow list enforced on the host",
+            "Warm start about <span> from the node's pool"
+          ],
+          "limits": [
+            "Allow list only: no per-request HTTP rules or credential injection",
+            "Cold start about <span>; uses more memory per sandbox"
+          ],
+          "maker": "SandHold",
+          "title": "SandHold Vault"
+        },
+        "capabilities": {
+          "egressAllowlist": false,
+          "isolation": "microvm",
+          "pty": true,
+          "runtime": "Kata Containers (Cloud Hypervisor microVM)",
+          "separateKernel": true
+        },
+        "confirmedAt": "<time>",
+        "heavy": true,
+        "id": "kata",
+        "kind": "local",
+        "limits": {},
+        "name": "kata",
+        "product": "sandhold",
+        "sandboxes": 0,
+        "scope": "sb",
+        "state": "active",
+        "tier": "vault",
+        "tierMeans": "its own kernel in a virtual machine",
+        "tierRank": 4
+      },
+      {
+        "about": {
+          "benefits": [
+            "Hardened container: no capabilities, syscall filter, non-root user, read-only /usr",
+            "Full network control: allow list, per-request HTTP rules and credentials injected on the wire",
+            "Warm start about <span> from the node's pool"
+          ],
+          "limits": [
+            "Shares the host's kernel",
+            "Cold start about <span> (the egress proxy starts with it)"
+          ],
+          "maker": "SandHold",
+          "title": "SandHold Shielded"
+        },
+        "capabilities": {
+          "egressAllowlist": true,
+          "isolation": "container",
+          "pty": true,
+          "runtime": "runc",
+          "separateKernel": false
+        },
+        "confirmedAt": "<time>",
+        "heavy": true,
+        "id": "runc",
+        "kind": "local",
+        "limits": {},
+        "name": "runc",
+        "product": "sandhold",
+        "sandboxes": 0,
+        "scope": "sb",
+        "state": "active",
+        "tier": "shielded",
+        "tierMeans": "a hardened container on the host's kernel",
+        "tierRank": 2
+      }
+    ]
+  }
+}

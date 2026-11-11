@@ -1,0 +1,18 @@
+{
+  "name": "device-code",
+  "about": "A tool asks to sign in: the code to show, the page to open, how often to ask.",
+  "method": "POST",
+  "path": "/v1/device/code",
+  "request": {
+    "client_id": "observer on laptop"
+  },
+  "status": 200,
+  "response": {
+    "device_code": "<device-code>",
+    "expires_in": 0,
+    "interval": 3,
+    "user_code": "<user-code>",
+    "verification_uri": "https://node.example:48000/app/#/device",
+    "verification_uri_complete": "<verification-uri-with-code>"
+  }
+}

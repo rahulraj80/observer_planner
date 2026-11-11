@@ -8,7 +8,8 @@ import (
 // sandbox_remote_egress_test.go pins the hosted sandbox drivers' egress
 // (sandbox plan v2 section 13 P7, ledger row SBX-BE-8, lane SBX-P7):
 //
-//   - the vendor wire clients (internal/sandboxremote/e2b, /modal, /vercel)
+//   - the vendor wire clients (internal/sandboxremote/e2b, /modal, /vercel,
+//     /sandhold)
 //     are the ONLY sandboxremote packages that import a network package;
 //     the shared core and the relay mux are pure;
 //   - only cmd/observer imports a vendor client (its per-vendor driver file
@@ -20,7 +21,7 @@ import (
 
 // sandboxRemoteClients are the vendor wire clients that exist in this
 // build's source tree.
-var sandboxRemoteClients = []string{"internal/sandboxremote/e2b", "internal/sandboxremote/modal", "internal/sandboxremote/vercel", "internal/sandboxremote/openshellorg"}
+var sandboxRemoteClients = []string{"internal/sandboxremote/e2b", "internal/sandboxremote/modal", "internal/sandboxremote/vercel", "internal/sandboxremote/openshellorg", "internal/sandboxremote/sandhold"}
 
 // sandboxRemotePure are the hosted packages held to no network import.
 var sandboxRemotePure = []string{"internal/sandboxremote", "internal/sandboxremote/relaymux"}

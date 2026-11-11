@@ -1,0 +1,17 @@
+{
+  "name": "exec",
+  "about": "Run a command; one answer when it ends.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "echo hello",
+    "timeoutSeconds": 30
+  },
+  "status": 200,
+  "response": {
+    "durationMs": 0,
+    "exitCode": 0,
+    "stderr": "",
+    "stdout": "ok\n"
+  }
+}

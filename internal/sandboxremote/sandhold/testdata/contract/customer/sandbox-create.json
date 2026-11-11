@@ -1,0 +1,25 @@
+{
+  "name": "sandbox-create",
+  "about": "Start a sandbox from a template; the create's own fields win.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "template": "py-tests",
+    "timeoutSeconds": 600
+  },
+  "status": 201,
+  "response": {
+    "createdAt": "<time>",
+    "engine": "runc",
+    "expiresAt": "<time>",
+    "id": "<id>",
+    "image": "sandhold/sandbox:dev",
+    "isolation": "shielded",
+    "isolationMeans": "a hardened container on the host's kernel",
+    "network": "limited",
+    "owner": "alice",
+    "runsOn": "runc",
+    "state": "Running",
+    "target": "runc"
+  }
+}

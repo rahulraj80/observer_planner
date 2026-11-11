@@ -1,0 +1,10 @@
+{
+  "name": "unauthenticated",
+  "about": "No credentials.",
+  "method": "GET",
+  "path": "/v1/whoami",
+  "status": 401,
+  "response": {
+    "error": "unauthorized: no credentials"
+  }
+}

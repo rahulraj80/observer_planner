@@ -194,6 +194,16 @@ var egressLanes = []egressLane{
 		Gate:     "a user-launched sandboxed terminal on the vercel-sandbox row (listed in backends, the terminals.sandbox.vercel component active, consent recorded) or a user's confirm in the leftover-box list (I6); the probe never calls it",
 		Pins:     []string{"sandbox_remote_egress_test.go"},
 	},
+	// The SandHold row (SandHold notes 41 D2 and D3): the node a user named
+	// with `observer sandbox connect`. Sign-in, whoami, targets and key
+	// revocation only in this release; the probe never calls it.
+	{
+		ID: "sandbox.remote.sandhold", Pkg: "internal/sandboxremote/sandhold", Kind: egressRemote,
+		Reaches:  "the SandHold node the user named (its /v1 device sign-in, whoami, targets and key revocation), over HTTPS (plain http for localhost only) with no redirects; a saved key is sent only to the node that issued it",
+		Triggers: []egressTrigger{trigUserCommand},
+		Gate:     "`observer sandbox connect <node-url>` and `observer sandbox disconnect`, run by the user (the terminals.sandbox module active); the row's probe and the inactive hint read only the local connection record",
+		Pins:     []string{"sandbox_remote_egress_test.go"},
+	},
 	// The org-hosted OpenShell row (tracker F-019, lane G4): the node to
 	// front lane. It reaches only the front URL the organization published in
 	// its signed managed sandbox body, never the gateway, with a run token
