@@ -136,6 +136,12 @@ func liveRun(t *testing.T, b *Box, class vocab.IsoClass) {
 			t.Errorf("the launch script is still in /tmp: %q", left)
 		}
 		t.Logf("/tmp after the terminal: %q", strings.Join(strings.Fields(string(left)), " "))
+		// The node's agent keeps no command's output loose in /tmp (a node
+		// whose execd is older than SandHold's sh3 did; the user's /tmp is
+		// theirs).
+		if bytes.Contains(left, []byte(".stdout")) || bytes.Contains(left, []byte(".stderr")) {
+			t.Errorf("command output files are left in the sandbox's /tmp: %q", left)
+		}
 	}
 
 	// Pipe mode (what the capture relay uses): stdin reaches the command.
