@@ -6167,6 +6167,22 @@
       "doc": "AllowShell is the opt-in for a fresh PLAIN SHELL launch (the child's\n$SHELL, or /bin/bash / /bin/sh as a fallback — never an AI tool).\nDefault FALSE, and deliberately independent of AllowFreshAgent: turning\non fresh AI-tool launches must not silently also grant an arbitrary\ncommand shell. BurntSushi leaves an absent key untouched, so a\npre-existing [terminal.launch] block that predates this key still\nloads with AllowShell=false."
     },
     {
+      "path": "terminal.launch.auto_confirm_agent",
+      "field_path": "Terminal.Launch.AutoConfirmAgent",
+      "kind": "bool",
+      "go_type": "bool",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.TerminalLaunchConfig",
+      "field": "AutoConfirmAgent",
+      "block": "terminal",
+      "table": "terminal.launch",
+      "tier": "sensitive",
+      "restart": "next_spawn",
+      "section": "terminal",
+      "prominence": "primary",
+      "secret": false,
+      "doc": "AutoConfirmAgent lets a launch an AI agent asked for (`observer\nlaunch` run by an agent) start without a human's confirm. Default\nFALSE: such a launch is held until a human runs `observer terminals\nconfirm <id>` or confirms it on the Terminals page. Turn it on only on\na machine where you accept that an agent may start terminals on its\nown; the run is still recorded as the agent's. Read from this file\nonly (the dashboard cannot change it); the daemon reads it at start."
+    },
+    {
       "path": "terminal.launch.allow_install",
       "field_path": "Terminal.Launch.AllowInstall",
       "kind": "bool",

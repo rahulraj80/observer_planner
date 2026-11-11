@@ -314,6 +314,7 @@ export type ConfigKeyPath =
   "terminal.ws_ping_failures_allowed" |
   "terminal.launch.allow_fresh_agent" |
   "terminal.launch.allow_shell" |
+  "terminal.launch.auto_confirm_agent" |
   "terminal.launch.allow_install" |
   "terminal.launch.allowed_tools" |
   "terminal.launch.allowed_project_roots" |
