@@ -60,7 +60,12 @@ func newSandholdFakeNode(t *testing.T, keyID string, tokens ...string) *sandhold
 			next, f.tokens = f.tokens[0], f.tokens[1:]
 		}
 		if next != "" {
-			sandholdWriteJSON(w, 400, map[string]string{"error": next, "error_description": "the node says " + next})
+			desc := "the node says " + next
+			if next == "expired_token" {
+				// SandHold's own words (control/internal/api/device.go).
+				desc = "the sign-in was not approved in time; start again"
+			}
+			sandholdWriteJSON(w, 400, map[string]string{"error": next, "error_description": desc})
 			return
 		}
 		sandholdWriteJSON(w, 200, map[string]any{"access_token": sandholdTestKey, "key_id": f.keyID, "expires_at": "2026-12-11T00:00:00Z", "org": "acme", "user": "alice"})
@@ -147,6 +152,10 @@ func TestSandholdConnect(t *testing.T) {
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				// Said once: the node's own words for an expiry repeat ours.
+				if n := strings.Count(err.Error(), tc.wantErr); n != 1 {
+					t.Errorf("%q appears %d times: %v", tc.wantErr, n, err)
 				}
 			} else if err != nil {
 				t.Fatalf("connect: %v\n%s", err, out.String())

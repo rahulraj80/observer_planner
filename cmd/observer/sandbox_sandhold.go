@@ -469,7 +469,10 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	case errors.Is(err, sandhold.ErrDenied):
 		return fmt.Errorf("sandbox connect: not connected: %w", err)
 	case errors.Is(err, sandhold.ErrExpired):
-		return fmt.Errorf("sandbox connect: not connected: %w; to fix: run observer sandbox connect %s again", err, node)
+		// The node's own words for this repeat ours ("not approved in
+		// time; start again"), so they are not printed: one sentence and
+		// the fix.
+		return fmt.Errorf("sandbox connect: not connected: %w; to fix: run observer sandbox connect %s again", sandhold.ErrExpired, node)
 	case err != nil:
 		return fmt.Errorf("sandbox connect: %w", err)
 	}
