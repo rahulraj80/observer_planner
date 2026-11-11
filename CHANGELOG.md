@@ -4,6 +4,14 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
+- **Agent launches without a confirm, when the owner says so.** A new setting,
+  `[terminal.launch].auto_confirm_agent` (off by default, read from
+  config.toml only), lets a launch an AI agent asked for start at once
+  instead of waiting for `observer terminals confirm`. The run is still
+  recorded as the agent's, and the daemon logs each one. Both launch paths
+  (`observer launch` and `observer <tool> --attach`) use the one decision,
+  `agentlaunch.Decide`.
+
 ### Changed (observer_planner fork)
 
 - **Synced with upstream v1.38.0; the fork's node migrations are now 249 to 255.** Upstream 1.38.0

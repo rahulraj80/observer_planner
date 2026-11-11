@@ -150,6 +150,31 @@ func TestAgentLaunchIsHeldUntilAHumanConfirms(t *testing.T) {
 	}
 }
 
+// TestAgentLaunchRunsWhenTheOwnerAutoConfirms: with
+// [terminal.launch].auto_confirm_agent on, an agent's `observer launch`
+// starts at once, still recorded as the agent's, and nothing is held.
+func TestAgentLaunchRunsWhenTheOwnerAutoConfirms(t *testing.T) {
+	requireTerminalsActive(t)
+	f := newFakeTermsvc()
+	f.probe = liveProbe()
+	var agent atomic.Bool
+	agent.Store(true)
+	c := agentCallerDaemon(t, f, &agent)
+	c.pending = newPendingLaunchStoreWith(true)
+
+	out, errb, code := runVerb(t, "launch", "claude", "--project", "/home/dev/repo", "--detach", "--json")
+	if code != 0 {
+		t.Fatalf("an auto-confirmed agent launch: exit %d (stdout %q, stderr %q)", code, out, errb)
+	}
+	if len(f.specs) != 1 || f.specs[0].Initiator != "agent" || f.specs[0].ParentSessionID != "sess-parent" {
+		t.Fatalf("launch spec = %+v", f.specs)
+	}
+	out, _, _ = runVerb(t, "terminals", "ls")
+	if strings.Contains(out, attachsock.StatePending) {
+		t.Fatalf("something is held:\n%s", out)
+	}
+}
+
 // TestAgentAttachLaunchIsHeld pins the attach spawn's half: an agent's
 // `observer <tool> --attach` spawns nothing and is refused with
 // confirm_required naming the hold; a human's confirm starts that request.

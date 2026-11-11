@@ -2272,6 +2272,14 @@ type TerminalLaunchConfig struct {
 	// pre-existing [terminal.launch] block that predates this key still
 	// loads with AllowShell=false.
 	AllowShell bool `toml:"allow_shell"`
+	// AutoConfirmAgent lets a launch an AI agent asked for (`observer
+	// launch` run by an agent) start without a human's confirm. Default
+	// FALSE: such a launch is held until a human runs `observer terminals
+	// confirm <id>` or confirms it on the Terminals page. Turn it on only on
+	// a machine where you accept that an agent may start terminals on its
+	// own; the run is still recorded as the agent's. Read from this file
+	// only (the dashboard cannot change it); the daemon reads it at start.
+	AutoConfirmAgent bool `toml:"auto_confirm_agent"`
 	// AllowInstall gates POST /api/terminal/install — the guided one-click
 	// "Install in terminal" affordance (tool-binary-resolution arc). Default
 	// TRUE: the consent is the explicit dashboard click that runs a grounded,

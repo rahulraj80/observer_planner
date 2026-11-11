@@ -423,7 +423,7 @@ func (h *attachHost) LaunchAttachable(ctx context.Context, req attachsock.SpawnR
 		return nil, &attachsock.ControlError{Code: agentlaunch.CodeOf(err), Message: err.Error()}
 	}
 	if _, confirmed := heldOrigin(ctx); !confirmed {
-		if hold, _ := agentlaunch.ShouldHold(origin); hold {
+		if h.pending.shouldHold(origin) {
 			return nil, h.holdAttach(req, origin)
 		}
 	}

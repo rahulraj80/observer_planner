@@ -191,7 +191,10 @@ func newLaunchCmd() *cobra.Command {
 			"Run by an agent (its process descends from an agent session, or carries\n" +
 			"its session marker), the launch is held for a human instead: the command\n" +
 			"prints the hold's id and exits 6; a human runs `observer terminals confirm\n" +
-			"<id>` (or confirms it on the dashboard's Terminals page) within 10 minutes.\n\n" +
+			"<id>` (or confirms it on the dashboard's Terminals page) within 10 minutes.\n" +
+			"An owner who accepts agents starting terminals on their own sets\n" +
+			"[terminal.launch].auto_confirm_agent = true in config.toml (off by default):\n" +
+			"the launch then starts at once, still recorded as the agent's.\n\n" +
 			"Exit codes: 0 launched (or, without --detach, the tool exited 0), 2 usage,\n" +
 			"3 refused or not available, 4 wait timed out, 5 the tool exited non-zero or\n" +
 			"its exit code is unknown, 6 held for a human's confirm, 130 Ctrl-C stopped\n" +

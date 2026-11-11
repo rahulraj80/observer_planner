@@ -68,6 +68,23 @@ var holdRows = []holdRow{
 	{"P3-human-runs", func(termrun.Origin) (bool, bool) { return false, true }},
 }
 
+// RuleAutoConfirmed is the row that lets an agent's launch run without a
+// human's confirm, because the owner turned on
+// [terminal.launch].auto_confirm_agent (Decide).
+const RuleAutoConfirmed = "P0-agent-auto-confirmed"
+
+// Decide is ShouldHold under the owner's setting: with autoConfirm on, an
+// agent's launch is not held (row P0-agent-auto-confirmed) and runs,
+// still recorded as the agent's; every other origin is decided exactly as
+// ShouldHold decides it. The setting is off by default and is read only
+// from the owner's config file, never from a request.
+func Decide(o termrun.Origin, autoConfirm bool) (bool, string) {
+	if autoConfirm && o.Normalized().Initiator == termrun.InitiatorAgent {
+		return false, RuleAutoConfirmed
+	}
+	return ShouldHold(o)
+}
+
 // ShouldHold reports whether a launch of this origin is held for a human,
 // and the deciding row.
 func ShouldHold(o termrun.Origin) (bool, string) {

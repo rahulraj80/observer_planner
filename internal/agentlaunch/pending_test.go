@@ -30,6 +30,28 @@ func TestShouldHoldRows(t *testing.T) {
 	}
 }
 
+// TestDecideAutoConfirm: the owner's setting lets only an agent's launch
+// through; with it off, Decide is ShouldHold.
+func TestDecideAutoConfirm(t *testing.T) {
+	t.Parallel()
+	agent := termrun.Origin{Initiator: termrun.InitiatorAgent, ParentSessionID: "s"}
+	if hold, rule := Decide(agent, true); hold || rule != RuleAutoConfirmed {
+		t.Errorf("agent, auto on: %v %s", hold, rule)
+	}
+	if hold, rule := Decide(agent, false); !hold || rule != "P1-agent-held" {
+		t.Errorf("agent, auto off: %v %s", hold, rule)
+	}
+	for _, o := range []termrun.Origin{{Initiator: termrun.InitiatorUnknown}, {Initiator: termrun.InitiatorHumanCLI}, {}} {
+		for _, auto := range []bool{true, false} {
+			h1, r1 := Decide(o, auto)
+			h2, r2 := ShouldHold(o)
+			if h1 != h2 || r1 != r2 {
+				t.Errorf("%+v auto=%v: Decide %v %s, ShouldHold %v %s", o, auto, h1, r1, h2, r2)
+			}
+		}
+	}
+}
+
 // TestMayConfirmRows walks one case per confirm row.
 func TestMayConfirmRows(t *testing.T) {
 	t.Parallel()

@@ -137,7 +137,7 @@ func (c *launchControl) LaunchDetached(ctx context.Context, spec attachsock.Laun
 	// An agent's launch is held for a human (lane cli-2 fixes-1): it starts
 	// only when `observer terminals confirm` (or the Terminals page) names
 	// this hold, and then walks every row above again.
-	if hold, _ := agentlaunch.ShouldHold(origin); hold && !confirmed {
+	if !confirmed && c.pending.shouldHold(origin) {
 		return c.holdLaunch(spec, n, origin)
 	}
 	res, gateRefused, err := c.fresh(dashapi.FreshLaunchSpec{

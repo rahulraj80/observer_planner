@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -45,11 +46,35 @@ type pendingAction func(ctx context.Context) (pendingOutcome, error)
 // dashboard (dashapi.PendingLaunches).
 type pendingLaunchStore struct {
 	holds *agentlaunch.Holds[pendingAction]
+	// autoConfirm is [terminal.launch].auto_confirm_agent: an agent's
+	// launch runs without a hold (agentlaunch.Decide).
+	autoConfirm bool
+}
+
+// shouldHold is the one hold decision of both launch paths (detached and
+// attach): a nil store has no setting, so an agent's launch is held (and
+// then refused, there being nowhere to hold it).
+func (p *pendingLaunchStore) shouldHold(o termrun.Origin) bool {
+	auto := p != nil && p.autoConfirm
+	hold, rule := agentlaunch.Decide(o, auto)
+	if rule == agentlaunch.RuleAutoConfirmed {
+		slog.Default().Info("an agent's launch runs without a confirm: [terminal.launch].auto_confirm_agent is on",
+			"initiator", string(o.Initiator), "parent_session", o.ParentSessionID)
+	}
+	return hold
 }
 
 // newPendingLaunchStore builds the store over the wall clock and random ids.
 func newPendingLaunchStore() *pendingLaunchStore {
 	return &pendingLaunchStore{holds: agentlaunch.NewHolds[pendingAction](time.Now, newPendingID)}
+}
+
+// newPendingLaunchStoreWith is newPendingLaunchStore under the owner's
+// [terminal.launch].auto_confirm_agent setting.
+func newPendingLaunchStoreWith(autoConfirm bool) *pendingLaunchStore {
+	p := newPendingLaunchStore()
+	p.autoConfirm = autoConfirm
+	return p
 }
 
 // newPendingID is a short random id ("pend-" + 12 hex digits).

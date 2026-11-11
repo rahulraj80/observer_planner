@@ -586,7 +586,7 @@ func buildTerminalStack(ctx context.Context, cfg config.Config, database *sql.DB
 		sandboxedRunRows: terminalSandboxedRunRows(database),
 		observerDir:      filepath.Dir(cfg.Observer.DBPath),
 		liveSession:      liveSessionFor(database),
-		pending:          newPendingLaunchStore(),
+		pending:          newPendingLaunchStoreWith(cfg.Terminal.Launch.AutoConfirmAgent),
 		modelOffered:     launchModelOffered(database),
 		close: func() {
 			// Stop the discovery sweep FIRST — before ANY DB write below and before
