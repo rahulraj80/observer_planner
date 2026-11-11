@@ -208,10 +208,26 @@ func (b *Box) Get(ctx context.Context, id string) (sandboxremote.BoxInfo, error)
 	return info(sb), nil
 }
 
-// ListByLabel cannot find a box by its run label: the node's list carries
-// no metadata (a gap reported to SandHold). It says so instead of guessing.
-func (b *Box) ListByLabel(context.Context, string, string) ([]sandboxremote.BoxInfo, error) {
-	return nil, fmt.Errorf("%w: the node's sandbox list carries no metadata, so a box cannot be found by its run label; look for it with `sandhold ls` or in the node's portal", sandboxremote.ErrNotSupported)
+// ListByLabel lists the member's sandboxes that carry the label key =
+// value, by the node's metadata filter. A node from before the filter
+// ignores it and lists every sandbox, none carrying the label: that is
+// told apart from "none found" and reported as not supported, so a box is
+// never declared gone on a guess.
+func (b *Box) ListByLabel(ctx context.Context, key, value string) ([]sandboxremote.BoxInfo, error) {
+	cctx, cancel := context.WithTimeout(ctx, callWait)
+	defer cancel()
+	list, err := b.api.ListSandboxesBy(cctx, key, value)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sandboxremote.BoxInfo, 0, len(list))
+	for _, sb := range list {
+		if got, ok := sb.Metadata[key]; !ok || got != value {
+			return nil, fmt.Errorf("%w: this node listed a sandbox without the label asked for, so it is older than the label filter and a box cannot be found by its run label; look for it with `sandhold ls` or in the node's portal", sandboxremote.ErrNotSupported)
+		}
+		out = append(out, info(sb))
+	}
+	return out, nil
 }
 
 // Delete removes a sandbox (ErrNotFound when the node no longer has it).

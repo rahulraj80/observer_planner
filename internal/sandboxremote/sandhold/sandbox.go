@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -27,17 +28,27 @@ type Sandbox struct {
 	// Network is the node's network word (none, limited, open).
 	Network string `json:"network"`
 	// RunsOn is the target; Engine and Target are its older names.
-	RunsOn    string    `json:"runsOn"`
-	Engine    string    `json:"engine"`
-	Target    string    `json:"target"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	RunsOn string `json:"runsOn"`
+	Engine string `json:"engine"`
+	Target string `json:"target"`
+	// Metadata is the caller's own labels from the create (a node older
+	// than 2026-11-11 sends none).
+	Metadata  map[string]string `json:"metadata"`
+	CreatedAt time.Time         `json:"createdAt"`
+	ExpiresAt time.Time         `json:"expiresAt"`
 }
 
 // clean removes control characters from every word the node sent.
 func (s *Sandbox) clean() {
 	for _, p := range []*string{&s.ID, &s.State, &s.Image, &s.Owner, &s.Isolation, &s.IsolationMeans, &s.Network, &s.RunsOn, &s.Engine, &s.Target} {
 		*p = PlainLine(*p)
+	}
+	if len(s.Metadata) > 0 {
+		md := make(map[string]string, len(s.Metadata))
+		for k, v := range s.Metadata {
+			md[PlainLine(k)] = PlainLine(v)
+		}
+		s.Metadata = md
 	}
 }
 
@@ -142,10 +153,22 @@ func (c *Client) GetSandbox(ctx context.Context, id string) (Sandbox, error) {
 
 // ListSandboxes lists the member's own sandboxes.
 func (c *Client) ListSandboxes(ctx context.Context) ([]Sandbox, error) {
+	return c.listSandboxes(ctx, "")
+}
+
+// ListSandboxesBy lists the member's sandboxes that carry the metadata
+// label key = value (GET /v1/sandboxes?metadata=key=value). A node older
+// than the filter ignores it and lists them all; the caller tells by the
+// labels on what comes back.
+func (c *Client) ListSandboxesBy(ctx context.Context, key, value string) ([]Sandbox, error) {
+	return c.listSandboxes(ctx, "?"+url.Values{"metadata": {key + "=" + value}}.Encode())
+}
+
+func (c *Client) listSandboxes(ctx context.Context, query string) ([]Sandbox, error) {
 	var out struct {
 		Sandboxes []Sandbox `json:"sandboxes"`
 	}
-	if err := c.Do(ctx, http.MethodGet, "/v1/sandboxes", nil, &out); err != nil {
+	if err := c.Do(ctx, http.MethodGet, "/v1/sandboxes"+query, nil, &out); err != nil {
 		return nil, err
 	}
 	for i := range out.Sandboxes {

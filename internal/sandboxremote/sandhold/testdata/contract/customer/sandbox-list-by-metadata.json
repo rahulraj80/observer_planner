@@ -1,0 +1,27 @@
+{
+  "name": "sandbox-list-by-metadata",
+  "about": "The sandboxes that carry a label: how a tool finds the ones it started.",
+  "method": "GET",
+  "path": "/v1/sandboxes?metadata=observer-run=run-7f3a",
+  "status": 200,
+  "response": {
+    "sandboxes": [
+      {
+        "createdAt": "<time>",
+        "engine": "runc",
+        "expiresAt": "<time>",
+        "id": "<id>",
+        "image": "sandhold/sandbox:dev",
+        "isolation": "shielded",
+        "isolationMeans": "a hardened container on the host's kernel",
+        "metadata": {
+          "observer-run": "run-7f3a"
+        },
+        "network": "limited",
+        "owner": "alice",
+        "runsOn": "runc",
+        "state": ""
+      }
+    ]
+  }
+}

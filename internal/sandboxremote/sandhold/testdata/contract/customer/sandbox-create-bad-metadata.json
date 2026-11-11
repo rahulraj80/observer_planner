@@ -1,0 +1,16 @@
+{
+  "name": "sandbox-create-bad-metadata",
+  "about": "A label no target would keep is refused before anything starts.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "metadata": {
+      "sandhold-org": "someone-else"
+    }
+  },
+  "status": 400,
+  "response": {
+    "error": "the metadata name \"sandhold-org\" is reserved for the node",
+    "fix": "use at most 16 labels; a name and a value are letters, digits, dashes, underscores and dots (at most 63, starting and ending with a letter or digit), and a name does not start with sandhold-"
+  }
+}

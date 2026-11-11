@@ -1,9 +1,12 @@
 {
   "name": "sandbox-create",
-  "about": "Start a sandbox from a template; the create's own fields win.",
+  "about": "Start a sandbox from a template; the create's own fields win. Its metadata labels stay on the sandbox.",
   "method": "POST",
   "path": "/v1/sandboxes",
   "request": {
+    "metadata": {
+      "observer-run": "run-7f3a"
+    },
     "template": "py-tests",
     "timeoutSeconds": 600
   },
@@ -16,6 +19,9 @@
     "image": "sandhold/sandbox:dev",
     "isolation": "shielded",
     "isolationMeans": "a hardened container on the host's kernel",
+    "metadata": {
+      "observer-run": "run-7f3a"
+    },
     "network": "limited",
     "owner": "alice",
     "runsOn": "runc",

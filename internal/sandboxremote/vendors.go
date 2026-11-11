@@ -514,7 +514,7 @@ var vendors = map[string]Vendor{
 		Docs: []EndpointDoc{
 			{"create", "POST", "/v1/sandboxes (template, timeoutSeconds, metadata, isolation, network.open)", "SandHold control/README.md; control/internal/api/api.go createSandbox; contract sandbox-create, sandbox-create-refused", ""},
 			{"get", "GET", "/v1/sandboxes/{id}", "api.go getSandbox; contract sandbox-get, sandbox-missing", ""},
-			{"list", "GET", "/v1/sandboxes", "api.go listSandboxes; contract sandbox-list", "the list carries no metadata, so a box is never found by its run label"},
+			{"list", "GET", "/v1/sandboxes?metadata=observer-run=<run id>", "api.go listSandboxes; contract sandbox-list, sandbox-list-by-metadata", "a node from before the metadata filter lists every sandbox; that is detected and reported as not supported"},
 			{"delete", "DELETE", "/v1/sandboxes/{id}", "api.go deleteSandbox; contract sandbox-delete", ""},
 			{"exec", "POST", "/v1/sandboxes/{id}/exec (Accept: text/event-stream)", "api.go exec, exec_stream.go; contract exec-stream", "output arrives as text lines, so a command's bytes are not carried exactly"},
 			{"upload", "PUT", "/v1/sandboxes/{id}/files?path=&mode= (raw body, 100 MiB at most)", "api.go putFile", "no contract vector"},

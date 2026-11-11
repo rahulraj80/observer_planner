@@ -12,6 +12,9 @@
     "image": "sandhold/sandbox:dev",
     "isolation": "shielded",
     "isolationMeans": "a hardened container on the host's kernel",
+    "metadata": {
+      "observer-run": "run-7f3a"
+    },
     "network": "limited",
     "owner": "alice",
     "runsOn": "runc",

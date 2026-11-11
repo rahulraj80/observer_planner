@@ -55,9 +55,9 @@ func TestContractBoxCreateGotLess(t *testing.T) {
 		spec sandboxremote.BoxSpec
 		want string
 	}{
-		{"isolation", sandboxremote.BoxSpec{Template: "py-tests", TimeoutSeconds: 600, Tier: vocab.TierInternet, Isolation: vocab.ClassHWVM}, "Shielded isolation, below the Vault asked for"},
-		{"network", sandboxremote.BoxSpec{Template: "py-tests", TimeoutSeconds: 600, Tier: vocab.TierNone}, "network limited, more open than the none tier allows"},
-		{"proxy_only", sandboxremote.BoxSpec{Template: "py-tests", TimeoutSeconds: 600, Tier: vocab.TierProxyOnly}, "more open than the proxy_only tier allows"},
+		{"isolation", sandboxremote.BoxSpec{Template: "py-tests", TimeoutSeconds: 600, Labels: map[string]string{sandboxremote.LabelKey: "run1"}, Tier: vocab.TierInternet, Isolation: vocab.ClassHWVM}, "Shielded isolation, below the Vault asked for"},
+		{"network", sandboxremote.BoxSpec{Template: "py-tests", TimeoutSeconds: 600, Labels: map[string]string{sandboxremote.LabelKey: "run1"}, Tier: vocab.TierNone}, "network limited, more open than the none tier allows"},
+		{"proxy_only", sandboxremote.BoxSpec{Template: "py-tests", TimeoutSeconds: 600, Labels: map[string]string{sandboxremote.LabelKey: "run1"}, Tier: vocab.TierProxyOnly}, "more open than the proxy_only tier allows"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := contractBox(t, loadVector(t, "sandbox-create"), loadVector(t, "sandbox-delete"))
@@ -106,9 +106,16 @@ func TestContractBoxGetListDelete(t *testing.T) {
 	if err := contractBox(t, loadVector(t, "sandbox-delete")).Delete(context.Background(), contractID); err != nil {
 		t.Errorf("delete (%d, no body): %v", loadVector(t, "sandbox-delete").Status, err)
 	}
-	// The list carries no metadata: a box is never "found" by its label.
-	if _, err := contractBox(t).ListByLabel(context.Background(), sandboxremote.LabelKey, "run1"); !errors.Is(err, sandboxremote.ErrNotSupported) {
-		t.Errorf("list by label: %v, want ErrNotSupported", err)
+	// A box is found by its run label: the node filters its list, and the
+	// answer carries the label.
+	found, err := contractBox(t, loadVector(t, "sandbox-list-by-metadata")).ListByLabel(context.Background(), sandboxremote.LabelKey, "run-7f3a")
+	if err != nil || len(found) != 1 || found[0].ID != contractID {
+		t.Errorf("list by label: %+v %v, want the one sandbox that carries it", found, err)
+	}
+	// A node from before the filter ignores it and lists everything: a
+	// sandbox without the label asked for means "cannot tell", never "none".
+	if _, err := contractBox(t, loadVector(t, "sandbox-list")).ListByLabel(context.Background(), sandboxremote.LabelKey, "another-run"); !errors.Is(err, sandboxremote.ErrNotSupported) {
+		t.Errorf("list by label on a node that did not filter: %v, want ErrNotSupported", err)
 	}
 }
 

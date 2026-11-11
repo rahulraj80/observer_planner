@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +80,10 @@ func contractNode(t *testing.T, vs ...vector) *Client {
 	t.Helper()
 	next := map[string][]vector{}
 	for _, v := range vs {
-		k := v.Method + " " + fill(v.Path)
+		// A contract path may carry a query; calls are matched on the path
+		// and the query is checked when the call arrives.
+		path, _, _ := strings.Cut(fill(v.Path), "?")
+		k := v.Method + " " + path
 		next[k] = append(next[k], v)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +97,12 @@ func contractNode(t *testing.T, vs ...vector) *Client {
 		v := q[0]
 		if len(q) > 1 {
 			next[k] = q[1:]
+		}
+		if _, wantQ, ok := strings.Cut(fill(v.Path), "?"); ok {
+			want, _ := url.ParseQuery(wantQ)
+			if got := r.URL.Query(); !reflect.DeepEqual(got, want) {
+				t.Errorf("%s: the client sent the query %v, the contract's call sends %v", v.Name, got, want)
+			}
 		}
 		if len(v.Request) > 0 {
 			// The client must send every field the contract's request has.
