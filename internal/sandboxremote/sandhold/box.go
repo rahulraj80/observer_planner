@@ -101,7 +101,7 @@ func createRequest(spec sandboxremote.BoxSpec) (CreateRequest, error) {
 		req.Isolation = w
 	}
 	if _, ok := netWords[spec.Tier]; !ok {
-		return CreateRequest{}, fmt.Errorf("sandhold: no %s network tier on a SandHold node", spec.Tier)
+		return CreateRequest{}, fmt.Errorf("sandhold: no network tier %q on a SandHold node (none, proxy_only or internet)", spec.Tier)
 	}
 	if spec.Tier == vocab.TierInternet {
 		req.Network = &CreateNetwork{Open: true}
