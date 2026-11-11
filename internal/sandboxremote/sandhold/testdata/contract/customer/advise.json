@@ -17,7 +17,7 @@
   },
   "status": 200,
   "response": {
-    "command": "sandhold create --isolation shielded --allow pypi.org --allow files.pythonhosted.org --allow github.com --timeout 30m",
+    "command": "sandhold create --isolation shielded --trust generated --allow pypi.org --allow files.pythonhosted.org --allow github.com --timeout 30m",
     "isolation": "shielded",
     "isolationMeans": "a hardened container on the host's kernel",
     "limits": [
@@ -38,7 +38,8 @@
           "github.com"
         ]
       },
-      "timeoutSeconds": 1800
+      "timeoutSeconds": 1800,
+      "trust": "generated"
     },
     "why": [
       {

@@ -1,0 +1,49 @@
+{
+  "name": "terminal-pipe",
+  "about": "A command without a terminal (mode=pipe): binary frames in are standard input and {\"type\":\"eof\"} ends it; binary frames out start with 1 (stdout) or 2 (stderr) and carry the exact bytes; the exit frame, then the close.",
+  "method": "GET",
+  "path": "/v1/sandboxes/<id>/pty?mode=pipe&command=cat",
+  "status": 101,
+  "frames": [
+    {
+      "from": "node",
+      "json": {
+        "mode": "pipe",
+        "type": "connected"
+      }
+    },
+    {
+      "from": "client",
+      "binary": "aGVsbG8K",
+      "text": "hello\n"
+    },
+    {
+      "from": "client",
+      "binary": "AP8="
+    },
+    {
+      "from": "client",
+      "json": {
+        "type": "eof"
+      }
+    },
+    {
+      "from": "node",
+      "binary": "AWhlbGxvCgD/"
+    },
+    {
+      "from": "node",
+      "json": {
+        "exitCode": 0,
+        "exit_code": 0,
+        "signaled": false,
+        "type": "exit"
+      }
+    },
+    {
+      "from": "node",
+      "close": 1000,
+      "reason": "process exited"
+    }
+  ]
+}

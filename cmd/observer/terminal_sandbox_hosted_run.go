@@ -86,9 +86,10 @@ type hostedPlanFile struct {
 	// ToolStateRel are the tool's HOME-relative state dirs (pulled at each
 	// checkpoint and at teardown).
 	ToolStateRel []string `json:"tool_state_rel"`
-	// ToolInstall is the tool's grounded Linux install argv run at first
-	// start (only on the internet tier with no template); empty otherwise.
-	ToolInstall []string `json:"tool_install,omitempty"`
+	// ToolCheck is what the box is asked about the agent tool at first
+	// start, and how it may install it (only on the internet tier); nil
+	// when there is nothing to look for (terminal_sandbox_hosted_toolinstall.go).
+	ToolCheck *hostedToolCheck `json:"tool_check,omitempty"`
 	// ForwardEnv are the provider API-key variable names copied into the
 	// box (custody in_box_api_key only; values are read by the helper).
 	ForwardEnv        []string `json:"forward_env,omitempty"`
@@ -230,46 +231,6 @@ func hostedCustodyCheckNoted(homeRelayOK bool, note string, custody vocab.KeyCus
 	return err
 }
 
-// hostedToolDelivery decides how the agent tool reaches the box (SBX-IMG-1,
-// orchestrator default): no agent CLI is uploaded; a template the user
-// named holds it, or, on the internet tier only, it installs from its
-// vendor at first start; otherwise tool_unavailable_in_image (S11).
-//
-// rule is the vendor's template rule (Vendor.TemplateRule), named in the
-// refusal so a vendor whose templates are restricted says how to make one.
-func hostedToolDelivery(tool, template string, tier vocab.Tier, rule string) ([]string, error) {
-	if strings.TrimSpace(template) != "" {
-		return nil, nil
-	}
-	install := hostedToolInstallCommand(tool)
-	if tier == vocab.TierInternet && len(install) > 0 {
-		return install, nil
-	}
-	if len(install) == 0 {
-		return nil, fmt.Errorf("terminal_sandbox: %s: %s has no grounded Linux install command, and no template is set; name a template that holds it in [terminal.sandbox.hosted.<provider>].template", verdictHostedTool, tool)
-	}
-	if rule != "" {
-		return nil, fmt.Errorf("terminal_sandbox: %s: no template is set, and the %s tier cannot reach %s's vendor to install it at first start; %s", verdictHostedTool, tier, tool, rule)
-	}
-	return nil, fmt.Errorf("terminal_sandbox: %s: no template is set, and the %s tier cannot reach %s's vendor to install it at first start; name a template that holds it in [terminal.sandbox.hosted.<provider>].template, or use the internet tier", verdictHostedTool, tier, tool)
-}
-
-// hostedToolInstallCommand is the tool's grounded Linux install argv from
-// the integration registry (nil when none is grounded): an npm or vendor
-// script channel only, the two that run inside a plain Linux box.
-func hostedToolInstallCommand(tool string) []string {
-	spec, ok := integration.For(tool)
-	if !ok || spec.Binary == nil {
-		return nil
-	}
-	for _, h := range spec.Binary.Installs {
-		if (h.OS == "" || h.OS == "linux") && (h.Channel == "npm" || h.Channel == "script") && len(h.Argv) > 0 {
-			return append([]string(nil), h.Argv...)
-		}
-	}
-	return nil
-}
-
 // hostedListWorkspace lists the upload candidates: git's tracked plus
 // untracked-not-ignored files under root (the hardened read-only git
 // envelope), each lstat'd, never followed.
@@ -365,7 +326,7 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 	if err := hostedCustodyCheckNoted(d.homeRelayOK, d.homeRelayNote, custody); err != nil {
 		return termsvc.CreateResult{}, err
 	}
-	install, err := hostedToolDelivery(req.Tool, pc.Template, tier, d.vendor.TemplateRule)
+	toolCheck, err := hostedToolDelivery(req.Tool, pc.Template, tier, d.vendor.TemplateRule)
 	if err != nil {
 		return termsvc.CreateResult{}, err
 	}
@@ -413,7 +374,7 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 		Version: hostedPlanVersion, RunID: ws.id, Provider: d.vendor.ID, Endpoint: endpoint, EndpointSPKISHA256: pc.EndpointSPKISHA256, Region: region,
 		Template: pc.Template, Tier: string(tier), Custody: string(custody), TimeoutMinutes: minutes,
 		Root: m.Root, ScopeKey: m.ScopeKey, Files: m.Files, BoxBinary: hostedBoxBinaryPath(pc, d.r.observerBin), BoxBinaryInImage: pc.BoxBinaryInImage,
-		ToolStateRel: spec.Sandbox.StateRW, ToolInstall: install, ForwardEnv: forward,
+		ToolStateRel: spec.Sandbox.StateRW, ToolCheck: toolCheck, ForwardEnv: forward,
 		CheckpointMinutes: d.cfg.CheckpointMinutes, DailyBoxMinutes: d.cfg.DailyBoxMinutes, ObserverDir: d.r.observerDir, Tool: req.Tool,
 		DBExport: d.cfg.DBExport, RetentionDays: d.r.cfg.WorkspaceRetentionDays,
 		Source: string(delivery.Source), Delivery: string(delivery.Delivery), CloneURL: delivery.CloneURL,

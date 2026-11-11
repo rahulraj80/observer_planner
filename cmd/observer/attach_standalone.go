@@ -380,6 +380,11 @@ func buildTerminalStack(ctx context.Context, cfg config.Config, database *sql.DB
 		// The DIRECT per-run exit seam: EndRunByHandle fires this once per run so
 		// the attach hub's correctness never rides the lossy status feed.
 		OnRunExit: hub.NotifyExit,
+		// Why a run nobody marked ended, from the note its helper left (a
+		// hosted launch refused before the agent started, run_end_note.go).
+		ExitReason: func(runID string, exitCode int) string {
+			return runEndNoteReason(filepath.Dir(cfg.Observer.DBPath), runID, exitCode)
+		},
 		// B9: the sandbox workspace+wrap-argv seam (nil when disabled → a
 		// Sandbox:true FreshRequest fails closed with ErrSandboxUnavailable).
 		Sandboxer:            sandboxSeam,
@@ -732,7 +737,8 @@ func resumableSessionSet(runs []store.TerminalRunSummary) map[string][]string {
 		if c, ok := integration.For(r.Tool); !ok || c.Resume.Kind != integration.ResumeNative {
 			continue
 		}
-		switch r.EndReason {
+		code, _ := termrun.SplitEndReason(r.EndReason)
+		switch code {
 		case store.EndReasonResumed, store.EndReasonChildExit, store.EndReasonOrgFloorHooksDrifted,
 			store.EndReasonConsoleClosed, store.EndReasonDashboardStop, store.EndReasonCLIStop, store.EndReasonLaunchRefused, store.EndReasonStoppedOutside, store.EndReasonProcessGone:
 			continue // superseded, an exit, a stop, or ended by the org's floor: not resumable-by-restart

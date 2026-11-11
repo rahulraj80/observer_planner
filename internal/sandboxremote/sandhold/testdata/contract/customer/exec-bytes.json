@@ -1,0 +1,17 @@
+{
+  "name": "exec-bytes",
+  "about": "The exact bytes out, in one answer.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "uname -sr",
+    "output": "base64"
+  },
+  "status": 200,
+  "response": {
+    "durationMs": 0,
+    "exitCode": 0,
+    "stderrBase64": "",
+    "stdoutBase64": "TGludXggc2FuZGJveCA2LjguMC1zYW5kaG9sZCAjMSBTTVAgeDg2XzY0IEdOVS9MaW51eAo="
+  }
+}

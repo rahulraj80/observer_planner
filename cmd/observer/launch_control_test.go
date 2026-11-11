@@ -33,6 +33,9 @@ type fakeTermsvc struct {
 	now      time.Time
 	// exitCode, when set, makes a launched run exit at once with it.
 	exitCode *int
+	// endReason is the reason the terminal service recorded for an ended
+	// run ("" defers to the exit code).
+	endReason string
 }
 
 func newFakeTermsvc() *fakeTermsvc {
@@ -63,7 +66,7 @@ func (f *fakeTermsvc) control(withProbe bool) *launchControl {
 		},
 		snapshot:   func() []dashapi.LaunchInfo { return append([]dashapi.LaunchInfo(nil), f.snap...) },
 		sessionFor: func(runID string) (string, bool) { s, ok := f.sessions[runID]; return s, ok },
-		endReason:  func(string) string { return "" },
+		endReason:  func(string) string { return f.endReason },
 		stop:       func(handle, reason string) { f.stopped[handle] = reason },
 		history: func(context.Context, int) ([]store.TerminalRunSummary, error) {
 			return f.history, nil

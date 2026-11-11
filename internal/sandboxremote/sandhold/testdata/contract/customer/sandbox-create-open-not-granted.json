@@ -1,0 +1,41 @@
+{
+  "name": "sandbox-create-open-not-granted",
+  "about": "Open network asked for on a target that enforces an allow list: the sandbox starts with what it got, and networkNote says what differs, why and what would give it.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "network": {
+      "open": true
+    },
+    "timeoutSeconds": 600
+  },
+  "status": 201,
+  "response": {
+    "createdAt": "<time>",
+    "engine": "runc",
+    "expiresAt": "<time>",
+    "id": "<id>",
+    "image": "sandhold/sandbox:dev",
+    "isolation": "shielded",
+    "isolationMeans": "a hardened container on the host's kernel",
+    "network": "none",
+    "networkNote": {
+      "asked": "open",
+      "code": "network_open_not_granted",
+      "fix": "list what the sandbox must reach in network.allow (within your org's ceiling; POST /v1/sandboxes/{id}/network/allow adds more later), or choose isolation sealed or vault, whose targets give an open network through the host egress gateway; send network.strict true to have such a create refused instead",
+      "got": "none",
+      "why": "network.open was asked for and not given: runc enforces its allow list inside the sandbox, which this node does not open to the whole internet; this sandbox on runc reaches nothing outside it (no allow list was given)"
+    },
+    "owner": "alice",
+    "runsOn": "runc",
+    "startedBy": {
+      "api": "native",
+      "keyId": "<key-id>",
+      "tool": "observer on laptop",
+      "via": "key",
+      "words": "Observer on laptop"
+    },
+    "state": "Running",
+    "target": "runc"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "files-get",
+  "about": "Read a file: the raw bytes.",
+  "method": "GET",
+  "path": "/v1/sandboxes/<id>/files?path=/workspace/report.csv",
+  "accept": "application/octet-stream",
+  "status": 200,
+  "contentType": "application/octet-stream",
+  "responseBody": "report,rows\nq3,1204\n"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "files-get-missing",
+  "about": "No such file.",
+  "method": "GET",
+  "path": "/v1/sandboxes/<id>/files?path=/missing",
+  "status": 404,
+  "response": {
+    "code": "file_not_found",
+    "error": "no such file in the sandbox: /missing",
+    "fix": "check the path (absolute, as the sandbox sees it); PUT /v1/sandboxes/{id}/files?path= writes one"
+  }
+}

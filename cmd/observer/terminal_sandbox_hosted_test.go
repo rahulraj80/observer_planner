@@ -320,11 +320,14 @@ func TestHostedCreateRefusesByName(t *testing.T) {
 	if _, err := hostedToolDelivery("claude-code", "", vocab.TierProxyOnly, ""); err == nil || !strings.Contains(err.Error(), sandboxselect.VerdictToolUnavailableInImage) {
 		t.Errorf("no template on proxy_only: %v", err)
 	}
-	if argv, err := hostedToolDelivery("claude-code", "", vocab.TierInternet, ""); err != nil || len(argv) == 0 {
-		t.Errorf("internet install: %v %v", argv, err)
+	if c, err := hostedToolDelivery("claude-code", "", vocab.TierInternet, ""); err != nil || c == nil || !c.CanInstall || len(c.Installs) == 0 {
+		t.Errorf("internet install: %+v %v", c, err)
 	}
-	if argv, err := hostedToolDelivery("claude-code", "observer-box", vocab.TierNone, ""); err != nil || argv != nil {
-		t.Errorf("named template: %v %v", argv, err)
+	// A named template is checked in the box at first start (it may lack
+	// the tool), never refused here and never installed into below the
+	// internet tier.
+	if c, err := hostedToolDelivery("claude-code", "observer-box", vocab.TierNone, ""); err != nil || c == nil || c.CanInstall || c.Template != "observer-box" || len(c.Names) == 0 {
+		t.Errorf("named template: %+v %v", c, err)
 	}
 	if calls != 0 {
 		t.Errorf("client built %d times", calls)
@@ -462,8 +465,8 @@ func TestHostedVercelTemplateRule(t *testing.T) {
 			t.Errorf("%s: %v", tier, err)
 		}
 	}
-	if argv, err := hostedToolDelivery("claude-code", "", vocab.TierInternet, v.TemplateRule); err != nil || len(argv) == 0 {
-		t.Errorf("internet: %v %v", argv, err)
+	if c, err := hostedToolDelivery("claude-code", "", vocab.TierInternet, v.TemplateRule); err != nil || c == nil || !c.CanInstall {
+		t.Errorf("internet: %+v %v", c, err)
 	}
 	e2b, _ := sandboxremote.VendorFor(sandboxremote.VendorE2B)
 	if e2b.TemplateRule != "" {

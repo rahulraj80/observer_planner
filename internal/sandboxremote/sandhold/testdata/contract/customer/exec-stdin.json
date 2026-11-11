@@ -1,0 +1,17 @@
+{
+  "name": "exec-stdin",
+  "about": "Run a command with standard input; it reads EOF after the last byte.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "cat",
+    "stdin": "hello\n"
+  },
+  "status": 200,
+  "response": {
+    "durationMs": 0,
+    "exitCode": 0,
+    "stderr": "",
+    "stdout": "hello\n"
+  }
+}

@@ -38,6 +38,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote/relaymux"
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
 	"github.com/marmutapp/superbased-observer/internal/store"
+	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/workspace"
 )
 
@@ -119,11 +120,14 @@ func realHostedTerm() (hostedTerm, func()) {
 			if !term.IsTerminal(fd) {
 				return func() {}
 			}
-			st, err := term.MakeRaw(fd)
+			// Flushed (TCSAFLUSH), not term.MakeRaw's TCSETS: input queued
+			// while the box was made is dropped, never sent to it as a NUL
+			// keystroke (termEnterRawFlushed).
+			restore, err := termEnterRawFlushed(fd)
 			if err != nil {
 				return func() {}
 			}
-			return func() { _ = term.Restore(fd, st) }
+			return restore
 		},
 	}
 	return t, func() {
@@ -225,6 +229,10 @@ type hostedRun struct {
 	// list; holding is not yet held, FX6-R4).
 	// Together they decide the helper's exit code (hostedEndCode).
 	agentExited, heldAtEnd bool
+	// agentStarted: the agent's terminal was opened in the box. A refusal
+	// before it leaves the run's end note (fail), so the run records why
+	// (launch_refused and the refusal) rather than an exit code alone.
+	agentStarted bool
 }
 
 // rlog returns the run's kept relay log (nil when it cannot be opened).
@@ -240,9 +248,14 @@ func (r *hostedRun) say(format string, a ...any) {
 }
 
 // fail prints a refusal with the credential redacted and returns the
-// helper's failure code.
+// helper's failure code. Before the agent started, the refusal is also the
+// run's end note (launch_refused with the refusal as its detail), which the
+// daemon records for `observer launch` and `observer terminals show`.
 func (r *hostedRun) fail(format string, a ...any) int {
 	msg := sandboxremote.Redact(fmt.Sprintf(format, a...), r.cred.Secrets())
+	if !r.agentStarted {
+		writeHostedEndNote(r.plan.ObserverDir, r.plan.RunID, termrun.EndLaunchRefused, strings.TrimPrefix(msg, "terminal_sandbox: "))
+	}
 	return helperFail("observer sandbox (%s): %s", r.plan.Provider, msg)
 }
 
@@ -654,13 +667,7 @@ func (r *hostedRun) prepare(ctx context.Context) error {
 			return err
 		}
 	}
-	if len(r.plan.ToolInstall) > 0 {
-		r.say("installing %s from its vendor (first start, internet tier)", r.plan.Tool)
-		if err := r.execOK(ctx, "install the agent tool", sandboxremote.ExecSpec{Argv: r.plan.ToolInstall, Cwd: r.layout.Home}); err != nil {
-			return fmt.Errorf("%s: %w", verdictHostedTool, err)
-		}
-	}
-	return nil
+	return r.ensureTool(ctx)
 }
 
 // checkArch refuses a box whose architecture the in-box binary does not
@@ -1334,6 +1341,7 @@ func (r *hostedRun) runVendorPTY(ctx context.Context, argv []string) (int, error
 	if err != nil {
 		return 1, fmt.Errorf("start the agent: %w", err)
 	}
+	r.agentStarted = true
 	r.recordPID(p.PID())
 	var mu sync.Mutex
 	cur := p
@@ -1368,7 +1376,7 @@ func (r *hostedRun) runVendorPTY(ctx context.Context, argv []string) (int, error
 		cp := current()
 		done := make(chan ended, 1)
 		go func() {
-			_, _ = io.Copy(r.t.out, cp)
+			_, _ = io.Copy(termNoNUL{w: r.t.out}, cp)
 			code, werr := cp.Wait(ctx)
 			done <- ended{code, werr}
 		}()
@@ -1470,10 +1478,11 @@ func (r *hostedRun) runGuestPTY(ctx context.Context, argv []string) (int, error)
 	if err != nil {
 		return 1, fmt.Errorf("start the agent: %w", err)
 	}
+	r.agentStarted = true
 	defer p.Close()
 	hopts := relaymux.HostOptions{
 		Options: relaymux.Options{RunID: r.plan.RunID, Secret: secret}, Rand: rand.Reader,
-		Kinds: map[string]bool{}, PTY: hostedTermConn{in: r.t.in, out: r.t.out},
+		Kinds: map[string]bool{}, PTY: hostedTermConn{in: r.t.in, out: termNoNUL{w: r.t.out}},
 		Dial: func(context.Context, string) (io.ReadWriteCloser, error) {
 			return nil, errors.New("no connections on the PTY stream")
 		},
@@ -1569,7 +1578,7 @@ var (
 // helper keeps (attachKeptPTY); a variable so a test can stand in for the
 // vendor.
 var hostedInRunAttach = func(ctx context.Context, r *hostedRun, key []byte, setMux func(*relaymux.Host)) (int, error) {
-	return r.attachKeptPTY(ctx, hostedTermConn{in: r.t.in, out: r.t.out}, key, setMux)
+	return r.attachKeptPTY(ctx, hostedTermConn{in: r.t.in, out: termNoNUL{w: r.t.out}}, key, setMux)
 }
 
 // reattachInRun re-opens a cut run's terminal on the agent its guest

@@ -84,3 +84,49 @@ func TestMarkEndingKeepsTheFirstReason(t *testing.T) {
 		t.Fatal("an ended run takes no mark")
 	}
 }
+
+// TestExitReasonNamesAnUnmarkedEnd (live run 2026-11-11): a run nobody
+// marked takes the reason its exit hook reads from what the run left (a
+// hosted launch refused before its agent started), detail included; a
+// marked reason still wins, and an empty answer defers to the exit code.
+func TestExitReasonNamesAnUnmarkedEnd(t *testing.T) {
+	refused := termrun.WithEndDetail(termrun.EndLaunchRefused, "claude-code is not installed in the box")
+	for _, c := range []struct {
+		name, mark, hook, want string
+	}{
+		{"the hook names it", "", refused, refused},
+		{"a mark wins", termrun.EndCLIStop, refused, termrun.EndCLIStop},
+		{"an empty answer defers to the code", "", "", termrun.EndChildExit},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := newFakeRecorder()
+			calls := 0
+			svc := New(Options{
+				Policy: Policy{AllowFresh: true, AllowedTools: []string{"claude-code"}}, Recorder: rec,
+				Launcher: &fakeLauncher{handle: "H"},
+				ExitReason: func(runID string, code int) string {
+					calls++
+					if code != 125 || runID == "" {
+						t.Errorf("hook got %q / %d", runID, code)
+					}
+					return c.hook
+				},
+			})
+			res, err := svc.LaunchFresh(context.Background(), FreshRequest{Tool: "claude-code", Subcommand: "claude"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.mark != "" {
+				svc.MarkEnding("H", c.mark)
+			}
+			svc.EndRunByHandle(context.Background(), "H", 125)
+			svc.EndRunByHandle(context.Background(), "H", 125) // idempotent: no second read
+			if rec.endReasons[res.RunID] != c.want || svc.EndReasonForHandle("H") != c.want {
+				t.Fatalf("recorded %q, handle %q, want %q", rec.endReasons[res.RunID], svc.EndReasonForHandle("H"), c.want)
+			}
+			if wantCalls := map[bool]int{true: 0, false: 1}[c.mark != ""]; calls != wantCalls {
+				t.Errorf("hook called %d times, want %d", calls, wantCalls)
+			}
+		})
+	}
+}

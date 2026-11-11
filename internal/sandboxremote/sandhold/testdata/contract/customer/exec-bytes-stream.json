@@ -1,0 +1,28 @@
+{
+  "name": "exec-bytes-stream",
+  "about": "Any bytes in (stdinBase64), the exact bytes out (output base64), as they arrive.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "accept": "text/event-stream",
+  "request": {
+    "command": "cat",
+    "output": "base64",
+    "stdinBase64": "AP8KaGk="
+  },
+  "status": 200,
+  "stream": [
+    {
+      "data": {
+        "base64": "AP8KaGk="
+      },
+      "event": "stdout"
+    },
+    {
+      "data": {
+        "durationMs": 0,
+        "exitCode": 0
+      },
+      "event": "exit"
+    }
+  ]
+}

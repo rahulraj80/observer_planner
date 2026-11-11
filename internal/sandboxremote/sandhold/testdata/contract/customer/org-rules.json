@@ -1,0 +1,29 @@
+{
+  "name": "org-rules",
+  "about": "The org's own rules: the weakest isolation allowed for each level of trust in the code (none set here), and who may change them.",
+  "method": "GET",
+  "path": "/v1/orgs/rules",
+  "status": 200,
+  "response": {
+    "changedBy": "an org admin",
+    "minIsolation": {},
+    "trust": [
+      {
+        "id": "own",
+        "label": "Code you or your team wrote",
+        "means": "you know what it does"
+      },
+      {
+        "id": "generated",
+        "label": "Code an AI wrote, or code nobody has reviewed",
+        "means": "probably fine, not checked"
+      },
+      {
+        "id": "unknown",
+        "label": "Code from a stranger, or code that may be hostile",
+        "means": "assume it will try to get out"
+      }
+    ],
+    "unsaid": "unknown"
+  }
+}

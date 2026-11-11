@@ -162,7 +162,7 @@ func hostedAdoptGuestPTYLinux(ctx context.Context, observerDir string, rec sandb
 		return 1, fmt.Errorf("the run's PTY keeper key: %w (a run started before the keeper key cannot be re-attached; delete it instead)", err)
 	}
 	run := hostedAdoptRun(observerDir, rec, v, c, cred, sandbox.HostArgs{}, t)
-	return run.attachKeptPTY(ctx, hostedTermConn{in: t.in, out: t.out}, key, nil)
+	return run.attachKeptPTY(ctx, hostedTermConn{in: t.in, out: termNoNUL{w: t.out}}, key, nil)
 }
 
 // attachKeptPTY starts `observer sandbox-guest attach` in the run's box,

@@ -1,0 +1,25 @@
+{
+  "name": "sandbox-create-nowait",
+  "about": "wait false: the answer comes at once (202) with state Starting; poll the sandbox until Running.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "timeoutSeconds": 600,
+    "wait": false
+  },
+  "status": 202,
+  "response": {
+    "createdAt": "<time>",
+    "engine": "runc",
+    "expiresAt": "<time>",
+    "id": "<id>",
+    "image": "sandhold/sandbox:dev",
+    "isolation": "shielded",
+    "isolationMeans": "a hardened container on the host's kernel",
+    "network": "none",
+    "owner": "alice",
+    "runsOn": "runc",
+    "state": "Starting",
+    "target": "runc"
+  }
+}

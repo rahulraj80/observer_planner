@@ -312,24 +312,7 @@ func realOCITerm() (ociTerm, func()) {
 // before the launcher's first line (two printable bytes, so ociNoNUL on the
 // output side could not drop it). What is discarded was typed under the
 // host's own line editing before the box existed. It returns the restore.
-func ociEnterRaw(fd int) (func(), error) {
-	old, err := unix.IoctlGetTermios(fd, unix.TCGETS)
-	if err != nil {
-		return nil, err
-	}
-	raw := *old
-	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
-	raw.Oflag &^= unix.OPOST
-	raw.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
-	raw.Cflag &^= unix.CSIZE | unix.PARENB
-	raw.Cflag |= unix.CS8
-	raw.Cc[unix.VMIN] = 1
-	raw.Cc[unix.VTIME] = 0
-	if err := unix.IoctlSetTermios(fd, unix.TCSETSF, &raw); err != nil {
-		return nil, err
-	}
-	return func() { _ = unix.IoctlSetTermios(fd, unix.TCSETS, old) }, nil
-}
+func ociEnterRaw(fd int) (func(), error) { return termEnterRawFlushed(fd) }
 
 // runOCIInit is the container's main process, PID 1 in its PID namespace
 // (section 4.6, sandboxoci.ContainerInit): it starts the inner launch in

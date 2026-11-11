@@ -1,0 +1,62 @@
+{
+  "name": "terminal",
+  "about": "A terminal: binary frames are keystrokes and output, text frames control (resize); the last text frame is the exit, then the close.",
+  "method": "GET",
+  "path": "/v1/sandboxes/<id>/pty?command=/bin/bash",
+  "status": 101,
+  "frames": [
+    {
+      "from": "node",
+      "json": {
+        "type": "connected"
+      }
+    },
+    {
+      "from": "node",
+      "binary": "JCA=",
+      "text": "$ "
+    },
+    {
+      "from": "client",
+      "json": {
+        "cols": 120,
+        "rows": 40,
+        "type": "resize"
+      }
+    },
+    {
+      "from": "client",
+      "binary": "ZWNobyBoaQ0=",
+      "text": "echo hi\r"
+    },
+    {
+      "from": "node",
+      "binary": "ZWNobyBoaQ0KaGkNCiQg",
+      "text": "echo hi\r\nhi\r\n$ "
+    },
+    {
+      "from": "client",
+      "binary": "ZXhpdCAzDQ==",
+      "text": "exit 3\r"
+    },
+    {
+      "from": "node",
+      "binary": "ZXhpdCAzDQo=",
+      "text": "exit 3\r\n"
+    },
+    {
+      "from": "node",
+      "json": {
+        "exitCode": 3,
+        "exit_code": 3,
+        "signaled": false,
+        "type": "exit"
+      }
+    },
+    {
+      "from": "node",
+      "close": 1000,
+      "reason": "session ended"
+    }
+  ]
+}

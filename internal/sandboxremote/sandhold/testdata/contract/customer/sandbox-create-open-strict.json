@@ -1,0 +1,18 @@
+{
+  "name": "sandbox-create-open-strict",
+  "about": "The same with network.strict: refused instead, with a code.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "network": {
+      "open": true,
+      "strict": true
+    }
+  },
+  "status": 409,
+  "response": {
+    "code": "network_open_not_granted",
+    "error": "network.open was asked for and not given: runc enforces its allow list inside the sandbox, which this node does not open to the whole internet; this sandbox on runc reaches nothing outside it (no allow list was given)",
+    "fix": "list what the sandbox must reach in network.allow (within your org's ceiling; POST /v1/sandboxes/{id}/network/allow adds more later), or choose isolation sealed or vault, whose targets give an open network through the host egress gateway; or leave network.strict out to accept the allow list"
+  }
+}

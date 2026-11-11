@@ -520,6 +520,10 @@ type Service struct {
 	// honest-close/teardown — the hub gets one direct notification per run from
 	// whichever path wins, with no dependence on term:exit surviving the feed.
 	onRunExit func(runID string)
+	// exitReason, when set, names why a run ended that nobody marked, from
+	// what the run left behind (a hosted launch's helper leaves a note when
+	// it fails before the agent starts): "" defers to the exit code.
+	exitReason func(runID string, exitCode int) string
 
 	mu       sync.Mutex
 	byHandle map[string]string  // PTY handle -> run id
@@ -590,6 +594,10 @@ type Options struct {
 	// (see Service.onRunExit). Nil disables the direct seam (the status feed's
 	// term:exit is then the only exit signal — advisory only).
 	OnRunExit func(runID string)
+	// ExitReason names the end reason of a run nobody marked, read from
+	// what the run left (see Service.exitReason); "" or nil defers to the
+	// exit code (termrun.EndReasonForExit).
+	ExitReason func(runID string, exitCode int) string
 	// Sandboxer prepares a B9 sandboxed fresh launch (see Service.sandboxer).
 	// Nil disables the feature: a Sandbox:true FreshRequest then fails closed.
 	Sandboxer Sandboxer
@@ -642,6 +650,7 @@ func New(opts Options) *Service {
 		now:                  now,
 		exitStatus:           opts.ExitStatus,
 		onRunExit:            opts.OnRunExit,
+		exitReason:           opts.ExitReason,
 		byHandle:             make(map[string]string),
 		byRun:                make(map[string]string),
 		byMeta:               make(map[string]runMeta),
@@ -1641,6 +1650,11 @@ func (s *Service) EndRunByHandle(ctx context.Context, handle string, exitCode in
 		// a still-live entry classified even against a stale live-handle set (R2-2).
 		if m, mok := s.byMeta[handle]; mok {
 			m.endedAt = s.now()
+			if m.endReason == "" && s.exitReason != nil {
+				// Once per run: only the call that found the live mapping
+				// gets here. A small bounded read (the run's own note).
+				m.endReason = s.exitReason(runID, exitCode)
+			}
 			m.endReason = endReasonFor(m.endReason, exitCode)
 			reason = m.endReason
 			s.byMeta[handle] = m

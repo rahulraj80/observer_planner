@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -424,20 +423,8 @@ func (r *ociRun) pumpOutput(ctx context.Context, wait <-chan sandboxengine.WaitR
 // of a NUL keystroke the helper had sent: the canonical end-of-file marker a
 // plain raw switch exposes, which ociEnterRaw now discards (Linux live check
 // 2026-10-23, R3).
-type ociNoNUL struct{ w io.Writer }
-
-// Write writes p without its NUL bytes and reports all of p as written.
-func (n ociNoNUL) Write(p []byte) (int, error) {
-	if bytes.IndexByte(p, 0) < 0 {
-		return n.w.Write(p)
-	}
-	if q := bytes.ReplaceAll(p, []byte{0}, nil); len(q) > 0 {
-		if _, err := n.w.Write(q); err != nil {
-			return 0, err
-		}
-	}
-	return len(p), nil
-}
+// The writer is shared with the hosted rows (termNoNUL).
+type ociNoNUL = termNoNUL
 
 // stillRunning reads the container's state (the wait-first rule: the
 // helper's own running flag is cleared by the wait; the engine's word is

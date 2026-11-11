@@ -14,7 +14,8 @@
           "github.com"
         ]
       },
-      "timeoutSeconds": 1800
+      "timeoutSeconds": 1800,
+      "trust": "generated"
     },
     "shared": true
   },
@@ -35,7 +36,8 @@
           "github.com"
         ]
       },
-      "timeoutSeconds": 1800
+      "timeoutSeconds": 1800,
+      "trust": "generated"
     },
     "shared": true,
     "updatedAt": "<time>"

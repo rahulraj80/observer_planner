@@ -237,7 +237,10 @@ func (r *hostedRun) prepareAfterClone(ctx context.Context, owner string) error {
 	if err := r.checkBoxBinary(ctx); err != nil {
 		return err
 	}
-	return r.execOK(ctx, "record the return baseline", sandboxremote.ExecSpec{Cwd: r.layout.Workspace, Argv: []string{r.layout.Binary, "sandbox-guest", guestBaselineFlagCore}})
+	if err := r.execOK(ctx, "record the return baseline", sandboxremote.ExecSpec{Cwd: r.layout.Workspace, Argv: []string{r.layout.Binary, "sandbox-guest", guestBaselineFlagCore}}); err != nil {
+		return err
+	}
+	return r.ensureTool(ctx)
 }
 
 // hostedBoxSetupUserScript makes the run's directories as the box user (a

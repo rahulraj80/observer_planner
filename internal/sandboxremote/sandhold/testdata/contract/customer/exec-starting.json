@@ -1,0 +1,15 @@
+{
+  "name": "exec-starting",
+  "about": "Commands wait until it runs.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "echo hello"
+  },
+  "status": 409,
+  "response": {
+    "code": "sandbox_starting",
+    "error": "the sandbox is still starting",
+    "fix": "wait until GET /v1/sandboxes/{id} says Running (poll every second or so), then try again"
+  }
+}

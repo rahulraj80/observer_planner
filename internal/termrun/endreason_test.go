@@ -1,6 +1,9 @@
 package termrun
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestEndReasonForExit pins the code-only classification (Windows 11 Pro
 // run 4, N3), one row per shape.
@@ -63,5 +66,40 @@ func TestEndLineNamesEveryReason(t *testing.T) {
 	}
 	if got := EndLine("something-new", nil); got != "the run ended" || KnownEndReason("something-new") {
 		t.Errorf("unknown reason: %q", got)
+	}
+}
+
+// TestEndReasonCarriesADetail (live run 2026-11-11): a reason can carry a
+// short detail, one line and bounded; the code splits back off it, the
+// named line shows the detail, and a reason outside the vocabulary or an
+// empty detail is left as it is.
+func TestEndReasonCarriesADetail(t *testing.T) {
+	t.Parallel()
+	r := WithEndDetail(EndLaunchRefused, "claude-code is not installed in the box,\r\nand the box has no npm\x00")
+	if r != "launch_refused: claude-code is not installed in the box, and the box has no npm" {
+		t.Fatalf("WithEndDetail = %q", r)
+	}
+	if code, detail := SplitEndReason(r); code != EndLaunchRefused || detail != "claude-code is not installed in the box, and the box has no npm" {
+		t.Errorf("split %q %q", code, detail)
+	}
+	if !KnownEndReason(r) {
+		t.Error("a detailed reason is not known by its code")
+	}
+	code := 125
+	if got := EndLine(r, &code); got != "the run ended: the launch was refused before the tool started: claude-code is not installed in the box, and the box has no npm (exit code 125)" {
+		t.Errorf("EndLine = %q", got)
+	}
+	if got := WithEndDetail(EndLaunchRefused, "  "); got != EndLaunchRefused {
+		t.Errorf("empty detail: %q", got)
+	}
+	if got := WithEndDetail("not-a-reason", "x"); got != "not-a-reason" {
+		t.Errorf("unknown reason: %q", got)
+	}
+	if code, detail := SplitEndReason("http: refused"); code != "http: refused" || detail != "" {
+		t.Errorf("a head that is no code split: %q %q", code, detail)
+	}
+	long := WithEndDetail(EndLaunchRefused, strings.Repeat("x", 2*EndDetailMax))
+	if _, d := SplitEndReason(long); len(d) != EndDetailMax+3 || !strings.HasSuffix(d, "...") {
+		t.Errorf("long detail kept %d bytes", len(d))
 	}
 }

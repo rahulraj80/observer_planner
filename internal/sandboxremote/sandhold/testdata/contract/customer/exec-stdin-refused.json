@@ -1,0 +1,17 @@
+{
+  "name": "exec-stdin-refused",
+  "about": "A refusal carries a code, why and what to do.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "cat",
+    "stdin": "a",
+    "stdinBase64": "YQ=="
+  },
+  "status": 400,
+  "response": {
+    "code": "stdin_twice",
+    "error": "stdin and stdinBase64 were both sent",
+    "fix": "send stdin for text or stdinBase64 for any bytes, not both"
+  }
+}

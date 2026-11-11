@@ -24,3 +24,11 @@ test("the lines match the CLI's table word for word", () => {
   }
   assert.equal((table.match(/: +"/g) ?? []).length, Object.keys(TERMINAL_END_LINES).length, "the two tables have the same rows");
 });
+
+test("a reason's detail follows its line (live run 2026-11-11)", () => {
+  assert.equal(
+    terminalEndLine("launch_refused: claude-code is not installed in the box", 125),
+    "the run ended: the launch was refused before the tool started: claude-code is not installed in the box (exit code 125)",
+  );
+  assert.equal(terminalEndLine("http: refused", null), "the run ended");
+});

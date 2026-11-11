@@ -1,6 +1,10 @@
 package termrun
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+	"unicode"
+)
 
 // endreason.go is the vocabulary of why a terminal run ended (Windows 11 Pro
 // run 4, N3): terminal_run.end_reason (node migration 072, an existing
@@ -54,19 +58,68 @@ var endLines = map[string]string{
 	EndOrgFloorHooksDrifted: "ended by the organization's full-capture floor (the run's hooks drifted)",
 }
 
-// KnownEndReason reports whether reason is in the vocabulary.
+// KnownEndReason reports whether reason is in the vocabulary (a reason
+// that carries a detail, WithEndDetail, is judged by its code).
 func KnownEndReason(reason string) bool {
-	_, ok := endLines[reason]
+	code, _ := SplitEndReason(reason)
+	_, ok := endLines[code]
 	return ok
 }
 
+// endDetailSep joins an end reason's code and its detail.
+const endDetailSep = ": "
+
+// EndDetailMax bounds an end reason's detail, in bytes.
+const EndDetailMax = 400
+
+// WithEndDetail is reason with a short detail saying why (live run
+// 2026-11-11: a hosted launch that failed before its agent started showed
+// only exit code 125, its cause only in the terminal): "launch_refused:
+// claude-code is not installed in the box, ...". The detail is made one
+// line without control characters and cut at EndDetailMax bytes; the code
+// stays first, so every reader that compares codes splits it off
+// (SplitEndReason). A reason outside the vocabulary, or an empty detail,
+// is returned unchanged.
+func WithEndDetail(reason, detail string) string {
+	if _, ok := endLines[reason]; !ok {
+		return reason
+	}
+	d := strings.Join(strings.FieldsFunc(detail, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }), " ")
+	if len(d) > EndDetailMax {
+		d = strings.ToValidUTF8(d[:EndDetailMax], "") + "..."
+	}
+	if d == "" {
+		return reason
+	}
+	return reason + endDetailSep + d
+}
+
+// SplitEndReason splits a recorded end reason into its vocabulary code and
+// its detail ("" when it carries none). A value whose head is not a code
+// is returned whole as the code.
+func SplitEndReason(s string) (code, detail string) {
+	head, tail, ok := strings.Cut(s, endDetailSep)
+	if !ok {
+		return s, ""
+	}
+	if _, known := endLines[head]; !known {
+		return s, ""
+	}
+	return head, tail
+}
+
 // EndLine is the named line for a run's end: "the run ended: the console
-// window was closed (exit code 3221225786)". exitCode nil leaves the code
-// out; an unknown reason says only that the run ended.
+// window was closed (exit code 3221225786)". A reason's detail follows its
+// line. exitCode nil leaves the code out; an unknown reason says only that
+// the run ended.
 func EndLine(reason string, exitCode *int) string {
 	s := "the run ended"
-	if l, ok := endLines[reason]; ok {
+	code, detail := SplitEndReason(reason)
+	if l, ok := endLines[code]; ok {
 		s += ": " + l
+		if detail != "" {
+			s += ": " + detail
+		}
 	}
 	if exitCode != nil {
 		s += " (exit code " + strconv.Itoa(*exitCode) + ")"

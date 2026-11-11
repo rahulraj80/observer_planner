@@ -1,0 +1,8 @@
+{
+  "name": "files-put",
+  "about": "Write a file: the raw bytes are the body; mode is octal.",
+  "method": "PUT",
+  "path": "/v1/sandboxes/<id>/files?path=/workspace/report.csv&mode=644",
+  "status": 204,
+  "requestBody": "report,rows\nq3,1204\n"
+}
