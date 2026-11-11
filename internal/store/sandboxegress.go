@@ -346,3 +346,41 @@ func (s *Store) SandboxEgressRefusalDrops(ctx context.Context, runIDs []string) 
 	}
 	return out, nil
 }
+
+// SandboxEgressRefusalCounts returns how many refusal rows each of runIDs
+// holds now (runs with none are absent; at most SandboxEgressRefusalMaxPage
+// ids are read). A count, never the hosts: the Sandboxes page's findings
+// column reads it beside SandboxEgressRefusalDrops.
+func (s *Store) SandboxEgressRefusalCounts(ctx context.Context, runIDs []string) (map[string]int, error) {
+	out := map[string]int{}
+	seen := map[string]bool{}
+	var args []any
+	for _, id := range runIDs {
+		if id == "" || seen[id] || len(args) >= SandboxEgressRefusalMaxPage {
+			continue
+		}
+		seen[id] = true
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return out, nil
+	}
+	q := `SELECT run_id, COUNT(*) FROM sandbox_egress_refusals WHERE run_id IN (?` + strings.Repeat(",?", len(args)-1) + `) GROUP BY run_id` //nolint:gosec // G202: only ? placeholders are joined; values bind as args
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store.SandboxEgressRefusalCounts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("store.SandboxEgressRefusalCounts: scan: %w", err)
+		}
+		out[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store.SandboxEgressRefusalCounts: %w", err)
+	}
+	return out, nil
+}

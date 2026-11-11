@@ -135,6 +135,9 @@ var features = []feature{
 	// The Terminals page's refused connections card (OpenShell lane N5),
 	// the module's like the settings card.
 	{"SANDBOX_REFUSALS_CARD", "components/SandboxRefusals", "SandboxRefusalsCard", "terminals.sandbox"},
+	// The Terminals page's Sandboxes tab (the planner fork's places,
+	// node advisor and recent sandboxed runs), the module's like the cards.
+	{"SANDBOXES_TAB", "components/SandboxesTab", "SandboxesTab", "terminals.sandbox"},
 }
 
 // packages maps an npm package that only a component's pages and features

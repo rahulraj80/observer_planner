@@ -1088,7 +1088,7 @@ func newStartCmd() *cobra.Command {
 					// admissionHandle (gap P0-7) shares the proxy's ONE live
 					// admission service with the dashboard policy/egress editors,
 					// so an edit hot-swaps the instance the proxy enforces.
-					ExtraRoutes: append(obsDashboardRoutes(ctx, cfg, configPath, database, admissionHandle, slog.Default()), append(hostedDashboardRoutes(configPath), gatesSandboxDashboardRoutes(configPath)...)...),
+					ExtraRoutes: append(obsDashboardRoutes(ctx, cfg, configPath, database, admissionHandle, slog.Default()), append(append(hostedDashboardRoutes(configPath), gatesSandboxDashboardRoutes(configPath)...), sandholdDashboardRoutes(configPath)...)...),
 					// Embedded web-terminal launcher (docs/session-handoff.md
 					// launch section). Nil when [handoff].allow_dashboard_launch
 					// is false → endpoints 503, button hidden.

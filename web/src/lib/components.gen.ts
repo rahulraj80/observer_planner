@@ -290,3 +290,7 @@ export const SANDBOX_SETUP_PANEL: LazyExoticComponent<typeof import("@/component
 /** SandboxRefusalsCard from @/components/SandboxRefusals (component terminals.sandbox), or null when this build does not compile it. */
 export const SANDBOX_REFUSALS_CARD: LazyExoticComponent<typeof import("@/components/SandboxRefusals").SandboxRefusalsCard> | null =
   lazy(() => import("@/components/SandboxRefusals").then((m) => ({ default: m.SandboxRefusalsCard })));
+
+/** SandboxesTab from @/components/SandboxesTab (component terminals.sandbox), or null when this build does not compile it. */
+export const SANDBOXES_TAB: LazyExoticComponent<typeof import("@/components/SandboxesTab").SandboxesTab> | null =
+  lazy(() => import("@/components/SandboxesTab").then((m) => ({ default: m.SandboxesTab })));

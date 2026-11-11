@@ -499,6 +499,7 @@ var expectedClassification = map[string]string{
 	"/api/terminal/project/":              "V",
 	"/api/terminal/session/":              "V",
 	"/api/terminal/runs":                  "V",
+	"/api/terminal/sandbox/runs":          "V", // the Terminals > Sandboxes tab's recent sandboxed runs: closed isolation words and refusal counts, never the hosts
 	"/api/arena/runs":                     "V", // agent arena: GET list; POST create auto-escalates to X + confirm token in-handler
 	"/api/arena/runs/{id}":                "V",
 	"/api/arena/models":                   "V", // read-only judge/candidate model pickers (GET only)

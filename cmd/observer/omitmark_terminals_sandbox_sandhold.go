@@ -2,7 +2,10 @@
 
 package main
 
-import "github.com/marmutapp/superbased-observer/internal/components"
+import (
+	"github.com/marmutapp/superbased-observer/internal/components"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
+)
 
 // The build reports terminals.sandbox.sandhold as compiled out (L1) wherever
 // its own omit tag or an ancestor's removes it, as every other L1
@@ -11,3 +14,7 @@ import "github.com/marmutapp/superbased-observer/internal/components"
 // `disconnect` are absent, and internal/sandboxremote/sandhold is not
 // linked.
 func init() { components.MarkOmitted("terminals.sandbox.sandhold") }
+
+// sandholdDashboardRoutes is absent with the row: the Terminals >
+// Sandboxes tab reads the 404 as "not in this build".
+func sandholdDashboardRoutes(string) []dashapi.ExtraRoute { return nil }

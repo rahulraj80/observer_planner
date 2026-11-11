@@ -14,6 +14,7 @@ import { exportTargetFor } from "@/lib/exportTarget";
 import { exportJSONText } from "@/lib/costExport";
 import { useFilters, windowParams } from "@/lib/filters";
 import { nodeTabCrumb } from "@/lib/pageTabRoutes";
+import { forkTabCrumb } from "@/lib/sandboxesTab";
 import { useApi, useApiActivity } from "@/lib/useApi";
 import { fmtDuration } from "@/lib/format";
 import { useTheme } from "@/lib/theme";
@@ -63,7 +64,7 @@ export function TopBar({
   const { pathname, search } = useLocation();
   // The open page tab is the breadcrumb's last segment (lib/pageTabRoutes.ts,
   // the table the command palette reads too); a default tab adds nothing.
-  const tabLabel = nodeTabCrumb(pathname, search);
+  const tabLabel = nodeTabCrumb(pathname, search) ?? forkTabCrumb(pathname, search);
   // The first segment is the page's Advanced sub-group; a page in the
   // sidebar's main list or bottom strip stands alone (lib/navLayout.ts).
   const group = navCrumb(NAV_GROUPS, pathname);

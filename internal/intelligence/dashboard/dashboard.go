@@ -720,6 +720,10 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// 3.1). LOCAL: the rows name the hosts a sandboxed agent tried to
 	// reach and the run's project root.
 	reg("/api/sandbox/refusals", L, secTerminals, s.handleSandboxRefusals)
+	// The Terminals > Sandboxes tab's recent runs (sandbox_runs.go). VIEW,
+	// the posture of /api/terminal/runs: closed isolation words and refusal
+	// COUNTS only; the hosts stay behind the Local audit above.
+	reg("/api/terminal/sandbox/runs", V, secTerminals, s.handleSandboxRuns)
 	// The refusal advisor (OpenShell lane N5): GET offers "allow this host"
 	// per refusal, PUT applies one through the config save pipeline. LOCAL +
 	// confirm-token-gated; guard rule R-167 denies an agent's PUT.

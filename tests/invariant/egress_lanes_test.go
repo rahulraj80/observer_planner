@@ -201,9 +201,9 @@ var egressLanes = []egressLane{
 	// host helper; the probe never calls it.
 	{
 		ID: "sandbox.remote.sandhold", Pkg: "internal/sandboxremote/sandhold", Kind: egressRemote,
-		Reaches:  "the SandHold node the user named (its /v1 device sign-in, whoami, targets and key revocation; for a run, its sandboxes, files, streamed exec and the pty WebSocket), over HTTPS and WSS (plain http and ws for localhost only) with no redirects; a saved key is sent only to the node that issued it, in a header, never in an address",
+		Reaches:  "the SandHold node the user named (its /v1 device sign-in, whoami, targets and key revocation; its advisor, GET and POST /v1/advise; for a run, its sandboxes, files, streamed exec and the pty WebSocket), over HTTPS and WSS (plain http and ws for localhost only) with no redirects; a saved key is sent only to the node that issued it, in a header, never in an address",
 		Triggers: []egressTrigger{trigUserCommand, trigUserAction},
-		Gate:     "`observer sandbox connect <node-url>` and `observer sandbox disconnect`, run by the user (the terminals.sandbox module active), or a user-launched sandboxed terminal on the sandhold row (listed in backends, the terminals.sandbox.sandhold component active, consent recorded) or a user's confirm in the leftover-box list (I6); the row's probe and the inactive hint read only the local connection record",
+		Gate:     "`observer sandbox connect <node-url>` and `observer sandbox disconnect`, run by the user (the terminals.sandbox module active), or a user-launched sandboxed terminal on the sandhold row (listed in backends, the terminals.sandbox.sandhold component active, consent recorded) or a user's confirm in the leftover-box list (I6), or the user's press of the advisor's button on the dashboard's Terminals > Sandboxes tab (an owner-local route; the key stays in the daemon); the row's probe, the inactive hint and the tab's place view read only the local connection record",
 		Pins:     []string{"sandbox_remote_egress_test.go"},
 	},
 	// The org-hosted OpenShell row (tracker F-019, lane G4): the node to

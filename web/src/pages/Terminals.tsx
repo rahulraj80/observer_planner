@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { SANDBOX_REFUSALS_CARD, SANDBOX_SETTINGS_CARD } from "@/lib/components.gen";
+import { SANDBOX_REFUSALS_CARD, SANDBOX_SETTINGS_CARD, SANDBOXES_TAB } from "@/lib/components.gen";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutGrid, SlidersHorizontal, Swords, type LucideIcon } from "lucide-react";
+import { Boxes, LayoutGrid, SlidersHorizontal, Swords, type LucideIcon } from "lucide-react";
 import { useUrlTab } from "@/lib/useUrlTab";
 import { usePageTabs } from "@/lib/governance";
 import {
@@ -10,6 +10,7 @@ import {
   terminalsHashTab,
   type TerminalsTab,
 } from "@/lib/nodePageTabs";
+import { TERMINALS_FORK_TABS, withForkTabs, type TerminalsForkTab } from "@/lib/sandboxesTab";
 import {
   ChartShell,
   EmptyState,
@@ -157,18 +158,25 @@ async function putPolicy(
 // The page's three views (`?tab=`, page tabs since the platform tabs plan),
 // each with its own glyph, and the one-line description the header shows
 // for the active view.
-const TERMINALS_TAB_ICONS: Record<TerminalsTab, LucideIcon> = {
+// The fork's Sandboxes tab (lib/sandboxesTab.ts) rides beside the governed
+// tabs: it is shown when this build has the sandbox module, and it is not
+// in the org-governance tab vocabulary.
+type TerminalsView = TerminalsTab | TerminalsForkTab;
+const TERMINALS_TAB_ICONS: Record<TerminalsView, LucideIcon> = {
   workspace: LayoutGrid,
+  sandboxes: Boxes,
   settings: SlidersHorizontal,
   arena: Swords,
 };
-const TERMINALS_TAB_DEFS: TabDef<TerminalsTab>[] = TERMINALS_TABS.ids.map((id) => ({
+const TERMINALS_TAB_LABELS: Record<TerminalsView, string> = { ...TERMINALS_TABS.labels, ...TERMINALS_FORK_TABS.labels };
+const TERMINALS_TAB_DEFS: TabDef<TerminalsView>[] = withForkTabs(TERMINALS_TABS.ids).map((id) => ({
   id,
-  label: TERMINALS_TABS.labels[id],
+  label: TERMINALS_TAB_LABELS[id],
   icon: TERMINALS_TAB_ICONS[id],
 }));
 
-const TERMINALS_TAB_SUBS: Record<TerminalsTab, string> = {
+const TERMINALS_TAB_SUBS: Record<TerminalsView, string> = {
+  sandboxes: "Where a sandboxed terminal runs, what it may reach, and what happened inside it.",
   workspace: "Your terminal workspace - run and arrange multiple live terminals on one grid.",
   arena:
     "Run one prompt against several agent harnesses in isolated worktrees, compare judged scorecards, keep the winner.",
@@ -202,7 +210,11 @@ export function TerminalsPage() {
   // the Settings tab.
   // The tabs the organization left visible on this machine (T-132).
   const pageTabs = usePageTabs("terminals", TERMINALS_TABS);
-  const [urlTab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const viewIds = useMemo<TerminalsView[]>(
+    () => (SANDBOXES_TAB ? withForkTabs(pageTabs.ids) : [...pageTabs.ids]),
+    [pageTabs.ids],
+  );
+  const [urlTab, setTab] = useUrlTab<TerminalsView>(viewIds, defaultTab(pageTabs));
   const location = useLocation();
   const navigate = useNavigate();
   // Hash deep-link: /terminals#launch-policy. The launch-policy card lives
@@ -212,7 +224,7 @@ export function TerminalsPage() {
   // The New-Terminal dialog's picker legend (DI-06) links here.
   const linkedTab = terminalsHashTab(location.hash);
   const hashTab = linkedTab && pageTabs.ids.includes(linkedTab) ? linkedTab : null;
-  const tab: TerminalsTab = hashTab ?? urlTab;
+  const tab: TerminalsView = hashTab ?? urlTab;
   useEffect(() => {
     if (!hashTab) return;
     if (urlTab !== hashTab) {
@@ -397,7 +409,7 @@ export function TerminalsPage() {
       <HeldLaunches onStarted={() => runs.reload()} />
 
       <TabStrip
-        tabs={TERMINALS_TAB_DEFS.filter((t) => pageTabs.ids.includes(t.id))}
+        tabs={TERMINALS_TAB_DEFS.filter((t) => viewIds.includes(t.id))}
         value={tab}
         onChange={setTab}
         idPrefix="terminals"
@@ -428,6 +440,14 @@ export function TerminalsPage() {
             onOpenSettings={() => setTab("settings")}
           />
         </div>
+      )}
+
+      {SANDBOXES_TAB && (
+        <TabPanel id="sandboxes" active={tab} idPrefix="terminals">
+          <Suspense fallback={<InlineLoading label="Loading sandboxes" />}>
+            <SANDBOXES_TAB />
+          </Suspense>
+        </TabPanel>
       )}
 
       <TabPanel id="arena" active={tab} idPrefix="terminals">

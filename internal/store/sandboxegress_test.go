@@ -286,3 +286,30 @@ func TestSandboxEgressRefusalPerRunBound(t *testing.T) {
 		t.Fatalf("an untouched run has counts: %+v", got["run-y"])
 	}
 }
+
+// TestSandboxEgressRefusalCounts: the count per run is the rows it holds,
+// a run with none is absent, and an empty list reads nothing.
+func TestSandboxEgressRefusalCounts(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	for i, host := range []string{"a.example", "b.example", "c.example"} {
+		if _, err := s.InsertSandboxEgressRefusal(ctx, SandboxEgressRefusal{RunID: "run-a", Host: host, Rule: "allow-list-miss", At: t0.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.InsertSandboxEgressRefusal(ctx, SandboxEgressRefusal{RunID: "run-b", Host: "a.example", Rule: "allow-list-miss", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SandboxEgressRefusalCounts(ctx, []string{"run-a", "run-b", "run-c", "run-a", ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["run-a"] != 3 || got["run-b"] != 1 {
+		t.Fatalf("counts %v, want run-a 3 and run-b 1 only", got)
+	}
+	if none, err := s.SandboxEgressRefusalCounts(ctx, nil); err != nil || len(none) != 0 {
+		t.Fatalf("empty list read %v, %v", none, err)
+	}
+}
