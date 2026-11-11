@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,6 +21,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/keystore"
 	"github.com/marmutapp/superbased-observer/internal/sandboxbackend"
+	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote/sandhold"
 	"github.com/marmutapp/superbased-observer/internal/sandboxselect"
 )
@@ -27,32 +29,55 @@ import (
 // sandbox_sandhold.go is the SandHold row (SandHold notes 41 D2 and D3, 42):
 // `observer sandbox connect <node-url>` signs this machine in to a SandHold
 // node by the node's browser sign-in, `observer sandbox disconnect` revokes
-// the key and forgets it, and the sandhold row of the backend list (the
-// dashboard's and `observer sandbox status`) says whether this machine is
-// connected, as whom, and which isolation the node offers in Observer's
-// classes. The key lives in the keystore (the OS keychain, or its hardened
-// owner-only file fallback), like the other hosted rows' credentials; the
-// non-secret connection record is an owner-only state file, so the row is
-// described without opening the keychain or calling the node (invariant
-// I6). Probe only in this release: a run on the row is refused by name.
+// the key and forgets it, and the row runs a sandboxed terminal on that node
+// as one more hosted vendor of the shared core (terminal_sandbox_hosted*.go):
+// the same consent, upload, capture relay, teardown and leftover list as the
+// other hosted rows, over the node's public API
+// (internal/sandboxremote/sandhold Box). The key lives in the keystore (the
+// OS keychain, or its hardened owner-only file fallback); the non-secret
+// connection record is an owner-only state file, so the row is described
+// without opening the keychain or calling the node (invariant I6).
+// SANDHOLD_URL and SANDHOLD_API_KEY win over the saved sign-in (CI).
 
 const sandholdComponent = "terminals.sandbox.sandhold"
 
-// sandholdNotBuilt is why a run on the row is refused.
-const sandholdNotBuilt = "a run on SandHold is not built in this release (beta, probe only): connect with `observer sandbox connect <node-url>` to see the node here, and use the node's own `sandhold run` for now"
+// sandholdConnectHow is how this machine connects to a node.
+const sandholdConnectHow = "connect with `observer sandbox connect <node-url>`, or set " + sandhold.EnvURL + " and " + sandhold.EnvKey
 
-// The row's probe verdicts (copy keys).
+// The row's own probe verdicts (copy keys); a missing connection is the
+// shared credential_missing.
 const (
 	verdictSandholdNotConnected = "credential_missing" //nolint:gosec // G101: a verdict copy key, not a credential
 	verdictSandholdKeyExpired   = "credential_expired" //nolint:gosec // G101: a verdict copy key, not a credential
-	verdictSandholdRunNotBuilt  = "run_path_not_built"
 )
 
 func init() {
-	registerSandboxDriver(sandboxDriverReg{
-		backend: sandboxbackend.BackendSandHold, component: sandholdComponent,
-		build: func(r *sandboxRuntime, _ config.Config) sandboxDriver {
-			return &sandholdDriver{gatesProbeOnlyDriver: gatesProbeOnlyDriver{r: r, id: sandboxbackend.BackendSandHold, notBuilt: sandholdNotBuilt}}
+	// The row's provider table: its template and box_binary from
+	// [terminal.sandbox.hosted.sandhold], its node from the connection
+	// (or SANDHOLD_URL), never a region or an endpoint from a file.
+	hostedVendorConfigTable = append(hostedVendorConfigTable, hostedVendorConfigRow{
+		vendor: sandboxremote.VendorSandHold,
+		read: func(c config.TerminalSandboxHostedConfig) config.TerminalSandboxHostedProviderConfig {
+			pc := c.SandHold
+			pc.Region, pc.EndpointSPKISHA256, pc.OrgPublished, pc.BoxBinaryInImage = "", "", false, false
+			pc.Endpoint = sandholdNode(sandholdNodeDir())
+			return pc
+		},
+	})
+	registerHostedVendor(hostedVendorReg{
+		vendor: sandboxremote.VendorSandHold, component: sandholdComponent,
+		newClient: func(cred sandboxremote.Credential, endpoint string) (sandboxremote.Client, error) {
+			// The key goes only to the node it is bound to (the core
+			// checked the binding before this).
+			return sandhold.NewBox(endpoint, cred.Get(sandhold.EnvKey))
+		},
+		localProbe:       sandholdLocalProbe,
+		credential:       sandholdHostedCredential,
+		credentialSource: sandholdHostedCredentialSource,
+		connectHow:       sandholdConnectHow,
+		built:            func(r *sandboxRuntime) { sandholdSetNodeDir(r.observerDir) },
+		probeHint: func(d *hostedDriver) string {
+			return sandholdProbeAt(d.r.observerDir, d.now()).Hint
 		},
 		// While the component is not selected the row still says whether
 		// this machine is connected: it reads only its own state file.
@@ -63,27 +88,117 @@ func init() {
 	sandboxSubcommands = append(sandboxSubcommands, newSandboxConnectCmd, newSandboxDisconnectCmd)
 }
 
-// sandholdDriver is the probe-only SandHold row: the shared probe-only
-// refusals (gatesProbeOnlyDriver) with a probe that reads the connection.
-type sandholdDriver struct {
-	gatesProbeOnlyDriver
-}
-
-// probe reads the connection record only (never the keychain, never the
-// node), listed or not: selection itself drops a row that is not in
-// [terminal.sandbox].backends, and the backend list's "when enabled"
-// answer and the Hint then say how to connect before the row is enabled.
-func (d *sandholdDriver) probe(context.Context) sandboxselect.Probe {
-	p := sandholdProbeAt(d.r.observerDir, time.Now())
-	d.ver = p.Version
-	return p
-}
-
 // sandholdLookupEnv reads SANDHOLD_URL and SANDHOLD_API_KEY (a variable for
 // tests).
 var sandholdLookupEnv = os.LookupEnv
 
-// sandholdProbeAt is the row's probe over the state in observerDir.
+// sandholdDirMu guards sandholdDirSet, the observer dir the row's node is
+// read from: the built driver's, else the default ~/.observer (the CLI verbs
+// that list or remove leftover boxes run without a driver).
+var (
+	sandholdDirMu  sync.Mutex
+	sandholdDirSet string
+)
+
+func sandholdSetNodeDir(dir string) {
+	sandholdDirMu.Lock()
+	sandholdDirSet = dir
+	sandholdDirMu.Unlock()
+}
+
+func sandholdNodeDir() string {
+	sandholdDirMu.Lock()
+	dir := sandholdDirSet
+	sandholdDirMu.Unlock()
+	if dir == "" {
+		dir, _ = hostedObserverDir()
+	}
+	return dir
+}
+
+// sandholdEnv reads one of the row's variables, trimmed.
+func sandholdEnv(name string) string {
+	v, _ := sandholdLookupEnv(name)
+	return strings.TrimSpace(v)
+}
+
+// sandholdNode is the node a launch would use, from local facts only:
+// SANDHOLD_URL, else the node of the saved connection; "" for none. An
+// address NodeURL refuses is returned as it is, so the row says why.
+func sandholdNode(observerDir string) string {
+	if raw := sandholdEnv(sandhold.EnvURL); raw != "" {
+		if u, err := sandhold.NodeURL(raw); err == nil {
+			return u
+		}
+		return raw
+	}
+	if conn, err := sandholdLoadConnection(observerDir); err == nil && conn != nil {
+		return conn.URL
+	}
+	return ""
+}
+
+// sandholdHostedCredentialSource says where the key would come from without
+// reading it (sandhold.Resolve's rules over local facts): "env" for
+// SANDHOLD_API_KEY with a node, "keystore" for a saved sign-in to the node
+// in use, "" for none.
+func sandholdHostedCredentialSource(observerDir string) string {
+	conn, err := sandholdLoadConnection(observerDir)
+	if err != nil {
+		conn = nil
+	}
+	envURL := sandholdEnv(sandhold.EnvURL)
+	if sandholdEnv(sandhold.EnvKey) != "" && (envURL != "" || conn != nil) {
+		return sandboxremote.SourceEnv
+	}
+	if conn == nil {
+		return ""
+	}
+	if envURL != "" {
+		if u, err := sandhold.NodeURL(envURL); err != nil || u != conn.URL {
+			return "" // the saved key belongs to the saved node only
+		}
+	}
+	return sandboxremote.SourceKeystore
+}
+
+// sandholdHostedCredential reads the key at use time (a launch, the leftover
+// list's confirm): sandhold.Resolve over the saved sign-in and the
+// environment, bound to the node it belongs to.
+func sandholdHostedCredential(observerDir string) (sandboxremote.Credential, error) {
+	saved, err := sandholdLoadCredential(observerDir)
+	if err != nil && sandholdEnv(sandhold.EnvKey) == "" {
+		return sandboxremote.Credential{}, fmt.Errorf("%w: %w", sandboxremote.ErrCredentialMissing, err)
+	}
+	s, err := sandhold.Resolve(saved, sandholdLookupEnv)
+	if err != nil {
+		return sandboxremote.Credential{}, fmt.Errorf("%w: %w", sandboxremote.ErrCredentialMissing, err)
+	}
+	if s.Key == "" || s.URL == "" {
+		return sandboxremote.Credential{}, fmt.Errorf("%w: this machine holds no key for a SandHold node; %s", sandboxremote.ErrCredentialMissing, sandholdConnectHow)
+	}
+	src := sandboxremote.SourceKeystore
+	if s.FromEnv {
+		src = sandboxremote.SourceEnv
+	}
+	return sandboxremote.Credential{Provider: sandboxremote.VendorSandHold, Fields: map[string]string{sandhold.EnvKey: s.Key}, Endpoint: s.URL, Source: src}, nil
+}
+
+// sandholdLocalProbe is the row's own probe rows, before the shared ladder:
+// a connection record that cannot be read, and a saved key past its expiry
+// (a CI key in the environment wins over both). Local facts only.
+func sandholdLocalProbe(d *hostedDriver) (string, string) {
+	if sandholdHostedCredentialSource(d.r.observerDir) == sandboxremote.SourceEnv {
+		return "", ""
+	}
+	p := sandholdProbeAt(d.r.observerDir, d.now())
+	if p.Verdict == verdictSandholdKeyExpired || (p.Verdict == verdictSandholdNotConnected && p.Reason != sandhold.NotConnected) {
+		return p.Verdict, p.Reason
+	}
+	return "", ""
+}
+
+// sandholdProbeAt is the row's connection state over observerDir.
 func sandholdProbeAt(observerDir string, now time.Time) sandboxselect.Probe {
 	conn, err := sandholdLoadConnection(observerDir)
 	return sandholdProbeFor(conn, err, sandholdEnvKeySet(), now)
@@ -91,12 +206,11 @@ func sandholdProbeAt(observerDir string, now time.Time) sandboxselect.Probe {
 
 // sandholdEnvKeySet reports a CI key in the environment (it wins over a
 // saved sign-in, note 41 D3).
-func sandholdEnvKeySet() bool {
-	v, ok := sandholdLookupEnv(sandhold.EnvKey)
-	return ok && strings.TrimSpace(v) != ""
-}
+func sandholdEnvKeySet() bool { return sandholdEnv(sandhold.EnvKey) != "" }
 
-// sandholdProbeFor decides the row's probe from local facts, top-down.
+// sandholdProbeFor says the connection's state from local facts, top-down:
+// its Verdict is "" when the connection is usable (the shared ladder then
+// decides), and its Hint is the row's note.
 func sandholdProbeFor(conn *sandhold.Connection, readErr error, envKey bool, now time.Time) sandboxselect.Probe {
 	p := sandboxselect.Probe{Compiled: true, Version: "1", Sources: []string{"live"}}
 	switch {
@@ -105,7 +219,6 @@ func sandholdProbeFor(conn *sandhold.Connection, readErr error, envKey bool, now
 		p.Reason = "the SandHold connection record could not be read (" + readErr.Error() + "); connect again: observer sandbox connect <node-url>"
 		p.Hint = p.Reason
 	case conn == nil && envKey:
-		p.Verdict, p.Reason = verdictSandholdRunNotBuilt, sandholdNotBuilt
 		p.Hint = "a key is set in " + sandhold.EnvKey + " for the node in " + sandhold.EnvURL + " (it wins over a saved sign-in; not checked here, the probe never calls the node)"
 	case conn == nil:
 		p.Verdict, p.Reason = verdictSandholdNotConnected, sandhold.NotConnected
@@ -115,7 +228,6 @@ func sandholdProbeFor(conn *sandhold.Connection, readErr error, envKey bool, now
 		p.Reason = "the key for " + conn.URL + " expired on " + conn.ExpiresAt.UTC().Format("2 Jan 2006") + "; connect again: observer sandbox connect " + conn.URL
 		p.Hint = conn.Summary(now)
 	default:
-		p.Verdict, p.Reason = verdictSandholdRunNotBuilt, sandholdNotBuilt
 		p.Hint = conn.Summary(now)
 		if envKey {
 			p.Hint += "; " + sandhold.EnvKey + " is set and wins over this sign-in"
@@ -428,7 +540,7 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 		}
 	}
 	fmt.Fprintln(out, "\nThe node appears in Observer's sandbox backends as \"sandhold\" (observer sandbox status --backend sandhold).")
-	fmt.Fprintln(out, "Running a sandbox on it from Observer is not built in this release.")
+	fmt.Fprintln(out, "To run a sandboxed terminal on it, add \"sandhold\" to [terminal.sandbox].backends and choose it by name; the first run asks you to agree to what is sent to the node.")
 	return nil
 }
 

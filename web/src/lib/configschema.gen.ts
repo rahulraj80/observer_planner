@@ -390,6 +390,11 @@ export type ConfigKeyPath =
   "terminal.sandbox.hosted.vercel.box_binary" |
   "terminal.sandbox.hosted.vercel.endpoint" |
   "terminal.sandbox.hosted.vercel.endpoint_spki_sha256" |
+  "terminal.sandbox.hosted.sandhold.region" |
+  "terminal.sandbox.hosted.sandhold.template" |
+  "terminal.sandbox.hosted.sandhold.box_binary" |
+  "terminal.sandbox.hosted.sandhold.endpoint" |
+  "terminal.sandbox.hosted.sandhold.endpoint_spki_sha256" |
   "terminal.sandbox.hosted.openshell-org.laptop_relay" |
   "terminal.sandbox.hosted.openshell-org.hold_on_end" |
   "terminal.sandbox.readopt.bound_minutes" |

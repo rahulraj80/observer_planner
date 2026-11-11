@@ -2655,6 +2655,11 @@ type TerminalSandboxHostedConfig struct {
 	E2B    TerminalSandboxHostedProviderConfig `toml:"e2b"`
 	Modal  TerminalSandboxHostedProviderConfig `toml:"modal"`
 	Vercel TerminalSandboxHostedProviderConfig `toml:"vercel"`
+	// SandHold is the SandHold row's table: its template (a template saved
+	// on the node, which may hold the agent tool) and box_binary only. Its
+	// node is the one `observer sandbox connect` signed in to (or
+	// SANDHOLD_URL), never a region or an endpoint here.
+	SandHold TerminalSandboxHostedProviderConfig `toml:"sandhold"`
 	// OpenShellOrg is the org-hosted OpenShell row's block (lane G4).
 	OpenShellOrg TerminalSandboxHostedOrgShellConfig `toml:"openshell-org"`
 }
@@ -7270,7 +7275,10 @@ func validateTerminalSandboxHosted(c TerminalSandboxHostedConfig) error {
 	default:
 		return fmt.Errorf("config: terminal.sandbox.hosted.memory_images %q not in {avoid, refuse}", c.MemoryImages)
 	}
-	for name, p := range map[string]TerminalSandboxHostedProviderConfig{"e2b": c.E2B, "modal": c.Modal, "vercel": c.Vercel} {
+	if c.SandHold.Region != "" || c.SandHold.Endpoint != "" || c.SandHold.EndpointSPKISHA256 != "" {
+		return errors.New("config: terminal.sandbox.hosted.sandhold takes template and box_binary only: its node is the one `observer sandbox connect <node-url>` signed in to, or SANDHOLD_URL")
+	}
+	for name, p := range map[string]TerminalSandboxHostedProviderConfig{"e2b": c.E2B, "modal": c.Modal, "vercel": c.Vercel, "sandhold": c.SandHold} {
 		if r := p.Region; r != "" && !hostedRegionRE.MatchString(r) {
 			return fmt.Errorf("config: terminal.sandbox.hosted.%s.region %q must be a region name (letters, digits and dashes)", name, r)
 		}

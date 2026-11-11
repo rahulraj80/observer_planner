@@ -36,6 +36,12 @@ type vector struct {
 	Request  json.RawMessage `json:"request"`
 	Status   int             `json:"status"`
 	Response json.RawMessage `json:"response"`
+	// Accept and Stream are an event-stream call's (exec-stream).
+	Accept string `json:"accept"`
+	Stream []struct {
+		Event string          `json:"event"`
+		Data  json.RawMessage `json:"data"`
+	} `json:"stream"`
 }
 
 // The values a contract file's placeholders stand for in these tests.
@@ -100,6 +106,22 @@ func contractNode(t *testing.T, vs ...vector) *Client {
 					t.Errorf("%s: the client's request lacks %q, which the contract's request has", v.Name, f)
 				}
 			}
+		}
+		if len(v.Stream) > 0 {
+			if v.Accept != "" && r.Header.Get("Accept") != v.Accept {
+				t.Errorf("%s: the client asked for %q, the contract's call sends Accept %q", v.Name, r.Header.Get("Accept"), v.Accept)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(v.Status)
+			for _, ev := range v.Stream {
+				// One data line per event, as the node's handler writes it.
+				var data bytes.Buffer
+				if err := json.Compact(&data, []byte(fill(string(ev.Data)))); err != nil {
+					t.Errorf("%s: event data: %v", v.Name, err)
+				}
+				_, _ = io.WriteString(w, "event: "+ev.Event+"\ndata: "+data.String()+"\n\n")
+			}
+			return
 		}
 		if len(v.Response) == 0 {
 			w.WriteHeader(v.Status)

@@ -124,6 +124,11 @@ func hostedStoredVendorArg(id string) (sandboxremote.Vendor, error) {
 	if err == nil && v.MintedCredential {
 		return v, errHostedMinted(v)
 	}
+	if reg, ok := hostedVendorRegs[id]; err == nil && ok && reg.credential != nil {
+		// A row that keeps its own sign-in (SandHold) is connected and
+		// disconnected by its own commands, never through the shared store.
+		return v, fmt.Errorf("%s keeps its own sign-in: %s; `observer sandbox disconnect` revokes it", v.Name, hostedConnectHow(v))
+	}
 	return v, err
 }
 

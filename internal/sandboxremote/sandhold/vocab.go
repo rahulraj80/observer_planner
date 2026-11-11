@@ -65,6 +65,21 @@ var networkTier = map[string]vocab.Tier{
 // tierTitle is the tier's display name.
 var tierTitle = map[string]string{TierShared: "Shared", TierShielded: "Shielded", TierSealed: "Sealed", TierVault: "Vault"}
 
+// classTier is tierClass backwards: the tier a create asks for to get a
+// class (Observer picks the node's isolation from the class a launch needs).
+var classTier = map[vocab.IsoClass]string{
+	vocab.ClassProcess:         TierShared,
+	vocab.ClassContainer:       TierShielded,
+	vocab.ClassUserspaceKernel: TierSealed,
+	vocab.ClassHWVM:            TierVault,
+}
+
+// TierForClass is the node tier a create asks for to get class.
+func TierForClass(c vocab.IsoClass) (string, bool) {
+	t, ok := classTier[c]
+	return t, ok
+}
+
 // ClassForLevel is the class of a node isolation level.
 func ClassForLevel(level string) (vocab.IsoClass, bool) {
 	c, ok := levelClass[strings.ToLower(strings.TrimSpace(level))]

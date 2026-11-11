@@ -447,6 +447,9 @@ func hostedConnectedMarker(observerDir, provider string) string {
 // hostedCredentialSource says where a credential would come from, without
 // reading any value or opening the keychain: "keystore", "env" or "".
 func hostedCredentialSource(observerDir string, v sandboxremote.Vendor) string {
+	if reg, ok := hostedVendorRegs[v.ID]; ok && reg.credentialSource != nil {
+		return reg.credentialSource(observerDir)
+	}
 	if _, err := os.Lstat(hostedConnectedMarker(observerDir, v.ID)); err == nil {
 		return sandboxremote.SourceKeystore
 	}
@@ -462,6 +465,9 @@ func hostedCredentialSource(observerDir string, v sandboxremote.Vendor) string {
 // first, then the vendor's environment variables. It is called only from a
 // user action (a launch, the leftover list's confirm, a connect check).
 func hostedResolveCredential(observerDir string, v sandboxremote.Vendor) (sandboxremote.Credential, error) {
+	if reg, ok := hostedVendorRegs[v.ID]; ok && reg.credential != nil {
+		return reg.credential(observerDir)
+	}
 	if _, err := os.Lstat(hostedConnectedMarker(observerDir, v.ID)); err == nil {
 		ks := hostedKeystoreOpen(v.KeystoreService, hostedCredDir(observerDir))
 		raw, err := ks.Get(sandboxremote.KeystoreName)
@@ -482,7 +488,17 @@ func hostedResolveCredential(observerDir string, v sandboxremote.Vendor) (sandbo
 	if c, ok := sandboxremote.CredentialFromEnv(v, hostedLookupEnv); ok {
 		return c, nil
 	}
-	return sandboxremote.Credential{}, fmt.Errorf("%w: no %s credential: connect one in Terminals > Settings > Hosted sandboxes, or set %s", sandboxremote.ErrCredentialMissing, v.Name, strings.Join(v.EnvCredential, " and "))
+	return sandboxremote.Credential{}, fmt.Errorf("%w: no %s credential: %s", sandboxremote.ErrCredentialMissing, v.Name, hostedConnectHow(v))
+}
+
+// hostedConnectHow says how a vendor's credential is connected: the row's
+// own words when it registers them, else the shared settings page or the
+// vendor's environment variables.
+func hostedConnectHow(v sandboxremote.Vendor) string {
+	if reg, ok := hostedVendorRegs[v.ID]; ok && reg.connectHow != "" {
+		return reg.connectHow
+	}
+	return "connect one in Terminals > Settings > Hosted sandboxes, or set " + strings.Join(v.EnvCredential, " and ")
 }
 
 // hostedConnectCredential stores a credential in the keystore, bound to
@@ -576,6 +592,24 @@ type hostedVendorReg struct {
 	//     clone_repositories), for the clone consent's picker (FX3 item 3).
 	//     nil: the row offers no box-side clone list.
 	cloneRepositories func(c config.TerminalSandboxHostedConfig) []string
+	//   - credential and credentialSource replace the shared keystore and
+	//     environment reading for a row that keeps its own sign-in (the
+	//     SandHold row: the key `observer sandbox connect` saved, or
+	//     SANDHOLD_URL with SANDHOLD_API_KEY); credentialSource reads no
+	//     value and opens no keychain (invariant I6). connectHow is the
+	//     row's own words for how to connect. nil and "" keep the core's.
+	credential       func(observerDir string) (sandboxremote.Credential, error)
+	credentialSource func(observerDir string) string
+	connectHow       string
+	//   - built runs when the row's driver is built (the SandHold row
+	//     notes the observer dir its node is read from), and inactiveHint
+	//     is the row's note while its component is not selected.
+	built        func(r *sandboxRuntime)
+	inactiveHint func(r *sandboxRuntime, full config.Config) string
+	//   - probeHint is the row's note on its probe (the SandHold row: who
+	//     this machine is signed in as and which isolation the node offers),
+	//     from local facts only.
+	probeHint func(d *hostedDriver) string
 }
 
 // hostedVendorRegs are the registered vendor drivers (vendor id ->
@@ -589,8 +623,12 @@ func registerHostedVendor(reg hostedVendorReg) {
 	registerSandboxDriver(sandboxDriverReg{
 		backend: reg.vendor, component: reg.component,
 		build: func(r *sandboxRuntime, full config.Config) sandboxDriver {
+			if reg.built != nil {
+				reg.built(r)
+			}
 			return newHostedDriver(r, full, reg)
 		},
+		inactiveHint: reg.inactiveHint,
 	})
 }
 
@@ -604,6 +642,12 @@ func hostedResolve(v sandboxremote.Vendor, pc config.TerminalSandboxHostedProvid
 
 // hostedResolveRefusal says why hostedResolve refused a provider table.
 func hostedResolveRefusal(v sandboxremote.Vendor, pc config.TerminalSandboxHostedProviderConfig) string {
+	if v.NodeEndpoint {
+		if pc.Endpoint == "" {
+			return "this machine is not connected to a " + v.Name + " node: " + hostedConnectHow(v)
+		}
+		return fmt.Sprintf("the node address %q is not one Observer sends a key to (https, or http for this machine only); %s", pc.Endpoint, hostedConnectHow(v))
+	}
 	if pc.Endpoint != "" {
 		return fmt.Sprintf("the endpoint %q is not on %s's own domain (%s); an endpoint elsewhere reaches a node only as one your organization publishes", pc.Endpoint, v.Name, strings.Join(v.Domains, ", "))
 	}
@@ -685,6 +729,12 @@ func hostedProbeLadder(v sandboxremote.Vendor, cfg config.TerminalSandboxHostedC
 			return !row.RunsOn(f.host), "the hosted drivers run their host services on a Linux or WSL2 daemon only"
 		}},
 		{verdictHostedRegionUnknown, func() (bool, string) {
+			if v.NodeEndpoint {
+				// A row on the person's own node has no region: no node yet
+				// is the credential row's (below), a node address Observer
+				// would not send a key to is this one.
+				return !regionOK && pc.Endpoint != "", hostedResolveRefusal(v, pc)
+			}
 			return !regionOK, "region " + pc.Region + " is not one " + v.Name + " documents (" + strings.Join(v.Regions.Known, ", ") + ")"
 		}},
 		{verdictHostedMemoryImages, func() (bool, string) {
@@ -692,7 +742,7 @@ func hostedProbeLadder(v sandboxremote.Vendor, cfg config.TerminalSandboxHostedC
 				v.Name + " can take a memory image of a live box and memory_images = refuse"
 		}},
 		{verdictHostedCredentialMissing, func() (bool, string) {
-			return f.credential == "", "no " + v.Name + " credential: connect one in Terminals > Settings > Hosted sandboxes, or set " + strings.Join(v.EnvCredential, " and ")
+			return f.credential == "", "no " + v.Name + " credential: " + hostedConnectHow(v)
 		}},
 		{verdictHostedBoxBinary, func() (bool, string) {
 			if f.boxBinaryErr == nil {
@@ -824,7 +874,16 @@ func hostedBoxBinaryLabel(pc config.TerminalSandboxHostedProviderConfig) string 
 
 // probe reads local facts only (never the vendor, never a credential
 // value).
-func (d *hostedDriver) probe(context.Context) sandboxselect.Probe {
+func (d *hostedDriver) probe(ctx context.Context) sandboxselect.Probe {
+	p := d.probeLocal(ctx)
+	if d.reg.probeHint != nil && p.Hint == "" {
+		p.Hint = d.reg.probeHint(d)
+	}
+	return p
+}
+
+// probeLocal is the probe's verdict from local facts.
+func (d *hostedDriver) probeLocal(context.Context) sandboxselect.Probe {
 	f := hostedProbeFacts{listed: d.listed(), host: sandboxHostKind()}
 	f.version, f.versionAuthenticated = d.probeVersion()
 	if d.reg.localProbe != nil {

@@ -148,7 +148,9 @@ func DecodeStored(provider string, b []byte) (Credential, error) {
 // to the vendor's default endpoint only.
 func CheckBinding(c Credential, v Vendor, endpoint string) error {
 	want := c.Endpoint
-	if c.Source == SourceEnv {
+	// A NodeEndpoint row's environment credential names its own node
+	// (SANDHOLD_URL), so it is bound there, never to a default.
+	if c.Source == SourceEnv && !v.NodeEndpoint {
 		want = v.DefaultEndpoint
 	}
 	if endpoint == "" || normalizeOrigin(endpoint) != normalizeOrigin(want) {

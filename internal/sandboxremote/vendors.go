@@ -26,6 +26,11 @@ const (
 	// through the org's validating front, which the org publishes in its
 	// signed managed sandbox body.
 	VendorOpenShellOrg = "openshell-org"
+	// VendorSandHold is a SandHold node the user connected with `observer
+	// sandbox connect <node-url>` (SandHold notes 41 D2 and D3): its
+	// "vendor" is the node itself, reached through its public /v1 API with
+	// the API key the node gave at sign-in (NodeEndpoint).
+	VendorSandHold = "sandhold"
 )
 
 // RegionKind says how a vendor places a box.
@@ -225,6 +230,18 @@ type Vendor struct {
 	// UploadViaExec vendor (each upload part is one such exec); 0 keeps the
 	// core's quarter-MiB default.
 	OneShotStdinBytes int
+	// NodeEndpoint (the SandHold row): the API endpoint is the node the user
+	// connected this machine to, never a vendor domain or a default; the
+	// credential is that node's own sign-in, resolved by the row's driver
+	// registration (the hosted core's keystore and environment lookups do
+	// not apply), and an environment credential is bound to the node its
+	// environment names (SANDHOLD_URL), not to a default endpoint.
+	NodeEndpoint bool
+	// SeveralIsolations (the SandHold row): the vendor offers more than one
+	// isolation, so a create asks for the class the launch needs
+	// (BoxSpec.Isolation) and the wire client refuses, and deletes, a box
+	// the vendor says got less.
+	SeveralIsolations bool
 }
 
 // DefaultReadyWaitSeconds is the ready wait of a row that names none.
@@ -456,6 +473,63 @@ var vendors = map[string]Vendor{
 		// request (FX4 item 2, F-P6-2; FX3 had assumed 4 MiB).
 		OneShotStdinBytes: 1<<20 - 64<<10,
 	},
+	// The SandHold row (SandHold notes 41 D2 to D5). Every fact is
+	// SandHold's own control/README.md and its API handlers
+	// (control/internal/api), read 2026-11-11, never a third party's docs.
+	// Built and tested against the node's customer contract vectors and an
+	// httptest fake; no live run yet (register SANDHOLD-1).
+	VendorSandHold: {
+		ID: VendorSandHold, Name: "SandHold",
+		// No default endpoint and no vendor domain: the endpoint is the node
+		// this machine is connected to (NodeEndpoint).
+		KeystoreService: "sbo-sandbox-sandhold-v1",
+		// The field name the resolved key is kept under (the key comes from
+		// the node's sign-in or SANDHOLD_API_KEY, SANDHOLD_URL naming the
+		// node).
+		EnvCredential: []string{"SANDHOLD_API_KEY"},
+		Regions:       Regions{Kind: RegionByEndpoint, Default: RegionSandHoldNode, Known: []string{RegionSandHoldNode}},
+		Tiers: map[vocab.Tier]TierMapping{
+			// Every sandbox is deny-by-default (README "Network"); the create
+			// sends no allow list, and a box the node reports with any
+			// network but none is refused and deleted.
+			vocab.TierNone:      blockAll("no network.allow (the node's deny-by-default egress); the relay carries only the hook stream", false),
+			vocab.TierProxyOnly: blockAll("no network.allow (the node's deny-by-default egress); the relay carries the hook stream and the model proxy", true),
+			// network.open is honoured only by a target that cannot enforce
+			// an allow list; elsewhere the box stays deny-by-default (the
+			// node's reply says which). Claimed: the host guards (metadata,
+			// private ranges, SMTP) are the node's words, not checked here.
+			vocab.TierInternet: {Mechanism: "network.open (an open network where the target offers one) plus the relay for the model proxy", Source: vocab.SourceClaimed, Relay: true},
+		},
+		// The node's own maximum timeout caps a box (its refusal says the
+		// number); the row names none.
+		MemoryImages: MemoryImagePolicy{AutoPauseExists: false, Note: "the native API has no pause or snapshot of a live sandbox"},
+		// The PTY is the node's terminal WebSocket (a resize control frame);
+		// the relay's second stream is a second terminal session put in raw
+		// mode, since the node's exec has no stdin. No reattach: the node
+		// ends a terminal session when its socket goes.
+		RelayStdin: true, GuestPTY: false, Reattach: false,
+		// The node runs every command as its sandbox user, which has no fixed
+		// home path; /workspace is made and handed to that user at create.
+		BoxHome: "/tmp/observer-home", BoxWorkspace: "/workspace", NoRootExec: true,
+		Docs: []EndpointDoc{
+			{"create", "POST", "/v1/sandboxes (template, timeoutSeconds, metadata, isolation, network.open)", "SandHold control/README.md; control/internal/api/api.go createSandbox; contract sandbox-create, sandbox-create-refused", ""},
+			{"get", "GET", "/v1/sandboxes/{id}", "api.go getSandbox; contract sandbox-get, sandbox-missing", ""},
+			{"list", "GET", "/v1/sandboxes", "api.go listSandboxes; contract sandbox-list", "the list carries no metadata, so a box is never found by its run label"},
+			{"delete", "DELETE", "/v1/sandboxes/{id}", "api.go deleteSandbox; contract sandbox-delete", ""},
+			{"exec", "POST", "/v1/sandboxes/{id}/exec (Accept: text/event-stream)", "api.go exec, exec_stream.go; contract exec-stream", "output arrives as text lines, so a command's bytes are not carried exactly"},
+			{"upload", "PUT", "/v1/sandboxes/{id}/files?path=&mode= (raw body, 100 MiB at most)", "api.go putFile", "no contract vector"},
+			{"download", "GET", "/v1/sandboxes/{id}/files?path=", "api.go getFile", "no contract vector"},
+			{"terminal", "GET (WebSocket)", "/v1/sandboxes/{id}/pty?command= (binary frames stdin and stdout, a resize text frame)", "api.go pty", "no contract vector; no exit status on the socket"},
+		},
+		Unverified: []string{
+			"every call against a real node (register SANDHOLD-1: no live run yet)",
+			"whether /tmp in the node's image lets the uploaded observer run (a noexec /tmp would stop it)",
+			"the exit status of a terminal session (the socket reports none; the command's wrapper writes it to a file the client reads)",
+			"whether a cancelled streamed exec ends the command in the box",
+		},
+		ReadyWaitSeconds: 60,
+		NodeEndpoint:     true, SeveralIsolations: true,
+	},
 }
 
 // VendorFor returns the vendor of a registry row id.
@@ -533,6 +607,9 @@ const RegionCustomEndpoint = "custom-endpoint"
 // (CheckBinding, SBX-GOV-4). ok is false otherwise.
 func (v Vendor) ResolveEndpoint(configuredRegion, endpoint string, orgPublished bool) (region, ep string, ok bool) {
 	endpoint = strings.TrimSuffix(strings.TrimSpace(endpoint), "/")
+	if v.NodeEndpoint {
+		return resolveNodeEndpoint(endpoint)
+	}
 	if v.OrgEndpoint {
 		// Only the organization's published endpoint, never a default or a
 		// local value; the region is the org's own label (section 8.2).
@@ -574,6 +651,53 @@ func (v Vendor) resolveOrgEndpoint(region, endpoint string, orgPublished bool) (
 		return "", "", false
 	}
 	return strings.TrimSpace(region), endpoint, true
+}
+
+// RegionSandHoldNode is the region a SandHold run records: the node this
+// machine is connected to (its address is the run's endpoint).
+const RegionSandHoldNode = "your-node"
+
+// resolveNodeEndpoint is ResolveEndpoint for a NodeEndpoint row: the
+// connected node's address, https, or http for this machine only (a key
+// travels on every call), with no user, query or fragment.
+func resolveNodeEndpoint(endpoint string) (string, string, bool) {
+	if endpoint == "" {
+		return "", "", false
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(endpoint, "?#") {
+		return "", "", false
+	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !loopbackHost(u.Hostname()) {
+			return "", "", false
+		}
+	default:
+		return "", "", false
+	}
+	return RegionSandHoldNode, endpoint, true
+}
+
+// loopbackHost reports localhost or a loopback address, without a resolver
+// (this package does no I/O).
+func loopbackHost(h string) bool {
+	h = strings.ToLower(h)
+	if h == "localhost" || h == "::1" {
+		return true
+	}
+	parts := strings.Split(h, ".")
+	if len(parts) != 4 || parts[0] != "127" {
+		return false
+	}
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 || n > 255 {
+			return false
+		}
+	}
+	return true
 }
 
 // OwnsHost reports whether host is one of the vendor's own domains or under

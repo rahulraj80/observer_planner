@@ -111,6 +111,10 @@ type hostedPlanFile struct {
 	// ResumeBoxRunID names the held box a resume launch takes over (the
 	// org-hosted row's resume, design 3.6); "" for a fresh box.
 	ResumeBoxRunID string `json:"resume_box_run_id,omitempty"`
+	// Isolation is the class the launch asks a row that offers several
+	// for (Vendor.SeveralIsolations: [terminal.sandbox].min_isolation);
+	// "" lets the vendor place the box.
+	Isolation string `json:"isolation,omitempty"`
 }
 
 // hostedForwardEnvNames are the provider API-key variables an
@@ -146,6 +150,12 @@ func (d *hostedDriver) floor(cfg config.TerminalSandboxConfig, tier vocab.Tier, 
 		return fmt.Errorf("terminal_sandbox: %s is not in [terminal.sandbox].backends %v; a hosted sandbox is used only when listed", d.vendor.ID, cfg.Backends)
 	}
 	if floor := vocab.IsoClass(cfg.MinIsolation); floor != "" && row.Iso.Class.Rank() < floor.Rank() {
+		if d.vendor.SeveralIsolations {
+			// The node offers several isolations, but which one a box gets
+			// is the node's own word, which Observer cannot check before
+			// or after: it never meets a floor above what the row counts.
+			return fmt.Errorf("terminal_sandbox: %s: the isolation of a box on %s is the node's own claim, which Observer cannot check, so it does not meet [terminal.sandbox].min_isolation = %s; remove min_isolation to use this row", sandboxselect.VerdictBelowRequestedClass, d.vendor.Name, floor)
+		}
 		return fmt.Errorf("terminal_sandbox: %s builds %s isolation, below [terminal.sandbox].min_isolation = %s", d.vendor.ID, row.Iso.Class, floor)
 	}
 	if !row.OffersTier(tier) {
@@ -407,6 +417,9 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 		CheckpointMinutes: d.cfg.CheckpointMinutes, DailyBoxMinutes: d.cfg.DailyBoxMinutes, ObserverDir: d.r.observerDir, Tool: req.Tool,
 		DBExport: d.cfg.DBExport, RetentionDays: d.r.cfg.WorkspaceRetentionDays,
 		Source: string(delivery.Source), Delivery: string(delivery.Delivery), CloneURL: delivery.CloneURL,
+	}
+	if d.vendor.SeveralIsolations {
+		plan.Isolation = launchFloorConfig(d.r.cfg, string(tier)).MinIsolation
 	}
 	if d.reg.resumeBox != nil {
 		// A resume launch takes over a held box (the row's resume, design

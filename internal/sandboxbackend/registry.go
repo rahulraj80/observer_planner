@@ -51,10 +51,10 @@ const (
 )
 
 // sandHoldDocSource names the grounding of the sandhold row.
-const sandHoldDocSource = "SandHold control/README.md (native API /v1: device sign-in, whoami, targets, sandboxes, exec, files, pty, keys) and notes 41 (D2 to D5) and 42 (browser sign-in, client-side security findings); internal/sandboxremote/sandhold httptest fake tests"
+const sandHoldDocSource = "SandHold control/README.md and control/internal/api handlers (native API /v1: device sign-in, whoami, targets, sandboxes, exec and its event stream, files, pty, keys), its customer contract vectors, and notes 41 (D2 to D5) and 42 (browser sign-in, client-side security findings); internal/sandboxremote/sandhold contract and httptest fake tests (no live node)"
 
 // sandHoldRegister names what the sandhold row still owes.
-const sandHoldRegister = "SANDHOLD-1: the launch path on SandHold's native API (create, upload, exec, pty, delete) and its first live run"
+const sandHoldRegister = "SANDHOLD-1: the first live run of the launch path on a SandHold node (create, upload, capture relay, terminal, resize, teardown, leftover delete), which is built and tested against fakes only"
 
 // ConnectorSSH is the SSH connector id.
 const ConnectorSSH = "ssh"
@@ -906,11 +906,12 @@ var registry = map[string]Capability{
 	// The node offers several isolations (Shared, Shielded, Sealed, Vault),
 	// so the row's static class is the weakest one a node can offer
 	// (process, claimed): the probe's note names what this node offers, per
-	// isolation, in Observer's classes. Probe only in this release: a run is
-	// refused by name until the launch path is built (owed: SANDHOLD-1).
+	// isolation, in Observer's classes. A run is one more hosted vendor of
+	// the shared core, built against SandHold's documented API and fakes
+	// only (owed: SANDHOLD-1, the first live run).
 	BackendSandHold: {
 		ID: BackendSandHold, Label: "SandHold (your node)", Maturity: MaturityPreview, Phase: "P7",
-		SetupUnavailable: "connecting is one command, `observer sandbox connect <node-url>`, and the run path is not built in this release",
+		SetupUnavailable: "connecting is one command you run in a terminal, `observer sandbox connect <node-url>` (you approve this machine in the node's portal); the first run then asks you to agree to what is sent to the node",
 		Verification: []Verified{
 			{Host: HostLinux, Kind: vocab.VerifiedDoc, Source: sandHoldDocSource, Date: "2026-11-11", RegisterRef: sandHoldRegister},
 			{Host: HostWSL2, Kind: vocab.VerifiedDoc, Source: sandHoldDocSource, Date: "2026-11-11", RegisterRef: sandHoldRegister},
@@ -935,7 +936,7 @@ var registry = map[string]Capability{
 		KeystoreServices: []string{"sbo-sandbox-sandhold-v1"},
 		Discloses:        []Disclosure{DiscloseDataLeaves, DiscloseAccountLogin},
 		// The node's own maximum timeout caps a box; the row names none.
-		Note: "Beta, used only when chosen by name, and probe only in this release: a SandHold node you connect with `observer sandbox connect <node-url>` (you approve this machine in the node's portal; Observer keeps the key in this machine's keychain). The note on this row says who you are signed in as and which isolation the node offers (Shared, Shielded, Sealed, Vault) in Observer's classes. A run on it is refused by name until the launch path is built.",
+		Note: "Beta, used only when chosen by name, and not yet tried against a live node: a SandHold node you connect with `observer sandbox connect <node-url>` (you approve this machine in the node's portal; Observer keeps the key in this machine's keychain and sends it only to that node). The note on this row says who you are signed in as and which isolation the node offers (Shared, Shielded, Sealed, Vault). A run creates a sandbox on the node, uploads the workspace after the same one-time consent as the other hosted sandboxes, runs the agent in the node's terminal with resize, relays capture, and deletes the sandbox at the end; the terminal reports the isolation and network the node says the box got. Observer counts the box as process isolation, since the rest is the node's own claim, so a min_isolation floor above that refuses this row. Not offered: a root command in the box, reattaching to a box, and finding a box whose create answer was lost (remove those with `sandhold rm` or in the node's portal).",
 	},
 }
 

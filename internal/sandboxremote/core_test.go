@@ -361,8 +361,8 @@ func TestPlanPull(t *testing.T) {
 func TestVendorTable(t *testing.T) {
 	for _, id := range VendorIDs() {
 		v, _ := VendorFor(id)
-		if v.OrgEndpoint {
-			continue // the org-hosted row has no vendor endpoint, key or price (TestOrgShellVendorRow)
+		if v.OrgEndpoint || v.NodeEndpoint {
+			continue // the org-hosted and SandHold rows have no vendor endpoint or price (TestOrgShellVendorRow, TestSandHoldVendorRow)
 		}
 		if v.ID != id || v.Name == "" || v.DefaultEndpoint == "" || v.KeystoreService == "" || len(v.EnvCredential) == 0 {
 			t.Errorf("%s: incomplete row", id)
@@ -428,8 +428,8 @@ func underVendor(v Vendor, raw string) bool {
 func TestVendorRegionsGrounded(t *testing.T) {
 	for _, id := range VendorIDs() {
 		v, _ := VendorFor(id)
-		if v.OrgEndpoint {
-			continue // no vendor domain: the org publishes the endpoint (TestOrgShellVendorRow)
+		if v.OrgEndpoint || v.NodeEndpoint {
+			continue // no vendor domain: the org publishes the endpoint, or it is the connected node (TestSandHoldVendorRow)
 		}
 		if len(v.Domains) == 0 {
 			t.Errorf("%s: no vendor domains", id)

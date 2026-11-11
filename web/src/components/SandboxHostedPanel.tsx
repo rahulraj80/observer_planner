@@ -1,7 +1,8 @@
 // SandboxHostedPanel.tsx is the "Hosted sandboxes" sub-panel of the Sandbox
 // isolation card (sandbox plan v2 sections 9, 10.1 and 13 P7, lane SBX-P7):
 // the editor for [terminal.sandbox.hosted], the E2B, Modal and Vercel Sandbox
-// rows (each beta). The card mounts it with one line and owns the save; this
+// rows and the SandHold row (each beta; SandHold has no region, its node is
+// the one `observer sandbox connect` signed in to). The card mounts it with one line and owns the save; this
 // panel edits its own block with pickers only, and renders nothing unless a
 // [components] block selects one of the hosted drivers (they are opt-in and
 // inactive in every distro). No credential is ever part of this block. Each
@@ -33,7 +34,12 @@ export type SandboxHostedConfig = {
   e2b: SandboxHostedProvider;
   modal: SandboxHostedProvider;
   vercel: SandboxHostedProvider;
+  // sandhold takes template and box_binary only; absent from a daemon that
+  // predates it.
+  sandhold?: SandboxHostedProvider;
 };
+
+const EMPTY_PROVIDER: SandboxHostedProvider = { region: "", template: "", box_binary: "" };
 
 // HOSTED_DRIVERS are the hosted rows: their component, their config table and
 // the regions each vendor documents (sandbox plan section 7.1; the vendor table
@@ -62,6 +68,14 @@ export const HOSTED_DRIVERS = [
     component: "terminals.sandbox.vercel",
     regions: ["arn1", "bom1", "cdg1", "cle1", "cpt1", "dub1", "fra1", "gru1", "hkg1", "hnd1", "iad1", "icn1", "kix1", "lhr1", "pdx1", "sfo1", "sin1", "syd1", "yul1"],
     regionNote: "The default is iad1. A Hobby plan caps a box at 45 minutes.",
+  },
+  {
+    id: "sandhold",
+    table: "sandhold" as const,
+    name: "SandHold (your node)",
+    component: "terminals.sandbox.sandhold",
+    regions: [] as string[],
+    regionNote: "No region: the node is the one you connected with `observer sandbox connect <node-url>`. A template names one saved on that node.",
   },
 ];
 
@@ -217,11 +231,14 @@ export function SandboxHostedPanel({
           </label>
         </div>
         {HOSTED_DRIVERS.filter((d) => selected.includes(d.id)).map((d) => {
-          const p = value[d.table];
+          const p = value[d.table] ?? EMPTY_PROVIDER;
           const setP = (k: keyof SandboxHostedProvider, v: string) => set(d.table, { ...p, [k]: v });
           return (
             <div key={d.id} className="space-y-2 rounded-2 border border-line-2 p-3">
               <div className="font-medium text-fg-1">{d.name}</div>
+              {d.regions.length === 0 ? (
+                <span className="block text-[11px] text-fg-3">{d.regionNote}</span>
+              ) : (
               <div className="space-y-1">
                 <span id={`sandbox-hosted-${d.id}-region`} className="block text-fg-2">Region</span>
                 <ComboChip
@@ -237,6 +254,7 @@ export function SandboxHostedPanel({
                 />
                 <span className="block text-[11px] text-fg-3">{d.regionNote}</span>
               </div>
+              )}
               <div className="grid gap-2 md:grid-cols-2">
                 <Input
                   label="Template"

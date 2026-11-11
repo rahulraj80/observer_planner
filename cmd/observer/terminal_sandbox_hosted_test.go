@@ -388,6 +388,9 @@ var sandboxHostedSettingsInventory = map[string]adminHome{
 	"e2b":    {Floor: "allowed_regions"},
 	"modal":  {Floor: "allowed_regions"},
 	"vercel": {Floor: "allowed_regions"},
+	// The SandHold row's table (template and box_binary): the node is the
+	// developer's own connection, so an org has no fleet-wide value.
+	"sandhold": {Local: "a template saved on the developer's own SandHold node and a machine path; the node is the one this machine connected to, so an org has no fleet-wide value"},
 	// The org-hosted row's table: its admin home is the managed body's
 	// org_openshell field (the published gateway); the member's two keys
 	// (laptop_relay, hold_on_end) live on the Org-hosted OpenShell card.
@@ -436,6 +439,7 @@ func TestSandboxHostedSettingsInventory(t *testing.T) {
 			if !managedBodyHasField(home.Managed) {
 				t.Errorf("%s: %q is not a field of the managed sandbox body", key, home.Managed)
 			}
+		case home.Local != "":
 		default:
 			t.Errorf("%s has no admin home", key)
 		}

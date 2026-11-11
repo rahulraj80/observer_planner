@@ -54,6 +54,10 @@ type BoxSpec struct {
 	TimeoutSeconds int
 	Tier           vocab.Tier
 	Region         string
+	// Isolation is the class the launch asks a SeveralIsolations vendor for
+	// ("" lets the vendor choose); the wire client refuses, and deletes, a
+	// box the vendor reports with less.
+	Isolation vocab.IsoClass
 	// Env is the box's base environment (never a provider credential of the
 	// sandbox vendor; a model credential only under an in-box custody).
 	Env map[string]string
@@ -69,6 +73,10 @@ type BoxInfo struct {
 	// Extra carries vendor identifiers other than the id (never a secret).
 	Extra    map[string]string
 	Deadline time.Time
+	// Described is how the vendor says the box runs, in its own words with
+	// control characters removed ("" when it says nothing); the run says it
+	// on the terminal and never claims more.
+	Described string
 	// EnvdToken is a per-box access secret the vendor returned (E2B); the
 	// cmd layer writes it owner-only and deletes it at teardown.
 	EnvdToken string

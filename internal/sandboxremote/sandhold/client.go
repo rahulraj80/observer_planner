@@ -121,21 +121,69 @@ func (c *Client) httpClient() *http.Client {
 // is the node's, control characters removed.
 func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
+	ctype := ""
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(b)
+		body, ctype = bytes.NewReader(b), "application/json"
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.URL+path, body)
+	res, err := c.send(ctx, request{method: method, path: path, body: body, size: -1, contentType: ctype, accept: "application/json"})
 	if err != nil {
 		return err
 	}
+	defer func() { _ = res.Body.Close() }()
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxReply))
+	if err != nil {
+		return fmt.Errorf("%w: %s: %s", ErrUnreachable, c.URL, Plain(err.Error()))
+	}
+	if out == nil || res.StatusCode == http.StatusNoContent || len(bytes.TrimSpace(b)) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(b, out); err != nil {
+		return fmt.Errorf("%s answered %s with a body that is not the JSON expected", c.URL, path)
+	}
+	return nil
+}
+
+// request is one call to the node.
+type request struct {
+	method, path string
+	query        url.Values
+	body         io.Reader
+	// size is the body's length (-1 when unknown).
+	size        int64
+	contentType string
+	accept      string
+}
+
+// ErrNotSent marks a call whose connection was never made (a dial
+// failure), so the node cannot have acted on it.
+var ErrNotSent = errors.New("the request never reached the node")
+
+// send makes one call and returns a 2xx reply for the caller to read and
+// close. A redirect is never followed with the key, a transport failure is
+// ErrUnreachable (and ErrNotSent when no connection was made), and every
+// other answer is the node's refusal in its own words.
+func (c *Client) send(ctx context.Context, rq request) (*http.Response, error) {
+	u := c.URL + rq.path
+	if len(rq.query) > 0 {
+		u += "?" + rq.query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, rq.method, u, rq.body)
+	if err != nil {
+		return nil, err
+	}
+	if rq.body != nil && rq.size >= 0 {
+		req.ContentLength = rq.size
+	}
 	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Accept", "application/json")
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if rq.accept != "" {
+		req.Header.Set("Accept", rq.accept)
+	}
+	if rq.contentType != "" {
+		req.Header.Set("Content-Type", rq.contentType)
 	}
 	if c.Key != "" {
 		req.Header.Set("X-API-Key", c.Key)
@@ -143,29 +191,28 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any) error
 	res, err := c.httpClient().Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
-		return fmt.Errorf("%w: %s: %s", ErrUnreachable, c.URL, Plain(rootCause(err).Error()))
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "dial" {
+			return nil, fmt.Errorf("%w (%w): %s: %s", ErrUnreachable, ErrNotSent, c.URL, Plain(rootCause(err).Error()))
+		}
+		return nil, fmt.Errorf("%w: %s: %s", ErrUnreachable, c.URL, Plain(rootCause(err).Error()))
 	}
-	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode/100 == 3 {
-		return fmt.Errorf("%w: %s answered %d pointing to %s; not following it with your key (if that is the node's real address, connect to it instead)",
+		_ = res.Body.Close()
+		return nil, fmt.Errorf("%w: %s answered %d pointing to %s; not following it with your key (if that is the node's real address, connect to it instead)",
 			ErrRedirect, c.URL, res.StatusCode, Plain(res.Header.Get("Location")))
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, maxReply))
-	if err != nil {
-		return fmt.Errorf("%w: %s: %s", ErrUnreachable, c.URL, Plain(err.Error()))
-	}
-	if res.StatusCode/100 == 2 {
-		if out == nil || res.StatusCode == http.StatusNoContent || len(bytes.TrimSpace(b)) == 0 {
-			return nil
+	if res.StatusCode/100 != 2 {
+		defer func() { _ = res.Body.Close() }()
+		b, err := io.ReadAll(io.LimitReader(res.Body, maxReply))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %s", ErrUnreachable, c.URL, Plain(err.Error()))
 		}
-		if err := json.Unmarshal(b, out); err != nil {
-			return fmt.Errorf("%s answered %s with a body that is not the JSON expected", c.URL, path)
-		}
-		return nil
+		return nil, refusal(res, b)
 	}
-	return refusal(res, b)
+	return res, nil
 }
 
 // refusal reads a non-2xx reply into the node's own reason and fix.

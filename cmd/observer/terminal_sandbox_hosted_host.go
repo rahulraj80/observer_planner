@@ -338,6 +338,7 @@ func (r *hostedRun) create(ctx context.Context) error {
 	spec := sandboxremote.BoxSpec{
 		RunID: r.plan.RunID, Labels: map[string]string{sandboxremote.LabelKey: r.plan.RunID},
 		Template: r.plan.Template, TimeoutSeconds: minutes * 60, Tier: vocab.Tier(r.plan.Tier), Region: r.plan.Region,
+		Isolation: vocab.IsoClass(r.plan.Isolation),
 	}
 	info, err := r.client.Create(ctx, spec)
 	switch {
@@ -388,6 +389,12 @@ func (r *hostedRun) create(ctx context.Context) error {
 		return fmt.Errorf("record the box id: %w", err)
 	}
 	r.notReady = !info.Running
+	if info.Described != "" {
+		// A row whose vendor says how the box runs (the SandHold node's
+		// isolation and network, in its own words) says that, not a region.
+		r.say("%s box %s: %s; stops by itself after %d minutes", r.vendor.Name, info.ID, info.Described, minutes)
+		return nil
+	}
 	r.say("%s box %s in %s, stops by itself after %d minutes", r.vendor.Name, info.ID, hostedRegionWords(r.vendor, r.rec.Region), minutes)
 	return nil
 }

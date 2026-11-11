@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,10 +22,10 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/keystore"
 	"github.com/marmutapp/superbased-observer/internal/sandbox"
 	"github.com/marmutapp/superbased-observer/internal/sandboxbackend"
+	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote/sandhold"
 	"github.com/marmutapp/superbased-observer/internal/sandboxselect"
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
-	"github.com/marmutapp/superbased-observer/internal/termsvc"
 )
 
 // sandholdTestKey is the key the fake node grants: no output, record or
@@ -296,9 +297,10 @@ func TestSandholdDisconnect(t *testing.T) {
 	}
 }
 
-// TestSandholdProbeStates is the row's state table: not connected,
-// connected (described in Observer's classes, run refused by name), an
-// expired key, an unreadable record, and a CI key in the environment.
+// TestSandholdProbeStates is the row's connection table: not connected, an
+// expired key and an unreadable record refuse by name; a usable connection
+// (or a CI key) leaves the verdict to the shared hosted ladder, with the
+// connection in the note.
 func TestSandholdProbeStates(t *testing.T) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	conn := &sandhold.Connection{Version: 1, URL: "https://node.example.com", User: "alice", Org: "acme", ExpiresAt: now.Add(24 * time.Hour),
@@ -315,11 +317,11 @@ func TestSandholdProbeStates(t *testing.T) {
 		wantHint    string
 	}{
 		{name: "not_connected", wantVerdict: verdictSandholdNotConnected, wantReason: "not connected: run `observer sandbox connect <node-url>`", wantHint: "not connected"},
-		{name: "connected", conn: conn, wantVerdict: verdictSandholdRunNotBuilt, wantReason: "not built in this release", wantHint: "connected to https://node.example.com as alice in acme; key works until 12 Nov 2026; offers Shared = process, Vault = hw_vm"},
+		{name: "connected", conn: conn, wantHint: "connected to https://node.example.com as alice in acme; key works until 12 Nov 2026; offers Shared = process, Vault = hw_vm"},
 		{name: "expired", conn: &expired, wantVerdict: verdictSandholdKeyExpired, wantReason: "observer sandbox connect https://node.example.com", wantHint: "expired"},
 		{name: "unreadable", err: errors.New("mode 0644"), wantVerdict: verdictSandholdNotConnected, wantReason: "could not be read (mode 0644)", wantHint: "connect again"},
-		{name: "env_key", envKey: true, wantVerdict: verdictSandholdRunNotBuilt, wantReason: "not built", wantHint: "SANDHOLD_API_KEY"},
-		{name: "connected_env_wins", conn: conn, envKey: true, wantVerdict: verdictSandholdRunNotBuilt, wantReason: "not built", wantHint: "SANDHOLD_API_KEY is set and wins"},
+		{name: "env_key", envKey: true, wantHint: "SANDHOLD_API_KEY"},
+		{name: "connected_env_wins", conn: conn, envKey: true, wantHint: "SANDHOLD_API_KEY is set and wins"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -327,33 +329,51 @@ func TestSandholdProbeStates(t *testing.T) {
 			if !p.Compiled || p.Verdict != tc.wantVerdict || !strings.Contains(p.Reason, tc.wantReason) || !strings.Contains(p.Hint, tc.wantHint) {
 				t.Fatalf("probe %+v", p)
 			}
-			if p.Verdict == sandboxselect.VerdictAvailable {
-				t.Fatal("a probe-only row reads available")
-			}
 		})
 	}
 }
 
+// sandholdTestRow builds the registered SandHold driver over a temporary
+// observer dir, with no SANDHOLD_* variable but those given and a file
+// keystore.
+func sandholdTestRow(t *testing.T, env map[string]string) (*hostedDriver, *sandboxRuntime) {
+	t.Helper()
+	deps, _ := sandholdTestDeps(t)
+	savedEnv := sandholdLookupEnv
+	sandholdLookupEnv = func(k string) (string, bool) { v, ok := env[k]; return v, ok }
+	t.Cleanup(func() { sandholdLookupEnv = savedEnv; sandholdSetNodeDir(""); hostedListed.Store(false) })
+	r := &sandboxRuntime{observerDir: deps.observerDir, observerBin: "/usr/local/bin/observer"}
+	full := config.Default()
+	r.cfg = full.Terminal.Sandbox
+	reg, ok := sandboxDriverRegs[sandboxbackend.BackendSandHold]
+	if !ok {
+		t.Fatal("no sandhold driver registered")
+	}
+	d, ok := reg.build(r, full).(*hostedDriver)
+	if !ok {
+		t.Fatal("the sandhold row is not a hosted driver")
+	}
+	d.now = func() time.Time { return time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC) }
+	return d, r
+}
+
 // TestSandholdBackendRow: the row the dashboard's probe API and `observer
 // sandbox status` render, connected and not, enabled and not, carries the
-// connection in its note, and never reads available.
+// connection in its note, and is the shared hosted ladder's once usable.
 func TestSandholdBackendRow(t *testing.T) {
-	dir := t.TempDir()
-	r := &sandboxRuntime{observerDir: dir}
-	drv := &sandholdDriver{gatesProbeOnlyDriver: gatesProbeOnlyDriver{r: r, id: sandboxbackend.BackendSandHold, notBuilt: sandholdNotBuilt}}
+	d, r := sandholdTestRow(t, nil)
 	row := func(enabled bool) (out struct{ hint, verdict, reason, whenVerdict, whenReason, class string }) {
-		cfg := config.TerminalSandboxConfig{Enabled: true}
+		cfg := config.Default().Terminal.Sandbox
+		cfg.Enabled = true
 		if enabled {
 			cfg.Backends = []string{sandbox.BackendBwrap, sandboxbackend.BackendSandHold}
 		}
 		r.cfg = cfg
-		probes := map[string]sandboxselect.Probe{sandboxbackend.BackendSandHold: drv.probe(context.Background())}
+		d.r.cfg = cfg
+		probes := map[string]sandboxselect.Probe{sandboxbackend.BackendSandHold: d.probe(context.Background())}
 		for _, b := range sandboxBackendListWith(cfg, sandbox.Availability{}, nil, vocab.TierNone, probes) {
 			if b.ID != sandboxbackend.BackendSandHold {
 				continue
-			}
-			if b.Available {
-				t.Fatal("the sandhold row reads available")
 			}
 			out.hint, out.verdict, out.reason, out.whenVerdict, out.whenReason, out.class = b.Hint, b.Verdict, b.Reason, b.WhenEnabledVerdict, b.WhenEnabledReason, b.Class
 			return out
@@ -362,8 +382,7 @@ func TestSandholdBackendRow(t *testing.T) {
 		return out
 	}
 
-	// Not connected, not enabled: the note and the "when enabled" answer
-	// both say how to connect.
+	// Not connected, not enabled: the note says how to connect.
 	got := row(false)
 	if got.hint != sandhold.NotConnected || got.verdict != sandboxselect.VerdictDisabledByConfig {
 		t.Errorf("not connected, not enabled: %+v", got)
@@ -371,13 +390,14 @@ func TestSandholdBackendRow(t *testing.T) {
 	if got.class != string(vocab.ClassProcess) {
 		t.Errorf("class %q", got.class)
 	}
-	if runtime.GOOS == "linux" && !strings.Contains(got.whenReason, "observer sandbox connect") {
-		t.Errorf("when enabled: %+v", got)
+	// Not connected, enabled: credential_missing, in the row's own words.
+	if p := (func() sandboxselect.Probe { row(true); return d.probe(context.Background()) })(); runtime.GOOS == "linux" && (p.Verdict != verdictSandholdNotConnected || !strings.Contains(p.Reason, "observer sandbox connect")) {
+		t.Errorf("not connected, enabled: %+v", p)
 	}
 
 	// Connected and enabled: the note names the node and its isolation, and
-	// the row is dropped with the probe's own refusal.
-	if err := sandholdSaveConnection(dir, sandhold.Connection{URL: "https://node.example.com", User: "alice", Org: "acme",
+	// the shared ladder decides (no consent yet, so not usable for a run).
+	if err := sandholdSaveConnection(r.observerDir, sandhold.Connection{URL: "https://node.example.com", User: "alice", Org: "acme",
 		Offers: []sandhold.Offer{{Tier: "vault", Class: vocab.ClassHWVM}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -385,17 +405,128 @@ func TestSandholdBackendRow(t *testing.T) {
 	if !strings.Contains(got.hint, "connected to https://node.example.com as alice in acme") || !strings.Contains(got.hint, "Vault = hw_vm") {
 		t.Errorf("connected hint %q", got.hint)
 	}
-	if runtime.GOOS == "linux" && (got.verdict != verdictSandholdRunNotBuilt || !strings.Contains(got.reason, "not built")) {
-		t.Errorf("connected, enabled: %+v", got)
+	if p := d.probe(context.Background()); runtime.GOOS == "linux" && (p.Verdict != sandboxselect.VerdictAvailable || p.ConsentRecorded) {
+		t.Errorf("connected, enabled: %+v", p)
 	}
-
 	// The inactive hint (component not selected) reads the same record.
 	reg := sandboxDriverRegs[sandboxbackend.BackendSandHold]
 	if reg.inactiveHint == nil || !strings.Contains(reg.inactiveHint(r, config.Config{}), "connected to https://node.example.com") {
 		t.Error("the inactive hint does not carry the connection")
 	}
-	// A run is refused by name.
-	if _, err := drv.Create(context.Background(), termsvc.PrepareRequest{}); err == nil || !strings.Contains(err.Error(), "not built") {
-		t.Errorf("create: %v", err)
+	// An expired key refuses by name, before anything else.
+	if err := sandholdSaveConnection(r.observerDir, sandhold.Connection{URL: "https://node.example.com", ExpiresAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	if p := d.probe(context.Background()); p.Verdict != verdictSandholdKeyExpired {
+		t.Errorf("expired: %+v", p)
+	}
+}
+
+// TestSandholdHostedCredential: the key comes from the saved sign-in, bound
+// to its node; SANDHOLD_URL with SANDHOLD_API_KEY wins; a saved key is never
+// bound to another node; the provider table's node is the same one; and the
+// source is said without reading the key.
+func TestSandholdHostedCredential(t *testing.T) {
+	v, _ := sandboxremote.VendorFor(sandboxremote.VendorSandHold)
+	d, r := sandholdTestRow(t, nil)
+	if _, err := hostedResolveCredential(r.observerDir, v); !errors.Is(err, sandboxremote.ErrCredentialMissing) || !strings.Contains(err.Error(), "observer sandbox connect") {
+		t.Fatalf("none: %v", err)
+	}
+	if src := hostedCredentialSource(r.observerDir, v); src != "" {
+		t.Errorf("none: source %q", src)
+	}
+	if _, err := sandholdSaveCredential(r.observerDir, sandhold.Credential{URL: "https://node.example.com", Key: sandholdTestKey, KeyID: "k1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sandholdSaveConnection(r.observerDir, sandhold.Connection{URL: "https://node.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	cred, err := hostedResolveCredential(r.observerDir, v)
+	if err != nil || cred.Get(sandhold.EnvKey) != sandholdTestKey || cred.Endpoint != "https://node.example.com" || cred.Source != sandboxremote.SourceKeystore {
+		t.Fatalf("saved: %v %v", cred, err)
+	}
+	if s := fmt.Sprintf("%v %+v %s", cred, cred, cred); strings.Contains(s, sandholdTestKey) {
+		t.Errorf("the credential prints its key: %s", s)
+	}
+	pc := hostedVendorConfig(d.cfg, v.ID)
+	_, endpoint, ok := hostedResolve(v, pc)
+	if !ok || endpoint != "https://node.example.com" {
+		t.Fatalf("provider table node %q %v", endpoint, ok)
+	}
+	if err := sandboxremote.CheckBinding(cred, v, endpoint); err != nil {
+		t.Errorf("binding: %v", err)
+	}
+	if err := sandboxremote.CheckBinding(cred, v, "https://other.example.com"); err == nil {
+		t.Error("the saved key was bound to another node")
+	}
+	if src := hostedCredentialSource(r.observerDir, v); src != sandboxremote.SourceKeystore {
+		t.Errorf("saved: source %q", src)
+	}
+
+	// SANDHOLD_URL names another node, no key in the environment: the saved
+	// key stays with its own node.
+	sandholdLookupEnv = func(k string) (string, bool) {
+		return map[string]string{sandhold.EnvURL: "https://other.example.com"}[k], k == sandhold.EnvURL
+	}
+	if _, err := hostedResolveCredential(r.observerDir, v); !errors.Is(err, sandboxremote.ErrCredentialMissing) {
+		t.Errorf("other node: %v", err)
+	}
+	if src := hostedCredentialSource(r.observerDir, v); src != "" {
+		t.Errorf("other node: source %q", src)
+	}
+	// Both variables: the environment wins, bound to its node.
+	sandholdLookupEnv = func(k string) (string, bool) {
+		v, ok := map[string]string{sandhold.EnvURL: "https://ci.example.com", sandhold.EnvKey: "ci-key-value"}[k]
+		return v, ok
+	}
+	cred, err = hostedResolveCredential(r.observerDir, v)
+	if err != nil || cred.Get(sandhold.EnvKey) != "ci-key-value" || cred.Endpoint != "https://ci.example.com" || cred.Source != sandboxremote.SourceEnv {
+		t.Fatalf("env: %v %v", cred, err)
+	}
+	if _, endpoint, _ := hostedResolve(v, hostedVendorConfig(d.cfg, v.ID)); endpoint != "https://ci.example.com" {
+		t.Errorf("env: provider table node %q", endpoint)
+	}
+	if src := hostedCredentialSource(r.observerDir, v); src != sandboxremote.SourceEnv {
+		t.Errorf("env: source %q", src)
+	}
+	// A node address Observer would not send a key to is refused by name.
+	sandholdLookupEnv = func(k string) (string, bool) {
+		return map[string]string{sandhold.EnvURL: "http://node.example.com"}[k], k == sandhold.EnvURL
+	}
+	pc = hostedVendorConfig(d.cfg, v.ID)
+	if _, _, ok := hostedResolve(v, pc); ok {
+		t.Error("a plain http node elsewhere was accepted")
+	}
+	if why := hostedResolveRefusal(v, pc); !strings.Contains(why, "not one Observer sends a key to") {
+		t.Errorf("refusal %q", why)
+	}
+}
+
+// TestSandholdClientAndStoredVerbs: the wire client is built only for an
+// address the key may go to, and the shared store's connect and disconnect
+// verbs point at the row's own commands.
+func TestSandholdClientAndStoredVerbs(t *testing.T) {
+	reg := hostedVendorRegs[sandboxremote.VendorSandHold]
+	cred := sandboxremote.Credential{Provider: sandboxremote.VendorSandHold, Fields: map[string]string{sandhold.EnvKey: sandholdTestKey}}
+	if c, err := reg.newClient(cred, "https://node.example.com"); err != nil || c == nil {
+		t.Errorf("https node: %v", err)
+	}
+	if _, err := reg.newClient(cred, "http://node.example.com"); err == nil {
+		t.Error("a client over plain http to another machine was built")
+	}
+	if _, err := hostedStoredVendorArg(sandboxremote.VendorSandHold); err == nil || !strings.Contains(err.Error(), "observer sandbox connect") {
+		t.Errorf("stored verb: %v", err)
+	}
+}
+
+// TestSandholdFloor: a min_isolation floor above what the row counts is
+// refused in plain words, because the node's isolation is its own claim.
+func TestSandholdFloor(t *testing.T) {
+	d, _ := sandholdTestRow(t, nil)
+	cfg := config.Default().Terminal.Sandbox
+	cfg.Enabled, cfg.Backends, cfg.MinIsolation = true, []string{sandboxbackend.BackendSandHold}, string(vocab.ClassContainer)
+	err := d.floor(cfg, vocab.TierNone, vocab.CustodyInBoxAPIKey, sandboxremote.RegionSandHoldNode)
+	if err == nil || !strings.Contains(err.Error(), "the node's own claim") {
+		t.Errorf("floor: %v", err)
 	}
 }

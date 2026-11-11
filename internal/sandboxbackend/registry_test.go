@@ -406,7 +406,7 @@ func TestRefusalAuditIsGroundedPerRow(t *testing.T) {
 		{BackendOpenShellOrg, nil, "denials happen on the org's machine and are not carried to the node in v1 (g1-design.md section 6.4)"},
 		{BackendModal, nil, "the provider enforces egress"},
 		{BackendVercelSandbox, nil, "the provider enforces egress"},
-		{BackendSandHold, nil, "the node enforces egress, and runs are refused by name in this release"},
+		{BackendSandHold, nil, "the node enforces egress; Observer's gateway never sees it"},
 		{BackendCodespaces, nil, "planned"},
 		{BackendCoder, nil, "planned"},
 		{BackendK8sAgentSandbox, nil, "planned"},
@@ -550,8 +550,9 @@ func TestSetupBetaRows(t *testing.T) {
 }
 
 // TestSandHoldRow (SandHold notes 41 D2 and D3): the sandhold row is an
-// offered preview remote row, explicit-only, probe only (setup is the
-// connect command, so the setup column says why there is no plan), whose
+// offered preview remote row, explicit-only, documented and fake-tested
+// only with its first live run owed (setup is the connect command, so the
+// setup column says why there is no plan), whose
 // static class is the weakest a node offers and is claimed, never more, and
 // whose key lives in its own keychain service.
 func TestSandHoldRow(t *testing.T) {
@@ -574,5 +575,13 @@ func TestSandHoldRow(t *testing.T) {
 	}
 	if c.Net.Enforcer != EnforcerProvider || c.Net.AuditsRefusals() {
 		t.Errorf("net %+v", c.Net)
+	}
+	for _, v := range c.Verification {
+		if v.Kind != vocab.VerifiedDoc || !strings.HasPrefix(v.RegisterRef, "SANDHOLD-1: the first live run") {
+			t.Errorf("verification %+v: the row is documented and fake-tested only, its first live run owed", v)
+		}
+	}
+	if strings.Contains(c.Note, "refused by name") || !strings.Contains(c.Note, "not yet tried against a live node") {
+		t.Errorf("note %q", c.Note)
 	}
 }
