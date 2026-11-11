@@ -104,10 +104,10 @@ func TestExitReasonNamesAnUnmarkedEnd(t *testing.T) {
 			svc := New(Options{
 				Policy: Policy{AllowFresh: true, AllowedTools: []string{"claude-code"}}, Recorder: rec,
 				Launcher: &fakeLauncher{handle: "H"},
-				ExitReason: func(runID string, code int) string {
+				ExitReason: func(runID, sandboxRunID string, code int) string {
 					calls++
-					if code != 125 || runID == "" {
-						t.Errorf("hook got %q / %d", runID, code)
+					if code != 125 || runID == "" || sandboxRunID != "" {
+						t.Errorf("hook got %q / %q / %d", runID, sandboxRunID, code)
 					}
 					return c.hook
 				},
@@ -128,5 +128,42 @@ func TestExitReasonNamesAnUnmarkedEnd(t *testing.T) {
 				t.Errorf("hook called %d times, want %d", calls, wantCalls)
 			}
 		})
+	}
+}
+
+// TestExitReasonIsAskedWithTheSandboxRunsOwnID (live run 2026-11-11): a
+// sandboxed run's helper is a separate process that knows the run only by
+// the sandbox run's id (PrepareResult.RunID, the workspace id), never by
+// terminal_run.run_id, so the exit hook is asked with both: the hook that
+// reads a note keyed by the sandbox run's id finds it.
+func TestExitReasonIsAskedWithTheSandboxRunsOwnID(t *testing.T) {
+	root := t.TempDir()
+	validated, err := ValidateProjectRoot(root, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := termrun.WithEndDetail(termrun.EndLaunchRefused, "credential_missing: no key")
+	notes := map[string]string{"ws-1": refused}
+	var gotRun, gotBox string
+	rec := newFakeRecorder()
+	svc := New(Options{
+		Policy:   Policy{AllowFresh: true, AllowedTools: []string{"claude-code"}, AllowedProjectRoots: []string{root}},
+		Recorder: rec, Launcher: &fakeLauncher{handle: "S1"},
+		Sandboxer: &fakeSandboxer{result: PrepareResult{RunID: "ws-1", Dir: validated, Isolation: termrun.Isolation{Class: "process"}}},
+		ExitReason: func(runID, sandboxRunID string, code int) string {
+			gotRun, gotBox = runID, sandboxRunID
+			return notes[sandboxRunID]
+		},
+	})
+	res, err := svc.LaunchFresh(context.Background(), FreshRequest{Tool: "claude-code", Subcommand: "claude", Sandbox: true, ProjectRoot: root, WorkspaceSource: "live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.EndRunByHandle(context.Background(), "S1", 125)
+	if gotRun != res.RunID || gotBox != "ws-1" || gotRun == gotBox {
+		t.Fatalf("hook asked with run %q / sandbox run %q; want %q / ws-1", gotRun, gotBox, res.RunID)
+	}
+	if rec.endReasons[res.RunID] != refused {
+		t.Fatalf("recorded %q, want %q", rec.endReasons[res.RunID], refused)
 	}
 }

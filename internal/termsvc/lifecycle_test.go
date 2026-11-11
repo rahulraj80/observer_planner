@@ -60,7 +60,7 @@ func TestComposePrepareIsCreateThenAttach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := PrepareResult{Dir: "/p", WrapArgv: []string{"bwrap", "--"}, Note: "n", Isolation: termrun.Isolation{Class: "process"}}
+	want := PrepareResult{RunID: "w1", Dir: "/p", WrapArgv: []string{"bwrap", "--"}, Note: "n", Isolation: termrun.Isolation{Class: "process"}}
 	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(f.calls, []string{"create", "attach"}) {
 		t.Fatalf("got %+v calls %v", got, f.calls)
 	}

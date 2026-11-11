@@ -120,8 +120,21 @@ func hostedToolCheckFor(tool string, tier vocab.Tier, template string) *hostedTo
 	}
 	c.Installs = hostedToolInstallOptions(spec.Binary.Installs)
 	c.CanInstall = tier == vocab.TierInternet && len(c.Installs) > 0
+	// An npm install lands under the box user's home (ensureTool), so the
+	// check looks there too.
+	if slices.ContainsFunc(c.Installs, func(o hostedInstallOption) bool { return o.Channel == "npm" }) && !slices.Contains(c.Dirs, hostedNPMBinDir) {
+		c.Dirs = append(c.Dirs, hostedNPMBinDir)
+	}
 	return c
 }
+
+// hostedNPMPrefixRel is npm's prefix for an install in the box, relative to
+// the box home, and hostedNPMBinDir where its executables land: the box
+// user's own, never the image's root-owned global prefix.
+const (
+	hostedNPMPrefixRel = ".local"
+	hostedNPMBinDir    = hostedNPMPrefixRel + "/bin"
+)
 
 // hostedToolInstallOptions are the grounded Linux install paths that run in
 // a plain Linux box, in the registry's order: npm, then each vendor script
@@ -169,6 +182,19 @@ func hostedWgetVariant(h integration.InstallHint) (hostedInstallOption, bool) {
 	}
 	cmd := "wget -qO- " + m[1] + " | " + m[2]
 	return hostedInstallOption{Channel: "script", Fetch: "wget", Needs: []string{"bash", "wget"}, Argv: []string{"bash", "-lc", cmd}, Display: cmd}, true
+}
+
+// hostedPipefail (applied when the install runs; the option keeps the
+// registry's argv) makes a `bash -lc "<fetch> | <shell>"` install fail when
+// the fetch fails: without pipefail the pipe returns the shell's 0 when the
+// download was refused, and the install looked done (seen live on sb,
+// 2026-11-11). Any other argv is returned as it is.
+func hostedPipefail(argv []string) []string {
+	out := append([]string(nil), argv...)
+	if len(out) == 3 && out[0] == "bash" && out[1] == "-lc" && strings.Contains(out[2], "|") {
+		out[2] = "set -o pipefail; " + out[2]
+	}
+	return out
 }
 
 // hostedToolProbeScript answers what the box has. Arguments: the tool's

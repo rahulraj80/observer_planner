@@ -21,6 +21,7 @@ type hostedToolBox struct {
 	has       []string
 	installed bool
 	installs  [][]string
+	envs      []map[string]string
 }
 
 func (tb *hostedToolBox) wrap(hh *hostedHarness) {
@@ -39,6 +40,7 @@ func (tb *hostedToolBox) wrap(hh *hostedHarness) {
 			return newFakeProcess(out.String(), 0), nil
 		case len(spec.Argv) > 0 && (spec.Argv[0] == "npm" || spec.Argv[0] == "bash"):
 			tb.installs = append(tb.installs, spec.Argv)
+			tb.envs = append(tb.envs, spec.Env)
 			tb.installed = true
 			return newFakeProcess("installed\n", 0), nil
 		}
@@ -74,11 +76,48 @@ func TestHostedHostInstallsTheToolOverCurl(t *testing.T) {
 	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	if len(tb.installs) != 1 || !slices.Equal(tb.installs[0], hostedClaudeScript(t).Argv) {
+	if len(tb.installs) != 1 || !slices.Equal(tb.installs[0], hostedPipefail(hostedClaudeScript(t).Argv)) {
 		t.Fatalf("installs %q", tb.installs)
 	}
 	if out := hh.out.String(); !strings.Contains(out, "over curl") || !strings.Contains(out, "claude-code installed at") {
 		t.Errorf("output %s", out)
+	}
+}
+
+// TestHostedHostInstallsWithNPMUnderTheBoxHome (live run 2026-11-11,
+// node:22-slim on a SandHold node: npm install -g as the box's non-root
+// user failed on the image's root-owned /usr/local): a box with npm gets
+// the tool with npm's prefix under the box home, whose bin the check looks
+// in, and the agent starts.
+func TestHostedHostInstallsWithNPMUnderTheBoxHome(t *testing.T) {
+	hh := newHostedHarness(t, sandboxremote.VendorE2B)
+	check, err := hostedToolDelivery("claude-code", "node-image", vocab.TierInternet, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(check.Dirs, hostedNPMBinDir) {
+		t.Fatalf("the check does not look in %s: %q", hostedNPMBinDir, check.Dirs)
+	}
+	hh.run.plan.Tier, hh.run.plan.ToolCheck = string(vocab.TierInternet), check
+	tb := &hostedToolBox{has: []string{"npm", "bash"}}
+	tb.wrap(hh)
+	code := make(chan int, 1)
+	go func() { code <- hh.run.drive(context.Background()) }()
+	waitFor(t, func() bool { hh.mu.Lock(); defer hh.mu.Unlock(); return len(hh.ptys) > 0 })
+	_, _ = hh.termIn.Write([]byte("exit"))
+	select {
+	case <-code:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the run did not end")
+	}
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if len(tb.installs) != 1 || tb.installs[0][0] != "npm" {
+		t.Fatalf("installs %q", tb.installs)
+	}
+	home := hh.run.layout.Home
+	if got := tb.envs[0]["NPM_CONFIG_PREFIX"]; got != home+"/.local" || tb.envs[0]["HOME"] != home {
+		t.Fatalf("npm env %v, want its prefix under %s", tb.envs[0], home)
 	}
 }
 
@@ -107,7 +146,7 @@ func TestHostedHostRefusesABoxThatCannotInstallTheTool(t *testing.T) {
 	if !hh.client.boxes["box1"].deleted {
 		t.Error("the box outlived the refusal")
 	}
-	got := runEndNoteReason(hh.run.plan.ObserverDir, hh.run.plan.RunID, sandboxHelperFailCode)
+	got := runEndNoteReason(hh.run.plan.ObserverDir, "termrun-id", hh.run.plan.RunID, sandboxHelperFailCode)
 	for _, want := range []string{"launch_refused: ", "claude-code is not installed in the box (template plain-image)", "it lacks npm, bash, curl and wget", "use a box image"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("end reason %q lacks %q", got, want)

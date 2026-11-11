@@ -236,6 +236,10 @@ type LaunchRequest struct {
 	// (B9). Carried alongside WrapArgv so the Launcher/recorder can label the
 	// run without re-deriving it from WrapArgv's mere presence.
 	Sandboxed bool
+	// SandboxRunID is PrepareResult.RunID for a sandboxed launch: the id
+	// the run's helper process knows the run by (see Service.exitReason).
+	// Empty for every non-sandboxed launch. Additive.
+	SandboxRunID string
 	// SourceDir is the project root a sandboxed launch's managed workspace
 	// was prepared from, set only when that workspace is not the project
 	// root itself (a clone). The Launcher tells the inner launcher, so its
@@ -341,6 +345,12 @@ type PrepareRequest struct {
 
 // PrepareResult is what a successful Sandboxer.Prepare returns.
 type PrepareResult struct {
+	// RunID is the sandbox run's own id (CreateResult.Run.ID, the workspace
+	// id Create minted), which is not terminal_run.run_id: the run's helper
+	// process knows the run only by this id, so what it leaves behind (a
+	// hosted launch's end note) is keyed by it. "" for a Sandboxer that
+	// does not compose Create. Additive.
+	RunID string
 	// Dir is the resolved working directory the launch spawns into: the
 	// original ProjectRoot for a "live" source, or a freshly prepared
 	// managed-workspace directory otherwise.
@@ -425,6 +435,9 @@ type runMeta struct {
 	// Sandboxer seam (in-memory only; no DB column — see B9 plan §10 ledger
 	// G19, "was this historical run sandboxed?" is deliberately deferred).
 	sandboxed bool
+	// sandboxRunID is the sandbox run's own id (LaunchRequest.SandboxRunID),
+	// handed to the exit-reason hook with the run id.
+	sandboxRunID string
 	// isolation is the run's G19 evidence as recorded at spawn (in memory,
 	// read by Isolation for the dashboard's run pill).
 	isolation termrun.Isolation
@@ -523,7 +536,13 @@ type Service struct {
 	// exitReason, when set, names why a run ended that nobody marked, from
 	// what the run left behind (a hosted launch's helper leaves a note when
 	// it fails before the agent starts): "" defers to the exit code.
-	exitReason func(runID string, exitCode int) string
+	//
+	// It is asked with both ids: runID is terminal_run.run_id, and
+	// sandboxRunID is the sandbox run's own id (PrepareResult.RunID, "" for
+	// an unsandboxed run). A sandboxed run's helper is a separate process
+	// that never learns runID, so its note is keyed by sandboxRunID (live
+	// run 2026-11-11: a note read by runID was never found).
+	exitReason func(runID, sandboxRunID string, exitCode int) string
 
 	mu       sync.Mutex
 	byHandle map[string]string  // PTY handle -> run id
@@ -597,7 +616,7 @@ type Options struct {
 	// ExitReason names the end reason of a run nobody marked, read from
 	// what the run left (see Service.exitReason); "" or nil defers to the
 	// exit code (termrun.EndReasonForExit).
-	ExitReason func(runID string, exitCode int) string
+	ExitReason func(runID, sandboxRunID string, exitCode int) string
 	// Sandboxer prepares a B9 sandboxed fresh launch (see Service.sandboxer).
 	// Nil disables the feature: a Sandbox:true FreshRequest then fails closed.
 	Sandboxer Sandboxer
@@ -861,6 +880,7 @@ func (s *Service) LaunchFresh(ctx context.Context, req FreshRequest) (LaunchResu
 		SandboxEnvPassed:    prepared.EnvPassed,
 		SandboxAllowOSC52:   prepared.AllowOSC52Clipboard,
 		SandboxSignInShared: prepared.SignInShared,
+		SandboxRunID:        prepared.RunID,
 	})
 }
 
@@ -1308,14 +1328,15 @@ func (s *Service) launch(ctx context.Context, run termrun.Run, lr LaunchRequest)
 	s.byHandle[handle] = runID
 	s.byRun[runID] = handle
 	s.byMeta[handle] = runMeta{
-		Kind:      run.Kind,
-		Tool:      run.Tool,
-		dir:       dir,
-		spawnDir:  spawnDir,
-		sandboxed: lr.Sandboxed,
-		isolation: run.Isolation,
-		startedAt: s.now(),
-		origin:    run.Origin.Normalized(),
+		Kind:         run.Kind,
+		Tool:         run.Tool,
+		dir:          dir,
+		spawnDir:     spawnDir,
+		sandboxed:    lr.Sandboxed,
+		sandboxRunID: lr.SandboxRunID,
+		isolation:    run.Isolation,
+		startedAt:    s.now(),
+		origin:       run.Origin.Normalized(),
 	}
 	s.mu.Unlock()
 
@@ -1653,7 +1674,7 @@ func (s *Service) EndRunByHandle(ctx context.Context, handle string, exitCode in
 			if m.endReason == "" && s.exitReason != nil {
 				// Once per run: only the call that found the live mapping
 				// gets here. A small bounded read (the run's own note).
-				m.endReason = s.exitReason(runID, exitCode)
+				m.endReason = s.exitReason(runID, m.sandboxRunID, exitCode)
 			}
 			m.endReason = endReasonFor(m.endReason, exitCode)
 			reason = m.endReason

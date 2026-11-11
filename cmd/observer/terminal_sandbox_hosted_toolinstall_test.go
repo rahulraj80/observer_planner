@@ -223,23 +223,48 @@ func TestHostedToolProbeScriptRuns(t *testing.T) {
 	}
 }
 
-// TestHostedEndNoteRoundTrip: the helper's refusal note reads back once as
-// launch_refused with the refusal as its detail, and a bad run id or a
-// clean exit reads nothing.
+// TestHostedEndNoteRoundTrip: the helper's refusal note, keyed by the
+// sandbox run's own id (the only id the helper knows), reads back once as
+// launch_refused with the refusal as its detail when the daemon asks with
+// both ids; asked by terminal_run.run_id alone (the live gap, 2026-11-11)
+// it is not found; a bad run id or a clean exit reads nothing.
 func TestHostedEndNoteRoundTrip(t *testing.T) {
 	obs := t.TempDir()
-	writeHostedEndNote(obs, "run-n1", "launch_refused", "tool_unavailable_in_image: claude-code is not installed in the box")
-	if got := runEndNoteReason(obs, "run-n1", 0); got != "" {
+	writeHostedEndNote(obs, "ws-n1", "launch_refused", "tool_unavailable_in_image: claude-code is not installed in the box")
+	if got := runEndNoteReason(obs, "run-n1", "ws-n1", 0); got != "" {
 		t.Errorf("a clean exit read %q", got)
 	}
-	if got := runEndNoteReason(obs, "run-n1", 125); got != "launch_refused: tool_unavailable_in_image: claude-code is not installed in the box" {
+	if got := runEndNoteReason(obs, "run-n1", "", 125); got != "" {
+		t.Errorf("an unsandboxed run read the sandbox run's note: %q", got)
+	}
+	if got := runEndNoteReason(obs, "run-n1", "ws-n1", 125); got != "launch_refused: tool_unavailable_in_image: claude-code is not installed in the box" {
 		t.Errorf("note = %q", got)
 	}
-	if got := runEndNoteReason(obs, "run-n1", 125); got != "" {
+	if got := runEndNoteReason(obs, "run-n1", "ws-n1", 125); got != "" {
 		t.Errorf("read twice: %q", got)
 	}
 	writeHostedEndNote(obs, "../x", "launch_refused", "x")
 	if got := readHostedEndNote(obs, "../x"); got != "" {
 		t.Errorf("a bad run id read %q", got)
+	}
+}
+
+// TestHostedScriptInstallFailsWhenTheFetchFails: a piped vendor script runs
+// under pipefail, so a refused download is a failed install, not bash's 0.
+func TestHostedScriptInstallFailsWhenTheFetchFails(t *testing.T) {
+	for _, o := range hostedToolInstallOptions([]integration.InstallHint{{
+		OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://example.invalid/install.sh | bash"},
+		Display: "curl -fsSL https://example.invalid/install.sh | bash", Requires: []string{"curl"},
+	}}) {
+		if got := hostedPipefail(o.Argv); len(got) != 3 || !strings.HasPrefix(got[2], "set -o pipefail; ") {
+			t.Errorf("%s option runs without pipefail: %q", o.Fetch, got)
+		}
+	}
+	got := hostedPipefail([]string{"bash", "-lc", "false | true"})
+	if out, err := exec.Command(got[0], got[1:]...).CombinedOutput(); err == nil {
+		t.Errorf("a failed fetch passed as success under %q (%s)", got, out)
+	}
+	if got := hostedPipefail([]string{"npm", "install", "-g", "x"}); strings.Join(got, " ") != "npm install -g x" {
+		t.Errorf("non-pipe argv changed: %q", got)
 	}
 }

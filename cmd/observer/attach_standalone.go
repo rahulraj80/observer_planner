@@ -382,9 +382,7 @@ func buildTerminalStack(ctx context.Context, cfg config.Config, database *sql.DB
 		OnRunExit: hub.NotifyExit,
 		// Why a run nobody marked ended, from the note its helper left (a
 		// hosted launch refused before the agent started, run_end_note.go).
-		ExitReason: func(runID string, exitCode int) string {
-			return runEndNoteReason(filepath.Dir(cfg.Observer.DBPath), runID, exitCode)
-		},
+		ExitReason: runEndNoteHook(filepath.Dir(cfg.Observer.DBPath)),
 		// B9: the sandbox workspace+wrap-argv seam (nil when disabled → a
 		// Sandbox:true FreshRequest fails closed with ErrSandboxUnavailable).
 		Sandboxer:            sandboxSeam,

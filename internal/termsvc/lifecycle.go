@@ -155,6 +155,7 @@ func ComposePrepare(ctx context.Context, lc SandboxLifecycle, req PrepareRequest
 		return PrepareResult{}, err
 	}
 	return PrepareResult{
+		RunID:        created.Run.ID,
 		Dir:          created.Run.Dir,
 		WrapArgv:     att.WrapArgv,
 		Note:         created.Note,

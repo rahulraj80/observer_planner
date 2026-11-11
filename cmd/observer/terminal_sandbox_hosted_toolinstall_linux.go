@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
@@ -50,8 +51,19 @@ func (r *hostedRun) ensureTool(ctx context.Context) error {
 			how += " over " + opt.Fetch
 		}
 	}
+	spec := sandboxremote.ExecSpec{Argv: hostedPipefail(opt.Argv), Cwd: r.layout.Home}
+	if opt.Channel == "npm" {
+		// npm's global prefix is the image's (/usr/local, root's), and the
+		// box runs the agent as its own non-root user: npm install -g there
+		// fails with EACCES (live run 2026-11-11, node:22-slim on a SandHold
+		// node). The tool goes under the box user's home instead, its bin
+		// in ~/.local/bin, which the check looks in (hostedNPMBinDir).
+		spec.Env = r.boxEnv()
+		spec.Env["NPM_CONFIG_PREFIX"] = path.Join(r.layout.Home, hostedNPMPrefixRel)
+		how += " into " + spec.Env["NPM_CONFIG_PREFIX"]
+	}
 	r.say("%s is not in the box; installing it %s (first start, internet tier): %s", c.Tool, how, opt.Display)
-	if err := r.execOK(ctx, "install "+c.Tool, sandboxremote.ExecSpec{Argv: opt.Argv, Cwd: r.layout.Home}); err != nil {
+	if err := r.execOK(ctx, "install "+c.Tool, spec); err != nil {
 		return fmt.Errorf("%s: %s is not installed in the box, and its install (%s) failed: %s", verdictHostedTool, c.Tool, opt.Display, hostedLastLine(err.Error()))
 	}
 	if got, err = r.probeTool(ctx, *c); err != nil {
