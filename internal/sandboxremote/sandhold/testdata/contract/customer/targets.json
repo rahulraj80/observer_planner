@@ -10,11 +10,10 @@
         "about": {
           "benefits": [
             "A separate kernel in user space (gVisor): the host kernel's attack surface is cut",
-            "Network allow list enforced on the host",
             "Fastest cold start of SandHold's engines (about <span>); warm about <span>"
           ],
           "limits": [
-            "Allow list only: no per-request HTTP rules or credential injection",
+            "Open network on this node: no allow list is enforced here",
             "Some system calls are unsupported or slower (heavy file and network I/O)"
           ],
           "maker": "SandHold",
@@ -45,11 +44,10 @@
         "about": {
           "benefits": [
             "Its own guest kernel in a hardware-virtualised VM (Kata Containers): the strongest separation",
-            "Network allow list enforced on the host",
             "Warm start about <span> from the node's pool"
           ],
           "limits": [
-            "Allow list only: no per-request HTTP rules or credential injection",
+            "Open network on this node: no allow list is enforced here",
             "Cold start about <span>; uses more memory per sandbox"
           ],
           "maker": "SandHold",
@@ -110,6 +108,40 @@
         "tier": "shielded",
         "tierMeans": "a hardened container on the host's kernel",
         "tierRank": 2
+      }
+    ],
+    "tiers": [
+      {
+        "bestFor": "Code you or your team wrote: quick scripts and checks, where starting in milliseconds matters most",
+        "means": "a jailed process on the host's kernel",
+        "rank": 1,
+        "tier": "shared",
+        "title": "Shared",
+        "tradeOff": "Shares the host's kernel: a flaw in that kernel reaches the host"
+      },
+      {
+        "bestFor": "Code an AI wrote, or code nobody has reviewed: tests and builds that need a full image",
+        "means": "a hardened container on the host's kernel",
+        "rank": 2,
+        "tier": "shielded",
+        "title": "Shielded",
+        "tradeOff": "Still on the host's kernel, behind the container's filters"
+      },
+      {
+        "bestFor": "Code from a stranger, or code that may be hostile: a bug in the host's kernel is out of its reach",
+        "means": "its own kernel in user space",
+        "rank": 3,
+        "tier": "sealed",
+        "title": "Sealed",
+        "tradeOff": "Some system calls are slower or unsupported"
+      },
+      {
+        "bestFor": "Hostile code that also needs the open internet, or work that must stay furthest from the host and from other sandboxes",
+        "means": "its own kernel in a virtual machine",
+        "rank": 4,
+        "tier": "vault",
+        "title": "Vault",
+        "tradeOff": "The slowest cold start, and more memory per sandbox"
       }
     ]
   }
