@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import clsx from "clsx";
 import { ChevronLeft, X } from "lucide-react";
 import { NAV_GROUPS } from "@/lib/nav";
@@ -18,6 +18,8 @@ import { WATCHER_LINE_LABEL, WATCHER_LINE_TOOLTIP, watcherLineState } from "@/li
 import { useMessagesSummary } from "@/lib/useMessagesSummary";
 import { navBadge, showMessagesNav } from "@/lib/adminMessages";
 import { DisplayControls } from "@/components/TopBar";
+import { NavAdvancedToggle } from "@/components/NavAdvanced";
+import { layoutNav, readNavOpen, readNavPins, writeNavOpen, writeNavPins } from "@/lib/navLayout";
 
 export function Sidebar({
   open = false,
@@ -68,6 +70,27 @@ export function Sidebar({
   const navHidden = showMessagesNav(messages) ? inactiveNav : [...inactiveNav, "messages"];
   const navGroups = filterNavByComponents(filterNavGroups(NAV_GROUPS, visibility.gov), navHidden);
   const messagesBadge = navBadge(messages);
+  // The sidebar lists a short main set and folds the rest under Advanced
+  // (lib/navLayout.ts decides placement; the page table and the filters
+  // above are unchanged). What a person unfolds or keeps in the main list is
+  // remembered in this browser.
+  const { pathname } = useLocation();
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(readNavOpen);
+  const [pins, setPins] = useState<string[]>(readNavPins);
+  const layout = layoutNav(navGroups, { pins, open: advancedOpen, pathname });
+  function toggleAdvanced() {
+    setAdvancedOpen((v) => {
+      writeNavOpen(!v);
+      return !v;
+    });
+  }
+  function pinNav(id: string, pinned: boolean) {
+    setPins((cur) => {
+      const next = pinned ? [...cur.filter((p) => p !== id), id] : cur.filter((p) => p !== id);
+      writeNavPins(next);
+      return next;
+    });
+  }
   // Desktop (lg+) icon-only rail collapse. The pref is persisted in
   // localStorage ("1"/"0", ProcessesSection pattern) and only bites at
   // lg+ — the mobile drawer keeps full width + labels regardless (the
@@ -147,17 +170,38 @@ export function Sidebar({
             pb-8 keeps the last row clear of the fade once scrolled to the
             end (T-803). */}
         <nav
-          className="flex-1 overflow-y-auto px-3 pb-8 pt-4"
+          className="flex flex-1 flex-col overflow-y-auto px-3 pb-8 pt-4"
           style={{
             maskImage: "linear-gradient(to bottom, black calc(100% - 28px), transparent)",
             WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 28px), transparent)",
           }}
         >
-          {navGroups.map((g) => (
-            <div key={g.id} className="mb-5">
+          {layout.sections.map((g) => (
+            <div
+              key={g.id}
+              className={clsx(
+                g.tier === "advanced" ? "mb-3" : "mb-5",
+                // The account and settings strip sits at the bottom of the
+                // list when there is room, and scrolls with it when not.
+                g.tier === "foot" && "mt-auto border-t border-line-1 pt-3",
+              )}
+            >
+              {g.toggle && (
+                <NavAdvancedToggle
+                  open={advancedOpen}
+                  onToggle={toggleAdvanced}
+                  folded={layout.folded}
+                  choices={layout.choices}
+                  onPin={pinNav}
+                  collapsed={collapsed}
+                  reveal={reveal}
+                />
+              )}
               <div
                 className={clsx(
                   "mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-3",
+                  // The main list and the bottom strip carry no heading.
+                  g.label === "" && "hidden",
                   // Group labels are noise on the icon rail — hide at lg+
                   // when collapsed; the mobile drawer still shows them.
                   collapsed && "lg:hidden",

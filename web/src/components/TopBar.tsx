@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { NAV_GROUPS } from "@/lib/nav";
+import { navCrumb } from "@/lib/navLayout";
 import { exportTargetFor } from "@/lib/exportTarget";
 import { exportJSONText } from "@/lib/costExport";
 import { useFilters, windowParams } from "@/lib/filters";
@@ -63,10 +64,10 @@ export function TopBar({
   // The open page tab is the breadcrumb's last segment (lib/pageTabRoutes.ts,
   // the table the command palette reads too); a default tab adds nothing.
   const tabLabel = nodeTabCrumb(pathname, search);
-  const group = NAV_GROUPS.find((g) =>
-    g.items.some((i) => i.path === pathname),
-  );
-  const item = group?.items.find((i) => i.path === pathname);
+  // The first segment is the page's Advanced sub-group; a page in the
+  // sidebar's main list or bottom strip stands alone (lib/navLayout.ts).
+  const group = navCrumb(NAV_GROUPS, pathname);
+  const item = group?.item;
   // Live-capture refresh: 5s on the lightweight status surface so the
   // header's "last seen" and counters stay current. Setup config is
   // static; no refresh.
@@ -141,8 +142,8 @@ export function TopBar({
         )}
         {group && (
           <div className="flex min-w-0 items-center gap-2">
-            <span className="hidden sm:inline">{group.label}</span>
-            <span className="hidden sm:inline">/</span>
+            {group.label && <span className="hidden sm:inline">{group.label}</span>}
+            {group.label && <span className="hidden sm:inline">/</span>}
             {tabLabel ? (
               <>
                 <RouterLink to={pathname} className="truncate hover:text-fg-1">
