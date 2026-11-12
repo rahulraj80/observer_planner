@@ -1,6 +1,6 @@
 {
   "name": "billing",
-  "about": "Where the org's billing stands, for its admins: test mode, this month's use at list price, the credit, the card on file (brand and last four only), invoices with Stripe's hosted page, and whether new sandboxes are allowed.",
+  "about": "Where the org's billing stands, for its admins: test mode, the payment provider (paddle or stripe) and whether prices exclude the tax it adds, this month's use at list price, the credit, the card on file (brand and last four only), invoices, whether new sandboxes are allowed, and on Paddle what Paddle.js needs to open a checkout from Paddle's payment link.",
   "method": "GET",
   "path": "/v1/billing",
   "status": 200,
@@ -26,12 +26,19 @@
       "vcpuHours": 0,
       "vcpuUsd": 0
     },
-    "notice": "Test mode: no real customers or charges. Billing runs in Stripe's test environment; no card is charged.",
+    "notice": "Test mode: no real customers or charges. Billing runs in Paddle's sandbox; no card is charged.",
+    "paddle": {
+      "clientToken": "test_contract",
+      "environment": "sandbox",
+      "scriptUrl": "https://cdn.paddle.com/paddle/v2/paddle.js"
+    },
     "paymentFailedAt": null,
     "prices": {
       "gibHourUsd": 0.013,
       "vcpuHourUsd": 0.04
     },
+    "provider": "paddle",
+    "taxExcluded": true,
     "testMode": true,
     "topUp": {
       "maxUsd": 1000,

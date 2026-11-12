@@ -1,0 +1,10 @@
+{
+  "name": "billing-invoice-link",
+  "about": "A link to one of the org's invoices, for its admins: on Paddle a PDF link fetched when asked for, valid for about an hour (open it now, do not keep it); on Stripe the hosted invoice page. 404 no_invoice for an id not the org's, 409 invoice_not_ready before it is paid.",
+  "method": "GET",
+  "path": "/v1/billing/invoices/txn_00000000000000000000000004/link",
+  "status": 200,
+  "response": {
+    "url": "https://paddle-fake.invalid/invoices/txn_00000000000000000000000004.pdf?disposition=inline"
+  }
+}

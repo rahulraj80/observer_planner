@@ -1,6 +1,6 @@
 {
   "name": "billing-topup",
-  "about": "Buy credit (whole dollars, 10 to 1000): the URL of Stripe's hosted payment page.",
+  "about": "Buy credit (whole dollars, 10 to 1000, before any tax the provider adds): the provider's hosted checkout, as for a card.",
   "method": "POST",
   "path": "/v1/billing/topup",
   "request": {
@@ -8,7 +8,14 @@
   },
   "status": 200,
   "response": {
+    "paddle": {
+      "clientToken": "test_contract",
+      "environment": "sandbox",
+      "scriptUrl": "https://cdn.paddle.com/paddle/v2/paddle.js",
+      "transactionId": "txn_00000000000000000000000004"
+    },
+    "provider": "paddle",
     "testMode": true,
-    "url": "https://checkout.stripe.com/c/pay/cs_test_contract"
+    "url": "https://node.example:48000/app/?_ptxn=txn_00000000000000000000000004"
   }
 }

@@ -1,11 +1,18 @@
 {
   "name": "billing-card",
-  "about": "Add a card: the URL of Stripe's hosted page, where the card goes in; the node never sees its number.",
+  "about": "Add a card: the provider's hosted checkout, where the card goes in; the node never sees its number. url opens it in a browser (Paddle: the portal's payment link, Stripe: Checkout); on Paddle, paddle gives the transaction, client-side token, environment and Paddle.js URL to open it in place.",
   "method": "POST",
   "path": "/v1/billing/card",
   "status": 200,
   "response": {
+    "paddle": {
+      "clientToken": "test_contract",
+      "environment": "sandbox",
+      "scriptUrl": "https://cdn.paddle.com/paddle/v2/paddle.js",
+      "transactionId": "txn_00000000000000000000000003"
+    },
+    "provider": "paddle",
     "testMode": true,
-    "url": "https://checkout.stripe.com/c/pay/cs_test_contract"
+    "url": "https://node.example:48000/app/?_ptxn=txn_00000000000000000000000003"
   }
 }
