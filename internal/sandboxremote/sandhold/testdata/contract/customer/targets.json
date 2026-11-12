@@ -52,7 +52,8 @@
           ],
           "limits": [
             "Open network on this node: no allow list is enforced here",
-            "Cold start about <span>; uses more memory per sandbox"
+            "Uses more memory per sandbox",
+            "Cold start about <span>"
           ],
           "maker": "SandHold",
           "title": "SandHold Vault"
