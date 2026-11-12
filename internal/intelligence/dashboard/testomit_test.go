@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http"
+	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/components"
 	"github.com/marmutapp/superbased-observer/internal/componentstate"
@@ -19,6 +20,17 @@ var testOmitted = map[string]bool{}
 // compiledOutInTest reports whether an omit tag removed component id from
 // this test binary.
 func compiledOutInTest(id string) bool { return testOmitted[id] }
+
+// skipWithoutPolicyLever skips a test of the routing shadow card's policy
+// lever: with proxy.routing compiled out there is no template map
+// (routing_omit.go routingTemplateKnown), so the card offers no policy
+// lever at all (the minimal distro).
+func skipWithoutPolicyLever(t *testing.T) {
+	t.Helper()
+	if compiledOutInTest("proxy.routing") {
+		t.Skip("proxy.routing is compiled out: the routing shadow card has no policy lever")
+	}
+}
 
 // answeredCompiledOut reports whether a response is the compiled-out stub's
 // 404 component_not_installed (reason not_compiled, writeCompiledOut) for a

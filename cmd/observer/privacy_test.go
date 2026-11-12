@@ -894,6 +894,14 @@ func TestPrivacyCmdLoadConfigError(t *testing.T) {
 func TestPrivacyReportListsPricingFeedByDefault(t *testing.T) {
 	report := buildPrivacyReport(config.Default())
 	row := findEgressRow(t, report.Egress, "pricing feed")
+	if !pricingFeedInBuild() {
+		// The minimal distro compiles the feed out: the row names the
+		// build and is never active.
+		if row.Active || !strings.Contains(row.Detail, "Not in this build") {
+			t.Errorf("no pricing feed in this build: row = %+v", row)
+		}
+		return
+	}
 	if !row.Active {
 		t.Errorf("pricing feed row inactive under the default config: %+v", row)
 	}

@@ -118,6 +118,7 @@ func TestBriefingCTASnoozeLifecycle(t *testing.T) {
 // strip shows a pause with its resume target; resume re-applies the lever
 // as a fresh apply (undo chain intact — revert still works after).
 func TestBriefingCTAPauseLifecycle(t *testing.T) {
+	skipWithoutPolicyLever(t)
 	e := newBriefingTestEnv(t)
 	s, st := newBriefingServer(t, e)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")

@@ -78,8 +78,13 @@ func TestBriefingActionsRail_MixedCards(t *testing.T) {
 			}
 		}
 	}
-	if levered != 2 || guidance != 1 {
-		t.Fatalf("rail = %+v, want 2 levered + 1 guidance", r.Actions)
+	// Without proxy.routing the card has no policy lever (no template map).
+	wantLevered := 2
+	if compiledOutInTest("proxy.routing") {
+		wantLevered = 1
+	}
+	if levered != wantLevered || guidance != 1 {
+		t.Fatalf("rail = %+v, want %d levered + 1 guidance", r.Actions, wantLevered)
 	}
 	// Actionable rows must sort before guidance rows.
 	for i, a := range r.Actions {

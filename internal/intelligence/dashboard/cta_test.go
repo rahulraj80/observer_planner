@@ -96,7 +96,12 @@ func TestBriefingCTAPlanRoutingShadow(t *testing.T) {
 		t.Fatalf("mode change = %+v, want routing.mode advise→enforce, restart, not already-active", mode)
 	}
 	pol, ok := byID["policy"]
-	if !ok || pol.Section != "routing" || pol.Key != "policy" || pol.To != "fast" || pol.From != "value" || !pol.RestartRequired || pol.AlreadyActive {
+	if compiledOutInTest("proxy.routing") {
+		// No template map in this build: no policy lever.
+		if ok {
+			t.Fatalf("policy change = %+v, want none (proxy.routing compiled out)", pol)
+		}
+	} else if !ok || pol.Section != "routing" || pol.Key != "policy" || pol.To != "fast" || pol.From != "value" || !pol.RestartRequired || pol.AlreadyActive {
 		t.Fatalf("policy change = %+v, want routing.policy value→fast, restart, not already-active", pol)
 	}
 	if _, ok := byID["stickiness"]; ok {
@@ -148,6 +153,7 @@ func TestBriefingCTAPlanStickinessLever(t *testing.T) {
 }
 
 func TestBriefingCTAPlanAlreadyActive(t *testing.T) {
+	skipWithoutPolicyLever(t)
 	e := newBriefingTestEnv(t)
 	s, st := newBriefingServer(t, e)
 	// Shadow policy == the default on-disk policy (value) → the policy
@@ -261,6 +267,7 @@ func TestBriefingCTAPlanBadBodyAndMethod(t *testing.T) {
 // file under a stamped backup + ledger, then revert {routing,policy}
 // restores the pre-write state exactly.
 func TestBriefingCTAApplyWritesLedgersReverts(t *testing.T) {
+	skipWithoutPolicyLever(t)
 	e := newBriefingTestEnv(t)
 	s, st := newBriefingServer(t, e)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
@@ -329,6 +336,7 @@ func TestBriefingCTAApplyWritesLedgersReverts(t *testing.T) {
 }
 
 func TestBriefingCTARevertAllRestores(t *testing.T) {
+	skipWithoutPolicyLever(t)
 	e := newBriefingTestEnv(t)
 	s, st := newBriefingServer(t, e)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
@@ -388,12 +396,18 @@ func TestBriefingCTARejections(t *testing.T) {
 	seedBriefingTurn(t, st, "s1", "claude", "claude-opus-4",
 		time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC), 20_000, 8_000, 0, 0)
 
+	// Without proxy.routing there is no policy lever, so the enforced
+	// config leaves nothing to apply at all: the plan is not appliable.
+	alreadyActive := http.StatusConflict
+	if compiledOutInTest("proxy.routing") {
+		alreadyActive = http.StatusUnprocessableEntity
+	}
 	cases := []struct {
 		name, method, path, body string
 		srv                      *Server
 		want                     int
 	}{
-		{"apply already active", http.MethodPost, "/api/briefing/cta/apply", `{"dedup_key":"routing_shadow_1","change_id":"mode"}`, s2, http.StatusConflict},
+		{"apply already active", http.MethodPost, "/api/briefing/cta/apply", `{"dedup_key":"routing_shadow_1","change_id":"mode"}`, s2, alreadyActive},
 		{"apply missing change_id", http.MethodPost, "/api/briefing/cta/apply", `{"dedup_key":"routing_shadow_1"}`, s, http.StatusBadRequest},
 		{"apply unknown change_id", http.MethodPost, "/api/briefing/cta/apply", `{"dedup_key":"routing_shadow_1","change_id":"nope"}`, s, http.StatusNotFound},
 		{"apply no lever", http.MethodPost, "/api/briefing/cta/apply", `{"dedup_key":"trivial_model_s1"}`, s, http.StatusUnprocessableEntity},
