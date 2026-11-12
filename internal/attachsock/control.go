@@ -141,10 +141,19 @@ type RunInfo struct {
 	EndReason  string `json:"end_reason,omitempty"`
 	Sandboxed  bool   `json:"sandboxed"`
 	Backend    string `json:"backend,omitempty"`
-	Isolation  string `json:"isolation,omitempty"`
-	Capture    string `json:"capture,omitempty"`
-	LaunchedAt string `json:"launched_at,omitempty"`
-	EndedAt    string `json:"ended_at,omitempty"`
+	// Isolation is the isolation the run's box got. For a backend whose
+	// node says what it made (a SandHold node), it is the node's own tier
+	// word (shared, shielded, sealed, vault), with Network (none, limited,
+	// open) and RunsOn beside it; IsolationPending says the node has not
+	// said yet, and Isolation is then empty rather than a guess. For every
+	// other backend it is Observer's recorded isolation class.
+	Isolation        string `json:"isolation,omitempty"`
+	Network          string `json:"network,omitempty"`
+	RunsOn           string `json:"runs_on,omitempty"`
+	IsolationPending bool   `json:"isolation_pending,omitempty"`
+	Capture          string `json:"capture,omitempty"`
+	LaunchedAt       string `json:"launched_at,omitempty"`
+	EndedAt          string `json:"ended_at,omitempty"`
 	// Initiator is who started the run (lane cli-2, migration 220):
 	// human_dashboard, human_cli or agent; "" when not recorded.
 	Initiator string `json:"initiator,omitempty"`

@@ -31,6 +31,9 @@ type fakeBoxClient struct {
 	createErr error
 	// writeFail, when set, fails one file's write with its error.
 	writeFail func(path string) error
+	// extra, when set, joins the create answer's vendor keys (a SandHold
+	// node's isolation, network and runs_on words).
+	extra map[string]string
 }
 
 type fakeBox struct {
@@ -62,7 +65,11 @@ func (f *fakeBoxClient) Create(_ context.Context, spec sandboxremote.BoxSpec) (s
 		f.loseCreate = false
 		return sandboxremote.BoxInfo{}, sandboxremote.ErrCreateUnknown
 	}
-	return sandboxremote.BoxInfo{ID: b.id, Region: spec.Region, Running: true, Labels: spec.Labels, Extra: map[string]string{"vendor_key": "v1"}, Deadline: time.Now().Add(time.Duration(spec.TimeoutSeconds) * time.Second)}, nil
+	extra := map[string]string{"vendor_key": "v1"}
+	for k, v := range f.extra {
+		extra[k] = v
+	}
+	return sandboxremote.BoxInfo{ID: b.id, Region: spec.Region, Running: true, Labels: spec.Labels, Extra: extra, Deadline: time.Now().Add(time.Duration(spec.TimeoutSeconds) * time.Second)}, nil
 }
 
 func (f *fakeBoxClient) box(id string) (*fakeBox, error) {

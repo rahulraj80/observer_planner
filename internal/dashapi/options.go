@@ -605,6 +605,12 @@ type Options struct {
 	// probe; nil (the default) is the honest disabled state, matching the
 	// LaunchManager/BuildHandoff seam pattern (CLAUDE.md #2).
 	SandboxProber SandboxProber
+	// SandboxBoxWords, when non-nil, reports what the node said it made for
+	// a sandboxed run's box (BoxWords), for GET /api/terminal/sandbox/runs:
+	// backend is the run's outermost backend and running whether the run is
+	// still open. ok=false: the backend reports no such words. Nil (the
+	// default) leaves every run with Observer's own recorded words.
+	SandboxBoxWords func(runID, backend string, running bool) (BoxWords, bool)
 	// SandboxSetup, when non-nil, backs the sandbox setup routes
 	// (/api/terminal/sandbox/setup..., sandbox installation lifecycle plan
 	// section 3.6) and the CLI's `observer sandbox setup`. Nil means the

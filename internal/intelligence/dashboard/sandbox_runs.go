@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/runstate"
 )
 
@@ -35,6 +36,12 @@ type sandboxRunRow struct {
 	IsolationClass string   `json:"isolation_class"`
 	EgressTier     string   `json:"egress_tier,omitempty"`
 	CaptureLevel   string   `json:"capture_level,omitempty"`
+	// Node is what the node said it made for the run's box (a SandHold
+	// node's isolation, network and target, in its own words), which the
+	// page shows instead of IsolationClass and EgressTier: those are the
+	// row's floor and the launch's tier, not what the box got. Absent for a
+	// backend that reports none.
+	Node *dashapi.BoxWords `json:"node,omitempty"`
 	// Refused is the connections the sandbox refused (the egress refusal
 	// report: rows kept, plus those dropped before they were written,
 	// evicted to bound the run, or refused while the link was down).
@@ -104,6 +111,11 @@ func (s *Server) handleSandboxRuns(w http.ResponseWriter, r *http.Request) {
 			row.State = "running"
 			if v := runstate.Reconcile(rules, runstate.Signal{Kind: runstate.KindTerminalRun, Status: "running", Age: now.Sub(rn.LaunchedAt)}); v.Changed {
 				row.State = v.To
+			}
+		}
+		if s.opts.SandboxBoxWords != nil {
+			if w, ok := s.opts.SandboxBoxWords(rn.RunID, row.Backend, row.State == "running"); ok {
+				row.Node = &w
 			}
 		}
 		out = append(out, row)

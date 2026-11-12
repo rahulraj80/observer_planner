@@ -374,3 +374,60 @@ func TestLaunchControlModelOffered(t *testing.T) {
 		t.Fatalf("offered model: %v %+v", err, f.specs)
 	}
 }
+
+// TestLaunchControlNodeBoxWords (demo screenshots 2026-11-12): a run on a
+// row whose node decides the box's isolation reports what the node said it
+// made, live and from the history, never the row's recorded floor; while
+// the node has not said, the isolation is empty and pending.
+func TestLaunchControlNodeBoxWords(t *testing.T) {
+	f := newFakeTermsvc()
+	f.snap = []dashapi.LaunchInfo{
+		{ID: "h-sh", RunID: "run-sh-01", Tool: "claude-code", Kind: "fresh", Sandboxed: true,
+			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "sandhold", EgressTier: "internet", CaptureLevel: "partial"}},
+		{ID: "h-new", RunID: "run-new-01", Tool: "claude-code", Kind: "fresh", Sandboxed: true,
+			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "sandhold", EgressTier: "internet"}},
+		{ID: "h-bw", RunID: "run-bw-01", Tool: "codex", Kind: "fresh", Sandboxed: true,
+			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "bwrap"}},
+	}
+	ended := f.now
+	f.history = []store.TerminalRunSummary{{RunID: "run-old-01", Tool: "claude-code", Kind: "fresh", LaunchedAt: f.now, EndedAt: &ended, IsolationClass: "process", Stack: "sandhold"}}
+	c := f.control(true)
+	c.boxWords = func(runID, backend string, running bool) (dashapi.BoxWords, bool) {
+		if backend != "sandhold" {
+			return dashapi.BoxWords{}, false
+		}
+		switch runID {
+		case "run-sh-01", "run-old-01":
+			return dashapi.BoxWords{Isolation: "shielded", Network: "limited", RunsOn: "runc"}, true
+		}
+		return dashapi.BoxWords{Pending: running}, true
+	}
+	runs, err := c.Runs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]attachsock.RunInfo{}
+	for _, r := range runs {
+		by[r.RunID] = r
+	}
+	for _, id := range []string{"run-sh-01", "run-old-01"} {
+		if r := by[id]; r.Isolation != "shielded" || r.Network != "limited" || r.RunsOn != "runc" || r.IsolationPending {
+			t.Errorf("%s = %+v", id, r)
+		}
+	}
+	if r := by["run-new-01"]; r.Isolation != "" || !r.IsolationPending {
+		t.Errorf("not answered yet = %+v", r)
+	}
+	if r := by["run-bw-01"]; r.Isolation != "process" || r.Network != "" || r.IsolationPending {
+		t.Errorf("a local row = %+v", r)
+	}
+	if got := describeIsolation(by["run-sh-01"]); got != "Shielded" {
+		t.Errorf("isolation line %q", got)
+	}
+	if got := describeNetwork(by["run-sh-01"].Network); got != "allow list (limited)" {
+		t.Errorf("network line %q", got)
+	}
+	if got := describeIsolation(by["run-new-01"]); !strings.Contains(got, "not reported yet") {
+		t.Errorf("pending line %q", got)
+	}
+}

@@ -1113,6 +1113,9 @@ func newStartCmd() *cobra.Command {
 					// The Settings card's org forbid of sign-in seeding (lane
 					// BOXSIGNIN): the composed managed view, nil without the sandbox.
 					SandboxSignInForbidden: sandboxSignInForbiddenSeam(resolvedConfigPath),
+					// What a node said it made for a run's box (a SandHold
+					// node's isolation and network), for the Sandboxes tab.
+					SandboxBoxWords: sandboxBoxWordsSeam(filepath.Dir(cfg.Observer.DBPath)),
 					// The refusal advisor's host check (OpenShell lane N5): the
 					// gateway's own, nil without the sandbox.
 					SandboxEgressHostCheck: sandboxEgressHostCheckSeam(),

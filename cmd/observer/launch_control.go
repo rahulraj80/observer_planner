@@ -66,7 +66,10 @@ type launchControl struct {
 	// confirmer resolves the caller of a confirm (the attach endpoint's
 	// peer) into the facts agentlaunch.MayConfirm judges.
 	confirmer func(ctx context.Context) agentlaunch.ConfirmFacts
-	now       func() time.Time
+	// boxWords reads what a run's node said it made for its box
+	// (run_box_words.go); nil reports Observer's recorded class.
+	boxWords func(runID, backend string, running bool) (dashapi.BoxWords, bool)
+	now      func() time.Time
 }
 
 // newLaunchControl builds the controller over the shared terminal stack.
@@ -83,6 +86,7 @@ func newLaunchControl(s *terminalStack) *launchControl {
 		},
 		history:      s.runHistory,
 		modelOffered: s.modelOffered,
+		boxWords:     sandboxBoxWordsSeam(s.observerDir),
 		now:          time.Now,
 	}
 	li := s.launchInitiator()
@@ -371,6 +375,7 @@ func (c *launchControl) liveRuns() []attachsock.RunInfo {
 		}
 		if s.Isolation != nil {
 			ri.Isolation, ri.Backend, ri.Capture = s.Isolation.Class, s.Isolation.Backend, s.Isolation.CaptureLevel
+			c.applyBoxWords(&ri)
 		}
 		if id, ok := c.sessionFor(s.RunID); ok {
 			ri.SessionID = id
@@ -417,7 +422,21 @@ func (c *launchControl) historyRun(h store.TerminalRunSummary) attachsock.RunInf
 			ri.State = attachsock.StateAbandoned
 		}
 	}
+	if ri.Sandboxed {
+		c.applyBoxWords(&ri)
+	}
 	return ri
+}
+
+// applyBoxWords replaces a sandboxed run's recorded class with what its
+// node said it made, when its backend reports that (run_box_words.go).
+func (c *launchControl) applyBoxWords(ri *attachsock.RunInfo) {
+	if c.boxWords == nil || ri.Backend == "" {
+		return
+	}
+	if w, ok := c.boxWords(ri.RunID, ri.Backend, ri.State == attachsock.StateRunning); ok {
+		applyBoxWords(ri, w)
+	}
 }
 
 // Run implements attachsock.Controller: an exact run id or handle, or a

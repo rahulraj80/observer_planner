@@ -171,3 +171,8 @@ const attachInBuild = false
 
 // sandboxSignInForbiddenSeam is nil in a build without terminals.
 func sandboxSignInForbiddenSeam(string) func() bool { return nil }
+
+// sandboxBoxWordsSeam is nil in a build without terminals: no run has a box.
+func sandboxBoxWordsSeam(string) func(string, string, bool) (dashapi.BoxWords, bool) {
+	return nil
+}

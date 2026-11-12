@@ -767,6 +767,7 @@ func (s *terminalStack) launchManager() *launchManagerAdapter {
 		sandboxProber: s.sandboxProber,
 		nf:            s.nf,
 		toolGate:      daemonToolGate,
+		boxWords:      sandboxBoxWordsSeam(s.observerDir),
 	}
 }
 

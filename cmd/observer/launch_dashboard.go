@@ -38,6 +38,9 @@ import (
 type launchManagerAdapter struct {
 	svc *termsvc.Service
 	mgr *termsession.Manager
+	// boxWords reads what a run's node said it made for its box
+	// (run_box_words.go); nil leaves the run pill on the recorded class.
+	boxWords func(runID, backend string, running bool) (dashapi.BoxWords, bool)
 	// budgetState loads the daemon's config and database for the managed
 	// hard-budget rows of a dashboard fresh launch (OSH-R-007). Nil (a test
 	// adapter) leaves those rows out.
@@ -1047,6 +1050,11 @@ func (a *launchManagerAdapter) Snapshot() []dashapi.LaunchInfo {
 			info.Isolation = launchIsolationFor(iso)
 			if runID, ok := a.svc.RunIDForHandle(s.ID); ok {
 				relayPillHealth(info.Isolation, runID)
+				if info.Isolation != nil && a.boxWords != nil {
+					if w, ok := a.boxWords(runID, info.Isolation.Backend, !s.Exited); ok {
+						info.Isolation.Node = &w
+					}
+				}
 			}
 		}
 		if runID, ok := a.svc.RunIDForHandle(s.ID); ok {

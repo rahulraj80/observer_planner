@@ -267,7 +267,7 @@ func runLaunch(ctx context.Context, out launchOutput, configPath string, spec at
 		return exitErr(launchExitPending)
 	}
 	if detach && waitFor == "" {
-		printRun(out, run, false)
+		printRun(out, awaitBoxWords(ctx, configPath, run), false)
 		return nil
 	}
 	if !detach {
@@ -346,7 +346,9 @@ func printRun(out launchOutput, r attachsock.RunInfo, timedOut bool) {
 	row("state", r.State)
 	row("session", runCell(r.SessionID))
 	row("sandbox", describeSandbox(r))
-	row("isolation", r.Isolation)
+	row("isolation", describeIsolation(r))
+	row("network", describeNetwork(r.Network))
+	row("runs on", r.RunsOn)
 	row("capture", r.Capture)
 	if r.ExitCode != nil {
 		row("exit code", fmt.Sprint(*r.ExitCode))
@@ -360,6 +362,69 @@ func printRun(out launchOutput, r attachsock.RunInfo, timedOut bool) {
 		row("wait", "timed out")
 	}
 	_ = tw.Flush()
+}
+
+// boxWordsWait bounds how long a detached launch waits for the node to say
+// what it made for the run's box (a SandHold create answers in seconds).
+var boxWordsWait = 60 * time.Second
+
+// boxWordsPoll is how often that wait asks the daemon again.
+var boxWordsPoll = 500 * time.Millisecond
+
+// awaitBoxWords waits, for a run whose node decides its box's isolation and
+// has not said yet, until the node has said (or the run ended, or
+// boxWordsWait passed), so a detached launch reports the box the node made
+// rather than nothing (demo screenshots 2026-11-12). Any other run is
+// returned as it is; a failed read returns the last answer.
+func awaitBoxWords(ctx context.Context, configPath string, run attachsock.RunInfo) attachsock.RunInfo {
+	if !run.IsolationPending || !run.Live() {
+		return run
+	}
+	wctx, cancel := context.WithTimeout(ctx, boxWordsWait)
+	defer cancel()
+	t := time.NewTicker(boxWordsPoll)
+	defer t.Stop()
+	for run.IsolationPending && run.Live() {
+		select {
+		case <-wctx.Done():
+			return run
+		case <-t.C:
+		}
+		res, err := controlCall(wctx, configPath, attachsock.ControlRequest{Op: "show", Run: run.RunID})
+		if err != nil || res.Run == nil {
+			return run
+		}
+		run = *res.Run
+	}
+	return run
+}
+
+// nodeTierWords are a node's isolation tiers (SandHold's), as a run reports
+// them when its node said what it made (run_box_words.go).
+var nodeTierWords = map[string]string{"shared": "Shared", "shielded": "Shielded", "sealed": "Sealed", "vault": "Vault"}
+
+// describeIsolation is a run's isolation line: the node's tier, capitalised,
+// when the node said it; that the node has not said yet; else Observer's
+// recorded class.
+func describeIsolation(r attachsock.RunInfo) string {
+	if w, ok := nodeTierWords[r.Isolation]; ok {
+		return w
+	}
+	if r.IsolationPending {
+		return "not reported yet (the node decides; run `observer terminals show " + r.RunID + "` again)"
+	}
+	return r.Isolation
+}
+
+// nodeNetworkWords are a node's network words as people read them.
+var nodeNetworkWords = map[string]string{"none": "none", "limited": "allow list (limited)", "open": "open"}
+
+// describeNetwork is the node's network word as people read it.
+func describeNetwork(n string) string {
+	if w, ok := nodeNetworkWords[n]; ok {
+		return w
+	}
+	return n
 }
 
 // initiatorWords are the short phrases of the recorded initiators (lane

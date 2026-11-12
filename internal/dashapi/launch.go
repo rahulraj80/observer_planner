@@ -398,7 +398,29 @@ type LaunchIsolation struct {
 	// sandboxvocab.SeccompRun vocabulary, tracker F-002); omitted when not
 	// recorded.
 	Seccomp string `json:"seccomp,omitempty"`
+	// Node is what the node that ran the box said it made (a SandHold
+	// node's isolation tier, network and target, in its own words); nil
+	// for a run whose backend does not report one.
+	Node *BoxWords `json:"node,omitempty"`
 }
+
+// BoxWords is what a node said it made for a run's box, in the node's own
+// words (a SandHold node: isolation shared, shielded, sealed or vault;
+// network none, limited or open; the target it runs on). Observer's own
+// class and network tier for such a run are the row's floor and the
+// launch's tier, not what the box got, so a surface that has these shows
+// them instead.
+type BoxWords struct {
+	Isolation string `json:"isolation,omitempty"`
+	Network   string `json:"network,omitempty"`
+	RunsOn    string `json:"runs_on,omitempty"`
+	// Pending says the node decides the box's isolation and has not said
+	// yet (the box is still being made, or it never was).
+	Pending bool `json:"pending,omitempty"`
+}
+
+// Known reports whether the node said which isolation the box got.
+func (w BoxWords) Known() bool { return w.Isolation != "" }
 
 // ErrLaunchTooMany signals the concurrent-session cap was hit (429).
 var ErrLaunchTooMany = errors.New("too many concurrent terminal sessions")

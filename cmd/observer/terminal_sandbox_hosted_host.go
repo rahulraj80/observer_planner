@@ -401,6 +401,9 @@ func (r *hostedRun) create(ctx context.Context) error {
 	if err := hostedSaveRecord(r.plan.ObserverDir, r.rec); err != nil {
 		return fmt.Errorf("record the box id: %w", err)
 	}
+	// What the node said it made (a SandHold node's isolation, network and
+	// target), for every surface that names the run's isolation.
+	writeHostedBoxNote(r.plan.ObserverDir, r.plan.RunID, info.Extra)
 	r.notReady = !info.Running
 	if info.Described != "" {
 		// A row whose vendor says how the box runs (the SandHold node's

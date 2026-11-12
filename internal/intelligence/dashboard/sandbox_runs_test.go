@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -44,6 +45,18 @@ func TestSandboxRunsRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// What the node said it made (demo screenshots 2026-11-12): the row's
+	// recorded class and tier are its floor and the launch's tier.
+	s.opts.SandboxBoxWords = func(runID, backend string, running bool) (dashapi.BoxWords, bool) {
+		if backend != "sandhold" {
+			return dashapi.BoxWords{}, false
+		}
+		if runID != "node" || !running {
+			t.Errorf("box words asked for %s on %s (running %v)", runID, backend, running)
+		}
+		return dashapi.BoxWords{Isolation: "shielded", Network: "limited", RunsOn: "runc"}, true
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sandbox/runs", nil)
 	req.Host = "127.0.0.1:8080"
 	rec := httptest.NewRecorder()
@@ -66,6 +79,9 @@ func TestSandboxRunsRoute(t *testing.T) {
 	node, local := body.Runs[0], body.Runs[1]
 	if node.Backend != "sandhold" || node.IsolationClass != "container" || node.EgressTier != "proxy_only" || node.DurationSeconds != nil {
 		t.Errorf("node run %+v", node)
+	}
+	if node.Node == nil || *node.Node != (dashapi.BoxWords{Isolation: "shielded", Network: "limited", RunsOn: "runc"}) || local.Node != nil {
+		t.Errorf("box words: node %+v, local %+v", node.Node, local.Node)
 	}
 	if node.Refused == nil || *node.Refused != 3 || !node.RefusedMayBeMore {
 		t.Errorf("node findings: refused %v may be more %v, want 3 (2 kept, 1 dropped) and may be more", node.Refused, node.RefusedMayBeMore)
