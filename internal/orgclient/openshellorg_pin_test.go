@@ -1,9 +1,12 @@
 package orgclient
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -19,7 +22,13 @@ import (
 // JSON keys as the server's own struct, read from the server's source (the
 // node never imports the server package).
 func TestOpenShellTypesMatchTheServer(t *testing.T) {
-	server := serverJSONKeys(t, filepath.Join("..", "orgserver", "openshellctl"))
+	dir := filepath.Join("..", "orgserver", "openshellctl")
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		// The public source snapshot carries no org server: there is
+		// nothing to compare against (the team build runs this check).
+		t.Skipf("no org server source in this tree (%s)", dir)
+	}
+	server := serverJSONKeys(t, dir)
 	pairs := []struct {
 		server string
 		node   any

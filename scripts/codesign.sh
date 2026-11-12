@@ -157,10 +157,10 @@ verify_authenticode() {
     fi
     [ -z "$tmp_ca" ] || rm -f "$tmp_ca"
     printf '%s\n' "$out"
-    if ! printf '%s\n' "$out" | grep -Eq "Subject:.*${EXPECTED_PUBLISHER}"; then
+    if ! grep -Eq "Subject:.*${EXPECTED_PUBLISHER}" <<<"$out"; then
         fail "the signature on $name does not name ${EXPECTED_PUBLISHER}"
     fi
-    if ! printf '%s\n' "$out" | grep -Eq 'The signature is timestamped:|Timestamp Server Signature verification: ok'; then
+    if ! grep -Eq 'The signature is timestamped:|Timestamp Server Signature verification: ok' <<<"$out"; then
         fail "the signature on $name carries no timestamp"
     fi
     echo "codesign: $name is signed by ${EXPECTED_PUBLISHER}, timestamped and verified"
@@ -194,14 +194,16 @@ sign_darwin() {
         fail "rcodesign print-signature-info could not read the signature on $name"
     fi
     printf '%s\n' "$info"
+    # Here-strings, not printf | grep -q: under pipefail grep -q's early exit
+    # can SIGPIPE the printf and fail a good signature (a flaky invariant test).
     # The code directory's flags (not executable_segment_flags) carry RUNTIME.
-    if ! printf '%s\n' "$info" | grep -Eq '(^|[[:space:]])flags: .*RUNTIME'; then
+    if ! grep -Eq '(^|[[:space:]])flags: .*RUNTIME' <<<"$info"; then
         fail "the signature on $name lacks the hardened runtime flag"
     fi
-    if ! printf '%s\n' "$info" | grep -Eq '(^|[[:space:]])apple_certificate_profile: developer-id-application[[:space:]]*$'; then
+    if ! grep -Eq '(^|[[:space:]])apple_certificate_profile: developer-id-application[[:space:]]*$' <<<"$info"; then
         fail "the signature on $name is not made with a Developer ID Application certificate"
     fi
-    if ! printf '%s\n' "$info" | grep -Eq "(^|[[:space:]])apple_team_id: ['\"]?${APPLE_TEAM_ID}['\"]?[[:space:]]*\$"; then
+    if ! grep -Eq "(^|[[:space:]])apple_team_id: ['\"]?${APPLE_TEAM_ID}['\"]?[[:space:]]*\$" <<<"$info"; then
         fail "the signing certificate on $name does not name team ${APPLE_TEAM_ID}"
     fi
     echo "codesign: $name is signed with the Developer ID of team ${APPLE_TEAM_ID}, hardened runtime, verified"
@@ -217,7 +219,7 @@ sign_darwin() {
     fi
     echo "codesign: submitting $name to Apple's notary service (waiting up to ${NOTARY_WAIT_SECONDS}s)"
     if out="$("$RCODESIGN" notary-submit --api-key-file "$APPLE_NOTARY_KEY_FILE" --wait --max-wait-seconds "$NOTARY_WAIT_SECONDS" "$zip_file" 2>&1)" &&
-        printf '%s\n' "$out" | grep -Eq 'poll state after [0-9]+s: Accepted'; then
+        grep -Eq 'poll state after [0-9]+s: Accepted' <<<"$out"; then
         printf '%s\n' "$out"
         rm -rf "$notary_dir"
         trap - EXIT
