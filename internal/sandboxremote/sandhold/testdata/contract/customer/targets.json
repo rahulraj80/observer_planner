@@ -35,6 +35,10 @@
         "product": "sandhold",
         "sandboxes": 0,
         "scope": "sb",
+        "size": {
+          "cpu": "1",
+          "memory": "1Gi"
+        },
         "state": "active",
         "tier": "sealed",
         "tierMeans": "its own kernel in user space",
@@ -69,6 +73,10 @@
         "product": "sandhold",
         "sandboxes": 0,
         "scope": "sb",
+        "size": {
+          "cpu": "1",
+          "memory": "1Gi"
+        },
         "state": "active",
         "tier": "vault",
         "tierMeans": "its own kernel in a virtual machine",
@@ -104,6 +112,10 @@
         "product": "sandhold",
         "sandboxes": 0,
         "scope": "sb",
+        "size": {
+          "cpu": "1",
+          "memory": "1Gi"
+        },
         "state": "active",
         "tier": "shielded",
         "tierMeans": "a hardened container on the host's kernel",
