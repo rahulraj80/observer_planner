@@ -3,7 +3,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +17,8 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/sandboxrelay"
 	"github.com/marmutapp/superbased-observer/internal/sandboxrelayd"
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
+	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // A hosted run's box note (demo screenshots 2026-11-12, run_box_words.go):
@@ -94,17 +100,110 @@ func hostedBoxNoteKey(observerDir, sandboxRunID string) string {
 }
 
 // writeHostedBoxNote leaves what the node said it made for a run's box (best
-// effort: a run whose note is missing reads as "the node has not said").
-func writeHostedBoxNote(observerDir, sandboxRunID string, extra map[string]string) {
+// effort: a run whose note is missing reads as "the node has not said"). It
+// returns the id the note is keyed by (the stored terminal run's) and the
+// note; ok=false when the answer named no isolation in the node's words.
+func writeHostedBoxNote(observerDir, sandboxRunID string, extra map[string]string) (string, hostedBoxNote, bool) {
 	if observerDir == "" || !sandboxrelay.ValidRunID(sandboxRunID) {
-		return
+		return "", hostedBoxNote{}, false
 	}
 	n, ok := hostedBoxNoteFrom(extra)
 	if !ok {
-		return
+		return "", hostedBoxNote{}, false
 	}
 	hostedSweepBoxNotes(observerDir, time.Now())
-	_ = hostedWriteOwned(hostedBoxNotePath(observerDir, hostedBoxNoteKey(observerDir, sandboxRunID)), n)
+	key := hostedBoxNoteKey(observerDir, sandboxRunID)
+	_ = hostedWriteOwned(hostedBoxNotePath(observerDir, key), n)
+	return key, n, true
+}
+
+// The stored class of a run whose node decides its box (demo round
+// 2026-11-12): the run is recorded at launch with the row's floor
+// (process) and the launch's tier, because the box does not exist yet.
+// Once the node answers, the stored terminal run takes the class and tier
+// the node's words map to, so analytics, Security, exports and the org wire
+// read the box the node made, not the floor. The note stays the source of
+// the node's own words and target.
+
+// hostedBoxClasses and hostedBoxTiers map a note's words onto Observer's
+// vocabulary: SandHold's one-to-one mapping (note 41 D4; the sandhold
+// package's ClassForTier and TierForNetwork, which a test holds this to),
+// kept here so a build without the SandHold driver still records a note's
+// class.
+var (
+	hostedBoxClasses = map[string]vocab.IsoClass{"shared": vocab.ClassProcess, "shielded": vocab.ClassContainer, "sealed": vocab.ClassUserspaceKernel, "vault": vocab.ClassHWVM}
+	hostedBoxTiers   = map[string]vocab.Tier{"none": vocab.TierNone, "limited": vocab.TierProxyOnly, "open": vocab.TierInternet}
+)
+
+// storeHostedBoxNote records a note's class and tier on the stored terminal
+// run id of backend (only a row whose node decides its box: a local run is
+// never touched, and the store only rewrites a row whose stack is exactly
+// backend). changed=false: nothing to record, or already recorded.
+func storeHostedBoxNote(ctx context.Context, st *store.Store, backend, id string, n hostedBoxNote) (bool, error) {
+	v, ok := sandboxremote.VendorFor(backend)
+	if !ok || !v.SeveralIsolations {
+		return false, nil
+	}
+	class, ok := hostedBoxClasses[n.Isolation]
+	if !ok {
+		return false, nil
+	}
+	return st.SetTerminalRunNodeIsolation(ctx, id, backend, string(class), string(hostedBoxTiers[n.Network]), resealRunEvidence)
+}
+
+// hostedRecordBoxClass is the helper's write of a note's class onto the
+// stored run, in the node database (best effort: a daemon start records
+// any note this missed, backfillHostedBoxClasses).
+func hostedRecordBoxClass(ctx context.Context, backend, id string, n hostedBoxNote) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	_, database, closeDB, err := loadConfigAndDB(ctx, daemonConfigPath())
+	if err != nil {
+		slog.Default().Warn("sandbox: the node's isolation was not recorded on the run; the next daemon start records it", "run", id, "err", err)
+		return
+	}
+	defer closeDB()
+	if _, err := storeHostedBoxNote(ctx, store.New(database), backend, id, n); err != nil {
+		slog.Default().Warn("sandbox: the node's isolation was not recorded on the run; the next daemon start records it", "run", id, "err", err)
+	}
+}
+
+// backfillHostedBoxClasses records every kept note's class on its stored
+// run (a daemon start): runs recorded before the helper wrote the class,
+// and any write the helper missed. Rows already right are left alone.
+func backfillHostedBoxClasses(ctx context.Context, st *store.Store, observerDir string) (int, error) {
+	entries, err := os.ReadDir(hostedBoxNoteDir(observerDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".json")
+		if !e.Type().IsRegular() || !ok {
+			continue
+		}
+		note, ok := readHostedBoxNote(observerDir, id)
+		if !ok {
+			continue
+		}
+		for _, backend := range sandboxremote.VendorIDs() {
+			changed, err := storeHostedBoxNote(ctx, st, backend, id, note)
+			if err != nil {
+				return n, err
+			}
+			if changed {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+func init() {
+	boxClassBackfills = append(boxClassBackfills, backfillHostedBoxClasses)
 }
 
 // readHostedBoxNote reads a run's note; ok=false when there is none or it

@@ -307,6 +307,73 @@ func (s *Store) LowerTerminalRunCapture(ctx context.Context, runID string, h Ter
 	return true, s.resealTerminalRun(ctx, runID, digest) // isolation.seal: the digest moved
 }
 
+// SetTerminalRunNodeIsolation records the isolation class and network tier
+// the node said it gave a run's box, on a run whose backend's node decides
+// them (a SandHold node; demo round 2026-11-12). Such a run is recorded at
+// launch, before its box exists, with the row's floor class and the
+// launch's tier; once the node answers, class and egressTier (closed
+// sandboxvocab words the caller mapped from the node's words) replace them,
+// so every reader of the stored class (analytics, Security, exports, the
+// org wire) sees the box the node made. Only a row whose stack is exactly
+// backend is touched, so a node's answer never rewrites a local run.
+// egressTier "" keeps the recorded tier. The evidence digest is resealed
+// over the new facts (reseal, as LowerTerminalRunCapture does).
+// changed=false: no such run, another backend's run, or already recorded.
+func (s *Store) SetTerminalRunNodeIsolation(ctx context.Context, runID, backend, class, egressTier string, reseal func(runID string, iso TerminalRunIsolation) string) (bool, error) {
+	if runID == "" || backend == "" || class == "" {
+		return false, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("store.SetTerminalRunNodeIsolation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var iso TerminalRunIsolation
+	var stack string
+	var degraded int
+	err = tx.QueryRowContext(ctx,
+		`SELECT isolation_class, stack, egress_tier, capture_level, capture_rule,
+		        capture_origin, capture_degraded, native_sandbox_state,
+		        verification, key_custody, evidence_digest,
+		        evidence_producer, evidence_component, evidence_component_version
+		   FROM terminal_run WHERE run_id = ?`, runID).
+		Scan(&iso.Class, &stack, &iso.EgressTier, &iso.CaptureLevel, &iso.CaptureRule,
+			&iso.CaptureOrigin, &degraded, &iso.NativeSandboxState,
+			&iso.Verification, &iso.KeyCustody, &iso.EvidenceDigest,
+			&iso.EvidenceProducer, &iso.EvidenceComponent, &iso.EvidenceComponentVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store.SetTerminalRunNodeIsolation: %w", err)
+	}
+	if stack != backend {
+		return false, nil
+	}
+	if egressTier == "" {
+		egressTier = iso.EgressTier
+	}
+	if iso.Class == class && iso.EgressTier == egressTier {
+		return false, nil
+	}
+	iso.Stack = []string{stack}
+	iso.CaptureDegraded = degraded != 0
+	iso.Class, iso.EgressTier = class, egressTier
+	digest := iso.EvidenceDigest
+	if digest != "" && reseal != nil {
+		digest = reseal(runID, iso)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE terminal_run SET isolation_class = ?, egress_tier = ?, evidence_digest = ?
+		  WHERE run_id = ?`, class, egressTier, digest, runID); err != nil {
+		return false, fmt.Errorf("store.SetTerminalRunNodeIsolation: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("store.SetTerminalRunNodeIsolation: %w", err)
+	}
+	return true, s.resealTerminalRun(ctx, runID, digest) // isolation.seal: the digest moved
+}
+
 // LoadTerminalRunSeccomp reads what the syscall filter gave a run
 // (migration 232); ok=false: no such run.
 func (s *Store) LoadTerminalRunSeccomp(ctx context.Context, runID string) (string, bool, error) {

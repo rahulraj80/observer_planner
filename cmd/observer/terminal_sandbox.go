@@ -501,6 +501,10 @@ type sandboxDriverReg struct {
 	// start no program and read nothing but its own state dir's names and
 	// times. Nil for none (fix round 1 of lane FU1).
 	inactiveHint func(r *sandboxRuntime, full config.Config) string
+	// tiers are the isolations the row's node offers this machine, from
+	// its own state dir only (the SandHold row), active or not; nil for a
+	// row with one isolation.
+	tiers func(r *sandboxRuntime) []sandboxselect.NodeTier
 }
 
 // releaseSandboxDrivers releases every registered driver's daemon-lifetime
@@ -588,6 +592,13 @@ func (r *sandboxRuntime) driverProbes(ctx context.Context) map[string]sandboxsel
 		if hint := r.inactiveHints[id]; hint != nil {
 			p := out[id]
 			p.Hint = hint()
+			out[id] = p
+		}
+	}
+	// A node offering several isolations lists them, active or not.
+	for id, p := range out {
+		if reg, ok := sandboxDriverRegs[id]; ok && reg.tiers != nil {
+			p.Tiers = reg.tiers(r)
 			out[id] = p
 		}
 	}

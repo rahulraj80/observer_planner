@@ -610,6 +610,9 @@ type hostedVendorReg struct {
 	//     this machine is signed in as and which isolation the node offers),
 	//     from local facts only.
 	probeHint func(d *hostedDriver) string
+	//   - tiers are the isolations the row's node offers this machine (the
+	//     SandHold row), from local facts only; nil for one isolation.
+	tiers func(r *sandboxRuntime) []sandboxselect.NodeTier
 }
 
 // hostedVendorRegs are the registered vendor drivers (vendor id ->
@@ -629,6 +632,7 @@ func registerHostedVendor(reg hostedVendorReg) {
 			return newHostedDriver(r, full, reg)
 		},
 		inactiveHint: reg.inactiveHint,
+		tiers:        reg.tiers,
 	})
 }
 

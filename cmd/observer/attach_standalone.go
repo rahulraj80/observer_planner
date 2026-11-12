@@ -196,6 +196,10 @@ func resolveTerminalSandbox(cfg config.Config, binPath string, logger *slog.Logg
 
 func buildTerminalStack(ctx context.Context, cfg config.Config, database *sql.DB, logger *slog.Logger, nf *nodeFeaturesHandle) (*terminalStack, error) {
 	installEvidenceSealer(ctx, cfg, database, logger) // isolation.seal (evidence_seal.go); off: nothing
+	// The class each node said it made, on runs that still carry the row's
+	// floor (run_box_words.go); after the sealer, so a resealed digest is
+	// signed. Off the start path: the rows are few, the open must not wait.
+	go backfillBoxClasses(ctx, database, filepath.Dir(cfg.Observer.DBPath), logger)
 	// Leave the stack unbuilt on an OS with no in-process PTY backend (a
 	// native-Windows daemon). A nil stack is the honest "disabled" state: the
 	// dashboard "Launch here" button is hidden and the attach socket is not

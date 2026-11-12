@@ -119,6 +119,24 @@ type Probe struct {
 	// make the row usable), for the dashboard's pin picker; nil when the
 	// row has no pin. Selection never reads it.
 	VersionPins []string
+	// Tiers are the isolations the row's node offers this machine, weakest
+	// first (the SandHold row: a remote node offering several tiers, whose
+	// registry class is only the floor Observer counts it as); nil for a
+	// row with one isolation, or a node this machine is not connected to.
+	// From local facts only. Selection never reads it.
+	Tiers []NodeTier
+}
+
+// NodeTier is one isolation a node offers: the node's tier word and title,
+// Observer's class for it ("" when the node's words name no known
+// isolation), the network words it can give and the targets that offer it.
+type NodeTier struct {
+	Tier     string
+	Title    string
+	Class    string
+	Networks []string
+	Targets  []string
+	Default  bool
 }
 
 // Floors are the org and machine-owner floors in force (section 8.1).

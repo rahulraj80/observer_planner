@@ -22,6 +22,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/sandbox"
 	"github.com/marmutapp/superbased-observer/internal/sandboxbackend"
 	"github.com/marmutapp/superbased-observer/internal/sandboximage"
+	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
 )
 
@@ -254,7 +255,7 @@ func renderSandboxStatus(w io.Writer, st sandboxStatusReport) error {
 		if capture == "" {
 			capture = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", b.ID, b.Class, b.Location, status, capture)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", b.ID, sandboxStatusClassCell(b), b.Location, status, capture)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -277,6 +278,7 @@ func renderSandboxStatus(w io.Writer, st sandboxStatusReport) error {
 		if b.Hint != "" {
 			fmt.Fprintf(w, "%s: note: %s\n", b.ID, b.Hint)
 		}
+		renderSandboxStatusTiers(w, b)
 		tiers := make([]string, 0, len(b.CaptureByTier))
 		for t := range b.CaptureByTier {
 			tiers = append(tiers, t)
@@ -291,6 +293,66 @@ func renderSandboxStatus(w io.Writer, st sandboxStatusReport) error {
 		}
 	}
 	return nil
+}
+
+// sandboxStatusByTier reports a row that is a remote node offering several
+// isolations (the SandHold row): its registry class is only the floor
+// Observer counts it as, and a run gets the tier it asks the node for.
+func sandboxStatusByTier(b dashapi.SandboxBackendAvail) bool {
+	if len(b.Tiers) > 0 {
+		return true
+	}
+	v, ok := sandboxremote.VendorFor(b.ID)
+	return ok && v.SeveralIsolations
+}
+
+// sandboxStatusClassCell is a backend's CLASS cell: its class, or for a node
+// offering several isolations the tiers it offers this machine (weakest
+// first), never the floor as if it were the box (demo round 2026-11-12).
+func sandboxStatusClassCell(b dashapi.SandboxBackendAvail) string {
+	if !sandboxStatusByTier(b) {
+		return b.Class
+	}
+	if len(b.Tiers) == 0 {
+		return "by tier"
+	}
+	words := make([]string, 0, len(b.Tiers))
+	for _, t := range b.Tiers {
+		words = append(words, t.Tier)
+	}
+	return strings.Join(words, ",")
+}
+
+// renderSandboxStatusTiers prints, for a node offering several isolations,
+// one line per tier it offers: the node's word, Observer's class for it, the
+// networks it can give and the targets that offer it.
+func renderSandboxStatusTiers(w io.Writer, b dashapi.SandboxBackendAvail) {
+	if !sandboxStatusByTier(b) {
+		return
+	}
+	if len(b.Tiers) == 0 {
+		fmt.Fprintf(w, "%s: isolation by tier: the node gives each run the tier it asks for; connect to a node to see which it offers you (Observer counts the row as %s for isolation floors)\n", b.ID, b.Class)
+		return
+	}
+	fmt.Fprintf(w, "%s: isolation by tier, as the node offers it to you (a run gets the tier it asks for and records the class the node made; Observer counts the row as %s for isolation floors, since the rest is the node's claim):\n", b.ID, b.Class)
+	for _, t := range b.Tiers {
+		line := "  " + t.Title
+		if t.Class != "" {
+			line += ": class " + t.Class
+		} else {
+			line += ": no Observer class (the node's words name no known isolation)"
+		}
+		if len(t.Networks) > 0 {
+			line += "; network " + strings.Join(t.Networks, ", ")
+		}
+		if len(t.Targets) > 0 {
+			line += "; runs on " + strings.Join(t.Targets, ", ")
+		}
+		if t.Default {
+			line += " (default)"
+		}
+		fmt.Fprintln(w, line)
+	}
 }
 
 // sandboxStatusWord is a backend's STATUS cell: available, the drop's

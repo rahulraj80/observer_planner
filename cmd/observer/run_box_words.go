@@ -3,8 +3,13 @@
 package main
 
 import (
+	"context"
+	"database/sql"
+	"log/slog"
+
 	"github.com/marmutapp/superbased-observer/internal/attachsock"
 	"github.com/marmutapp/superbased-observer/internal/dashapi"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // run_box_words.go: what the node said it made for a run's box (demo
@@ -23,6 +28,31 @@ import (
 // run's backend reports no such words (every local row). A driver whose
 // node decides the box's isolation registers one.
 var boxWordsSources []func(observerDir, runID, backend string, running bool) (dashapi.BoxWords, bool)
+
+// boxClassBackfills record, at a daemon start, the class each node said it
+// made on the stored runs that still carry the row's floor (a driver whose
+// node decides the box's isolation registers one; the count is the rows
+// changed).
+var boxClassBackfills []func(ctx context.Context, st *store.Store, observerDir string) (int, error)
+
+// backfillBoxClasses runs every registered backfill once (best effort: a
+// failure is logged, the rows keep what they had).
+func backfillBoxClasses(ctx context.Context, database *sql.DB, observerDir string, logger *slog.Logger) {
+	if database == nil || observerDir == "" {
+		return
+	}
+	st := store.New(database)
+	for _, f := range boxClassBackfills {
+		n, err := f(ctx, st, observerDir)
+		if err != nil {
+			logger.Warn("sandbox: recording the isolation nodes gave earlier runs failed", "err", err)
+			continue
+		}
+		if n > 0 {
+			logger.Info("sandbox: recorded the isolation the node gave earlier runs", "runs", n)
+		}
+	}
+}
 
 // runBoxWords is the first registered source's answer for a run.
 func runBoxWords(observerDir, runID, backend string, running bool) (dashapi.BoxWords, bool) {

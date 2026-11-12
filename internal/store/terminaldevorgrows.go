@@ -253,7 +253,8 @@ func (s *Store) SelectRemoteAuditRows(ctx context.Context) ([]orgcontract.Remote
 //
 // PROBE: (MAX(rowid), COUNT(*), COUNT(ended_at), MAX(ended_at),
 // SUM(capture_degraded), SUM(missed_heartbeats),
-// SUM(LENGTH(capture_degraded_causes))) over terminal_run, plus MAX(id) on
+// SUM(LENGTH(capture_degraded_causes)), a rowid-weighted sum of each row's
+// isolation_class and egress_tier positions) over terminal_run, plus MAX(id) on
 // terminal_commands and terminal_run_session.
 //
 // WHY ended_at IS IN THE PROBE: terminal_run is the most visibly MUTABLE
@@ -277,6 +278,14 @@ func (s *Store) SelectRemoteAuditRows(ctx context.Context) ([]orgcontract.Remote
 // Counts and a boolean only: the probe string never leaves the node, and
 // no wire column changes.
 //
+// WHY THE CLASS AND TIER ARE IN THE PROBE (demo round 2026-11-12): a run
+// whose node decides its box's isolation (a SandHold node) is recorded with
+// the row's floor class and the launch's tier, and both are replaced once
+// the node answers (store.SetTerminalRunNodeIsolation, which also reseals
+// the digest). The term weights each row's class and tier position by its
+// rowid, so one run's change always moves the sum and its wire row re-ships
+// on the next push. Numbers only, like the rest of the probe.
+//
 // RESIDUAL, BOUNDED BY THE FRESHNESS FLOOR: the shutdown stampers set
 // end_reason WITHOUT setting ended_at on attach runs, and the resume path
 // rewrites end_reason alone; neither moves the probe. snapGate's maxSkipAge
@@ -287,7 +296,9 @@ func (s *Store) probeTerminalActivity(ctx context.Context) (string, error) {
 		                       '/' || COALESCE(MAX(ended_at), '') ||
 		                       '/' || COALESCE(SUM(capture_degraded), 0) ||
 		                       '/' || COALESCE(SUM(missed_heartbeats), 0) ||
-		                       '/' || COALESCE(SUM(LENGTH(capture_degraded_causes)), 0)
+		                       '/' || COALESCE(SUM(LENGTH(capture_degraded_causes)), 0) ||
+		                       '/' || COALESCE(SUM(rowid * (INSTR('|none|process|container|userspace_kernel|hw_vm|', '|' || isolation_class || '|') +
+		                                                    64 * INSTR('|host|internet|proxy_only|none|', '|' || egress_tier || '|'))), 0)
 		                  FROM terminal_run) ||
 		       ':tc' || (SELECT COALESCE(MAX(id), 0) FROM terminal_commands) ||
 		       ':ts' || (SELECT COALESCE(MAX(id), 0) FROM terminal_run_session)`)

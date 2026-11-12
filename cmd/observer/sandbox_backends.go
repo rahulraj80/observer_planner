@@ -388,6 +388,12 @@ func sandboxBackendListWith(cfg config.TerminalSandboxConfig, av sandbox.Availab
 			e.Hint = p.Hint
 			e.GatewayMode, e.Prerequisite = string(p.GatewayMode), p.Prerequisite
 			e.VersionPins = append([]string(nil), p.VersionPins...)
+			for _, t := range p.Tiers {
+				e.Tiers = append(e.Tiers, dashapi.SandboxBackendTier{
+					Tier: t.Tier, Title: t.Title, Class: t.Class, Default: t.Default,
+					Networks: append([]string(nil), t.Networks...), Targets: append([]string(nil), t.Targets...),
+				})
+			}
 		}
 		e.Disclosures = sandboxDisclosuresFor(row, vocab.GatewayMode(e.GatewayMode))
 		e.Enabled = slices.Contains(listed, id)

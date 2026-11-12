@@ -203,6 +203,25 @@ type SandboxBackendAvail struct {
 	// closed registry disclosure, each with the daemon's own text for this
 	// row's gateway mode (OpenShell lane O4). Old clients ignore it.
 	Disclosures []SandboxDisclosure `json:"disclosures,omitempty"`
+	// Tiers are the isolations the row's node offers this machine, weakest
+	// first, for a row that is a remote node offering several (SandHold):
+	// Class is then only the floor Observer counts the row as, and a run
+	// gets the tier it asks the node for. Absent for every other row and
+	// for a node this machine is not connected to.
+	Tiers []SandboxBackendTier `json:"tiers,omitempty"`
+}
+
+// SandboxBackendTier is one entry of SandboxBackendAvail.Tiers: the node's
+// tier word and title, Observer's class for it (empty when the node's words
+// name no known isolation), the node's network words it can give and the
+// targets that offer it.
+type SandboxBackendTier struct {
+	Tier     string   `json:"tier"`
+	Title    string   `json:"title"`
+	Class    string   `json:"class,omitempty"`
+	Networks []string `json:"networks,omitempty"`
+	Targets  []string `json:"targets,omitempty"`
+	Default  bool     `json:"default,omitempty"`
 }
 
 // SandboxDisclosure is one entry of SandboxBackendAvail.Disclosures: the

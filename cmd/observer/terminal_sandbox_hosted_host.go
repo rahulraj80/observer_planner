@@ -176,7 +176,7 @@ func runHostedHost(args []string) int {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	run := &hostedRun{plan: plan, h: h, t: t, now: time.Now, ingest: hostedOpenIngester}
+	run := &hostedRun{plan: plan, h: h, t: t, now: time.Now, ingest: hostedOpenIngester, recordBox: hostedRecordBoxClass}
 	return run.drive(ctx)
 }
 
@@ -196,6 +196,9 @@ type hostedRun struct {
 	t      hostedTerm
 	now    func() time.Time
 	ingest func(ctx context.Context) (hostedIngester, func(), error)
+	// recordBox records the node's answer on the stored run (its class and
+	// tier, hostedRecordBoxClass); nil records nothing.
+	recordBox func(ctx context.Context, backend, id string, n hostedBoxNote)
 
 	vendor sandboxremote.Vendor
 	client sandboxremote.Client
@@ -403,7 +406,10 @@ func (r *hostedRun) create(ctx context.Context) error {
 	}
 	// What the node said it made (a SandHold node's isolation, network and
 	// target), for every surface that names the run's isolation.
-	writeHostedBoxNote(r.plan.ObserverDir, r.plan.RunID, info.Extra)
+	// The stored run takes the class and tier those words map to.
+	if key, note, ok := writeHostedBoxNote(r.plan.ObserverDir, r.plan.RunID, info.Extra); ok && r.recordBox != nil {
+		r.recordBox(ctx, r.vendor.ID, key, note)
+	}
 	r.notReady = !info.Running
 	if info.Described != "" {
 		// A row whose vendor says how the box runs (the SandHold node's

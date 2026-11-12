@@ -84,6 +84,13 @@ func init() {
 		inactiveHint: func(r *sandboxRuntime, _ config.Config) string {
 			return sandholdProbeAt(r.observerDir, time.Now()).Hint
 		},
+		tiers: func(r *sandboxRuntime) []sandboxselect.NodeTier {
+			conn, err := sandholdLoadConnection(r.observerDir)
+			if err != nil {
+				return nil
+			}
+			return sandholdNodeTiers(conn)
+		},
 	})
 	sandboxSubcommands = append(sandboxSubcommands, newSandboxConnectCmd, newSandboxDisconnectCmd)
 }
@@ -202,6 +209,23 @@ func sandholdLocalProbe(d *hostedDriver) (string, string) {
 func sandholdProbeAt(observerDir string, now time.Time) sandboxselect.Probe {
 	conn, err := sandholdLoadConnection(observerDir)
 	return sandholdProbeFor(conn, err, sandholdEnvKeySet(), now)
+}
+
+// sandholdNodeTiers are the isolations the connected node offers this
+// machine, as read at connect (Connection.Offers), weakest first; nil when
+// not connected or none was read.
+func sandholdNodeTiers(conn *sandhold.Connection) []sandboxselect.NodeTier {
+	if conn == nil {
+		return nil
+	}
+	var out []sandboxselect.NodeTier
+	for _, o := range conn.Offers {
+		out = append(out, sandboxselect.NodeTier{
+			Tier: strings.ToLower(o.Tier), Title: sandhold.TierTitle(o.Tier), Class: string(o.Class),
+			Networks: append([]string(nil), o.Networks...), Targets: append([]string(nil), o.Targets...), Default: o.Default,
+		})
+	}
+	return out
 }
 
 // sandholdEnvKeySet reports a CI key in the environment (it wins over a
