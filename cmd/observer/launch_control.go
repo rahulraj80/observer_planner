@@ -516,8 +516,41 @@ func (c *launchControl) StopRun(ctx context.Context, ref string) (attachsock.Run
 		return ri, nil // already exited: nothing to stop
 	}
 	c.stop(ri.Handle, termrun.EndCLIStop)
-	ri.State, ri.EndReason = attachsock.StateEnded, termrun.EndCLIStop
-	return ri, nil
+	return c.awaitStopped(ctx, ri), nil
+}
+
+// stopSettleWait bounds how long a stop waits for the run's record to say
+// it ended (a hosted run's helper deletes its box first, which takes a few
+// seconds); stopSettlePoll is how often it looks.
+var (
+	stopSettleWait = 30 * time.Second
+	stopSettlePoll = 100 * time.Millisecond
+)
+
+// awaitStopped returns the run as its record reads once the record no
+// longer says running, so what stop prints is what `observer terminals ls`
+// and `show` say right after it (demo screenshots 2026-11-12: stop printed
+// ended while ls and show said running for about 2 s). Past stopSettleWait,
+// or when ctx ends, it returns the record as it then reads, never a state
+// the record does not hold.
+func (c *launchControl) awaitStopped(ctx context.Context, ri attachsock.RunInfo) attachsock.RunInfo {
+	wctx, cancel := context.WithTimeout(ctx, stopSettleWait)
+	defer cancel()
+	t := time.NewTicker(stopSettlePoll)
+	defer t.Stop()
+	for {
+		if cur, err := c.Run(wctx, ri.RunID); err == nil {
+			ri = cur
+			if ri.State != attachsock.StateRunning {
+				return ri
+			}
+		}
+		select {
+		case <-wctx.Done():
+			return ri
+		case <-t.C:
+		}
+	}
 }
 
 // stamp formats a time as RFC 3339 UTC, "" for the zero time.

@@ -300,7 +300,8 @@ func runLaunch(ctx context.Context, out launchOutput, configPath string, spec at
 
 // stopAfterInterrupt stops the run after Ctrl-C and reports it.
 func stopAfterInterrupt(out launchOutput, configPath string, run attachsock.RunInfo) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// The stop answers once the run's record says it ended (stopSettleWait).
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	res, err := controlCall(ctx, configPath, attachsock.ControlRequest{Op: "stop", Run: run.RunID})
 	if err != nil {

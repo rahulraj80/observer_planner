@@ -67,7 +67,17 @@ func (f *fakeTermsvc) control(withProbe bool) *launchControl {
 		snapshot:   func() []dashapi.LaunchInfo { return append([]dashapi.LaunchInfo(nil), f.snap...) },
 		sessionFor: func(runID string) (string, bool) { s, ok := f.sessions[runID]; return s, ok },
 		endReason:  func(string) string { return f.endReason },
-		stop:       func(handle, reason string) { f.stopped[handle] = reason },
+		// A stop ends the process and records its reason, as the terminal
+		// service does (StopRun waits for the record to say so).
+		stop: func(handle, reason string) {
+			f.stopped[handle] = reason
+			f.endReason = reason
+			for i := range f.snap {
+				if f.snap[i].ID == handle {
+					f.snap[i].Exited = true
+				}
+			}
+		},
 		history: func(context.Context, int) ([]store.TerminalRunSummary, error) {
 			return f.history, nil
 		},
@@ -297,9 +307,31 @@ func TestLaunchControlStop(t *testing.T) {
 	}
 	f.history = []store.TerminalRunSummary{{RunID: "run-cli-sandbox", Tool: "codex", Kind: "fresh", LaunchedAt: f.now}}
 	c := f.control(true)
+	// The process goes a few polls after the stop (a hosted helper deletes
+	// its box first): the stop answers with the record as it then reads,
+	// the same answer `ls` and `show` give, never an ended it made up.
+	polls := 0
+	c.stop = func(handle, reason string) {
+		f.stopped[handle] = reason
+		f.endReason = reason
+	}
+	c.snapshot = func() []dashapi.LaunchInfo {
+		out := append([]dashapi.LaunchInfo(nil), f.snap...)
+		if f.stopped["h-live"] != "" {
+			if polls++; polls > 3 {
+				out[0].Exited = true
+			}
+		}
+		return out
+	}
+	defer func(w, p time.Duration) { stopSettleWait, stopSettlePoll = w, p }(stopSettleWait, stopSettlePoll)
+	stopSettlePoll = time.Millisecond
 	ri, err := c.StopRun(context.Background(), "run-live-01")
-	if err != nil || ri.State != attachsock.StateEnded || ri.EndReason != termrun.EndCLIStop {
-		t.Fatalf("stop live = %+v, %v", ri, err)
+	if err != nil || ri.State != attachsock.StateExited || ri.EndReason != termrun.EndCLIStop || polls <= 3 {
+		t.Fatalf("stop live = %+v, %v after %d polls", ri, err, polls)
+	}
+	if show, _ := c.Run(context.Background(), "run-live-01"); show.State != ri.State {
+		t.Fatalf("stop said %s, show says %s", ri.State, show.State)
 	}
 	if f.stopped["h-live"] != termrun.EndCLIStop {
 		t.Fatalf("stop marked %v", f.stopped)
@@ -313,6 +345,21 @@ func TestLaunchControlStop(t *testing.T) {
 	}
 	if _, err := c.StopRun(context.Background(), "missing-run"); !errors.Is(err, attachsock.ErrRunNotFound) {
 		t.Fatalf("unknown stop = %v", err)
+	}
+}
+
+// TestLaunchControlStopNeverClaimsEnded: a run whose process outlives the
+// stop's wait is reported running, as its record reads.
+func TestLaunchControlStopNeverClaimsEnded(t *testing.T) {
+	f := newFakeTermsvc()
+	f.snap = []dashapi.LaunchInfo{{ID: "h-slow", RunID: "run-slow-01", Tool: "codex", Kind: "fresh"}}
+	c := f.control(true)
+	c.stop = func(handle, reason string) { f.stopped[handle] = reason } // the process does not go
+	defer func(w, p time.Duration) { stopSettleWait, stopSettlePoll = w, p }(stopSettleWait, stopSettlePoll)
+	stopSettleWait, stopSettlePoll = 20*time.Millisecond, time.Millisecond
+	ri, err := c.StopRun(context.Background(), "run-slow-01")
+	if err != nil || ri.State != attachsock.StateRunning || ri.EndReason != "" || f.stopped["h-slow"] != termrun.EndCLIStop {
+		t.Fatalf("slow stop = %+v, %v (stopped %v)", ri, err, f.stopped)
 	}
 }
 
