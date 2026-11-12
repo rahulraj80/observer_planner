@@ -85,6 +85,22 @@ type Connection struct {
 	// KeyStore says where the key is kept ("the OS keychain" or the file
 	// fallback's directory), for people.
 	KeyStore string `json:"key_store,omitempty"`
+	// OrgToken, when set, says this machine reaches the node as an enrolled
+	// member of an Observer org: no key is kept, each call carries a
+	// short-lived DPoP-bound token from the org's token service (auth.go).
+	OrgToken *OrgToken `json:"org_token,omitempty"`
+}
+
+// OrgToken is where an org member's tokens for the node come from. No
+// secret: the token service is reached with the machine's org enrolment.
+type OrgToken struct {
+	// Issuer is the org's token service; TokenURL, when set, is where its
+	// token endpoint is dialled (default <issuer>/oauth2/token).
+	Issuer   string `json:"issuer"`
+	TokenURL string `json:"token_url,omitempty"`
+	// Config is the Observer config file the enrolment is read with ("":
+	// the standard location).
+	Config string `json:"config,omitempty"`
 }
 
 // Summary is the connection in one line, for the backend row and status.
@@ -99,6 +115,9 @@ func (c *Connection) Summary(now time.Time) string {
 		if c.Org != "" {
 			b.WriteString(" in " + c.Org)
 		}
+	}
+	if c.OrgToken != nil {
+		b.WriteString(" as a member of your Observer org (short-lived tokens from " + c.OrgToken.Issuer + ")")
 	}
 	if !c.ExpiresAt.IsZero() {
 		if now.After(c.ExpiresAt) {

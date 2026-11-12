@@ -71,7 +71,9 @@ type Client struct {
 	// URL is the node address, as NodeURL returns it.
 	URL string
 	// Key is the API key sent as X-API-Key ("" for the sign-in endpoints).
-	Key  string
+	Key string
+	// Auth, when set, is the call's credential in place of Key (auth.go).
+	Auth Authorizer
 	HTTP *http.Client
 }
 
@@ -86,6 +88,9 @@ type APIError struct {
 	Status int
 	Msg    string
 	Fix    string
+	// Code is the refusal's code a client branches on (pipe_unsupported,
+	// network_open_not_granted, ...), "" when the node sent none.
+	Code string
 }
 
 func (e *APIError) Error() string {
@@ -185,8 +190,8 @@ func (c *Client) send(ctx context.Context, rq request) (*http.Response, error) {
 	if rq.contentType != "" {
 		req.Header.Set("Content-Type", rq.contentType)
 	}
-	if c.Key != "" {
-		req.Header.Set("X-API-Key", c.Key)
+	if err := c.authorize(ctx, rq.method, c.URL+rq.path, req.Header); err != nil {
+		return nil, err
 	}
 	res, err := c.httpClient().Do(req)
 	if err != nil {
@@ -221,9 +226,10 @@ func refusal(res *http.Response, b []byte) error {
 		Error string `json:"error"`
 		Fix   string `json:"fix"`
 		Desc  string `json:"error_description"`
+		Code  string `json:"code"`
 	}
 	_ = json.Unmarshal(b, &e)
-	ae := &APIError{Status: res.StatusCode, Msg: Plain(e.Error), Fix: Plain(e.Fix)}
+	ae := &APIError{Status: res.StatusCode, Msg: Plain(e.Error), Fix: Plain(e.Fix), Code: PlainLine(e.Code)}
 	if e.Desc != "" || isOAuthCode(e.Error) {
 		code := e.Error
 		ae.Msg, ae.Fix = Plain(e.Desc), ""

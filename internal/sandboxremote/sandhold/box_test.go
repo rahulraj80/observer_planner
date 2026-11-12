@@ -50,6 +50,11 @@ type boxNode struct {
 	input   bytes.Buffer
 	// redirectPTY answers the terminal's handshake with a redirect.
 	redirectPTY bool
+	// modern is a node with the 2026-11-11 API (box_api_test.go): exec
+	// stdin and exact bytes, the pipe mode, the connected and exit frames.
+	// shared makes its sandbox a Shared one (no pipe).
+	modern, shared bool
+	pipeIn         bytes.Buffer
 }
 
 var (
@@ -109,8 +114,12 @@ func (f *boxNode) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(b)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes/sb1/exec" && f.modern:
+		f.execModern(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/sandboxes/sb1/exec":
 		f.exec(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/sb1/pty" && f.modern:
+		f.ptyModern(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/sandboxes/sb1/pty":
 		f.pty(w, r)
 	default:
@@ -118,12 +127,20 @@ func (f *boxNode) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// exec answers the few commands the client runs itself.
+// exec answers the few commands the client runs itself, as a node from
+// before exec stdin (it refuses an unknown field, as the node's readJSON).
 func (f *boxNode) exec(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Command string `json:"command"`
+		Cwd     string `json:"cwd"`
+		Env     map[string]string
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		f.refuse(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
 	if r.Header.Get("Accept") != "text/event-stream" {
 		f.refuse(w, http.StatusBadRequest, "this fake streams only")
 		return
@@ -442,11 +459,11 @@ func TestBoxAddressRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := b.wsURL("sb1", "/bin/sh /tmp/x")
+	u, err := b.wsURL("sb1", "/bin/sh /tmp/x", false)
 	if err != nil || !strings.HasPrefix(u, "wss://node.example:48000/v1/sandboxes/sb1/pty?command=") {
 		t.Errorf("terminal address %q %v", u, err)
 	}
-	if _, err := b.wsURL("../x", "sh"); err == nil {
+	if _, err := b.wsURL("../x", "sh", true); err == nil {
 		t.Error("a bad sandbox id became part of an address")
 	}
 	if s := fmt.Sprintf("%v %+v %s", b, b, b); strings.Contains(s, "k ") || strings.Contains(s, "Key") {
@@ -522,13 +539,16 @@ func TestLaunchScriptRunsInSh(t *testing.T) {
 	if _, err := os.Stat(script); !errors.Is(err, os.ErrNotExist) {
 		t.Error("the launch script did not remove itself")
 	}
-	// Without a terminal the pipe form's stty fails, and says so in its code.
-	body = launchScript(sandboxremote.ExecSpec{Argv: []string{"true"}}, exitFile, "observer-pipe-ready-1")
+	// Without a terminal (the node's pipe mode) the pipe form runs the
+	// command as it is: no stty, no ready line, stderr kept.
+	body = launchScript(sandboxremote.ExecSpec{Argv: []string{"sh", "-c", "echo out; echo err >&2; exit 4"}}, exitFile, "observer-pipe-ready-1")
 	_ = os.WriteFile(script, []byte(body), 0o700)
 	c := exec.Command("sh", script)
 	c.Stdin = strings.NewReader("")
+	var so, se bytes.Buffer
+	c.Stdout, c.Stderr = &so, &se
 	_ = c.Run()
-	if code, _ := os.ReadFile(exitFile); string(code) != "125" {
-		t.Errorf("pipe without a terminal: exit file %q", code)
+	if code, _ := os.ReadFile(exitFile); string(code) != "4" || so.String() != "out\n" || se.String() != "err\n" {
+		t.Errorf("pipe without a terminal: exit file %q, stdout %q, stderr %q", code, so.String(), se.String())
 	}
 }

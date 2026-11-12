@@ -44,6 +44,16 @@ type vector struct {
 		Event string          `json:"event"`
 		Data  json.RawMessage `json:"data"`
 	} `json:"stream"`
+	// Frames are a terminal's WebSocket frames in order (terminal,
+	// terminal-pipe): from "node" or "client", binary (base64), json or a
+	// close.
+	Frames []struct {
+		From   string          `json:"from"`
+		Binary []byte          `json:"binary"`
+		JSON   json.RawMessage `json:"json"`
+		Close  int             `json:"close"`
+		Reason string          `json:"reason"`
+	} `json:"frames"`
 }
 
 // The values a contract file's placeholders stand for in these tests.

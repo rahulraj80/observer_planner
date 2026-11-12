@@ -16,6 +16,9 @@
 //   - no redirect is followed, so the key goes only to the node named
 //     (HTTPClient); Go keeps X-API-Key on a redirect;
 //   - a saved key is sent only to the node that issued it (Resolve);
+//   - an enrolled org member's credential (auth.go: a DPoP-bound token
+//     from the org's token service, a fresh proof per call bound to its
+//     method and address) follows every rule a key does;
 //   - a key never prints: Credential's String and Format name the node only;
 //   - every string a node sends is stripped of control characters before a
 //     person sees it (Plain, PlainWriter), except the output of the person's

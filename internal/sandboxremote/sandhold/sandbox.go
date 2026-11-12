@@ -36,7 +36,25 @@ type Sandbox struct {
 	Metadata  map[string]string `json:"metadata"`
 	CreatedAt time.Time         `json:"createdAt"`
 	ExpiresAt time.Time         `json:"expiresAt"`
+	// NetworkNote, on a create's answer only, says the sandbox did not get
+	// the network asked for (contract sandbox-create-open-not-granted).
+	NetworkNote *NetworkNote `json:"networkNote,omitempty"`
 }
+
+// NetworkNote is the node's coded word that a create got a different
+// network than it asked for: what was asked and got, why, and what would
+// give it.
+type NetworkNote struct {
+	Code  string `json:"code"`
+	Asked string `json:"asked"`
+	Got   string `json:"got"`
+	Why   string `json:"why"`
+	Fix   string `json:"fix"`
+}
+
+// NetworkOpenNotGranted is the note's code for an open network asked for
+// and not given.
+const NetworkOpenNotGranted = "network_open_not_granted"
 
 // clean removes control characters from every word the node sent.
 func (s *Sandbox) clean() {
@@ -49,6 +67,11 @@ func (s *Sandbox) clean() {
 			md[PlainLine(k)] = PlainLine(v)
 		}
 		s.Metadata = md
+	}
+	if n := s.NetworkNote; n != nil {
+		for _, p := range []*string{&n.Code, &n.Asked, &n.Got, &n.Why, &n.Fix} {
+			*p = PlainLine(*p)
+		}
 	}
 }
 
@@ -83,7 +106,32 @@ func (s Sandbox) Words() string {
 	if w := s.Where(); w != "" {
 		parts = append(parts, "runs on "+w)
 	}
-	return PlainLine(strings.Join(parts, ", "))
+	out := strings.Join(parts, ", ")
+	if n := s.NetworkNote; n != nil && n.Code != "" {
+		// The node's coded reason the network differs from the one asked
+		// for, so the run says why (an open network not granted).
+		out += "; " + n.Words()
+	}
+	return PlainLine(out)
+}
+
+// Words is the note for people: "network open was asked for, got none
+// (network_open_not_granted): <the node's why>".
+func (n NetworkNote) Words() string {
+	w := "network"
+	if n.Asked != "" {
+		w += " " + n.Asked + " was asked for"
+	} else {
+		w += " differs from the one asked for"
+	}
+	if n.Got != "" {
+		w += ", got " + n.Got
+	}
+	w += " (" + n.Code + ")"
+	if n.Why != "" {
+		w += ": " + n.Why
+	}
+	return PlainLine(w)
 }
 
 // CreateRequest is what POST /v1/sandboxes is sent. A template names a
@@ -95,8 +143,21 @@ type CreateRequest struct {
 	Env            map[string]string `json:"env,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	// Isolation is the node's tier word ("" lets the node place it).
-	Isolation string         `json:"isolation,omitempty"`
-	Network   *CreateNetwork `json:"network,omitempty"`
+	Isolation string `json:"isolation,omitempty"`
+	// Target names one of the node's targets (`observer sandbox targets`);
+	// empty lets the node place the sandbox.
+	Target string `json:"target,omitempty"`
+	// Placement is the long form of Isolation: a measured isolation level
+	// (container, user-kernel, microvm) the node must meet.
+	Placement *CreatePlacement `json:"placement,omitempty"`
+	Network   *CreateNetwork   `json:"network,omitempty"`
+}
+
+// CreatePlacement is a create's placement member.
+type CreatePlacement struct {
+	Require struct {
+		Isolation string `json:"isolation,omitempty"`
+	} `json:"require"`
 }
 
 // CreateNetwork is a create's network member. No allow list keeps the

@@ -156,4 +156,33 @@ func liveRun(t *testing.T, b *Box, class vocab.IsoClass) {
 	if scode, err := sp.Wait(ctx); err != nil || scode != 0 || !bytes.Contains(sout, []byte("got:ping")) {
 		t.Errorf("pipe: exit %d %v output %q", scode, err, sout)
 	}
+
+	// The node's pipe mode (2026-11-11): exact bytes both ways, stderr
+	// apart, stdin ended on its own, the exit frame's status.
+	var serr bytes.Buffer
+	cp, err := b.Exec(ctx, info.ID, sandboxremote.ExecSpec{Argv: []string{"sh", "-c", "echo warn >&2; cat; exit 5"}, Stdin: true, Stderr: &serr})
+	if err != nil {
+		t.Fatalf("pipe mode: %v", err)
+	}
+	hc, ok := cp.(sandboxremote.HalfCloser)
+	if !ok {
+		t.Fatalf("the node gave no pipe mode (%T)", cp)
+	}
+	raw := []byte{0x00, 0xff, '\r', '\n', 'x'}
+	_, _ = cp.Write(raw)
+	_ = hc.CloseWrite()
+	cout, _ := io.ReadAll(cp)
+	if ccode, err := cp.Wait(ctx); err != nil || ccode != 5 || !bytes.Equal(cout, raw) || !strings.Contains(serr.String(), "warn") {
+		t.Errorf("pipe mode: exit %d %v output %q stderr %q", ccode, err, cout, serr.String())
+	}
+
+	// A one-shot stdin, its output's exact bytes.
+	op, err := b.Exec(ctx, info.ID, sandboxremote.ExecSpec{Argv: []string{"cat"}, StdinData: raw})
+	if err != nil {
+		t.Fatalf("one-shot stdin: %v", err)
+	}
+	oout, _ := io.ReadAll(op)
+	if ocode, err := op.Wait(ctx); err != nil || ocode != 0 || !bytes.Equal(oout, raw) {
+		t.Errorf("one-shot stdin: exit %d %v output %q", ocode, err, oout)
+	}
 }

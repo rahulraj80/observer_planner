@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,11 +17,14 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 )
 
-// exec.go runs a command in a box. The node's exec has no stdin, so:
+// exec.go runs a command in a box:
 //
-//   - a command with no stdin is POST /v1/sandboxes/{id}/exec with
-//     Accept: text/event-stream (contract vector exec-stream): stdout and
-//     stderr events as the output arrives, then the exit;
+//   - a command with no streaming stdin is POST /v1/sandboxes/{id}/exec
+//     with Accept: text/event-stream (contract vector exec-stream): stdout
+//     and stderr events as the output arrives, then the exit. A one-shot
+//     stdin (ExecSpec.StdinData) goes with it as stdinBase64, and the output
+//     then comes back as its exact bytes (output base64; contract vectors
+//     exec-stdin, exec-bytes-stream);
 //   - a command with a terminal, or with a streaming stdin, runs on the
 //     node's terminal WebSocket (term.go).
 
@@ -36,8 +40,11 @@ func (b *Box) Exec(ctx context.Context, id string, spec sandboxremote.ExecSpec) 
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("sandhold: exec needs an argv")
 	}
-	if len(spec.StdinData) > 0 {
-		return nil, fmt.Errorf("sandhold: a one-shot stdin: %w", sandboxremote.ErrNotSupported)
+	if len(spec.StdinData) > 0 && (spec.Stdin || spec.PTY) {
+		return nil, errors.New("sandhold: a one-shot stdin is for a command without a terminal or a streaming stdin")
+	}
+	if len(spec.StdinData) > MaxOneShotStdin {
+		return nil, fmt.Errorf("sandhold: a one-shot stdin of %d bytes is over %d; send it as a file", len(spec.StdinData), MaxOneShotStdin)
 	}
 	for k := range spec.Env {
 		if !envName.MatchString(k) {
@@ -49,6 +56,10 @@ func (b *Box) Exec(ctx context.Context, id string, spec sandboxremote.ExecSpec) 
 	}
 	return b.startStream(ctx, id, spec)
 }
+
+// MaxOneShotStdin is the most a one-shot stdin carries: the node reads at
+// most 1 MiB of request body, and base64 makes the bytes a third larger.
+const MaxOneShotStdin = 640 << 10
 
 // envName is the shape of an environment variable name.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -88,6 +99,12 @@ func (b *Box) startStream(ctx context.Context, id string, spec sandboxremote.Exe
 	if len(spec.Env) > 0 {
 		body["env"] = spec.Env
 	}
+	if len(spec.StdinData) > 0 {
+		// The node then runs the command on its pipe, which also gives the
+		// output's exact bytes: ask for them.
+		body["stdinBase64"] = base64.StdEncoding.EncodeToString(spec.StdinData)
+		body["output"] = "base64"
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -96,6 +113,9 @@ func (b *Box) startStream(ctx context.Context, id string, spec sandboxremote.Exe
 	res, err := b.api.send(pctx, request{method: http.MethodPost, path: sp + "/exec", body: bytes.NewReader(raw), size: int64(len(raw)), contentType: "application/json", accept: "text/event-stream"})
 	if err != nil {
 		cancel()
+		if len(spec.StdinData) > 0 {
+			err = stdinRefusal(err)
+		}
 		return nil, notFound(err)
 	}
 	p := &streamProcess{cancel: cancel, body: res.Body, out: newOutBuf(), stderr: spec.Stderr, done: make(chan struct{})}
@@ -148,17 +168,28 @@ func (p *streamProcess) read() {
 func (p *streamProcess) dispatch(event, data string) bool {
 	switch event {
 	case "stdout", "stderr":
+		// A chunk is text, or its exact bytes when output base64 was asked.
 		var ev struct {
-			Text string `json:"text"`
+			Text   string  `json:"text"`
+			Base64 *string `json:"base64"`
 		}
 		if json.Unmarshal([]byte(data), &ev) != nil {
 			return false
 		}
+		chunk := []byte(ev.Text)
+		if ev.Base64 != nil {
+			b, err := base64.StdEncoding.DecodeString(*ev.Base64)
+			if err != nil {
+				p.code, p.err = -1, errors.New("the node's output event does not decode")
+				return true
+			}
+			chunk = b
+		}
 		if event == "stdout" {
 			// The user's own command's output, as it is.
-			p.out.write([]byte(ev.Text))
+			p.out.write(chunk)
 		} else if p.stderr != nil {
-			_, _ = io.WriteString(p.stderr, ev.Text)
+			_, _ = p.stderr.Write(chunk)
 		}
 	case "exit":
 		var ev struct {
@@ -176,6 +207,17 @@ func (p *streamProcess) dispatch(event, data string) bool {
 		return true
 	}
 	return false
+}
+
+// stdinRefusal marks a node that cannot take a one-shot stdin as not
+// supported, in its own words: an older node refuses the field
+// (DisallowUnknownFields), a sandbox of the Shared tier has no pipe.
+func stdinRefusal(err error) error {
+	var ae *APIError
+	if errors.As(err, &ae) && (ae.Code == "pipe_unsupported" || (ae.Status == http.StatusBadRequest && strings.Contains(ae.Msg, "unknown field"))) {
+		return fmt.Errorf("sandhold: a one-shot stdin: %w: %w", sandboxremote.ErrNotSupported, err)
+	}
+	return err
 }
 
 // readLine reads one line without its end, failing over max.
@@ -204,7 +246,7 @@ func readLine(r *bufio.Reader, max int) (string, error) {
 func (p *streamProcess) Read(b []byte) (int, error) { return p.out.Read(b) }
 
 func (p *streamProcess) Write([]byte) (int, error) {
-	return 0, errors.New("sandhold: this command has no stdin")
+	return 0, errors.New("sandhold: this command has no streaming stdin")
 }
 
 func (p *streamProcess) PID() string { return "" }

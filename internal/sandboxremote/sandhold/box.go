@@ -54,6 +54,9 @@ type Box struct {
 	api *Client
 	// tar caches, per sandbox, whether the box has tar (a batch upload).
 	tar sync.Map
+	// noPipe caches, per sandbox, a refusal of the terminal's pipe mode
+	// (a Shared sandbox has none).
+	noPipe sync.Map
 }
 
 // NewBox returns the wire client of node (normalised by NodeURL) with key.
@@ -75,6 +78,9 @@ func NewBox(node, key string) (*Box, error) {
 func streamHTTPClient() *http.Client {
 	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
+
+// API is the box's plain API client, with the same node and credential.
+func (b *Box) API() *Client { return b.api }
 
 // String names the client without its key.
 func (b *Box) String() string { return "sandhold box client for " + b.api.URL }
@@ -138,7 +144,11 @@ func checkGot(spec sandboxremote.BoxSpec, sb Sandbox) error {
 // info is a sandbox as the hosted core records it.
 func info(sb Sandbox) sandboxremote.BoxInfo {
 	extra := map[string]string{}
-	for k, v := range map[string]string{"isolation": sb.Isolation, "network": sb.Network, "runs_on": sb.Where()} {
+	note := ""
+	if sb.NetworkNote != nil {
+		note = sb.NetworkNote.Code
+	}
+	for k, v := range map[string]string{"isolation": sb.Isolation, "network": sb.Network, "runs_on": sb.Where(), "network_note": note} {
 		if v != "" {
 			extra[k] = v
 		}

@@ -21,24 +21,32 @@ import (
 )
 
 // term.go runs a command on the node's terminal WebSocket
-// (GET /v1/sandboxes/{id}/pty?command=, api.go pty): binary frames are the
-// terminal's input and output, a text frame {"type":"resize","cols","rows"}
-// resizes it. It carries two kinds of process:
+// (GET /v1/sandboxes/{id}/pty?command=, api.go pty). It carries two kinds of
+// process:
 //
 //   - a terminal (ExecSpec.PTY): the agent, whose output passes through as
-//     it is;
-//   - a pipe (ExecSpec.Stdin without PTY): the capture relay, the node's
-//     exec having no stdin. The terminal is put in raw mode with no echo
-//     before the command starts, and the client discards everything before
-//     a ready line and sends nothing until it has seen it, so the relay's
-//     base64 lines cross unchanged.
+//     it is; binary frames are the terminal's input and output, a text frame
+//     {"type":"resize","cols","rows"} resizes it (contract vector terminal);
+//   - a pipe (ExecSpec.Stdin without PTY): the capture relay. It asks for
+//     mode=pipe (contract vector terminal-pipe): binary frames in are stdin
+//     and {"type":"eof"} ends it (CloseWrite), binary frames out are 0x01 +
+//     stdout or 0x02 + stderr, exact bytes either way. A node from before the
+//     pipe mode ignores it and gives a terminal, and a Shared sandbox refuses
+//     it (pipe_unsupported, then the client asks again for a terminal): the
+//     launch script then puts the terminal in raw mode with no echo before
+//     the command starts, and the client discards everything before a ready
+//     line and sends nothing until it has seen it, so the relay's base64
+//     lines cross unchanged. The node's first text frame,
+//     {"type":"connected","mode":"pipe"}, tells the two apart.
 //
 // What the command needs (its environment, which may hold a model key under
 // in-box custody, its directory and argv) is written first as an owner-only
 // launch script, so nothing but the script's path is in the address the
-// node logs. The socket reports no exit status, so the script writes the
-// command's exit code to a file the client reads once the socket closes; no
-// file means the session ended before the command did (a cut).
+// node logs. The node's last text frame before the close is the exit
+// {"type":"exit","exitCode","signaled"}; a node from before it sends none,
+// so the script also writes the command's exit code to a file the client
+// reads once the socket closes. No exit frame and no file means the session
+// ended before the command did (a cut).
 
 // The terminal's bounds (variables so tests shorten them).
 var (
@@ -78,12 +86,19 @@ func launchScript(spec sandboxremote.ExecSpec, exitFile, ready string) string {
 	}
 	cmd := shellJoin(spec.Argv)
 	if ready != "" {
+		// On a terminal (a node without the pipe mode) the terminal is made
+		// a clean byte pipe and the ready line marks where the command's
+		// output starts; on the node's pipe (no terminal) neither is needed,
+		// and the command's stderr is kept apart from its stdout.
+		b.WriteString("if [ -t 0 ]; then\n")
 		b.WriteString("stty raw -echo -iexten 2>/dev/null || { printf 125 > " + ef + "; exit 125; }\n")
 		b.WriteString("printf '%s\\n' " + shellQuote(ready) + "\n")
 		// The relay's stderr would mix into its stream on the terminal.
-		cmd += " 2>/dev/null"
+		b.WriteString(cmd + " 2>/dev/null\n")
+		b.WriteString("else\n" + cmd + "\nfi\n")
+	} else {
+		b.WriteString(cmd + "\n")
 	}
-	b.WriteString(cmd + "\n")
 	b.WriteString("c=$?\nprintf '%s' \"$c\" > " + ef + "\nexit \"$c\"\n")
 	return b.String()
 }
@@ -101,6 +116,16 @@ type termProcess struct {
 	readyCh chan struct{}
 	pipe    bool
 	done    chan struct{}
+	// stderr receives a pipe-mode command's stderr (nil discards it).
+	stderr io.Writer
+	// pipeMode: the node runs the command on its pipe (mode=pipe), not a
+	// terminal. Set before readyCh closes.
+	pipeMode bool
+	// exitSeen, exitCode and signaled are the node's exit frame, set
+	// before done closes.
+	exitSeen bool
+	exitCode int
+	signaled bool
 
 	once sync.Once
 	code int
@@ -110,7 +135,7 @@ type termProcess struct {
 // wsURL is the terminal's address on the node: wss for an https node, ws
 // only for this machine's own (NodeURL already refused plain http
 // elsewhere). The key never enters it.
-func (b *Box) wsURL(id, command string) (string, error) {
+func (b *Box) wsURL(id, command string, pipe bool) (string, error) {
 	sp, err := sandboxPath(id)
 	if err != nil {
 		return "", err
@@ -131,7 +156,11 @@ func (b *Box) wsURL(id, command string) (string, error) {
 		return "", errors.New("sandhold: the node address is not https")
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + sp + "/pty"
-	u.RawQuery = url.Values{"command": {command}}.Encode()
+	q := url.Values{"command": {command}}
+	if pipe {
+		q.Set("mode", "pipe")
+	}
+	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
 
@@ -148,25 +177,25 @@ func (b *Box) startTerm(ctx context.Context, id string, spec sandboxremote.ExecS
 	if err := b.putFile(ctx, id, script, 0o700, int64(len(body)), strings.NewReader(body)); err != nil {
 		return nil, fmt.Errorf("sandhold: write the launch script: %w", err)
 	}
-	u, err := b.wsURL(id, "/bin/sh "+script)
-	if err != nil {
-		return nil, err
+	askPipe := pipe
+	if v, ok := b.noPipe.Load(id); ok && v.(bool) {
+		askPipe = false
 	}
-	hdr := http.Header{}
-	hdr.Set("User-Agent", UserAgent)
-	hdr.Set("X-API-Key", b.api.Key)
-	dctx, dcancel := context.WithTimeout(ctx, termDialWait)
-	ws, res, err := websocket.Dial(dctx, u, &websocket.DialOptions{HTTPClient: b.api.httpClient(), HTTPHeader: hdr})
-	dcancel()
+	ws, err := b.dialTerm(ctx, id, "/bin/sh "+script, askPipe)
+	if askPipe && isPipeUnsupported(err) {
+		// A Shared sandbox has no pipe: the terminal with the ready line.
+		b.noPipe.Store(id, true)
+		ws, err = b.dialTerm(ctx, id, "/bin/sh "+script, false)
+	}
 	if err != nil {
 		b.removeQuiet(id, script)
-		return nil, b.dialRefusal(res, err)
+		return nil, err
 	}
 	ws.SetReadLimit(4 << 20)
 	// The session outlives the call that started it (the relay's stream is
 	// ended explicitly); Kill and Close end it.
 	pctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	p := &termProcess{b: b, id: id, ws: ws, ctx: pctx, cancel: cancel, out: newOutBuf(), exit: exitFile, pid: n, pipe: pipe, readyCh: make(chan struct{}), done: make(chan struct{})}
+	p := &termProcess{b: b, id: id, ws: ws, ctx: pctx, cancel: cancel, out: newOutBuf(), exit: exitFile, pid: n, pipe: pipe, readyCh: make(chan struct{}), done: make(chan struct{}), stderr: spec.Stderr}
 	if spec.PTY && spec.Rows > 0 && spec.Cols > 0 {
 		_ = p.Resize(pctx, spec.Rows, spec.Cols)
 	}
@@ -187,10 +216,41 @@ func (b *Box) startTerm(ctx context.Context, id string, spec sandboxremote.ExecS
 			_ = p.Close()
 			return nil, ctx.Err()
 		}
+		if p.pipeMode {
+			return &pipeProcess{p}, nil
+		}
 	} else {
 		close(p.readyCh)
 	}
 	return p, nil
+}
+
+// dialTerm opens the terminal WebSocket for command (mode=pipe when pipe).
+func (b *Box) dialTerm(ctx context.Context, id, command string, pipe bool) (*websocket.Conn, error) {
+	u, err := b.wsURL(id, command, pipe)
+	if err != nil {
+		return nil, err
+	}
+	hdr := http.Header{}
+	hdr.Set("User-Agent", UserAgent)
+	sp, _ := sandboxPath(id) // wsURL checked it
+	if err := b.api.authorize(ctx, http.MethodGet, b.api.URL+sp+"/pty", hdr); err != nil {
+		return nil, err
+	}
+	dctx, dcancel := context.WithTimeout(ctx, termDialWait)
+	ws, res, err := websocket.Dial(dctx, u, &websocket.DialOptions{HTTPClient: b.api.httpClient(), HTTPHeader: hdr})
+	dcancel()
+	if err != nil {
+		return nil, b.dialRefusal(res, err)
+	}
+	return ws, nil
+}
+
+// isPipeUnsupported reports the node's refusal of the pipe mode for this
+// sandbox (the Shared tier has none).
+func isPipeUnsupported(err error) bool {
+	var ae *APIError
+	return errors.As(err, &ae) && (ae.Code == "pipe_unsupported" || (ae.Code == "" && ae.Status == http.StatusNotImplemented))
 }
 
 // dialRefusal is a failed handshake in the node's own words.
@@ -216,7 +276,8 @@ func (b *Box) removeQuiet(id, p string) {
 }
 
 // read copies the terminal's output until the socket closes. A pipe's
-// output before its ready line is discarded.
+// output before its ready line is discarded; on the node's pipe mode the
+// output is tagged by stream and there is no ready line.
 func (p *termProcess) read(ready []byte) {
 	defer close(p.done)
 	defer p.out.close()
@@ -228,7 +289,26 @@ func (p *termProcess) read(ready []byte) {
 			return
 		}
 		if typ != websocket.MessageBinary {
-			continue // the node's control events
+			if p.control(data) && waiting {
+				// The node runs the command on its pipe: no ready line.
+				waiting = false
+				close(p.readyCh)
+			}
+			continue
+		}
+		if p.pipeMode {
+			if len(data) == 0 {
+				continue
+			}
+			switch data[0] {
+			case 0x01:
+				p.out.write(data[1:])
+			case 0x02:
+				if p.stderr != nil {
+					_, _ = p.stderr.Write(data[1:])
+				}
+			}
+			continue
 		}
 		if !waiting {
 			p.out.write(data)
@@ -252,6 +332,32 @@ func (p *termProcess) read(ready []byte) {
 		p.out.write(rest[j+1:])
 		head = nil
 	}
+}
+
+// control reads one of the node's text frames: the connected frame (true
+// when it says the pipe mode, for a pipe that asked for it) and the exit.
+func (p *termProcess) control(data []byte) bool {
+	var f struct {
+		Type     string `json:"type"`
+		Mode     string `json:"mode"`
+		ExitCode *int   `json:"exitCode"`
+		Signaled bool   `json:"signaled"`
+	}
+	if json.Unmarshal(data, &f) != nil {
+		return false
+	}
+	switch f.Type {
+	case "connected":
+		if p.pipe && f.Mode == "pipe" && !p.pipeMode {
+			p.pipeMode = true
+			return true
+		}
+	case "exit":
+		if f.ExitCode != nil {
+			p.exitSeen, p.exitCode, p.signaled = true, *f.ExitCode, f.Signaled
+		}
+	}
+	return false
 }
 
 func (p *termProcess) Read(b []byte) (int, error) { return p.out.Read(b) }
@@ -285,8 +391,9 @@ func (p *termProcess) Resize(ctx context.Context, rows, cols uint16) error {
 	return p.ws.Write(ctx, websocket.MessageText, msg)
 }
 
-// Wait waits for the socket to close, then reads the exit code the script
-// wrote. No exit file: the session ended before the command did.
+// Wait waits for the socket to close, then takes the exit code from the
+// node's exit frame, or (a node without it) from the file the script wrote.
+// Neither: the session ended before the command did.
 func (p *termProcess) Wait(ctx context.Context) (int, error) {
 	select {
 	case <-p.done:
@@ -296,6 +403,15 @@ func (p *termProcess) Wait(ctx context.Context) (int, error) {
 	p.once.Do(func() {
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callWait)
 		defer cancel()
+		if p.exitSeen {
+			p.code = p.exitCode
+			if p.signaled || p.exitCode < 0 {
+				p.code, p.err = -1, errors.New("the command was ended by a signal before it exited")
+			}
+			// The script wrote the file too, for a node without the frame.
+			p.b.removeQuiet(p.id, p.exit)
+			return
+		}
 		b, err := p.b.ReadFile(rctx, p.id, p.exit, 32)
 		if err != nil {
 			p.code, p.err = -1, errors.New("the terminal session ended before its command did (the connection was cut, or the command was stopped)")
@@ -326,3 +442,20 @@ func (p *termProcess) Close() error {
 	p.cancel()
 	return nil
 }
+
+// pipeProcess is a command on the node's pipe mode: its stdin can be ended
+// on its own (sandboxremote.HalfCloser), so the relay's end is clean.
+type pipeProcess struct{ *termProcess }
+
+// CloseWrite ends the command's stdin ({"type":"eof"}); the output and the
+// exit still arrive.
+func (p *pipeProcess) CloseWrite() error {
+	select {
+	case <-p.done:
+		return nil
+	default:
+	}
+	return p.ws.Write(p.ctx, websocket.MessageText, []byte(`{"type":"eof"}`))
+}
+
+var _ sandboxremote.HalfCloser = (*pipeProcess)(nil)

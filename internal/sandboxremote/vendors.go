@@ -504,27 +504,29 @@ var vendors = map[string]Vendor{
 		// number); the row names none.
 		MemoryImages: MemoryImagePolicy{AutoPauseExists: false, Note: "the native API has no pause or snapshot of a live sandbox"},
 		// The PTY is the node's terminal WebSocket (a resize control frame);
-		// the relay's second stream is a second terminal session put in raw
-		// mode, since the node's exec has no stdin. No reattach: the node
-		// ends a terminal session when its socket goes.
+		// the relay's second stream is the same socket's pipe mode (exact
+		// bytes, stderr apart, a stdin end of its own), or a second terminal
+		// session put in raw mode on a Shared sandbox or a node from before
+		// the pipe mode. No reattach: the node ends a terminal session when
+		// its socket goes.
 		RelayStdin: true, GuestPTY: false, Reattach: false,
 		// The node runs every command as its sandbox user, which has no fixed
 		// home path; /workspace is made and handed to that user at create.
 		BoxHome: "/tmp/observer-home", BoxWorkspace: "/workspace", NoRootExec: true,
 		Docs: []EndpointDoc{
-			{"create", "POST", "/v1/sandboxes (template, timeoutSeconds, metadata, isolation, network.open)", "SandHold control/README.md; control/internal/api/api.go createSandbox; contract sandbox-create, sandbox-create-refused", ""},
+			{"create", "POST", "/v1/sandboxes (template, timeoutSeconds, metadata, isolation, network.open)", "SandHold control/README.md; control/internal/api/api.go createSandbox; contract sandbox-create, sandbox-create-refused, sandbox-create-open-not-granted", "an open network not given comes back as networkNote (network_open_not_granted), which the run says"},
 			{"get", "GET", "/v1/sandboxes/{id}", "api.go getSandbox; contract sandbox-get, sandbox-missing", ""},
 			{"list", "GET", "/v1/sandboxes?metadata=observer-run=<run id>", "api.go listSandboxes; contract sandbox-list, sandbox-list-by-metadata", "a node from before the metadata filter lists every sandbox; that is detected and reported as not supported"},
 			{"delete", "DELETE", "/v1/sandboxes/{id}", "api.go deleteSandbox; contract sandbox-delete", ""},
-			{"exec", "POST", "/v1/sandboxes/{id}/exec (Accept: text/event-stream)", "api.go exec, exec_stream.go; contract exec-stream", "output arrives as text lines, so a command's bytes are not carried exactly"},
+			{"exec", "POST", "/v1/sandboxes/{id}/exec (Accept: text/event-stream; stdinBase64 and output base64 for a one-shot stdin)", "api.go exec, exec_stream.go, exec_pipe.go; contract exec-stream, exec-bytes-stream", "without a stdin the output arrives as text lines; with one, as its exact bytes (a Shared sandbox or an older node refuses it: not supported)"},
 			{"upload", "PUT", "/v1/sandboxes/{id}/files?path=&mode= (raw body, 100 MiB at most)", "api.go putFile", "no contract vector"},
 			{"download", "GET", "/v1/sandboxes/{id}/files?path=", "api.go getFile", "no contract vector"},
-			{"terminal", "GET (WebSocket)", "/v1/sandboxes/{id}/pty?command= (binary frames stdin and stdout, a resize text frame)", "api.go pty", "no contract vector; no exit status on the socket"},
+			{"terminal", "GET (WebSocket)", "/v1/sandboxes/{id}/pty?command=[&mode=pipe] (binary frames stdin and stdout, a resize text frame; the pipe's eof frame and tagged output; the exit frame last)", "api.go pty, exec_pipe.go ptyPipe; contract terminal, terminal-pipe", "a node from before 2026-11-11 sends no exit frame and has no pipe mode"},
 		},
 		Unverified: []string{
 			"every call against a real node (register SANDHOLD-1: no live run yet)",
 			"whether /tmp in the node's image lets the uploaded observer run (a noexec /tmp would stop it)",
-			"the exit status of a terminal session (the socket reports none; the command's wrapper writes it to a file the client reads)",
+			"the exit status of a terminal session on a node from before the exit frame (the command's wrapper writes it to a file the client reads)",
 			"whether a cancelled streamed exec ends the command in the box",
 		},
 		ReadyWaitSeconds: 60,
