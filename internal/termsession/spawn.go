@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // SpecKind classifies a session by SHAPE so authorization and validation
@@ -166,6 +167,24 @@ type Spec struct {
 	// [terminal.sandbox].allow_osc52_clipboard; false leaves the output
 	// byte for byte as the process wrote it.
 	StripOSC52 bool
+	// KillGrace is how long a Close waits after its SIGTERM before the
+	// SIGKILL backstop (unix). Zero means DefaultKillGrace. A hosted sandbox
+	// helper sets it to cover its own bounded teardown (pull, then the
+	// vendor delete), which a two-second backstop would cut short and leave
+	// the box billing (a Kata box takes seconds to delete). Server-derived.
+	KillGrace time.Duration
+}
+
+// DefaultKillGrace is the SIGTERM-to-SIGKILL backstop of a Close when the
+// Spec sets no KillGrace.
+const DefaultKillGrace = 2 * time.Second
+
+// killGrace is the Spec's KillGrace or DefaultKillGrace.
+func (s Spec) killGrace() time.Duration {
+	if s.KillGrace > 0 {
+		return s.KillGrace
+	}
+	return DefaultKillGrace
 }
 
 // ArgvMode selects the launch argv SHAPE for a SpecAgent session. It is an

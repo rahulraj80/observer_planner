@@ -2,8 +2,15 @@
 
 package main
 
-import "github.com/marmutapp/superbased-observer/internal/dashapi"
+import (
+	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
+)
 
 // terminal_sandbox_hosted_omit.go: a build without the sandbox module has no
 // hosted rows, so the Hosted sandboxes panel has no routes.
 func hostedDashboardRoutes(string) []dashapi.ExtraRoute { return nil }
+
+// hostedKillGrace: no hosted helper exists in this build.
+func hostedKillGrace([]string) time.Duration { return 0 }

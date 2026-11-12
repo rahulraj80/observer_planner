@@ -63,7 +63,7 @@ func (unixSpawner) Spawn(spec Spec) (PTY, error) {
 		}
 		return nil, fmt.Errorf("termsession: start pty for observer %s: %w", spec.Subcommand, err)
 	}
-	return &unixPTY{f: f, cmd: cmd}, nil
+	return &unixPTY{f: f, cmd: cmd, killGrace: spec.killGrace()}, nil
 }
 
 // The unix backend reports its child's pid, so the Manager can publish a
@@ -76,6 +76,8 @@ type unixPTY struct {
 	f        *os.File
 	cmd      *exec.Cmd
 	killOnce sync.Once
+	// killGrace is the SIGTERM-to-SIGKILL wait (Spec.KillGrace).
+	killGrace time.Duration
 }
 
 // Pid implements [ProcessReporter]: the OS pid of the launcher child, which
@@ -113,7 +115,8 @@ func (p *unixPTY) Wait() (int, error) {
 
 // Kill force-reaps the whole process group and closes the master fd. It is
 // idempotent. A graceful SIGTERM is sent first; a delayed SIGKILL backstops
-// a child that ignores it (a dead group returns ESRCH, harmlessly).
+// a child that ignores it (a dead group returns ESRCH, harmlessly) after
+// the Spec's kill grace.
 func (p *unixPTY) Kill() error {
 	p.killOnce.Do(func() {
 		_ = p.f.Close()
@@ -123,7 +126,11 @@ func (p *unixPTY) Kill() error {
 		}
 		pgid := proc.Pid // Setsid → the child leads its own process group
 		_ = syscall.Kill(-pgid, syscall.SIGTERM)
-		time.AfterFunc(2*time.Second, func() {
+		grace := p.killGrace
+		if grace <= 0 {
+			grace = DefaultKillGrace
+		}
+		time.AfterFunc(grace, func() {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		})
 	})

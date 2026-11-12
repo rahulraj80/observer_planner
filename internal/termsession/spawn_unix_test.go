@@ -111,3 +111,33 @@ func TestRealSpawnerEchoes(t *testing.T) {
 		t.Errorf("PTY output %q did not echo the subcommand token", got)
 	}
 }
+
+// A Close sends SIGTERM and, after the Spec's KillGrace, SIGKILL. A child
+// whose stop path outlasts the default two seconds (a hosted helper
+// deleting a Kata box) finishes and exits with its own code when its Spec
+// gives it the time; without it the backstop kills it (-1).
+func TestKillWaitsTheSpecsKillGraceBeforeSIGKILL(t *testing.T) {
+	// The stop path takes 2.5 s: longer than the default backstop.
+	script := "trap '' HUP; trap 'sleep 2.5; exit 7' TERM; while :; do sleep 0.1; done"
+	for _, tc := range []struct {
+		name  string
+		grace time.Duration
+		want  int
+	}{
+		{"default grace kills the stop path", 0, -1},
+		{"a longer grace lets it finish", 10 * time.Second, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewOSSpawner().Spawn(Spec{Kind: SpecShell, ShellArgv: []string{"/bin/sh", "-c", script}, KillGrace: tc.grace})
+			if err != nil {
+				t.Fatalf("real spawn: %v", err)
+			}
+			time.Sleep(300 * time.Millisecond) // the traps are set
+			_ = p.Kill()
+			code, _ := p.Wait()
+			if code != tc.want {
+				t.Fatalf("exit code %d, want %d", code, tc.want)
+			}
+		})
+	}
+}

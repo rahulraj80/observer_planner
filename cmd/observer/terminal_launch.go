@@ -279,6 +279,9 @@ func (l *ptyLauncher) Spawn(req termsvc.LaunchRequest) (string, error) {
 		// A sandboxed run's OSC 52 clipboard sequences are removed from its
 		// output (ruling P-175) unless [terminal.sandbox].allow_osc52_clipboard.
 		StripOSC52: sandboxStripsOSC52(req.Sandboxed, req.SandboxAllowOSC52),
+		// A hosted helper's stop deletes its box before it exits; the
+		// SIGKILL backstop waits for that bounded teardown (0 = default).
+		KillGrace: hostedKillGrace(req.WrapArgv),
 	}
 	if len(req.SSHArgv) > 0 {
 		// An outbound SSH remote-system session (plan §2). Like SpecShell it

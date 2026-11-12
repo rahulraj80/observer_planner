@@ -1623,6 +1623,21 @@ var (
 	hostedTeardownDeleteTimeout = 2 * time.Minute
 )
 
+// hostedKillGrace is the SIGTERM-to-SIGKILL wait the daemon gives a hosted
+// helper it stops (`observer terminals stop`, Stop & close): the helper's
+// stop path pulls the transcripts, exports, then deletes the box, each
+// under its own deadline above, plus a margin for the relay's close. The
+// default two-second backstop killed the helper mid-delete on a Kata box
+// (seconds to tear down): the node dropped the half-done delete, the box
+// stayed listed until its timeout, and the run's exit code read -1. Zero
+// for any wrap that is not a hosted helper's.
+func hostedKillGrace(wrapArgv []string) time.Duration {
+	if len(wrapArgv) < 2 || wrapArgv[1] != hostedHostVerb || wrapArgv[len(wrapArgv)-1] != hostedInnerMarker {
+		return 0
+	}
+	return hostedTeardownPullTimeout + hostedTeardownExportTimeout + hostedTeardownDeleteTimeout + time.Minute
+}
+
 // hostedTeardownExport is the teardown's in-box database export step; a
 // variable so a test can stand in a slow export.
 var hostedTeardownExport = func(ctx context.Context, r *hostedRun) { r.exportBoxDatabases(ctx) }

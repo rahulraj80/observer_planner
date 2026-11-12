@@ -2,11 +2,17 @@
 
 package main
 
+import "time"
+
 // terminal_sandbox_hosted_host_other.go: the hosted rows run their host
 // services (the per-run socket dir, the capture relay, the model proxy
 // forward) on a Linux or WSL2 daemon only; elsewhere the probe refuses at
 // its platform row and this helper is never started.
 func runHostedHost([]string) int { return sandboxHelperUnsupported() }
+
+// hostedKillGrace: no helper runs on this platform, so no wrap needs a
+// longer stop.
+func hostedKillGrace([]string) time.Duration { return 0 }
 
 // hostedHelperAlive: no helper runs on this platform.
 var hostedHelperAlive = func(string) bool { return false }
