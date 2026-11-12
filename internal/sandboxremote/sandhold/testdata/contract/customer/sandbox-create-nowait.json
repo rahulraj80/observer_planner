@@ -19,6 +19,13 @@
     "network": "none",
     "owner": "alice",
     "runsOn": "runc",
+    "startedBy": {
+      "api": "native",
+      "keyId": "<key-id>",
+      "tool": "observer on laptop",
+      "via": "key",
+      "words": "Observer on laptop"
+    },
     "state": "Starting",
     "target": "runc"
   }

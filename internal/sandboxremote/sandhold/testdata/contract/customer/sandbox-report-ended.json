@@ -1,0 +1,71 @@
+{
+  "name": "sandbox-report-ended",
+  "about": "The report is kept after the sandbox ends: state ended, and how.",
+  "method": "GET",
+  "path": "/v1/sandboxes/<id>/report",
+  "status": 200,
+  "response": {
+    "allow": [
+      "pypi.org",
+      "files.pythonhosted.org",
+      "github.com"
+    ],
+    "changes": [
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Lifetime changed: 20 min from then"
+      }
+    ],
+    "commands": [
+      {
+        "at": "<time>",
+        "by": "alice",
+        "exitCode": 0,
+        "from": "an API key"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "exitCode": 0,
+        "from": "an API key"
+      }
+    ],
+    "ended": {
+      "at": "<time>",
+      "by": "alice",
+      "text": "removed by alice"
+    },
+    "expiresAt": "<time>",
+    "files": [],
+    "id": "<id>",
+    "image": "sandhold/sandbox:dev",
+    "isolation": "shielded",
+    "isolationMeans": "a hardened container on the host's kernel",
+    "network": "limited",
+    "owner": "alice",
+    "refusals": {
+      "asked": [],
+      "network": null,
+      "networkNote": "its egress log is not kept once the sandbox has ended, so its network refusals cannot be read now"
+    },
+    "runsOn": "runc",
+    "started": {
+      "at": "<time>",
+      "how": "cold",
+      "lifetimeSeconds": 600,
+      "ms": 0,
+      "placed": "the template py-tests asks for shielded isolation"
+    },
+    "startedBy": {
+      "api": "native",
+      "keyId": "<key-id>",
+      "tool": "observer on laptop",
+      "via": "key",
+      "words": "Observer on laptop"
+    },
+    "state": "ended",
+    "terminals": [],
+    "text": "Sandbox <id>\nOwner: alice; started with: Observer on laptop.\nIsolation: Shielded (a hardened container on the host's kernel); runs on runc; image sandhold/sandbox:dev.\nNetwork: limited to pypi.org, files.pythonhosted.org, github.com.\nStarted: <time>, cold in <span>; it runs there because the template py-tests asks for shielded isolation; lifetime 10 min.\n\nCommands: 2, 0 with a non-zero exit status.\n  <time>  alice (an API key)  exit 0\n  <time>  alice (an API key)  exit 0\n  (The node records a command's exit status, not the command line.)\n\nNetwork refusals: not known: its egress log is not kept once the sandbox has ended, so its network refusals cannot be read now.\nFiles written through the API: none.\n  (Files a command writes inside the sandbox are not recorded.)\nChanges:\n  <time>  alice  Lifetime changed: 20 min from then\n\nEnded: <time>, removed by alice.\n"
+  }
+}
