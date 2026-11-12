@@ -1,13 +1,13 @@
 package termsession
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 )
 
 // SpecKind classifies a session by SHAPE so authorization and validation
@@ -329,11 +329,13 @@ func PTYSupported() bool { return ptySupported() }
 // unguessable; it is minted only by the Origin-checked launch POST.
 const secretBytes = 32
 
-// newToken mints an opaque base64url session identifier from crypto/rand.
+// newToken mints an opaque base64url session identifier from crypto/rand,
+// never starting with '-' or '_' (termcore.NewToken): a handle is typed and
+// pasted on command lines, where a leading '-' reads as a flag.
 func newToken() (string, error) {
-	b := make([]byte, secretBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("termsession: read random bytes: %w", err)
+	id, err := termcore.NewToken(secretBytes)
+	if err != nil {
+		return "", fmt.Errorf("termsession: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+	return id, nil
 }

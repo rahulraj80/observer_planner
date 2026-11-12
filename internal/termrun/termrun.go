@@ -1,9 +1,7 @@
 package termrun
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -246,12 +244,14 @@ func NewCorrelationToken() (string, error) {
 	return randID("termrun: read correlation nonce bytes")
 }
 
+// randID never starts with '-' or '_' (termcore.NewToken): a run id is
+// typed and pasted on command lines, where a leading '-' reads as a flag.
 func randID(errCtx string) (string, error) {
-	b := make([]byte, idBytes)
-	if _, err := rand.Read(b); err != nil {
+	id, err := termcore.NewToken(idBytes)
+	if err != nil {
 		return "", fmt.Errorf("%s: %w", errCtx, err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+	return id, nil
 }
 
 // Domain-separation prefixes keep the two hash spaces disjoint so a

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -477,7 +478,9 @@ func newTerminalsCmd() *cobra.Command {
 			"`confirm <pending-id>` starts it, `reject <pending-id>` drops it; a hold is\n" +
 			"single use and expires after 10 minutes, and an agent may not confirm.\n" +
 			"A run is named by its run id, a unique run-id prefix of at least 6\n" +
-			"characters, or its terminal handle.\n\n" +
+			"characters, or its terminal handle. An id that starts with '-' goes\n" +
+			"after --: `observer terminals stop -- -XJMm...` (ids minted now never\n" +
+			"start with '-' or '_'; older ones can).\n\n" +
 			"Exit codes: 0 ok, 2 usage, 3 not found or not available, 4 wait timed out,\n" +
 			"1 other failure.",
 		SilenceUsage:  true,
@@ -485,6 +488,7 @@ func newTerminalsCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVar(&asJSON, "json", false, "print JSON")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config.toml (default ~/.observer/config.toml)")
+	cmd.SetFlagErrorFunc(runIDFlagError)
 	output := func(c *cobra.Command) launchOutput {
 		return launchOutput{json: asJSON, stdout: c.OutOrStdout(), stderr: c.ErrOrStderr(), verb: "terminals " + c.Name()}
 	}
@@ -583,6 +587,28 @@ func newTerminalsCmd() *cobra.Command {
 
 	cmd.AddCommand(ls, show, stop, wait, confirm, reject)
 	return cmd
+}
+
+// runIDFlagError is the flag error of a verb that takes a run id or handle:
+// base64url ids could start with '-' (live check 2026-11-12: `observer
+// terminals stop -XJMm...` failed with "unknown shorthand flag: 'X'"), so an
+// unknown flag says how to pass such an id, after --.
+func runIDFlagError(c *cobra.Command, err error) error {
+	if err == nil || !strings.HasPrefix(err.Error(), "unknown shorthand flag") && !strings.HasPrefix(err.Error(), "unknown flag") {
+		return err
+	}
+	return fmt.Errorf("%w (a run id or handle that starts with '-' goes after --: observer %s -- <id>)", err, strings.TrimPrefix(c.CommandPath(), c.Root().Name()+" "))
+}
+
+// withRunIDFlagErrors gives every command under root whose argument is a run
+// id (its Use names "<run") the run-id flag error, unless it has its own.
+func withRunIDFlagErrors(root *cobra.Command) {
+	for _, c := range root.Commands() {
+		withRunIDFlagErrors(c)
+		if strings.Contains(c.Use, "<run") {
+			c.SetFlagErrorFunc(runIDFlagError)
+		}
+	}
 }
 
 func ctxOf(c *cobra.Command) context.Context {

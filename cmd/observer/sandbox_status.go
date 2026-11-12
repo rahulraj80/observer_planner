@@ -44,6 +44,8 @@ func newSandboxCmd() *cobra.Command {
 	for _, sub := range sandboxSubcommands {
 		cmd.AddCommand(sub())
 	}
+	// A run id that starts with '-' goes after -- (the flag error says so).
+	withRunIDFlagErrors(cmd)
 	return cmd
 }
 

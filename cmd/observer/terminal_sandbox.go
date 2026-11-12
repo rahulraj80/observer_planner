@@ -5,8 +5,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +34,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/sandboxselect"
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
@@ -2205,17 +2204,11 @@ func (r *sandboxRuntime) writeMeta(dest string, src workspace.Source, req termsv
 // one starting with '_', 2026-11-12). The last of the 22 characters holds
 // only two bits, so it is always A, Q, g or w.
 func newWorkspaceID() (string, error) {
-	for i := 0; i < 8; i++ {
-		var b [16]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			return "", fmt.Errorf("terminal_sandbox: mint workspace id: %w", err)
-		}
-		id := base64.RawURLEncoding.EncodeToString(b[:])
-		if c := id[0]; c != '-' && c != '_' {
-			return id, nil
-		}
+	id, err := termcore.NewToken(16)
+	if err != nil {
+		return "", fmt.Errorf("terminal_sandbox: mint workspace id: %w", err)
 	}
-	return "", fmt.Errorf("terminal_sandbox: could not mint a workspace id")
+	return id, nil
 }
 
 // gitPrepEnv builds the workspace-prep subprocess env: the daemon env with
