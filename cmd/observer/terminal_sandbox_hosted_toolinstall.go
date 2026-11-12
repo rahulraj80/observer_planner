@@ -130,10 +130,12 @@ func hostedToolCheckFor(tool string, tier vocab.Tier, template string) *hostedTo
 
 // hostedNPMPrefixRel is npm's prefix for an install in the box, relative to
 // the box home, and hostedNPMBinDir where its executables land: the box
-// user's own, never the image's root-owned global prefix.
+// user's own, never the image's root-owned global prefix. hostedNPMCacheRel
+// is npm's cache for that install, removed after it (ensureTool).
 const (
 	hostedNPMPrefixRel = ".local"
 	hostedNPMBinDir    = hostedNPMPrefixRel + "/bin"
+	hostedNPMCacheRel  = ".cache/observer-npm-install"
 )
 
 // hostedToolInstallOptions are the grounded Linux install paths that run in

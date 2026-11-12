@@ -22,6 +22,7 @@ type hostedToolBox struct {
 	installed bool
 	installs  [][]string
 	envs      []map[string]string
+	removes   [][]string
 }
 
 func (tb *hostedToolBox) wrap(hh *hostedHarness) {
@@ -43,6 +44,9 @@ func (tb *hostedToolBox) wrap(hh *hostedHarness) {
 			tb.envs = append(tb.envs, spec.Env)
 			tb.installed = true
 			return newFakeProcess("installed\n", 0), nil
+		case len(spec.Argv) > 0 && spec.Argv[0] == "rm":
+			tb.removes = append(tb.removes, spec.Argv)
+			return newFakeProcess("", 0), nil
 		}
 		tb.mu.Unlock()
 		defer tb.mu.Lock()
@@ -78,6 +82,9 @@ func TestHostedHostInstallsTheToolOverCurl(t *testing.T) {
 	defer tb.mu.Unlock()
 	if len(tb.installs) != 1 || !slices.Equal(tb.installs[0], hostedPipefail(hostedClaudeScript(t).Argv)) {
 		t.Fatalf("installs %q", tb.installs)
+	}
+	if len(tb.removes) != 0 {
+		t.Errorf("a script install removed %q", tb.removes)
 	}
 	if out := hh.out.String(); !strings.Contains(out, "over curl") || !strings.Contains(out, "claude-code installed at") {
 		t.Errorf("output %s", out)
@@ -118,6 +125,16 @@ func TestHostedHostInstallsWithNPMUnderTheBoxHome(t *testing.T) {
 	home := hh.run.layout.Home
 	if got := tb.envs[0]["NPM_CONFIG_PREFIX"]; got != home+"/.local" || tb.envs[0]["HOME"] != home {
 		t.Fatalf("npm env %v, want its prefix under %s", tb.envs[0], home)
+	}
+	// npm's cache for the install has its own directory under the box home
+	// and is removed once the install is done (SandHold's Shared tier keeps
+	// /tmp and /workspace in one store of at most 512 MiB); nothing else is.
+	cache := tb.envs[0]["NPM_CONFIG_CACHE"]
+	if cache != home+"/.cache/observer-npm-install" {
+		t.Fatalf("npm cache %q", cache)
+	}
+	if len(tb.removes) != 1 || !slices.Equal(tb.removes[0], []string{"rm", "-rf", "--", cache}) {
+		t.Fatalf("removes %q, want the install cache only", tb.removes)
 	}
 }
 

@@ -60,10 +60,23 @@ func (r *hostedRun) ensureTool(ctx context.Context) error {
 		// in ~/.local/bin, which the check looks in (hostedNPMBinDir).
 		spec.Env = r.boxEnv()
 		spec.Env["NPM_CONFIG_PREFIX"] = path.Join(r.layout.Home, hostedNPMPrefixRel)
+		// npm's download cache gets a directory of its own, removed once
+		// the install is done: it is as large again as half the package
+		// (Claude Code: about 160 MB of cache beside 330 MB installed), and
+		// a box whose home is on a small store (SandHold's Shared tier:
+		// /tmp and /workspace share at most 512 MiB) would keep it for
+		// nothing. A cache the image already had in ~/.npm is left alone.
+		spec.Env["NPM_CONFIG_CACHE"] = path.Join(r.layout.Home, hostedNPMCacheRel)
 		how += " into " + spec.Env["NPM_CONFIG_PREFIX"]
 	}
 	r.say("%s is not in the box; installing it %s (first start, internet tier): %s", c.Tool, how, opt.Display)
-	if err := r.execOK(ctx, "install "+c.Tool, spec); err != nil {
+	err = r.execOK(ctx, "install "+c.Tool, spec)
+	if opt.Channel == "npm" {
+		if cerr := r.execOK(ctx, "remove npm's install cache", sandboxremote.ExecSpec{Argv: []string{"rm", "-rf", "--", spec.Env["NPM_CONFIG_CACHE"]}, Cwd: r.layout.Home}); cerr != nil {
+			r.say("npm's install cache stays in the box (%s): %s", spec.Env["NPM_CONFIG_CACHE"], hostedLastLine(cerr.Error()))
+		}
+	}
+	if err != nil {
 		return fmt.Errorf("%s: %s is not installed in the box, and its install (%s) failed: %s", verdictHostedTool, c.Tool, opt.Display, hostedLastLine(err.Error()))
 	}
 	if got, err = r.probeTool(ctx, *c); err != nil {
