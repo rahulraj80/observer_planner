@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -266,5 +267,84 @@ func TestHostedScriptInstallFailsWhenTheFetchFails(t *testing.T) {
 	}
 	if got := hostedPipefail([]string{"npm", "install", "-g", "x"}); strings.Join(got, " ") != "npm install -g x" {
 		t.Errorf("non-pipe argv changed: %q", got)
+	}
+}
+
+// TestHostedToolRunScriptRuns runs the installed tool's start check with
+// the host's sh (live run 2026-11-12: a tool npm placed without its native
+// binary): a tool that starts exits 0; one that fails gives its own words,
+// the home's free room and its status; the words and room parse back.
+func TestHostedToolRunScriptRuns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a POSIX shell")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	home := t.TempDir()
+	tool := filepath.Join(home, "claude")
+	run := func(body string) ([]byte, int) {
+		if err := os.WriteFile(tool, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		argv := hostedToolRunArgv(tool)
+		cmd := exec.Command(sh, argv[1:]...) //nolint:gosec // G204: the check under test, in a temp dir
+		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}
+		out, err := cmd.Output()
+		var ee *exec.ExitError
+		switch {
+		case err == nil:
+			return out, 0
+		case errors.As(err, &ee):
+			return out, ee.ExitCode()
+		}
+		t.Fatalf("run check: %v", err)
+		return nil, 0
+	}
+	if out, code := run("echo 2.1.322; exit 0\n"); code != 0 || strings.Contains(string(out), "2.1.322") {
+		t.Fatalf("a tool that starts: exit %d, output %q (its version is not repeated)", code, out)
+	}
+	out, code := run("echo 'Error: claude native binary not installed.' >&2; exit 1\n")
+	if code != 1 {
+		t.Fatalf("exit %d, output %q", code, out)
+	}
+	words, sp := parseHostedToolRun(out)
+	if words != "Error: claude native binary not installed." {
+		t.Errorf("words %q", words)
+	}
+	if _, err := exec.LookPath("df"); err == nil && (sp.SizeKiB <= 0 || sp.FreeKiB < 0) {
+		t.Errorf("no space line in %q", out)
+	}
+}
+
+// TestHostedSpaceNote: the run check's output parses into the tool's words
+// and the store's room; a nearly full store is named as the likely cause.
+func TestHostedSpaceNote(t *testing.T) {
+	words, sp := parseHostedToolRun([]byte("Error: claude native binary not installed.\n\nOr reinstall.\nspace 9216 524288\n"))
+	if words != "Error: claude native binary not installed. ... Or reinstall." || sp != (hostedSpace{9216, 524288}) {
+		t.Fatalf("words %q space %+v", words, sp)
+	}
+	if n := sp.note(""); !strings.Contains(n, "9 MiB free of 512 MiB") || !strings.Contains(n, "ran out of room") {
+		t.Errorf("full store: %q", n)
+	}
+	if n := (hostedSpace{400 << 10, 512 << 10}).note(""); n != "the box home's store has 400 MiB free of 512 MiB" {
+		t.Errorf("roomy store: %q", n)
+	}
+	if n := (hostedSpace{}).note(""); n != "" || hostedWithNote(n) != "" {
+		t.Errorf("unknown space: %q", n)
+	}
+	// npm let the optional native binary fail on ENOSPC, exited 0 and
+	// removed what it wrote (live run 2026-11-12): the store looks roomy,
+	// the install's own words say it ran out.
+	npm := "npm warn tar TAR_ENTRY_ERROR ENOSPC: no space left on device, write\nadded 2 packages in 9s"
+	if n := (hostedSpace{332 << 10, 512 << 10}).note(npm); !strings.Contains(n, "ran out of room in the box") || !strings.Contains(n, "332 MiB free of 512 MiB") || !strings.Contains(n, "more storage") {
+		t.Errorf("ENOSPC in the install: %q", n)
+	}
+	if n := (hostedSpace{}).note(npm); !strings.HasPrefix(n, "the install ran out of room in the box: it reported no space left on device; use") {
+		t.Errorf("ENOSPC, space unknown: %q", n)
+	}
+	if _, sp := parseHostedToolRun([]byte("space x 1\nspace 5 0\n")); sp != (hostedSpace{}) {
+		t.Errorf("a bad space line parsed: %+v", sp)
 	}
 }

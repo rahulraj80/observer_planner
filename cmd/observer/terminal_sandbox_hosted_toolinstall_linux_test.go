@@ -23,6 +23,10 @@ type hostedToolBox struct {
 	installs  [][]string
 	envs      []map[string]string
 	removes   [][]string
+	// broken: the installed tool does not start (its run check fails);
+	// runs are the run checks asked for.
+	broken bool
+	runs   [][]string
 }
 
 func (tb *hostedToolBox) wrap(hh *hostedHarness) {
@@ -43,7 +47,22 @@ func (tb *hostedToolBox) wrap(hh *hostedHarness) {
 			tb.installs = append(tb.installs, spec.Argv)
 			tb.envs = append(tb.envs, spec.Env)
 			tb.installed = true
+			if tb.broken {
+				// npm says the failed write on stderr and exits 0.
+				if spec.Stderr != nil {
+					_, _ = spec.Stderr.Write([]byte("npm warn tar TAR_ENTRY_ERROR ENOSPC: no space left on device, write\n"))
+				}
+				return newFakeProcess("added 1 package\n", 0), nil
+			}
 			return newFakeProcess("installed\n", 0), nil
+		case len(spec.Argv) >= 3 && spec.Argv[0] == "sh" && spec.Argv[2] == hostedToolRunScript:
+			tb.runs = append(tb.runs, spec.Argv)
+			if tb.broken {
+				return newFakeProcess("Error: claude native binary not installed.\n\nOr reinstall without --ignore-scripts / --omit=optional.\nspace 9216 524288\n", 1), nil
+			}
+			return newFakeProcess("2.1.322 (Claude Code)\nspace 200000 524288\n", 0), nil
+		case len(spec.Argv) >= 3 && spec.Argv[0] == "sh" && strings.HasPrefix(spec.Argv[2], hostedBoxSpaceLine):
+			return newFakeProcess("space 9216 524288\n", 0), nil
 		case len(spec.Argv) > 0 && spec.Argv[0] == "rm":
 			tb.removes = append(tb.removes, spec.Argv)
 			return newFakeProcess("", 0), nil
@@ -135,6 +154,61 @@ func TestHostedHostInstallsWithNPMUnderTheBoxHome(t *testing.T) {
 	}
 	if len(tb.removes) != 1 || !slices.Equal(tb.removes[0], []string{"rm", "-rf", "--", cache}) {
 		t.Fatalf("removes %q, want the install cache only", tb.removes)
+	}
+	// The installed tool is started once before the agent is.
+	if len(tb.runs) != 1 || !slices.Equal(tb.runs[0], hostedToolRunArgv("/tmp/observer-home/.local/bin/claude")) {
+		t.Fatalf("run checks %q", tb.runs)
+	}
+}
+
+// TestHostedHostRefusesAnInstalledToolThatDoesNotStart (live run
+// 2026-11-12, SandHold's Shared tier: npm placed Claude Code's launcher, its
+// native binary did not fit in the box's 512 MiB store, and the agent
+// exited 1 at once with no word of why): the install's tool is started
+// once; when it fails the launch is refused before the agent starts, with
+// the tool's own words and the box's free room, and the box is deleted.
+func TestHostedHostRefusesAnInstalledToolThatDoesNotStart(t *testing.T) {
+	hh := newHostedHarness(t, sandboxremote.VendorE2B)
+	check, err := hostedToolDelivery("claude-code", "node-image", vocab.TierInternet, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hh.run.plan.Tier, hh.run.plan.ToolCheck = string(vocab.TierInternet), check
+	tb := &hostedToolBox{has: []string{"npm", "bash"}, broken: true}
+	tb.wrap(hh)
+	if c := hh.run.drive(context.Background()); c != sandboxHelperFailCode {
+		t.Fatalf("exit %d, want %d", c, sandboxHelperFailCode)
+	}
+	hh.mu.Lock()
+	ptys := len(hh.ptys)
+	hh.mu.Unlock()
+	if ptys != 0 {
+		t.Fatal("the agent started with a tool that does not start")
+	}
+	if len(tb.installs) != 1 || len(tb.runs) != 1 {
+		t.Fatalf("installs %q, run checks %q", tb.installs, tb.runs)
+	}
+	if !hh.client.boxes["box1"].deleted {
+		t.Error("the box outlived the refusal")
+	}
+	// The end note (bounded) carries the cause.
+	got := runEndNoteReason(hh.run.plan.ObserverDir, "termrun-id", hh.run.plan.RunID, sandboxHelperFailCode)
+	for _, want := range []string{"launch_refused: ", "claude-code was installed at /tmp/observer-home/.local/bin/claude", "does not start: the install ran out of room in the box",
+		"9 MiB free of 512 MiB"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("end reason %q lacks %q", got, want)
+		}
+	}
+	// The whole refusal (asked again of the fake box, brought back): the
+	// fix and the tool's own words.
+	hh.client.mu.Lock()
+	hh.client.boxes["box1"].deleted = false
+	hh.client.mu.Unlock()
+	err = hh.run.checkToolRuns(context.Background(), *check, "npm install -g @anthropic-ai/claude-code", "/tmp/observer-home/.local/bin/claude", "npm warn tar TAR_ENTRY_ERROR ENOSPC: no space left on device")
+	for _, want := range []string{"more storage", "`claude --version` exited 1: Error: claude native binary not installed."} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %v lacks %q", err, want)
+		}
 	}
 }
 

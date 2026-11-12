@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
@@ -223,6 +224,93 @@ done; done
 for t in $needs; do command -v "$t" >/dev/null 2>&1 && echo "has $t"; done
 exit 0`
 
+// hostedBoxSpaceLine prints "space <free KiB> <size KiB>" for the file
+// system of the box home (nothing when df gives no answer).
+const hostedBoxSpaceLine = `set -- $(df -Pk -- "$HOME" 2>/dev/null | tail -n 1)
+[ -n "$4" ] && echo "space $4 $2"`
+
+// hostedToolRunScript starts the tool an install just placed, once, with
+// --version (live run 2026-11-12 on SandHold's Shared tier: npm placed
+// Claude Code's launcher but its native binary, a platform optional
+// dependency npm let fail, did not fit in the box's 512 MiB store, so the
+// probe found the tool, the agent exited 1 at once and the run ended with
+// no word of why). Argument: the tool's path. On a failure it prints the
+// tool's own last words; then the space line; it exits with the tool's
+// status.
+const hostedToolRunScript = `t=$1
+out=$("$t" --version 2>&1 </dev/null); c=$?
+[ "$c" -eq 0 ] || printf '%s\n' "$out" | tail -c 1500
+` + hostedBoxSpaceLine + `
+exit "$c"`
+
+// hostedToolRunArgv is the run check's argv for the tool at path.
+func hostedToolRunArgv(path string) []string {
+	return []string{"sh", "-c", hostedToolRunScript, "sh", path}
+}
+
+// hostedBoxSpaceArgv asks the box how much room its home has.
+func hostedBoxSpaceArgv() []string {
+	return []string{"sh", "-c", hostedBoxSpaceLine + "\nexit 0"}
+}
+
+// hostedSpace is the box home's file system: free and total KiB (zero
+// when the box did not say).
+type hostedSpace struct{ FreeKiB, SizeKiB int64 }
+
+// parseHostedToolRun splits the run check's output into the tool's words
+// and the space line.
+func parseHostedToolRun(out []byte) (string, hostedSpace) {
+	var words []string
+	var sp hostedSpace
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if f := strings.Fields(line); len(f) == 3 && f[0] == "space" {
+			free, e1 := strconv.ParseInt(f[1], 10, 64)
+			size, e2 := strconv.ParseInt(f[2], 10, 64)
+			if e1 == nil && e2 == nil && free >= 0 && size > 0 {
+				sp = hostedSpace{free, size}
+				continue
+			}
+		}
+		words = append(words, line)
+	}
+	return hostedLastLine(strings.Join(words, "\n")), sp
+}
+
+// hostedLowSpaceKiB is the free room under which a failed install is put
+// down to the box's store being full.
+const hostedLowSpaceKiB = 64 << 10
+
+// hostedNoSpaceRE finds a write that ran out of room in an install's
+// output (npm: "TAR_ENTRY_ERROR ENOSPC: no space left on device"). npm lets
+// an optional dependency fail and exits 0, then removes what it wrote, so
+// by the time the box is asked its store may look roomy again (live run
+// 2026-11-12: 332 MiB free of 512 MiB after Claude Code's 326 MiB native
+// binary did not fit).
+var hostedNoSpaceRE = regexp.MustCompile(`(?i)\bENOSPC\b|no space left on device`)
+
+// note is the space in words for a refusal ("" when unknown and the
+// install said nothing of room); a store that ran out, or is nearly full,
+// is named as the likely cause, with the fix.
+func (s hostedSpace) note(installOut string) string {
+	full := hostedNoSpaceRE.MatchString(installOut)
+	n := ""
+	if s.SizeKiB > 0 {
+		n = fmt.Sprintf("the box home's store has %d MiB free of %d MiB", s.FreeKiB>>10, s.SizeKiB>>10)
+	}
+	switch {
+	case full:
+		if n != "" {
+			n = " (" + n + " now that the install's leftovers are gone)"
+		}
+		return "the install ran out of room in the box: it reported no space left on device" + n + "; use a box with more storage, or a template whose image already holds the tool"
+	case n != "" && s.FreeKiB < hostedLowSpaceKiB:
+		return n + "; the install most likely ran out of room (a package manager can leave a tool that cannot start when a part of it does not fit): use a box with more storage, or a template whose image already holds the tool"
+	}
+	return n
+}
+
 // hostedToolProbeArgv is the probe's argv for c.
 func hostedToolProbeArgv(c hostedToolCheck) []string {
 	argv := append([]string{"sh", "-c", hostedToolProbeScript, "sh"}, c.Names...)
@@ -323,4 +411,30 @@ func hostedAndList(xs []string) string {
 		return strings.Join(xs, "")
 	}
 	return strings.Join(xs[:len(xs)-1], ", ") + " and " + xs[len(xs)-1]
+}
+
+// hostedLastLine is s cut to its first and last non-empty lines, for a
+// bounded refusal (an install's output can run to many lines).
+func hostedLastLine(s string) string {
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	switch len(lines) {
+	case 0:
+		return ""
+	case 1:
+		return lines[0]
+	}
+	return lines[0] + " ... " + lines[len(lines)-1]
+}
+
+// hostedWithNote is "; " and the note, or "" for none.
+func hostedWithNote(n string) string {
+	if n == "" {
+		return ""
+	}
+	return "; " + n
 }

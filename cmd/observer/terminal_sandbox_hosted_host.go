@@ -466,23 +466,66 @@ func (r *hostedRun) boxEnv() map[string]string {
 
 // execOK runs argv in the box and requires exit 0.
 func (r *hostedRun) execOK(ctx context.Context, what string, spec sandboxremote.ExecSpec) error {
+	_, err := r.execOKOut(ctx, what, spec)
+	return err
+}
+
+// execOKOut is execOK that also returns the command's output (its first
+// 64 KiB of stdout, then of stderr when the vendor keeps it apart, redacted),
+// whatever its exit.
+func (r *hostedRun) execOKOut(ctx context.Context, what string, spec sandboxremote.ExecSpec) (string, error) {
 	if spec.Env == nil {
 		spec.Env = r.boxEnv()
 	}
+	var errBuf *hostedCappedBuffer
+	if spec.Stderr == nil {
+		// npm says a write that ran out of room on stderr, and a vendor
+		// that keeps stderr apart would drop it (live run 2026-11-12).
+		errBuf = &hostedCappedBuffer{max: 64 << 10}
+		spec.Stderr = errBuf
+	}
 	p, err := r.client.Exec(ctx, r.rec.VendorID, spec)
 	if err != nil {
-		return fmt.Errorf("%s: %w", what, err)
+		return "", fmt.Errorf("%s: %w", what, err)
 	}
 	defer p.Close()
-	out, _ := io.ReadAll(io.LimitReader(p, 64<<10))
+	raw, _ := io.ReadAll(io.LimitReader(p, 64<<10))
 	code, err := p.Wait(ctx)
+	if errBuf != nil {
+		raw = append(raw, '\n')
+		raw = append(raw, errBuf.bytes()...)
+	}
+	out := strings.TrimSpace(sandboxremote.Redact(string(raw), r.cred.Secrets()))
 	if err != nil {
-		return fmt.Errorf("%s: %w", what, err)
+		return out, fmt.Errorf("%s: %w", what, err)
 	}
 	if code != 0 {
-		return fmt.Errorf("%s exited %d: %s", what, code, strings.TrimSpace(sandboxremote.Redact(string(out), r.cred.Secrets())))
+		return out, fmt.Errorf("%s exited %d: %s", what, code, out)
 	}
-	return nil
+	return out, nil
+}
+
+// hostedCappedBuffer keeps the first max bytes written to it; writes never
+// fail (the process's stream must not stop on a full buffer).
+type hostedCappedBuffer struct {
+	mu  sync.Mutex
+	max int
+	b   []byte
+}
+
+func (c *hostedCappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if room := c.max - len(c.b); room > 0 {
+		c.b = append(c.b, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (c *hostedCappedBuffer) bytes() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]byte(nil), c.b...)
 }
 
 // hostedBoxOwnerProbe prints the uid:gid of the box's default (non-root)

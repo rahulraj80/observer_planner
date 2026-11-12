@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"strings"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 )
@@ -70,39 +70,66 @@ func (r *hostedRun) ensureTool(ctx context.Context) error {
 		how += " into " + spec.Env["NPM_CONFIG_PREFIX"]
 	}
 	r.say("%s is not in the box; installing it %s (first start, internet tier): %s", c.Tool, how, opt.Display)
-	err = r.execOK(ctx, "install "+c.Tool, spec)
+	installOut, err := r.execOKOut(ctx, "install "+c.Tool, spec)
 	if opt.Channel == "npm" {
 		if cerr := r.execOK(ctx, "remove npm's install cache", sandboxremote.ExecSpec{Argv: []string{"rm", "-rf", "--", spec.Env["NPM_CONFIG_CACHE"]}, Cwd: r.layout.Home}); cerr != nil {
 			r.say("npm's install cache stays in the box (%s): %s", spec.Env["NPM_CONFIG_CACHE"], hostedLastLine(cerr.Error()))
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("%s: %s is not installed in the box, and its install (%s) failed: %s", verdictHostedTool, c.Tool, opt.Display, hostedLastLine(err.Error()))
+		return fmt.Errorf("%s: %s is not installed in the box, and its install (%s) failed: %s%s", verdictHostedTool, c.Tool, opt.Display, hostedLastLine(err.Error()), hostedWithNote(r.boxSpace(ctx).note(installOut)))
 	}
 	if got, err = r.probeTool(ctx, *c); err != nil {
 		return err
 	}
 	if got.Tool == "" {
-		return fmt.Errorf("%s: %s's install (%s) finished, but %s is still not found in the box (on PATH or under %s)", verdictHostedTool, c.Tool, opt.Display, c.Tool, r.layout.Home)
+		return fmt.Errorf("%s: %s's install (%s) finished, but %s is still not found in the box (on PATH or under %s)%s", verdictHostedTool, c.Tool, opt.Display, c.Tool, r.layout.Home, hostedWithNote(r.boxSpace(ctx).note(installOut)))
+	}
+	if err := r.checkToolRuns(ctx, *c, opt.Display, got.Tool, installOut); err != nil {
+		return err
 	}
 	r.say("%s installed at %s", c.Tool, got.Tool)
 	return nil
 }
 
-// hostedLastLine is s cut to its first and last non-empty lines, for a
-// bounded refusal (an install's output can run to many lines).
-func hostedLastLine(s string) string {
-	var lines []string
-	for _, l := range strings.Split(s, "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			lines = append(lines, l)
-		}
+// hostedToolRunWait bounds the installed tool's first start.
+var hostedToolRunWait = 2 * time.Minute
+
+// checkToolRuns starts the tool an install just placed, once (--version),
+// so a tool that cannot start refuses the launch with its own words and the
+// box's free room, instead of the agent exiting at once with no word of why
+// (hostedToolRunScript).
+// installOut is the install's own output, read for a write that ran out of
+// room.
+func (r *hostedRun) checkToolRuns(ctx context.Context, c hostedToolCheck, display, at, installOut string) error {
+	rctx, cancel := context.WithTimeout(ctx, hostedToolRunWait)
+	defer cancel()
+	out, code, err := hostedExecOutput(rctx, r.client, r.rec.VendorID, hostedToolRunArgv(at), r.boxEnv(), hostedToolProbeLimit)
+	if err != nil {
+		return fmt.Errorf("%s: %s was installed at %s, but the box could not be asked whether it starts: %w", verdictHostedTool, c.Tool, at, err)
 	}
-	switch len(lines) {
-	case 0:
-		return ""
-	case 1:
-		return lines[0]
+	if code == 0 {
+		return nil
 	}
-	return lines[0] + " ... " + lines[len(lines)-1]
+	words, sp := parseHostedToolRun(out)
+	if words == "" {
+		words = "no output"
+	}
+	// The cause comes before the tool's words: a run's end note is bounded.
+	why := ""
+	if n := sp.note(installOut); n != "" {
+		why = ": " + n
+	}
+	return fmt.Errorf("%s: %s was installed at %s (%s), but it does not start%s (`%s --version` exited %d: %s)", verdictHostedTool, c.Tool, at, display, why, path.Base(at), code, sandboxremote.Redact(words, r.cred.Secrets()))
+}
+
+// boxSpace asks the box how much room its home has (zero when it does not
+// say).
+func (r *hostedRun) boxSpace(ctx context.Context) hostedSpace {
+	out, code, err := hostedExecOutput(ctx, r.client, r.rec.VendorID, hostedBoxSpaceArgv(), r.boxEnv(), 256)
+	if err != nil || code != 0 {
+		return hostedSpace{}
+	}
+	_, sp := parseHostedToolRun(out)
+	return sp
 }
