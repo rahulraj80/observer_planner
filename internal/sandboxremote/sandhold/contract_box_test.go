@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/sandboxremote"
 	vocab "github.com/marmutapp/superbased-observer/internal/sandboxvocab"
@@ -86,6 +87,50 @@ func TestContractBoxCreateRefused(t *testing.T) {
 	_, err = contractBox(t, v).Create(context.Background(), sandboxremote.BoxSpec{Tier: vocab.TierNone, Isolation: vocab.ClassContainer, TimeoutSeconds: 60})
 	if err == nil || errors.Is(err, sandboxremote.ErrCreateUnknown) || !strings.Contains(err.Error(), words.Error) || !strings.Contains(err.Error(), words.Fix) {
 		t.Errorf("the launch would say %v, want the node's reason and fix", err)
+	}
+}
+
+// TestContractBoxCreateFull: a full node (503 with Retry-After) is "full,
+// try again shortly", not a refusal: the create waits what the node asks,
+// once, and tries again; still full, the launch says so in the node's words.
+func TestContractBoxCreateFull(t *testing.T) {
+	full := loadVector(t, "sandbox-create-full")
+	var words struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(full.Response, &words)
+	var waits []time.Duration
+	old := fullWait
+	fullWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	t.Cleanup(func() { fullWait = old })
+	spec := sandboxremote.BoxSpec{
+		RunID: "run1", Labels: map[string]string{sandboxremote.LabelKey: "run1"},
+		Template: "py-tests", TimeoutSeconds: 600, Tier: vocab.TierInternet, Isolation: vocab.ClassContainer,
+	}
+
+	_, err := contractNode(t, full).CreateSandbox(context.Background(), CreateRequest{Isolation: "shielded", Network: &CreateNetwork{Allow: []string{"pypi.org"}, Open: true}})
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 503 || ae.RetryAfter != 30*time.Second {
+		t.Fatalf("got %v (%+v), want a 503 that asks for 30 s", err, ae)
+	}
+
+	got, err := contractBox(t, full, loadVector(t, "sandbox-create")).Create(context.Background(), spec)
+	if err != nil || got.ID != contractID || len(waits) != 1 || waits[0] != 30*time.Second {
+		t.Fatalf("full then made: %+v %v, waits %v; want the box after one 30 s wait", got, err, waits)
+	}
+
+	waits = nil
+	_, err = contractBox(t, full).Create(context.Background(), spec)
+	if !errors.Is(err, sandboxremote.ErrFull) || errors.Is(err, sandboxremote.ErrRefused) || errors.Is(err, sandboxremote.ErrCreateUnknown) ||
+		!strings.Contains(err.Error(), words.Error) || strings.Contains(err.Error(), "refused") || len(waits) != 1 {
+		t.Fatalf("full twice: %v (waits %v), want ErrFull in the node's words after one wait, never a refusal", err, waits)
+	}
+
+	// A wait the launch is cancelled in ends it as full, without a second try.
+	fullWait = func(context.Context, time.Duration) error { return context.Canceled }
+	_, err = contractBox(t, full).Create(context.Background(), spec)
+	if !errors.Is(err, sandboxremote.ErrFull) {
+		t.Fatalf("cancelled wait: %v, want ErrFull", err)
 	}
 }
 

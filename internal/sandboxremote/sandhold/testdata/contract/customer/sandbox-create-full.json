@@ -1,0 +1,20 @@
+{
+  "name": "sandbox-create-full",
+  "about": "No room now on the targets that meet the request: 503 with a Retry-After header (seconds); the refusal says which sandboxes are full and why, naming only targets that could have taken it.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {
+    "isolation": "shielded",
+    "network": {
+      "allow": [
+        "pypi.org"
+      ],
+      "open": true
+    }
+  },
+  "status": 503,
+  "response": {
+    "error": "Shielded sandboxes with an allow list are full right now: runc: not enough free CPU for all sandboxes: needs 1.00, 0.87 free of 2.00",
+    "fix": "try again in about 30 seconds (the Retry-After header), or delete a sandbox you no longer need to free its CPU and memory"
+  }
+}

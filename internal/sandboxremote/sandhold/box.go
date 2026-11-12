@@ -40,6 +40,11 @@ var (
 	fileWait = 5 * time.Minute
 	// deleteTries bounds the deletes of a box the node gave less than asked.
 	deleteTries = 3
+	// fullRetryMax bounds the one wait a full node's Retry-After asks for
+	// before the create is tried again; a longer ask is not waited out.
+	fullRetryMax = 2 * time.Minute
+	// fullWait waits out a full node's Retry-After (tests replace it).
+	fullWait = sleepCtx
 )
 
 // maxUploadFile is the most one PUT carries (the node's own limit is
@@ -159,6 +164,24 @@ func info(sb Sandbox) sandboxremote.BoxInfo {
 	}
 }
 
+// createOnce is one bounded create call.
+func (b *Box) createOnce(ctx context.Context, req CreateRequest) (Sandbox, error) {
+	cctx, cancel := context.WithTimeout(ctx, createWait)
+	defer cancel()
+	return b.api.CreateSandbox(cctx, req)
+}
+
+// nodeFull reports a full node's answer: 503 with a Retry-After in seconds.
+func nodeFull(err error) (*APIError, bool) {
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusServiceUnavailable && ae.RetryAfter > 0 {
+		return ae, true
+	}
+	return nil, false
+}
+
+func isFull(err error) bool { _, full := nodeFull(err); return full }
+
 // Create starts a sandbox with the isolation and network the spec asks for,
 // and refuses (deleting it) a sandbox the node says got less.
 func (b *Box) Create(ctx context.Context, spec sandboxremote.BoxSpec) (sandboxremote.BoxInfo, error) {
@@ -166,12 +189,20 @@ func (b *Box) Create(ctx context.Context, spec sandboxremote.BoxSpec) (sandboxre
 	if err != nil {
 		return sandboxremote.BoxInfo{}, err
 	}
-	cctx, cancel := context.WithTimeout(ctx, createWait)
-	sb, err := b.api.CreateSandbox(cctx, req)
-	cancel()
+	sb, err := b.createOnce(ctx, req)
+	// A full node (503 with Retry-After) is not a refusal: wait what it
+	// asks, once, and try again.
+	if ae, full := nodeFull(err); full && ae.RetryAfter <= fullRetryMax {
+		if serr := fullWait(ctx, ae.RetryAfter); serr != nil {
+			return sandboxremote.BoxInfo{}, fmt.Errorf("%w: %w", sandboxremote.ErrFull, err)
+		}
+		sb, err = b.createOnce(ctx, req)
+	}
 	if err != nil {
 		var ae *APIError
 		switch {
+		case isFull(err):
+			return sandboxremote.BoxInfo{}, fmt.Errorf("the node is %w: %w", sandboxremote.ErrFull, err)
 		case errors.As(err, &ae) && ae.Status == http.StatusNotFound && spec.Template != "":
 			return sandboxremote.BoxInfo{}, fmt.Errorf("%w: %w", sandboxremote.ErrTemplateUnavailable, err)
 		case errors.As(err, &ae) && ae.Status == http.StatusTooManyRequests:

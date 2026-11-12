@@ -149,6 +149,11 @@ func contractNode(t *testing.T, vs ...vector) *Client {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if v.Status == http.StatusServiceUnavailable {
+			// A full node's 503 carries Retry-After in seconds (contract
+			// README, sandbox-create-full); the file holds only the body.
+			w.Header().Set("Retry-After", "30")
+		}
 		w.WriteHeader(v.Status)
 		_, _ = io.WriteString(w, fill(string(v.Response)))
 	}))

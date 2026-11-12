@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -91,6 +92,9 @@ type APIError struct {
 	// Code is the refusal's code a client branches on (pipe_unsupported,
 	// network_open_not_granted, ...), "" when the node sent none.
 	Code string
+	// RetryAfter is the reply's Retry-After in seconds (0 when it sent
+	// none, or a date): a full node's 503 says when to try again.
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -244,8 +248,13 @@ func refusal(res *http.Response, b []byte) error {
 			ae.Msg += ": " + Plain(s)
 		}
 	}
-	if ra := res.Header.Get("Retry-After"); ra != "" && ae.Fix == "" {
-		ae.Fix = "try again in " + Plain(ra) + " seconds"
+	if ra := strings.TrimSpace(res.Header.Get("Retry-After")); ra != "" {
+		if n, err := strconv.Atoi(ra); err == nil && n > 0 {
+			ae.RetryAfter = time.Duration(n) * time.Second
+		}
+		if ae.Fix == "" {
+			ae.Fix = "try again in " + Plain(ra) + " seconds"
+		}
 	}
 	return ae
 }

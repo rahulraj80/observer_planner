@@ -25,6 +25,10 @@ var (
 	// ErrRateLimited: the vendor answered 429 after the client's own bounded
 	// retries.
 	ErrRateLimited = errors.New("provider rate limit")
+	// ErrFull: the provider has no room for the box right now and said
+	// when to try again (SandHold: 503 with Retry-After); no box was made.
+	// Not a refusal: the same launch may succeed shortly.
+	ErrFull = errors.New("full right now, try again shortly")
 	// ErrCreateUnknown: the create call's outcome is unknown (the response
 	// was lost); the box may exist under its label.
 	ErrCreateUnknown = errors.New("create outcome unknown")
