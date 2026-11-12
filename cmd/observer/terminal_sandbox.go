@@ -2187,8 +2187,12 @@ func (r *sandboxRuntime) writeMeta(dest string, src workspace.Source, req termsv
 }
 
 // newWorkspaceID mints the 16-random-byte base64url managed-workspace id (plan
-// §4). It regenerates on the rare value whose leading char is '-' (base64url's
-// alphabet includes it), which workspace.mintDest's clean-token guard rejects.
+// §4). It regenerates on the rare value whose leading char is '-' or '_'
+// (base64url's alphabet includes both): workspace.mintDest's clean-token
+// guard rejects a leading '-', and a hosted box carries the id as a label
+// value, which must start and end with a letter or digit (SandHold refused
+// one starting with '_', 2026-11-12). The last of the 22 characters holds
+// only two bits, so it is always A, Q, g or w.
 func newWorkspaceID() (string, error) {
 	for i := 0; i < 8; i++ {
 		var b [16]byte
@@ -2196,7 +2200,7 @@ func newWorkspaceID() (string, error) {
 			return "", fmt.Errorf("terminal_sandbox: mint workspace id: %w", err)
 		}
 		id := base64.RawURLEncoding.EncodeToString(b[:])
-		if !strings.HasPrefix(id, "-") {
+		if c := id[0]; c != '-' && c != '_' {
 			return id, nil
 		}
 	}
