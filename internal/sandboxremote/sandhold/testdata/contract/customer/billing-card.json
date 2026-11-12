@@ -1,0 +1,11 @@
+{
+  "name": "billing-card",
+  "about": "Add a card: the URL of Stripe's hosted page, where the card goes in; the node never sees its number.",
+  "method": "POST",
+  "path": "/v1/billing/card",
+  "status": 200,
+  "response": {
+    "testMode": true,
+    "url": "https://checkout.stripe.com/c/pay/cs_test_contract"
+  }
+}

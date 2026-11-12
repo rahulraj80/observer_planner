@@ -1,0 +1,14 @@
+{
+  "name": "billing-topup",
+  "about": "Buy credit (whole dollars, 10 to 1000): the URL of Stripe's hosted payment page.",
+  "method": "POST",
+  "path": "/v1/billing/topup",
+  "request": {
+    "amountUsd": 50
+  },
+  "status": 200,
+  "response": {
+    "testMode": true,
+    "url": "https://checkout.stripe.com/c/pay/cs_test_contract"
+  }
+}

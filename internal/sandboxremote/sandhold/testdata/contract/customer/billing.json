@@ -1,0 +1,41 @@
+{
+  "name": "billing",
+  "about": "Where the org's billing stands, for its admins: test mode, this month's use at list price, the credit, the card on file (brand and last four only), invoices with Stripe's hosted page, and whether new sandboxes are allowed.",
+  "method": "GET",
+  "path": "/v1/billing",
+  "status": 200,
+  "response": {
+    "billable": true,
+    "billing": "test",
+    "canCreate": true,
+    "card": null,
+    "credit": {
+      "leftUsd": 80,
+      "starterUsd": 80,
+      "topUpsUsd": 0,
+      "usedUsd": 0
+    },
+    "graceEndsAt": null,
+    "invoices": [],
+    "month": {
+      "costUsd": 0,
+      "from": "<time>",
+      "gibHours": 0,
+      "gibUsd": 0,
+      "period": "<period>",
+      "vcpuHours": 0,
+      "vcpuUsd": 0
+    },
+    "notice": "Test mode: no real customers or charges. Billing runs in Stripe's test environment; no card is charged.",
+    "paymentFailedAt": null,
+    "prices": {
+      "gibHourUsd": 0.013,
+      "vcpuHourUsd": 0.04
+    },
+    "testMode": true,
+    "topUp": {
+      "maxUsd": 1000,
+      "minUsd": 10
+    }
+  }
+}

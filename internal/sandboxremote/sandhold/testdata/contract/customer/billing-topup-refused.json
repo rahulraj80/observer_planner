@@ -1,0 +1,15 @@
+{
+  "name": "billing-topup-refused",
+  "about": "An amount out of bounds.",
+  "method": "POST",
+  "path": "/v1/billing/topup",
+  "request": {
+    "amountUsd": 5
+  },
+  "status": 400,
+  "response": {
+    "code": "bad_amount",
+    "error": "amountUsd must be a whole number of dollars from 10 to 1000",
+    "fix": "send {\"amountUsd\": 50}"
+  }
+}

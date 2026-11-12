@@ -1,0 +1,12 @@
+{
+  "name": "billing-member",
+  "about": "Members see nothing of billing.",
+  "method": "GET",
+  "path": "/v1/billing",
+  "status": 403,
+  "response": {
+    "code": "admin_only",
+    "error": "only an org admin can see or change billing",
+    "fix": "ask an org admin"
+  }
+}
