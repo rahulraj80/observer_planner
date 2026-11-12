@@ -72,6 +72,58 @@ export function networkWord(n: string): string {
   return tierTitle(n);
 }
 
+// A node's network words as people read them: a Limited network reaches
+// only the hosts on the box's allow list.
+const NODE_NETWORK: Record<string, string> = {
+  none: "None",
+  limited: "Allow list (limited)",
+  open: "Open",
+};
+
+/** nodeNetworkLabel is a node network word as people read it. */
+export function nodeNetworkLabel(n: string | undefined): string {
+  if (!n) return "";
+  return NODE_NETWORK[n.toLowerCase()] ?? tierTitle(n);
+}
+
+/**
+ * BoxWords is what the node said it made for a run's box, in its own words
+ * (dashapi.BoxWords): isolation shared, shielded, sealed or vault; network
+ * none, limited or open; the target it runs on. pending: the node decides
+ * the isolation and has not said yet.
+ */
+export type BoxWords = { isolation?: string; network?: string; runs_on?: string; pending?: boolean };
+
+/**
+ * runIsolationWords is a run's isolation and network for the page: the
+ * node's own answer when its backend reports one (the recorded class and
+ * tier of such a run are the row's floor and the launch's tier, not what
+ * the box got), else the recorded class and tier in SandHold's words.
+ */
+export function runIsolationWords(r: {
+  isolation_class: string;
+  egress_tier?: string;
+  node?: BoxWords;
+}): { isolation: string; network: string; title: string } {
+  const n = r.node;
+  if (n) {
+    if (n.isolation) {
+      return {
+        isolation: tierTitle(n.isolation),
+        network: nodeNetworkLabel(n.network),
+        title: n.runs_on ? `What the node made: runs on ${n.runs_on}` : "What the node made",
+      };
+    }
+    const why = n.pending ? "waiting for the node" : "not reported by the node";
+    return { isolation: why, network: "", title: "The node decides this run's isolation" };
+  }
+  return {
+    isolation: tierForClass(r.isolation_class) || r.isolation_class,
+    network: networkForEgress(r.egress_tier),
+    title: `Observer class: ${r.isolation_class}`,
+  };
+}
+
 /** durationText is a run's length: "48 s", "14 min", "2 h 5 min". */
 export function durationText(seconds: number | undefined): string {
   if (seconds === undefined || seconds < 0) return "";
@@ -97,6 +149,8 @@ export type SandboxRun = {
   isolation_class: string;
   egress_tier?: string;
   capture_level?: string;
+  /** What the node said it made (absent for a backend that reports none). */
+  node?: BoxWords;
   refused?: number;
   refused_may_be_more?: boolean;
 };
@@ -162,4 +216,32 @@ export function nodeError(body: string): { error: string; fix?: string } {
     // not JSON
   }
   return { error: body.trim() || "the request failed" };
+}
+
+/** The selection verdict for a row that does not run on this platform. */
+export const VERDICT_UNSUPPORTED_PLATFORM = "unsupported_platform";
+
+/**
+ * placesGroups splits this machine's backends for the Places column
+ * (demo screenshots 2026-11-12: on Linux ten rows that cannot run here
+ * pushed the advisor below the fold): `here` are the rows that run or can
+ * be turned on here, `needsModule` those that wait for a module, `other`
+ * those that do not run on this platform at all (folded under "Other
+ * platforms"). A row is judged by the verdict it would get once enabled,
+ * so a row that is both off and for another platform is "other".
+ */
+export function placesGroups<
+  T extends { verdict?: string; when_enabled_verdict?: string; available?: boolean },
+>(rows: T[], stateOf: (b: T) => string): { here: T[]; needsModule: T[]; other: T[] } {
+  const out = { here: [] as T[], needsModule: [] as T[], other: [] as T[] };
+  for (const b of rows) {
+    if (!b.available && (b.verdict === VERDICT_UNSUPPORTED_PLATFORM || b.when_enabled_verdict === VERDICT_UNSUPPORTED_PLATFORM)) {
+      out.other.push(b);
+    } else if (stateOf(b) === "needs_module") {
+      out.needsModule.push(b);
+    } else {
+      out.here.push(b);
+    }
+  }
+  return out;
 }

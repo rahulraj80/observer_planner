@@ -482,3 +482,36 @@ func TestForVersion(t *testing.T) {
 		t.Fatal("a non-release fixed_in validated")
 	}
 }
+
+// TestForOS (demo screenshots 2026-11-12: a "needs macOS 13" banner on
+// Linux): an announcement naming platforms reaches only those; one naming
+// none reaches every platform; an unknown platform name is refused.
+func TestForOS(t *testing.T) {
+	all := with(func(a *Announcement) { a.ID = "all" })
+	mac := with(func(a *Announcement) { a.ID = "mac"; a.OS = []string{"darwin"} })
+	ids := func(list []Announcement) string {
+		var out []string
+		for _, a := range list {
+			out = append(out, a.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	list := []Announcement{all, mac}
+	if got := ids(ForOS(list, "linux")); got != "all" {
+		t.Errorf("linux sees %q", got)
+	}
+	if got := ids(ForOS(list, "darwin")); got != "all,mac" {
+		t.Errorf("darwin sees %q", got)
+	}
+	if len(list) != 2 {
+		t.Error("ForOS changed its input")
+	}
+	if err := Validate(with(func(a *Announcement) { a.OS = []string{"macos"} })); !errors.Is(err, ErrInvalid) {
+		t.Errorf("unknown os accepted: %v", err)
+	}
+	for _, a := range Release() {
+		if strings.Contains(a.Title, "macOS") && (len(a.OS) != 1 || a.OS[0] != "darwin") {
+			t.Errorf("%s names macOS but reaches %v", a.ID, a.OS)
+		}
+	}
+}

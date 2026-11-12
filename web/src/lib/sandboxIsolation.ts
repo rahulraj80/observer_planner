@@ -285,6 +285,24 @@ export function unavailableRows(probe: SandboxAvailability | null): UnavailableR
     .map(({ b, st }) => ({ id: b.id, label: b.label, reason: st.reason, notes: backendNotes(b) }));
 }
 
+/** nodeTierLabel is a node's isolation tier word ("shielded" -> "Shielded"). */
+export function nodeTierLabel(tier: string): string {
+  return tier ? tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase() : "";
+}
+
+// NODE_NETWORK_PHRASES are a node's network words as the run pill says them.
+const NODE_NETWORK_PHRASES: Record<string, string> = {
+  none: "none",
+  limited: "allow list (limited)",
+  open: "open",
+};
+
+/** nodeNetworkPhrase is a node network word as the run pill says it. */
+export function nodeNetworkPhrase(n: string | undefined): string {
+  if (!n) return "";
+  return NODE_NETWORK_PHRASES[n.toLowerCase()] ?? n;
+}
+
 // CAUSE_LABELS names the capture relay's closed degraded-cause vocabulary
 // (Go owner: internal/sandboxrelayd.DegradedCause) for people.
 const CAUSE_LABELS: Record<string, string> = {
@@ -340,8 +358,24 @@ export function seccompNotFiltered(iso: LaunchIsolation | undefined): boolean {
  */
 export function runPillLabel(iso: LaunchIsolation | undefined): string | null {
   if (!iso || !iso.class || iso.class === "none") return null;
-  const parts = [iso.backend ? `${iso.backend} (${classLabel(iso.class)})` : classLabel(iso.class)];
-  if (iso.egress_tier) parts.push(`network ${iso.egress_tier.replaceAll("_", " ")}`);
+  const parts: string[] = [];
+  const node = iso.node;
+  if (node) {
+    // The node decides the box's isolation (a SandHold node): its own
+    // words, never the row's floor or the launch's tier.
+    const backend = iso.backend || "node";
+    if (node.isolation) {
+      const where = node.runs_on ? ` on ${node.runs_on}` : "";
+      parts.push(`${backend} (${nodeTierLabel(node.isolation)}${where})`);
+      const net = nodeNetworkPhrase(node.network);
+      if (net) parts.push(`network ${net}`);
+    } else {
+      parts.push(`${backend} (${node.pending ? "waiting for the node to say its isolation" : "isolation not reported by the node"})`);
+    }
+  } else {
+    parts.push(iso.backend ? `${iso.backend} (${classLabel(iso.class)})` : classLabel(iso.class));
+    if (iso.egress_tier) parts.push(`network ${iso.egress_tier.replaceAll("_", " ")}`);
+  }
   parts.push(`capture ${captureLabel(iso.capture_level, iso.capture_rule)}`);
   const degraded = degradedLabel(iso);
   if (degraded) parts.push(degraded);

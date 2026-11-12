@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -85,6 +86,12 @@ type Announcement struct {
 	// it (WINNODE2 16b, a "v1.32.0 fixes ..." banner on a v1.36.0 node).
 	// Additive on every rail: an older reader ignores the field.
 	FixedIn string `json:"fixed_in,omitempty"`
+	// OS, optional, lists the platforms (runtime.GOOS values: darwin,
+	// linux, windows) the announcement applies to; empty applies to every
+	// platform. A node on another platform does not show it (demo
+	// screenshots 2026-11-12: a "needs macOS 13" banner on Linux).
+	// Additive on every rail: an older reader ignores the field.
+	OS []string `json:"os,omitempty"`
 }
 
 // releaseAnnouncements is rail R1: the announcements compiled into this
@@ -153,6 +160,7 @@ var releaseAnnouncements = []Announcement{
 		URL:       "https://github.com/superbasedapp/observer/releases/tag/v1.37.0",
 		ExpiresAt: "2026-12-30T00:00:00Z",
 		Source:    SourceRelease,
+		OS:        []string{"darwin"},
 	},
 }
 
@@ -218,6 +226,11 @@ func Validate(a Announcement) error {
 		}
 		if u.Host == "" {
 			return fmt.Errorf("%w: url has no host", ErrInvalid)
+		}
+	}
+	for _, o := range a.OS {
+		if !knownOS[o] {
+			return fmt.Errorf("%w: os %q is not a platform (darwin, linux or windows)", ErrInvalid, o)
 		}
 	}
 	if a.FixedIn != "" {
@@ -427,6 +440,22 @@ func ForVersion(list []Announcement, running string) []Announcement {
 	out := list[:0:0]
 	for _, a := range list {
 		if fixed, ok := parseRelease(a.FixedIn); ok && compareRelease(have, fixed) >= 0 {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// knownOS are the platforms an announcement may name.
+var knownOS = map[string]bool{"darwin": true, "linux": true, "windows": true}
+
+// ForOS drops the announcements that name platforms other than goos (an
+// announcement naming none applies everywhere).
+func ForOS(list []Announcement, goos string) []Announcement {
+	out := list[:0:0]
+	for _, a := range list {
+		if len(a.OS) > 0 && !slices.Contains(a.OS, goos) {
 			continue
 		}
 		out = append(out, a)

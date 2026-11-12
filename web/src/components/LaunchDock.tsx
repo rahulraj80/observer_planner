@@ -1255,7 +1255,11 @@ function Dock({
             hoverable span; the enabled button is its own reference. */}
         {(() => {
           const newBtn = (
-            <button type="button" onClick={onNew} disabled={remoteBlocked} className="flex items-center gap-1.5 rounded-pill border bg-bg-1 px-3 py-1.5 text-caption font-medium text-fg-2 shadow-lg hover:text-fg-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-fg-2"><Icon icon={Plus} size="xs" />New terminal</button>
+            // At rest the button is its "+" alone, so it covers as little of the
+            // page under it as it can (demo screenshots 2026-11-12: the full
+            // label sat on a card's text); hover or keyboard focus shows the
+            // label. The label stays in the DOM, so it is the accessible name.
+            <button type="button" onClick={onNew} disabled={remoteBlocked} aria-label="New terminal" className="group flex items-center rounded-pill border bg-bg-1 px-2 py-1.5 text-caption font-medium text-fg-2 shadow-lg hover:text-fg-1 focus:outline-none focus-visible:text-fg-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-fg-2"><Icon icon={Plus} size="xs" /><span className="max-w-0 overflow-hidden whitespace-nowrap transition-[max-width,margin] duration-150 group-hover:ml-1.5 group-hover:max-w-[8rem] group-focus-visible:ml-1.5 group-focus-visible:max-w-[8rem]">New terminal</span></button>
           );
           const tip = remoteBlocked ? REMOTE_TERMINAL_OFF_MSG : "Start a fresh agent in the embedded terminal";
           return remoteBlocked ? (

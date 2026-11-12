@@ -30,9 +30,10 @@ import {
   adviseReady,
   durationText,
   findingsText,
-  networkForEgress,
   networkWord,
   nodeError,
+  placesGroups,
+  runIsolationWords,
   statusText,
   tierForClass,
   tierTitle,
@@ -115,8 +116,41 @@ export function LocalPlaces({ probe }: { probe: SandboxAvailability | null }) {
   if (rows.length === 0) {
     return <p className="text-fg-3">{probe.reason || "No sandbox backend is offered on this machine."}</p>;
   }
+  // Only what applies to this machine is listed in the open; rows that wait
+  // for a module, and rows for another platform, are folded (demo
+  // screenshots 2026-11-12: on Linux they pushed the advisor below the fold).
+  const groups = placesGroups(rows, (b) => backendState(b).state);
   return (
-    <ul className="space-y-2" aria-label="This machine's sandbox backends">
+    <div className="space-y-2">
+      {groups.here.length > 0 ? (
+        <BackendList rows={groups.here} label="This machine's sandbox backends" />
+      ) : (
+        <p className="text-fg-3">No sandbox backend runs here yet.</p>
+      )}
+      {groups.needsModule.length > 0 && (
+        <details data-group="needs-module">
+          <summary className="cursor-pointer text-[12px] text-fg-3">Need a module installed ({groups.needsModule.length})</summary>
+          <div className="mt-2">
+            <BackendList rows={groups.needsModule} label="Backends that need a module installed" />
+          </div>
+        </details>
+      )}
+      {groups.other.length > 0 && (
+        <details data-group="other-platforms">
+          <summary className="cursor-pointer text-[12px] text-fg-3">Other platforms ({groups.other.length})</summary>
+          <div className="mt-2">
+            <BackendList rows={groups.other} label="Backends for other platforms" />
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** BackendList lists backends with their tier, maturity and state. */
+function BackendList({ rows, label }: { rows: SandboxBackendAvail[]; label: string }) {
+  return (
+    <ul className="space-y-2" aria-label={label}>
       {rows.map((b) => {
         const st = backendState(b);
         const tier = tierForClass(b.class);
@@ -436,6 +470,7 @@ export function RunsView({ runs }: { runs: SandboxRun[] }) {
         <tbody>
           {runs.map((r) => {
             const found = findingsText(r);
+            const iso = runIsolationWords(r);
             return (
               <tr key={r.run_id} data-run={r.run_id} className="border-b border-line-1">
                 <td className="px-2 py-1.5">
@@ -446,10 +481,10 @@ export function RunsView({ runs }: { runs: SandboxRun[] }) {
                   <span className="block text-[11px] text-fg-3">{fmtRelative(r.launched_at)}</span>
                 </td>
                 <td className="px-2 py-1.5 text-fg-2">{whereText(r)}</td>
-                <td className="px-2 py-1.5 text-fg-2" title={`Observer class: ${r.isolation_class}`}>
-                  {tierForClass(r.isolation_class) || r.isolation_class}
+                <td className="px-2 py-1.5 text-fg-2" title={iso.title}>
+                  {iso.isolation}
                 </td>
-                <td className="px-2 py-1.5 text-fg-2">{networkForEgress(r.egress_tier)}</td>
+                <td className="px-2 py-1.5 text-fg-2">{iso.network}</td>
                 <td className="px-2 py-1.5 text-fg-2">{statusText(r)}</td>
                 <td className="px-2 py-1.5 text-fg-2">{durationText(r.duration_seconds)}</td>
                 <td className={"px-2 py-1.5 " + (found ? "text-warn" : "")}>{found}</td>

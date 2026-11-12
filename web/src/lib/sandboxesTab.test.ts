@@ -10,6 +10,9 @@ import {
   forkTabCrumb,
   networkForEgress,
   nodeError,
+  nodeNetworkLabel,
+  placesGroups,
+  runIsolationWords,
   statusText,
   tierForClass,
   tierTitle,
@@ -74,4 +77,34 @@ test("the advisor's answers", () => {
     fix: "say own",
   });
   assert.deepEqual(nodeError("plain text\n"), { error: "plain text" });
+});
+
+test("a run on a node shows what the node made, in its words (demo 2026-11-12)", () => {
+  const node = { isolation_class: "process", egress_tier: "internet" };
+  assert.deepEqual(runIsolationWords({ ...node, node: { isolation: "shielded", network: "limited", runs_on: "runc" } }), {
+    isolation: "Shielded",
+    network: "Allow list (limited)",
+    title: "What the node made: runs on runc",
+  });
+  assert.equal(runIsolationWords({ ...node, node: { pending: true } }).isolation, "waiting for the node");
+  assert.equal(runIsolationWords({ ...node, node: {} }).isolation, "not reported by the node");
+  assert.equal(runIsolationWords({ ...node, node: {} }).network, "");
+  // A local row keeps its recorded class and tier, in SandHold's words.
+  assert.deepEqual(runIsolationWords(node), { isolation: "Shared", network: "Open", title: "Observer class: process" });
+  assert.equal(nodeNetworkLabel("none"), "None");
+  assert.equal(nodeNetworkLabel("open"), "Open");
+});
+
+test("Places lists what runs here and folds other platforms (demo 2026-11-12)", () => {
+  const rows = [
+    { id: "bwrap", available: false, verdict: "disabled_by_config", when_enabled_verdict: "" },
+    { id: "apple", available: false, verdict: "unsupported_platform" },
+    { id: "seatbelt", available: false, verdict: "disabled_by_config", when_enabled_verdict: "unsupported_platform" },
+    { id: "oci", available: false, verdict: "module_inactive" },
+    { id: "jail", available: true },
+  ];
+  const g = placesGroups(rows, (b) => (b.verdict === "module_inactive" ? "needs_module" : "x"));
+  assert.deepEqual(g.here.map((b) => b.id), ["bwrap", "jail"]);
+  assert.deepEqual(g.needsModule.map((b) => b.id), ["oci"]);
+  assert.deepEqual(g.other.map((b) => b.id), ["apple", "seatbelt"]);
 });

@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/announce"
@@ -51,7 +52,7 @@ func (s *Server) handleAnnouncements(w http.ResponseWriter, r *http.Request) {
 	// An announcement whose fixed_in this node has reached is no news here
 	// (WINNODE2 16b).
 	writeJSON(w, announcementsResponse{
-		Announcements: announce.ForVersion(announce.Merge(announcementNow(), sources...), s.opts.Version),
+		Announcements: announce.ForOS(announce.ForVersion(announce.Merge(announcementNow(), sources...), s.opts.Version), runtime.GOOS),
 	})
 }
 

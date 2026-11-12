@@ -83,6 +83,18 @@ test("the run pill reads the run's recorded evidence", () => {
   assert.equal(runPillLabel(undefined), null);
 });
 
+test("the run pill says what the node made, never the row's floor (demo 2026-11-12)", () => {
+  const sh = { class: "process", backend: "sandhold", egress_tier: "internet", capture_level: "partial", verification: "live" };
+  assert.equal(
+    runPillLabel({ ...sh, node: { isolation: "shielded", network: "limited", runs_on: "runc" } }),
+    "sandhold (Shielded on runc), network allow list (limited), capture partial",
+  );
+  const pending = runPillLabel({ ...sh, node: { pending: true } }) ?? "";
+  assert.match(pending, /^sandhold \(waiting for the node to say its isolation\), capture partial$/);
+  assert.doesNotMatch(pending, /process|internet/);
+  assert.equal(runPillLabel({ ...sh, node: {} }), "sandhold (isolation not reported by the node), capture partial");
+});
+
 test("the run pill says when capture was lowered after launch", () => {
   const base = { class: "process", backend: "bwrap", capture_level: "full", capture_rule: "C2", verification: "live" };
   assert.equal(

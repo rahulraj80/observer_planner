@@ -4848,6 +4848,13 @@ export type LaunchIsolation = {
   // off, not_applicable, none); absent from an older daemon or a run that
   // recorded none.
   seccomp?: string;
+  // node is what the node that ran the box said it made, in its own words
+  // (dashapi.BoxWords: a SandHold node's isolation shared, shielded, sealed
+  // or vault; network none, limited or open; the target it runs on), or
+  // pending while it has not said. Absent for a backend that reports none;
+  // class and egress_tier of such a run are the row's floor and the
+  // launch's tier, not what the box got.
+  node?: { isolation?: string; network?: string; runs_on?: string; pending?: boolean };
 };
 
 // SSHProfileInfo is one row of GET /api/terminal/ssh — an operator-authored
