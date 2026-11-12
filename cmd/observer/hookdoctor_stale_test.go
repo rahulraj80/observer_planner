@@ -171,3 +171,20 @@ func TestHookDoctorListsStaleEntriesReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// A bare binary name is resolved through PATH, so it is under no temp
+// directory even when the doctor runs from one (an omit-tag run from a
+// worktree under /tmp reported `observer hook ...` as a temp binary).
+func TestStaleBareNameFromTempDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	env := staleEnv{tempRoots: []string{filepath.ToSlash(os.TempDir()), filepath.ToSlash(dir)}}
+	for _, bin := range []string{"observer", "./observer", "bin/observer"} {
+		if underTempRoot(bin, env) {
+			t.Errorf("underTempRoot(%q) from %s = true, want false", bin, dir)
+		}
+	}
+	if !underTempRoot(filepath.ToSlash(filepath.Join(dir, "observer")), env) {
+		t.Errorf("an absolute binary under %s is not reported", dir)
+	}
+}

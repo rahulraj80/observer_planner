@@ -308,6 +308,12 @@ func underTempRoot(bin string, env staleEnv) bool {
 	if strings.Contains(low, "/appdata/local/temp/") || strings.Contains(low, "/windows/temp/") {
 		return true
 	}
+	// A bare or relative name (`observer`, resolved through PATH) is under
+	// no directory: PathUnder would resolve it against the working
+	// directory and call it a temp binary whenever doctor runs from /tmp.
+	if !filepath.IsAbs(filepath.FromSlash(bin)) {
+		return false
+	}
 	for _, root := range env.tempRoots {
 		if root != "" && crossmount.PathUnder(filepath.ToSlash(root), bin) {
 			return true
