@@ -279,6 +279,11 @@ func TestSecurityPostureGateOutcomesAndTrustVerdicts(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
+	// The events sit up to 5 minutes before now and must fall on now's
+	// day: just after midnight UTC, step back into the previous day.
+	if now.Sub(now.Truncate(24*time.Hour)) < 10*time.Minute {
+		now = now.Add(-10 * time.Minute)
+	}
 	day := now.Format("2006-01-02")
 	empty, err := s.SecurityPostureFacts(ctx, day, now, SecurityScope{})
 	if err != nil || len(empty.GateOutcomes) != 0 || len(empty.TrustVerdicts) != 0 ||
