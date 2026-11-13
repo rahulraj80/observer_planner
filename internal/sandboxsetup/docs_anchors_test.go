@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/publictree"
 )
 
 // docs_anchors_test.go (docs/sandbox-backend-checklist.md, box B14): every
@@ -58,6 +60,9 @@ func docAnchors(t *testing.T, file string) map[string]bool {
 }
 
 func TestRemedyDocsAnchorsResolve(t *testing.T) {
+	// docs/ is private-only (scripts/release.sh keeps only docs/assets/ in
+	// the public tree), so the anchors are checked where the docs live.
+	publictree.Skip(t, "docs/")
 	all := append([]Prereq(nil), prereqTable...)
 	for _, g := range genericPrereqs {
 		all = append(all, g)
