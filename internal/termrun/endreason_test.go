@@ -98,6 +98,13 @@ func TestEndReasonCarriesADetail(t *testing.T) {
 	if code, detail := SplitEndReason("http: refused"); code != "http: refused" || detail != "" {
 		t.Errorf("a head that is no code split: %q %q", code, detail)
 	}
+	// A node's refusal with its fix is kept whole (live run 2026-11-13).
+	refusal := "create the box: the node refused the sandbox: your SandHold account needs attention: a card is needed to start more sandboxes: " +
+		"you have started 5, and 5 may start without a card. Your first month stays free with a card on file. Running sandboxes, their files and exports are not affected " +
+		"(to fix: add a card at https://sandhold.example:48000/app/#/billing (it is checked with a $1.00 charge that is refunded at once), then try again)"
+	if _, d := SplitEndReason(WithEndDetail(EndLaunchRefused, refusal)); d != refusal {
+		t.Errorf("a node's refusal was cut: %q", d)
+	}
 	long := WithEndDetail(EndLaunchRefused, strings.Repeat("x", 2*EndDetailMax))
 	if _, d := SplitEndReason(long); len(d) != EndDetailMax+3 || !strings.HasSuffix(d, "...") {
 		t.Errorf("long detail kept %d bytes", len(d))

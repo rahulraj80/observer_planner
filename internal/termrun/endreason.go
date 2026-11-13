@@ -69,8 +69,11 @@ func KnownEndReason(reason string) bool {
 // endDetailSep joins an end reason's code and its detail.
 const endDetailSep = ": "
 
-// EndDetailMax bounds an end reason's detail, in bytes.
-const EndDetailMax = 400
+// EndDetailMax bounds an end reason's detail, in bytes. A node's refusal
+// with its fix runs to about 600 bytes (SandHold's card_required, live run
+// 2026-11-13, was cut at 400 so `observer terminals show` lost the fix);
+// the bound only stops a runaway detail.
+const EndDetailMax = 4096
 
 // WithEndDetail is reason with a short detail saying why (live run
 // 2026-11-11: a hosted launch that failed before its agent started showed
