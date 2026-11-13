@@ -1,0 +1,19 @@
+{
+  "name": "whoami-self",
+  "about": "A self-serve account's key: account self (one person, no org), with the person's name and email for a tool to show instead of ids.",
+  "method": "GET",
+  "path": "/v1/whoami",
+  "status": 200,
+  "response": {
+    "account": "self",
+    "admin": false,
+    "email": "ada@example.com",
+    "issuer": "",
+    "keyId": "<key-id>",
+    "name": "Ada",
+    "org": "org_solo",
+    "orgName": "Ada",
+    "user": "u_solo",
+    "via": "apikey"
+  }
+}

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +43,9 @@ type sandholdFakeNode struct {
 	// signup and plan, when set, are GET /app/api/signup and GET
 	// /v1/offer (404 otherwise, as on a node without the offer).
 	signup, plan any
+	// who and starter, when set, are GET /v1/whoami's answer and GET
+	// /v1/targets' starter limits (a self-serve starter account).
+	who, starter any
 }
 
 func newSandholdFakeNode(t *testing.T, keyID string, tokens ...string) *sandholdFakeNode {
@@ -78,13 +82,21 @@ func newSandholdFakeNode(t *testing.T, keyID string, tokens ...string) *sandhold
 			sandholdWriteJSON(w, 401, map[string]string{"error": "no valid credential", "fix": "sign in again"})
 			return
 		}
+		if f.who != nil {
+			sandholdWriteJSON(w, 200, f.who)
+			return
+		}
 		sandholdWriteJSON(w, 200, map[string]any{"org": "acme", "user": "alice", "keyId": f.keyID})
 	})
 	mux.HandleFunc("GET /v1/targets", func(w http.ResponseWriter, _ *http.Request) {
-		sandholdWriteJSON(w, 200, map[string]any{"targets": []map[string]any{
+		body := map[string]any{"targets": []map[string]any{
 			{"id": "jail", "tier": "shared", "tierMeans": "a jailed process on the host kernel", "tierRank": 1, "state": "active", "default": true, "capabilities": map[string]any{"isolation": "process", "egressAllowlist": true}},
 			{"id": "gvisor", "tier": "sealed", "tierMeans": "its own user-space kernel", "tierRank": 3, "state": "active", "capabilities": map[string]any{"isolation": "user-kernel", "egressAllowlist": true}},
-		}})
+		}}
+		if f.starter != nil {
+			body["starter"] = f.starter
+		}
+		sandholdWriteJSON(w, 200, body)
 	})
 	mux.HandleFunc("GET /app/api/signup", func(w http.ResponseWriter, _ *http.Request) {
 		if f.signup == nil {
@@ -616,5 +628,34 @@ func TestSandholdFloor(t *testing.T) {
 	err := d.floor(cfg, vocab.TierNone, vocab.CustodyInBoxAPIKey, sandboxremote.RegionSandHoldNode)
 	if err == nil || !strings.Contains(err.Error(), "the node's own claim") {
 		t.Errorf("floor: %v", err)
+	}
+}
+
+// TestSandholdConnectStarterInWords: a self-serve starter account is named
+// as the person ("your own account", no ids), and offered only what it may
+// use: no host-kernel tier and no open network, at connect and in the
+// Sandboxes panel.
+func TestSandholdConnectStarterInWords(t *testing.T) {
+	deps, _ := sandholdTestDeps(t)
+	f := newSandholdFakeNode(t, "key_1", "")
+	f.who = map[string]any{"org": "org_5e87", "user": "u_23e9", "keyId": "key_1", "account": "self", "name": "Dana Example", "email": "dana@example.test", "orgName": "Dana Example"}
+	f.starter = map[string]any{"isolation": "sealed", "openNetwork": false}
+	var out bytes.Buffer
+	if err := runSandholdConnect(context.Background(), &out, deps, f.srv.URL, true); err != nil {
+		t.Fatalf("connect: %v\n%s", err, out.String())
+	}
+	o := out.String()
+	if !strings.Contains(o, "Connected to "+f.srv.URL+" as Dana Example (dana@example.test), your own account.") || strings.Contains(o, "u_23e9") || strings.Contains(o, "org_5e87") {
+		t.Errorf("connect named ids, not the person:\n%s", o)
+	}
+	if strings.Contains(o, "Shared (") || !strings.Contains(o, "Sealed (its own user-space kernel)") || strings.Contains(o, "network none, limited, open") || !strings.Contains(o, "starter limits: Sealed or stronger") {
+		t.Errorf("connect offered beyond the starter limits:\n%s", o)
+	}
+	v := sandholdPlace(deps.observerDir, time.Now())
+	if v.User != "Dana Example (dana@example.test), your own account" || v.Org != "" {
+		t.Errorf("panel: signed in as %q in %q", v.User, v.Org)
+	}
+	if len(v.Offers) != 1 || v.Offers[0].Tier != "sealed" || slices.Contains(v.Offers[0].Networks, sandhold.NetworkOpen) {
+		t.Errorf("panel offers: %+v", v.Offers)
 	}
 }

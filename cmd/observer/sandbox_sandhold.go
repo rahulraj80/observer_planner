@@ -533,12 +533,15 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	if who, err := c.Whoami(ctx); err == nil {
 		conn.Org, conn.User = firstNonEmpty(who.Org, conn.Org), firstNonEmpty(who.User, conn.User)
 		conn.KeyID = firstNonEmpty(conn.KeyID, who.KeyID)
+		conn.Account, conn.Name, conn.Email, conn.OrgName = who.Account, who.Name, who.Email, who.OrgName
 	} else {
 		whoErr = err
 	}
-	targets, terr := c.Targets(ctx)
+	targets, limits, terr := c.TargetsAndLimits(ctx)
 	if terr == nil {
-		conn.Offers = sandhold.Offers(targets)
+		// Only what the account may use: a starter account is not offered
+		// the host-kernel tiers or an open network.
+		conn.Offers, conn.Starter = sandhold.OffersWithin(targets, limits), limits
 	} else {
 		conn.TargetsError = sandhold.PlainLine(terr.Error())
 	}
@@ -559,10 +562,10 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	}
 
 	fmt.Fprintf(out, "\nConnected to %s", node)
-	if conn.User != "" {
-		fmt.Fprintf(out, " as %s", conn.User)
-		if conn.Org != "" {
-			fmt.Fprintf(out, " in %s", conn.Org)
+	if who, in := conn.Who(); who != "" {
+		fmt.Fprintf(out, " as %s", who)
+		if in != "" {
+			fmt.Fprintf(out, " in %s", in)
 		}
 	}
 	fmt.Fprintln(out, ".")
@@ -591,6 +594,9 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 		fmt.Fprintln(out, "Isolation this node offers you:")
 		for _, o := range conn.Offers {
 			fmt.Fprintf(out, "  %s\n", o.Line())
+		}
+		if conn.Starter != nil && !conn.Starter.OpenNetwork {
+			fmt.Fprintf(out, "  (Your account's starter limits: %s or stronger, and an allow list of package sources and model APIs, never the whole internet.)\n", sandhold.TierTitle(conn.Starter.Isolation))
 		}
 	}
 	fmt.Fprintln(out, "\nThe node appears in Observer's sandbox backends as \"sandhold\" (observer sandbox status --backend sandhold).")

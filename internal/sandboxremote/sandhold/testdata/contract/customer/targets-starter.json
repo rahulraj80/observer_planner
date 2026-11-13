@@ -1,0 +1,126 @@
+{
+  "name": "targets-starter",
+  "about": "A starter account sees only the tiers it may use (sealed or stronger here), and starter says so: isolation at that tier or stronger, never an open network (an open network asked for gets the starter allow list).",
+  "method": "GET",
+  "path": "/v1/targets",
+  "status": 200,
+  "response": {
+    "starter": {
+      "isolation": "sealed",
+      "openNetwork": false
+    },
+    "targets": [
+      {
+        "about": {
+          "benefits": [
+            "A separate kernel in user space (gVisor): the host kernel's attack surface is cut",
+            "Fastest cold start of SandHold's engines (about <span>); warm about <span>"
+          ],
+          "limits": [
+            "Open network on this node: no allow list is enforced here",
+            "Some system calls are unsupported or slower (heavy file and network I/O)"
+          ],
+          "maker": "SandHold",
+          "title": "SandHold Sealed"
+        },
+        "capabilities": {
+          "egressAllowlist": false,
+          "isolation": "user-kernel",
+          "pty": true,
+          "runtime": "gVisor (runsc, KVM platform)",
+          "separateKernel": true
+        },
+        "confirmedAt": "<time>",
+        "heavy": true,
+        "id": "gvisor",
+        "kind": "local",
+        "limits": {},
+        "name": "gvisor",
+        "product": "sandhold",
+        "sandboxes": 0,
+        "scope": "sb",
+        "size": {
+          "cpu": "1",
+          "memory": "1Gi"
+        },
+        "state": "active",
+        "tier": "sealed",
+        "tierMeans": "its own kernel in user space",
+        "tierRank": 3
+      },
+      {
+        "about": {
+          "benefits": [
+            "Its own guest kernel in a hardware-virtualised VM (Kata Containers): the strongest separation",
+            "Warm start about <span> from the node's pool"
+          ],
+          "limits": [
+            "Open network on this node: no allow list is enforced here",
+            "Uses more memory per sandbox",
+            "Cold start about <span>"
+          ],
+          "maker": "SandHold",
+          "title": "SandHold Vault"
+        },
+        "capabilities": {
+          "egressAllowlist": false,
+          "isolation": "microvm",
+          "pty": true,
+          "runtime": "Kata Containers (Cloud Hypervisor microVM)",
+          "separateKernel": true
+        },
+        "confirmedAt": "<time>",
+        "heavy": true,
+        "id": "kata",
+        "kind": "local",
+        "limits": {},
+        "name": "kata",
+        "product": "sandhold",
+        "sandboxes": 0,
+        "scope": "sb",
+        "size": {
+          "cpu": "1",
+          "memory": "1Gi"
+        },
+        "state": "active",
+        "tier": "vault",
+        "tierMeans": "its own kernel in a virtual machine",
+        "tierRank": 4
+      }
+    ],
+    "tiers": [
+      {
+        "bestFor": "Code you or your team wrote: quick scripts and checks, where starting in milliseconds matters most",
+        "means": "a jailed process on the host's kernel",
+        "rank": 1,
+        "tier": "shared",
+        "title": "Shared",
+        "tradeOff": "Shares the host's kernel: a flaw in that kernel reaches the host"
+      },
+      {
+        "bestFor": "Code an AI wrote, or code nobody has reviewed: tests and builds that need a full image",
+        "means": "a hardened container on the host's kernel",
+        "rank": 2,
+        "tier": "shielded",
+        "title": "Shielded",
+        "tradeOff": "Still on the host's kernel, behind the container's filters"
+      },
+      {
+        "bestFor": "Code from a stranger, or code that may be hostile: a bug in the host's kernel is out of its reach",
+        "means": "its own kernel in user space",
+        "rank": 3,
+        "tier": "sealed",
+        "title": "Sealed",
+        "tradeOff": "Some system calls are slower or unsupported"
+      },
+      {
+        "bestFor": "Hostile code that also needs the open internet, or work that must stay furthest from the host and from other sandboxes",
+        "means": "its own kernel in a virtual machine",
+        "rank": 4,
+        "tier": "vault",
+        "title": "Vault",
+        "tradeOff": "The slowest cold start, and more memory per sandbox"
+      }
+    ]
+  }
+}

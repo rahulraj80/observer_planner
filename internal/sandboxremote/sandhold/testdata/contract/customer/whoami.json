@@ -5,10 +5,12 @@
   "path": "/v1/whoami",
   "status": 200,
   "response": {
+    "account": "org",
     "admin": false,
     "issuer": "",
     "keyId": "<key-id>",
     "org": "org_acme",
+    "orgName": "Acme Robotics",
     "user": "alice",
     "via": "apikey"
   }

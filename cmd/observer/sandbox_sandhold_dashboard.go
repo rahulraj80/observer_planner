@@ -170,7 +170,10 @@ func sandholdPlace(observerDir string, now time.Time) sandholdPlaceView {
 		v.Problem = "the SandHold connection record could not be read (" + sandhold.PlainLine(err.Error()) + "); connect again"
 	case conn != nil:
 		v.Connected = true
-		v.Node, v.User, v.Org = conn.URL, sandhold.PlainLine(conn.User), sandhold.PlainLine(conn.Org)
+		// The panel says "signed in as <user> in <org>": a self-serve person
+		// by name, "your own account", with no org id.
+		v.Node = conn.URL
+		v.User, v.Org = conn.Who()
 		v.KeyStore = sandhold.PlainLine(conn.KeyStore)
 		v.TargetsError = sandhold.PlainLine(conn.TargetsError)
 		if !conn.ExpiresAt.IsZero() {

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -348,5 +349,71 @@ func TestContractCopyIsSandHolds(t *testing.T) {
 		if n := filepath.Base(f); !seen[n] {
 			t.Errorf("%s is in %s but not in SandHold's contract", n, contractDir)
 		}
+	}
+}
+
+// TestContractWhoamiInWords: a self-serve account's whoami reads as the
+// person ("Ada (ada@example.com), your own account", no org id), an org
+// member's as the member in the org's name, and a node that sends no names
+// as the ids.
+func TestContractWhoamiInWords(t *testing.T) {
+	who, err := contractNode(t, loadVector(t, "whoami-self")).Whoami(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if who.Account != AccountSelf || who.Name != "Ada" || who.Email != "ada@example.com" {
+		t.Fatalf("whoami-self was not read as the contract gives it: %+v", who)
+	}
+	conn := Connection{URL: "https://node.example", Org: who.Org, User: who.User, Account: who.Account, Name: who.Name, Email: who.Email, OrgName: who.OrgName}
+	if w, in := conn.Who(); w != "Ada (ada@example.com), your own account" || in != "" {
+		t.Errorf("self: %q in %q", w, in)
+	}
+	if s := conn.Summary(time.Now()); !strings.Contains(s, "as Ada (ada@example.com), your own account") || strings.Contains(s, "org_solo") {
+		t.Errorf("summary: %s", s)
+	}
+	org, err := contractNode(t, loadVector(t, "whoami")).Whoami(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn = Connection{Org: org.Org, User: org.User, Account: org.Account, OrgName: org.OrgName}
+	if w, in := conn.Who(); w != "alice" || in != "Acme Robotics (org_acme)" {
+		t.Errorf("org: %q in %q", w, in)
+	}
+	if w, in := (&Connection{Org: "org_old", User: "bob"}).Who(); w != "bob" || in != "org_old" {
+		t.Errorf("older node: %q in %q", w, in)
+	}
+}
+
+// TestContractTargetsStarter: a starter account's targets carry its
+// limits, and the offers kept within them have no tier below the starter
+// one and no open network; with no limits nothing is dropped.
+func TestContractTargetsStarter(t *testing.T) {
+	ts, lim, err := contractNode(t, loadVector(t, "targets-starter")).TargetsAndLimits(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lim == nil || lim.Isolation != "sealed" || lim.OpenNetwork {
+		t.Fatalf("starter limits: %+v", lim)
+	}
+	offers := OffersWithin(ts, lim)
+	if len(offers) == 0 {
+		t.Fatal("no offer within the starter limits")
+	}
+	for _, o := range offers {
+		if tierRankOf(o.Tier) < 3 || slices.Contains(o.Networks, NetworkOpen) {
+			t.Errorf("offered beyond the starter limits: %+v", o)
+		}
+	}
+	// The node's limits are applied even to targets it still listed: a
+	// Shielded target with an allow list is dropped, Vault keeps none and
+	// limited.
+	mixed := []Target{{ID: "runc", Tier: "shielded", TierRank: 2, State: "active"}, {ID: "kata", Tier: "vault", TierRank: 4, State: "active"}}
+	mixed[0].Capabilities.EgressAllowlist, mixed[1].Capabilities.EgressAllowlist = true, true
+	got := OffersWithin(mixed, lim)
+	if len(got) != 1 || got[0].Tier != "vault" || !slices.Equal(got[0].Networks, []string{NetworkNone, NetworkLimited}) {
+		t.Errorf("mixed: %+v", got)
+	}
+	if all := OffersWithin(mixed, nil); len(all) != 2 || !slices.Contains(all[0].Networks, NetworkOpen) {
+		t.Errorf("no limits: %+v", all)
 	}
 }

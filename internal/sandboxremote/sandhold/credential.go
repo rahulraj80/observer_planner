@@ -70,11 +70,17 @@ func DecodeCredential(b []byte) (Credential, error) {
 
 // Connection is the non-secret record of a connect.
 type Connection struct {
-	Version     int       `json:"version"`
-	URL         string    `json:"url"`
-	KeyID       string    `json:"key_id,omitempty"`
-	Org         string    `json:"org,omitempty"`
-	User        string    `json:"user,omitempty"`
+	Version int    `json:"version"`
+	URL     string `json:"url"`
+	KeyID   string `json:"key_id,omitempty"`
+	Org     string `json:"org,omitempty"`
+	User    string `json:"user,omitempty"`
+	// Account, Name, Email and OrgName are whoami's words for people
+	// (Whoami): a self-serve person's name and email, or the org's name.
+	Account     string    `json:"account,omitempty"`
+	Name        string    `json:"name,omitempty"`
+	Email       string    `json:"email,omitempty"`
+	OrgName     string    `json:"org_name,omitempty"`
 	ExpiresAt   time.Time `json:"expires_at,omitzero"`
 	ConnectedAt time.Time `json:"connected_at"`
 	// Offers is what the node offered this key at connect (GET
@@ -92,6 +98,31 @@ type Connection struct {
 	// Plan is the account's first-month offer as the node last told it
 	// (GET /v1/offer, SandHold note 44): nil for an org without one.
 	Plan *Plan `json:"plan,omitempty"`
+	// Starter is the account's starter limits as the node said them at
+	// connect; Offers are already kept within them.
+	Starter *StarterLimits `json:"starter,omitempty"`
+}
+
+// Who is who the key acts as, for people: the person and, when it is an
+// org's, "in" the org. A self-serve person is "Dana (dana@example.test),
+// your own account" with no org; an org member "alice" in "Acme Robotics
+// (org_acme)"; the ids where the node gave no names.
+func (c *Connection) Who() (who, in string) {
+	if c == nil {
+		return "", ""
+	}
+	if c.Account == AccountSelf && c.Name != "" {
+		who = c.Name
+		if c.Email != "" {
+			who += " (" + c.Email + ")"
+		}
+		return PlainLine(who + ", your own account"), ""
+	}
+	in = c.Org
+	if c.OrgName != "" && c.OrgName != c.Org && c.Org != "" {
+		in = c.OrgName + " (" + c.Org + ")"
+	}
+	return PlainLine(c.User), PlainLine(in)
 }
 
 // OrgToken is where an org member's tokens for the node come from. No
@@ -113,10 +144,10 @@ func (c *Connection) Summary(now time.Time) string {
 	}
 	var b strings.Builder
 	b.WriteString("connected to " + c.URL)
-	if c.User != "" {
-		b.WriteString(" as " + c.User)
-		if c.Org != "" {
-			b.WriteString(" in " + c.Org)
+	if who, in := c.Who(); who != "" {
+		b.WriteString(" as " + who)
+		if in != "" {
+			b.WriteString(" in " + in)
 		}
 	}
 	if c.OrgToken != nil {

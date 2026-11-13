@@ -217,6 +217,56 @@ func Offers(ts []Target) []Offer {
 	return out
 }
 
+// OffersWithin is Offers kept to what an account's starter limits allow:
+// no isolation below the starter one, and no open network unless the
+// limits give one. Nil limits: Offers.
+func OffersWithin(ts []Target, lim *StarterLimits) []Offer {
+	if lim == nil {
+		return Offers(ts)
+	}
+	floor := tierRankOf(lim.Isolation)
+	kept := make([]Target, 0, len(ts))
+	for _, t := range ts {
+		if r := t.TierRank; r == 0 {
+			r = tierRankOf(t.Tier)
+			if r < floor {
+				continue
+			}
+		} else if r < floor {
+			continue
+		}
+		kept = append(kept, t)
+	}
+	out := Offers(kept)
+	if !lim.OpenNetwork {
+		for i := range out {
+			nets := out[i].Networks[:0:0]
+			for _, n := range out[i].Networks {
+				if n != NetworkOpen {
+					nets = append(nets, n)
+				}
+			}
+			out[i].Networks = nets
+		}
+	}
+	return out
+}
+
+// tierRankOf orders the node's tier words, weakest first (0: unknown).
+func tierRankOf(tier string) int {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "shared":
+		return 1
+	case "shielded":
+		return 2
+	case "sealed":
+		return 3
+	case "vault":
+		return 4
+	}
+	return 0
+}
+
 func unionNetworks(a, b []string) []string {
 	all := []string{NetworkNone, NetworkLimited, NetworkOpen}
 	have := map[string]bool{}
