@@ -319,7 +319,7 @@ func TestBwrapIntegrationTeardownThroughHelpers(t *testing.T) {
 	}
 	proxyPort, _ := pongListener(t)
 	wrap, home, _, _ := prepLiveWrapArgvTier(t, "internet", proxyPort, nil)
-	const marker = "317.31"
+	marker := sleepMarker(317)
 	argv := append(append([]string(nil), wrap...), "sleep", marker)
 	//nolint:gosec // Prepare-composed wrapper + fixed test argv.
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -356,6 +356,19 @@ func TestBwrapIntegrationTeardownThroughHelpers(t *testing.T) {
 	}
 }
 
+// sleepMarkerSeq numbers this process's sleep markers.
+var sleepMarkerSeq atomic.Int64
+
+// sleepMarker returns a `sleep` argument of about secs seconds that no other
+// run on the host uses: secs, then this process's pid and a sequence number
+// as the fraction. sleepMarkerRunning scans every process on the host, so a
+// fixed marker matched a concurrent test binary's box (the other build's, or
+// a parallel run of this one): its sleep looked like ours outliving the
+// helper, and its teardown looked like ours never starting.
+func sleepMarker(secs int) string {
+	return fmt.Sprintf("%d.%07d%05d", secs, os.Getpid(), sleepMarkerSeq.Add(1))
+}
+
 // sleepMarkerRunning scans /proc for a `sleep <marker>` process.
 func sleepMarkerRunning(marker string) bool {
 	ents, _ := os.ReadDir("/proc")
@@ -385,7 +398,7 @@ func TestBwrapIntegrationHelperDeathKillsChain(t *testing.T) {
 	}
 	proxyPort, _ := pongListener(t)
 	wrap, home, _, _ := prepLiveWrapArgvTier(t, "internet", proxyPort, nil)
-	const marker = "318.31"
+	marker := sleepMarker(318)
 	argv := append(append([]string(nil), wrap...), "sleep", marker)
 	//nolint:gosec // Prepare-composed wrapper + fixed test argv.
 	cmd := exec.Command(argv[0], argv[1:]...)

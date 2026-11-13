@@ -213,7 +213,7 @@ func TestBwrapIntegrationTeardown(t *testing.T) {
 	}
 
 	wrap, home, _, _ := prepLiveWrapArgv(t)
-	const marker = "300.31"
+	marker := sleepMarker(300)
 	argv := append(append([]string(nil), wrap...), "bash", "-c", "sleep "+marker)
 	//nolint:gosec // argv[0] is the Prepare-resolved bwrap path; fixed test argv.
 	cmd := exec.Command(argv[0], argv[1:]...)
