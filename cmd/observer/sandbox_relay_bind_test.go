@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/guidance"
 	"github.com/marmutapp/superbased-observer/internal/hookctx"
 	"github.com/marmutapp/superbased-observer/internal/policy"
@@ -273,13 +275,26 @@ func TestBoxRefusedAnswers(t *testing.T) {
 
 // TestRelayRefusesAnotherRepositoryEndToEnd (P-026 a, through the real
 // executor and database): a relayed event whose payload names another
-// repository writes nothing; the same event in the run's workspace lands.
+// repository writes nothing; the same event in the run's workspace lands as
+// its user_prompt row.
+//
+// The event is relayed under the argv spelling Observer registers for
+// Claude Code (user-prompt-submit), which is what a box sends. The native
+// name (UserPromptSubmit) reaches no prompt receiver: it gets the plain
+// approve and is never captured. The test used to send the native name and
+// count rows in ANY table, so it only passed when the hook's posture
+// fallback (hookFallbackGateEnforcement) finished migrating a fresh database
+// inside its 2s store budget; under load the migration was cut off, the
+// database stayed empty and the test failed. It now migrates the database
+// first (the daemon owns it on a real node) and looks for the event's own
+// row.
 func TestRelayRefusesAnotherRepositoryEndToEnd(t *testing.T) {
 	bin := probeHookTestBinary(t)
 	ws, other := twoRepos(t)
 	setTestHome(t, t.TempDir())
 	h := startRelayHarness(t, bin, ws, "")
-	args := []string{"claude-code", "UserPromptSubmit"}
+	dbPath := filepath.Join(h.obs, "observer.db")
+	args := []string{"claude-code", "user-prompt-submit"}
 	payload := func(cwd, sid string) []byte {
 		return []byte(`{"session_id":"` + sid + `","hook_event_name":"UserPromptSubmit","cwd":"` + cwd + `","prompt":"hello"}`)
 	}
@@ -290,14 +305,47 @@ func TestRelayRefusesAnotherRepositoryEndToEnd(t *testing.T) {
 	if resp.Refused != sandboxrelay.RefusedPath {
 		t.Fatalf("a payload naming another repository: %+v", resp)
 	}
-	if n := tableCounts(t, filepath.Join(h.obs, "observer.db")); len(n) != 0 {
+	if n := tableCounts(t, dbPath); len(n) != 0 {
 		t.Fatalf("a refused event wrote rows: %v", n)
 	}
+	migrateRelayDB(t, dbPath)
 	resp, err = h.relayed(t, sandboxrelay.HookRequest{Kind: sandboxrelay.KindHook, Args: args, Cwd: ws, Stdin: payload(ws, "own")})
 	if err != nil || resp.Refused != "" {
 		t.Fatalf("the run's own event: %+v %v", resp, err)
 	}
-	if n := tableCounts(t, filepath.Join(h.obs, "observer.db")); len(n) == 0 {
-		t.Fatal("the run's own event never reached the database")
+	if n := promptRows(t, dbPath, "own"); n != 1 {
+		t.Fatalf("the run's own event: %d user_prompt rows, want 1 (exit %d stdout %q stderr %q)", n, resp.Exit, resp.Stdout, resp.Stderr)
 	}
+	if n := promptRows(t, dbPath, "foreign"); n != 0 {
+		t.Fatalf("the refused event: %d user_prompt rows, want 0", n)
+	}
+}
+
+// migrateRelayDB creates and migrates the node database at path, as the
+// daemon has on a real node before any relayed hook runs.
+func migrateRelayDB(t *testing.T, path string) {
+	t.Helper()
+	d, err := db.Open(context.Background(), db.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// promptRows is the number of user_prompt actions of session sid in the
+// database at path.
+func promptRows(t *testing.T, path, sid string) int {
+	t.Helper()
+	d, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM actions WHERE session_id = ? AND action_type = 'user_prompt'`, sid).Scan(&n); err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return n
 }
