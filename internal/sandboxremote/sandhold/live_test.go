@@ -52,8 +52,10 @@ func liveRun(t *testing.T, b *Box, class vocab.IsoClass) {
 
 	// Create: the node says what the sandbox got; less than asked is refused.
 	start := time.Now()
-	info, err := b.Create(ctx, sandboxremote.BoxSpec{RunID: run, Labels: map[string]string{sandboxremote.LabelKey: run},
-		TimeoutSeconds: 600, Tier: vocab.TierNone, Isolation: class})
+	info, err := b.Create(ctx, sandboxremote.BoxSpec{
+		RunID: run, Labels: map[string]string{sandboxremote.LabelKey: run},
+		TimeoutSeconds: 600, Tier: vocab.TierNone, Isolation: class,
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -87,8 +89,10 @@ func liveRun(t *testing.T, b *Box, class vocab.IsoClass) {
 		if strings.HasSuffix(p, ".sh") {
 			mode = 0o755
 		}
-		up = append(up, sandboxremote.UploadFile{Path: p, Mode: mode, Size: int64(len(body)),
-			Open: func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(body)), nil }})
+		up = append(up, sandboxremote.UploadFile{
+			Path: p, Mode: mode, Size: int64(len(body)),
+			Open: func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(body)), nil },
+		})
 	}
 	if err := b.WriteFiles(ctx, info.ID, up); err != nil {
 		t.Fatalf("upload: %v", err)
@@ -98,8 +102,10 @@ func liveRun(t *testing.T, b *Box, class vocab.IsoClass) {
 	}
 
 	// Streamed exec: output, environment, directory, exit code.
-	p, err := b.Exec(ctx, info.ID, sandboxremote.ExecSpec{Argv: []string{"sh", "-c", `echo "$GREETING"; pwd; ./dir/b.sh; exit 3`},
-		Env: map[string]string{"GREETING": "hi there"}, Cwd: "/workspace"})
+	p, err := b.Exec(ctx, info.ID, sandboxremote.ExecSpec{
+		Argv: []string{"sh", "-c", `echo "$GREETING"; pwd; ./dir/b.sh; exit 3`},
+		Env:  map[string]string{"GREETING": "hi there"}, Cwd: "/workspace",
+	})
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -115,8 +121,10 @@ func liveRun(t *testing.T, b *Box, class vocab.IsoClass) {
 	}
 
 	// The terminal: the owner-only launch script in /tmp, the exit file.
-	tp, err := b.Exec(ctx, info.ID, sandboxremote.ExecSpec{Argv: []string{"sh", "-c", `echo "term $SECRET_NAME"; exit 7`},
-		Env: map[string]string{"SECRET_NAME": "never-in-the-url"}, Cwd: "/workspace", PTY: true, Rows: 30, Cols: 100})
+	tp, err := b.Exec(ctx, info.ID, sandboxremote.ExecSpec{
+		Argv: []string{"sh", "-c", `echo "term $SECRET_NAME"; exit 7`},
+		Env:  map[string]string{"SECRET_NAME": "never-in-the-url"}, Cwd: "/workspace", PTY: true, Rows: 30, Cols: 100,
+	})
 	if err != nil {
 		t.Fatalf("terminal: %v", err)
 	}

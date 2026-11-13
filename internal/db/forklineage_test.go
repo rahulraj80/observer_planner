@@ -140,8 +140,11 @@ func TestForkLineageStoreReconciles(t *testing.T) {
 			// Upstream's 080, 212 and 215 columns and the fork's turn_kind and
 			// dispatch-benefit columns all exist.
 			for _, c := range [][2]string{
-				{"session_annotations", "rating"}, {"process_runs", "capture_class"}, {"codeintel_nodes", "complexity"},
-				{"api_turns", "turn_kind"}, {"router_decisions", "realized_delta_usd"},
+				{"session_annotations", "rating"},
+				{"process_runs", "capture_class"},
+				{"codeintel_nodes", "complexity"},
+				{"api_turns", "turn_kind"},
+				{"router_decisions", "realized_delta_usd"},
 			} {
 				var n int
 				if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c[0], c[1]).Scan(&n); err != nil || n != 1 {

@@ -193,8 +193,10 @@ func TestHostedHostRefusesAnInstalledToolThatDoesNotStart(t *testing.T) {
 	}
 	// The end note (bounded) carries the cause.
 	got := runEndNoteReason(hh.run.plan.ObserverDir, "termrun-id", hh.run.plan.RunID, sandboxHelperFailCode)
-	for _, want := range []string{"launch_refused: ", "claude-code was installed at /tmp/observer-home/.local/bin/claude", "does not start: the install ran out of room in the box",
-		"9 MiB free of 512 MiB"} {
+	for _, want := range []string{
+		"launch_refused: ", "claude-code was installed at /tmp/observer-home/.local/bin/claude", "does not start: the install ran out of room in the box",
+		"9 MiB free of 512 MiB",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("end reason %q lacks %q", got, want)
 		}

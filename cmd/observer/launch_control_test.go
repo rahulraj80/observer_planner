@@ -429,12 +429,18 @@ func TestLaunchControlModelOffered(t *testing.T) {
 func TestLaunchControlNodeBoxWords(t *testing.T) {
 	f := newFakeTermsvc()
 	f.snap = []dashapi.LaunchInfo{
-		{ID: "h-sh", RunID: "run-sh-01", Tool: "claude-code", Kind: "fresh", Sandboxed: true,
-			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "sandhold", EgressTier: "internet", CaptureLevel: "partial"}},
-		{ID: "h-new", RunID: "run-new-01", Tool: "claude-code", Kind: "fresh", Sandboxed: true,
-			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "sandhold", EgressTier: "internet"}},
-		{ID: "h-bw", RunID: "run-bw-01", Tool: "codex", Kind: "fresh", Sandboxed: true,
-			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "bwrap"}},
+		{
+			ID: "h-sh", RunID: "run-sh-01", Tool: "claude-code", Kind: "fresh", Sandboxed: true,
+			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "sandhold", EgressTier: "internet", CaptureLevel: "partial"},
+		},
+		{
+			ID: "h-new", RunID: "run-new-01", Tool: "claude-code", Kind: "fresh", Sandboxed: true,
+			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "sandhold", EgressTier: "internet"},
+		},
+		{
+			ID: "h-bw", RunID: "run-bw-01", Tool: "codex", Kind: "fresh", Sandboxed: true,
+			Isolation: &dashapi.LaunchIsolation{Class: "process", Backend: "bwrap"},
+		},
 	}
 	ended := f.now
 	f.history = []store.TerminalRunSummary{{RunID: "run-old-01", Tool: "claude-code", Kind: "fresh", LaunchedAt: f.now, EndedAt: &ended, IsolationClass: "process", Stack: "sandhold"}}

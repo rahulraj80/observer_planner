@@ -85,10 +85,14 @@ func newFakeNode(t *testing.T, tokens ...string) *fakeNode {
 	mux.HandleFunc("GET /v1/targets", func(w http.ResponseWriter, r *http.Request) {
 		f.see(r)
 		writeJSON(w, 200, map[string]any{"targets": []map[string]any{
-			{"id": "kata", "tier": "vault", "tierMeans": "its own kernel in a virtual machine", "tierRank": 4, "state": "active",
-				"capabilities": map[string]any{"isolation": "microvm", "egressAllowlist": true}},
-			{"id": "jail", "tier": "shared", "tierMeans": "a jailed process on the host kernel", "tierRank": 1, "state": "active", "default": true,
-				"capabilities": map[string]any{"isolation": "process", "egressAllowlist": true}},
+			{
+				"id": "kata", "tier": "vault", "tierMeans": "its own kernel in a virtual machine", "tierRank": 4, "state": "active",
+				"capabilities": map[string]any{"isolation": "microvm", "egressAllowlist": true},
+			},
+			{
+				"id": "jail", "tier": "shared", "tierMeans": "a jailed process on the host kernel", "tierRank": 1, "state": "active", "default": true,
+				"capabilities": map[string]any{"isolation": "process", "egressAllowlist": true},
+			},
 			{"id": "old", "tier": "shielded", "tierRank": 2, "state": "suspended"},
 		}})
 	})
@@ -152,8 +156,10 @@ func TestSignIn(t *testing.T) {
 			rs := &recordSleep{}
 			var shown Start
 			var same bool
-			s := &SignIn{Client: NewClient(f.srv.URL, ""), ClientID: "Observer on test", Sleep: rs.sleep,
-				Shown: func(st Start, sameNode bool) { shown, same = st, sameNode }}
+			s := &SignIn{
+				Client: NewClient(f.srv.URL, ""), ClientID: "Observer on test", Sleep: rs.sleep,
+				Shown: func(st Start, sameNode bool) { shown, same = st, sameNode },
+			}
 			g, err := s.Run(context.Background())
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
@@ -195,8 +201,10 @@ func TestSignInDeadline(t *testing.T) {
 	}
 	f := newFakeNode(t, pending...)
 	clock := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
-	s := &SignIn{Client: NewClient(f.srv.URL, ""), Now: func() time.Time { return clock },
-		Sleep: func(_ context.Context, d time.Duration) error { clock = clock.Add(d); return nil }}
+	s := &SignIn{
+		Client: NewClient(f.srv.URL, ""), Now: func() time.Time { return clock },
+		Sleep: func(_ context.Context, d time.Duration) error { clock = clock.Add(d); return nil },
+	}
 	if _, err := s.Run(context.Background()); !errors.Is(err, ErrExpired) {
 		t.Fatalf("err = %v, want ErrExpired", err)
 	}
@@ -337,8 +345,10 @@ func TestVocabularyMapping(t *testing.T) {
 		level string
 		want  vocab.IsoClass
 	}{
-		{"process", vocab.ClassProcess}, {"container", vocab.ClassContainer},
-		{"user-kernel", vocab.ClassUserspaceKernel}, {"microvm", vocab.ClassHWVM},
+		{"process", vocab.ClassProcess},
+		{"container", vocab.ClassContainer},
+		{"user-kernel", vocab.ClassUserspaceKernel},
+		{"microvm", vocab.ClassHWVM},
 	}
 	for _, tc := range levels {
 		if got, ok := ClassForLevel(tc.level); !ok || got != tc.want {
@@ -349,8 +359,11 @@ func TestVocabularyMapping(t *testing.T) {
 		tier string
 		want vocab.IsoClass
 	}{
-		{"shared", vocab.ClassProcess}, {"shielded", vocab.ClassContainer},
-		{"sealed", vocab.ClassUserspaceKernel}, {"vault", vocab.ClassHWVM}, {"Vault", vocab.ClassHWVM},
+		{"shared", vocab.ClassProcess},
+		{"shielded", vocab.ClassContainer},
+		{"sealed", vocab.ClassUserspaceKernel},
+		{"vault", vocab.ClassHWVM},
+		{"Vault", vocab.ClassHWVM},
 	}
 	for _, tc := range tiers {
 		if got, ok := ClassForTier(tc.tier); !ok || got != tc.want {
@@ -493,8 +506,10 @@ func TestConnectionSummary(t *testing.T) {
 	if got := none.Summary(now); got != NotConnected {
 		t.Errorf("nil: %q", got)
 	}
-	c := &Connection{URL: "https://node.example.com", User: "alice", Org: "acme", ExpiresAt: now.Add(48 * time.Hour),
-		Offers: []Offer{{Tier: "shared", Class: vocab.ClassProcess}, {Tier: "vault", Class: vocab.ClassHWVM}}}
+	c := &Connection{
+		URL: "https://node.example.com", User: "alice", Org: "acme", ExpiresAt: now.Add(48 * time.Hour),
+		Offers: []Offer{{Tier: "shared", Class: vocab.ClassProcess}, {Tier: "vault", Class: vocab.ClassHWVM}},
+	}
 	want := "connected to https://node.example.com as alice in acme; key works until 13 Nov 2026; offers Shared = process, Vault = hw_vm"
 	if got := c.Summary(now); got != want {
 		t.Errorf("summary %q\nwant %q", got, want)

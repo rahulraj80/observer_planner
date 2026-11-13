@@ -27,10 +27,14 @@ func TestSandboxRunsRoute(t *testing.T) {
 	exit0 := 0
 	for _, r := range []store.TerminalRun{
 		{RunID: "plain", Tool: "claude-code", Kind: "fresh", LaunchedAt: t0},
-		{RunID: "local", Tool: "claude-code", Kind: "fresh", LaunchedAt: t0.Add(time.Minute), EndedAt: &ended, ExitCode: &exit0,
-			Isolation: store.TerminalRunIsolation{Class: "process", Stack: []string{"bwrap"}, EgressTier: "none", CaptureLevel: "full"}},
-		{RunID: "node", Tool: "claude-code", Kind: "fresh", LaunchedAt: t0.Add(2 * time.Minute),
-			Isolation: store.TerminalRunIsolation{Class: "container", Stack: []string{"sandhold"}, EgressTier: "proxy_only"}},
+		{
+			RunID: "local", Tool: "claude-code", Kind: "fresh", LaunchedAt: t0.Add(time.Minute), EndedAt: &ended, ExitCode: &exit0,
+			Isolation: store.TerminalRunIsolation{Class: "process", Stack: []string{"bwrap"}, EgressTier: "none", CaptureLevel: "full"},
+		},
+		{
+			RunID: "node", Tool: "claude-code", Kind: "fresh", LaunchedAt: t0.Add(2 * time.Minute),
+			Isolation: store.TerminalRunIsolation{Class: "container", Stack: []string{"sandhold"}, EgressTier: "proxy_only"},
+		},
 	} {
 		if err := st.InsertTerminalRun(ctx, r); err != nil {
 			t.Fatal(err)
