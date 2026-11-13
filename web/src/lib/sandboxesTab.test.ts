@@ -11,7 +11,11 @@ import {
   networkForEgress,
   nodeError,
   nodeNetworkLabel,
+  PLAN_MIN_GAP_MS,
+  PLAN_REFRESH_MS,
   placesGroups,
+  planRefreshDue,
+  planRefusedSince,
   runIsolationWords,
   statusText,
   tierForClass,
@@ -107,4 +111,18 @@ test("Places lists what runs here and folds other platforms (demo 2026-11-12)", 
   assert.deepEqual(g.here.map((b) => b.id), ["bwrap", "jail"]);
   assert.deepEqual(g.needsModule.map((b) => b.id), ["oci"]);
   assert.deepEqual(g.other.map((b) => b.id), ["apple", "seatbelt"]);
+});
+
+test("the plan box reads the node again after a refused launch, on show and every few minutes", () => {
+  const refused = run({ backend: "sandhold", state: "ended", launched_at: "2026-11-13T06:10:00Z", ended_at: "2026-11-13T06:10:02Z",
+    end_reason: "launch_refused: the node refused the sandbox: your SandHold account needs attention: a card is needed to start more sandboxes" });
+  assert.equal(planRefusedSince([refused], "2026-11-13T06:00:00Z"), true);
+  assert.equal(planRefusedSince([refused], "2026-11-13T06:11:00Z"), false, "read after the refusal");
+  assert.equal(planRefusedSince([refused], undefined), true);
+  assert.equal(planRefusedSince([{ ...refused, backend: "bwrap" }], "2026-11-13T06:00:00Z"), false, "not a SandHold run");
+  assert.equal(planRefusedSince([{ ...refused, end_reason: "child_exit" }], "2026-11-13T06:00:00Z"), false, "ran and exited");
+  assert.equal(planRefreshDue(0, PLAN_MIN_GAP_MS, true), true);
+  assert.equal(planRefreshDue(1_000, 1_000 + PLAN_MIN_GAP_MS - 1, true), false, "focus and visibility fire together");
+  assert.equal(planRefreshDue(0, PLAN_REFRESH_MS, false), false, "never while hidden");
+  assert.ok(PLAN_REFRESH_MS >= 60_000 && PLAN_REFRESH_MS <= 10 * 60_000);
 });

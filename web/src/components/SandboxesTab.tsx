@@ -18,7 +18,7 @@
 // A component of terminals.sandbox (web/compgen): a build without the
 // sandbox module has no tab.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   ChartShell,
@@ -39,7 +39,10 @@ import {
   findingsText,
   networkWord,
   nodeError,
+  PLAN_REFRESH_MS,
   placesGroups,
+  planRefreshDue,
+  planRefusedSince,
   runIsolationWords,
   statusText,
   tierForClass,
@@ -859,10 +862,16 @@ export function SandboxesTab() {
   }
 
   const [plan, setPlan] = useState<SandholdPlan | null>(null);
-  async function refreshPlan() {
+  // refreshPlan reads the plan from the node: the Refresh button, or on its
+  // own (quiet: no busy label, and a failure keeps the last plan without an
+  // error box, since nobody asked).
+  async function refreshPlan(quiet = false) {
     if (!place.data?.confirm_token) return;
-    setBusy("plan");
-    setErr(null);
+    planAskedAt.current = Date.now();
+    if (!quiet) {
+      setBusy("plan");
+      setErr(null);
+    }
     try {
       const r = await fetchJSON<{ plan?: SandholdPlan | null }>(
         "/api/terminal/sandbox/sandhold/plan",
@@ -873,11 +882,45 @@ export function SandboxesTab() {
       );
       if (r.plan) setPlan(r.plan);
     } catch (e) {
-      failed(e);
+      if (!quiet) failed(e);
     } finally {
-      setBusy("");
+      if (!quiet) setBusy("");
     }
   }
+
+  // The plan box reads the node again on its own: when the panel is shown
+  // or the window regains focus, every few minutes while it stays visible,
+  // and after a launch the node refused (a card needed, say), so it never
+  // waits for Refresh.
+  const planAskedAt = useRef(0);
+  const refreshPlanRef = useRef(refreshPlan);
+  refreshPlanRef.current = refreshPlan;
+  const reloadRuns = runs.reload;
+  const canAutoPlan = !!(place.data?.plan && place.data.confirm_token);
+  useEffect(() => {
+    if (!canAutoPlan) return;
+    const tick = () => {
+      if (!planRefreshDue(planAskedAt.current, Date.now(), document.visibilityState === "visible")) return;
+      void refreshPlanRef.current(true);
+      reloadRuns();
+    };
+    tick();
+    const id = window.setInterval(tick, PLAN_REFRESH_MS);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("focus", tick);
+    };
+  }, [canAutoPlan, reloadRuns]);
+  const planCheckedAt = (plan ?? place.data?.plan)?.checked_at;
+  const runList = runs.data?.runs;
+  useEffect(() => {
+    if (!canAutoPlan || !runList || !planRefusedSince(runList, planCheckedAt)) return;
+    if (!planRefreshDue(planAskedAt.current, Date.now(), true)) return;
+    void refreshPlanRef.current(true);
+  }, [canAutoPlan, runList, planCheckedAt]);
 
   async function ask() {
     setBusy("ask");
@@ -933,7 +976,7 @@ export function SandboxesTab() {
           probe={probe.data}
           place={place.data && plan ? { ...place.data, plan } : place.data}
           placeMissing={placeMissing}
-          onRefreshPlan={place.data?.plan ? refreshPlan : undefined}
+          onRefreshPlan={place.data?.plan ? () => void refreshPlan() : undefined}
           planBusy={busy === "plan"}
         />
       )}

@@ -245,3 +245,34 @@ export function placesGroups<
   }
   return out;
 }
+
+/**
+ * The Sandboxes panel's plan box reads the node again on its own (the
+ * onboarding demo of 2026-11-13 found it stale until Refresh was pressed):
+ * when the panel is shown or the window regains focus, every
+ * PLAN_REFRESH_MS while it stays visible, and after a launch the node
+ * refused. PLAN_MIN_GAP_MS keeps focus and visibility, which fire
+ * together, to one call.
+ */
+export const PLAN_REFRESH_MS = 5 * 60_000;
+export const PLAN_MIN_GAP_MS = 15_000;
+
+/** planRefreshDue says whether the plan may be read again now. */
+export function planRefreshDue(lastMs: number, nowMs: number, visible: boolean): boolean {
+  return visible && nowMs - lastMs >= PLAN_MIN_GAP_MS;
+}
+
+/**
+ * planRefusedSince says whether a SandHold launch was refused after the
+ * plan was last read (a card needed, the free month over, a refused
+ * create of any kind): the node's answer may have changed the plan.
+ * Without a time the plan was read, any refused launch counts.
+ */
+export function planRefusedSince(runs: SandboxRun[], checkedAt?: string): boolean {
+  const since = checkedAt ? Date.parse(checkedAt) : NaN;
+  return runs.some((r) => {
+    if (r.backend !== "sandhold" || !/^launch_refused\b|refused the sandbox/.test(r.end_reason ?? "")) return false;
+    const at = Date.parse(r.ended_at ?? r.launched_at);
+    return Number.isNaN(since) || Number.isNaN(at) || at > since;
+  });
+}
