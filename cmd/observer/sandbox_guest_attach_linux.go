@@ -229,6 +229,11 @@ type frameWriter struct {
 func (f *frameWriter) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.writeLocked(p)
+}
+
+// writeLocked is Write for a caller that already holds f.mu.
+func (f *frameWriter) writeLocked(p []byte) (int, error) {
 	for off := 0; off < len(p); off += attachFrameMax {
 		end := min(off+attachFrameMax, len(p))
 		if err := writeAttachFrame(f.c, attachFrameData, p[off:end]); err != nil {
@@ -264,15 +269,23 @@ func (k *ptyKeeper) serveOne(c net.Conn) {
 		_, _ = c.Write([]byte{attachBusy})
 		return
 	}
-	if _, err := c.Write([]byte{attachOK}); err != nil {
-		return
-	}
+	// The client becomes the keeper's output before it hears OK, and holds
+	// its own writer until OK and the notice are out: the agent's output
+	// from the moment the client may act on OK reaches it (never the
+	// replaced client, never dropped), and always after the notice.
 	fw := &frameWriter{c: c}
-	if _, err := fw.Write([]byte(guestAttachNotice(k.runID))); err != nil {
-		return
-	}
+	fw.mu.Lock()
 	k.attachWriter(fw)
 	defer k.detach(fw)
+	if _, err := c.Write([]byte{attachOK}); err != nil {
+		fw.mu.Unlock()
+		return
+	}
+	if _, err := fw.writeLocked([]byte(guestAttachNotice(k.runID))); err != nil {
+		fw.mu.Unlock()
+		return
+	}
+	fw.mu.Unlock()
 	left := make(chan struct{})
 	defer close(left)
 	go func() {
