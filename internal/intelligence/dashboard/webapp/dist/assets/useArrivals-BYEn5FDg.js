@@ -1,1 +1,0 @@
-import{i as s}from"./vendor-react-DcQPdiaM.js";import{em as a,fU as l}from"./index-DUvVwmZi.js";function f(t,e){const r=s.useRef(null);s.useEffect(()=>{r.current=e?a(r.current,t):null});const n=e?r.current:null;return u=>l(n,u)}export{f as u};

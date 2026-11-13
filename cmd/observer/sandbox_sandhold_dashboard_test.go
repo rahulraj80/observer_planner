@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/dashapi"
@@ -75,6 +76,17 @@ func sandholdDashEnv(t *testing.T, adviseRefusal bool) (*[]string, string) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(a)
 		}
+	})
+	plan := bytes.ReplaceAll(loadContractAnswer(t, "offer"), []byte("<time>"), []byte("2026-12-09T12:00:00Z"))
+	sandholdOfferCalls.Store(0)
+	front.HandleFunc("GET /v1/offer", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != sandholdTestKey {
+			sandholdWriteJSON(w, 401, map[string]string{"error": "no valid credential"})
+			return
+		}
+		sandholdOfferCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(plan)
 	})
 	front.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Everything else (the sign-in) goes to the fake node.
@@ -171,7 +183,7 @@ func TestSandholdDashboardPlaceAndAdvisor(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &place); err != nil {
 		t.Fatal(err)
 	}
-	if !place.Connected || place.Node != node || place.User != "alice" || place.Org != "acme" || !place.ComponentActive || place.ConnectCommand != "observer sandbox connect <node-url>" {
+	if !place.Connected || place.Node != node || place.User != "alice" || place.Org != "acme" || !place.ComponentActive || place.ConnectCommand != "observer sandbox connect" {
 		t.Errorf("place view %+v", place)
 	}
 	if len(place.Offers) != 2 || place.Offers[0].Title != "Shared" || place.Offers[1].Title != "Sealed" || len(place.Offers[0].Networks) == 0 {
@@ -246,6 +258,31 @@ func TestSandholdDashboardRefusalScrubsTheKey(t *testing.T) {
 	}
 }
 
+// TestSandholdDashboardPlan: the account's first-month offer is kept at
+// connect and shown in the place view; the refresh reads it from the node
+// only with the confirm token, and keeps it.
+func TestSandholdDashboardPlan(t *testing.T) {
+	_, node := sandholdDashEnv(t, false)
+	code, body := sandholdDashCall(t, http.MethodGet, "/api/terminal/sandbox/sandhold", "", "")
+	if code != 200 || !strings.Contains(body, `"skips_left":5`) || !strings.Contains(body, `"days_left":28`) || strings.Contains(body, `"offer":"`) ||
+		!strings.Contains(body, `"add_card_url":"`+node+`/app/#/billing"`) || !strings.Contains(body, "5 of 5 sandboxes left before a card is needed") {
+		t.Fatalf("place view %d %s", code, body)
+	}
+	if code, _ := sandholdDashCall(t, http.MethodGet, "/api/terminal/sandbox/sandhold/plan", "", ""); code != http.StatusForbidden || sandholdOfferCalls.Load() != 1 {
+		t.Fatalf("plan without the confirm token: %d, node calls %d (want only connect's)", code, sandholdOfferCalls.Load())
+	}
+	code, body = sandholdDashCall(t, http.MethodGet, "/api/terminal/sandbox/sandhold/plan", "", strings.Repeat("ab", 32))
+	if code != 200 || !strings.Contains(body, `"skips_left":5`) || !strings.Contains(body, `"checked_at":"`) || strings.Contains(body, sandholdTestKey) {
+		t.Fatalf("plan %d %s", code, body)
+	}
+	if sandholdOfferCalls.Load() != 2 {
+		t.Errorf("node calls %d, want 2", sandholdOfferCalls.Load())
+	}
+}
+
+// sandholdOfferCalls counts GET /v1/offer at the dashboard tests' node.
+var sandholdOfferCalls atomic.Int32
+
 func TestSandholdDashboardNotConnected(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	savedKS, savedEnv, savedActive := sandholdKeystoreOpen, sandholdLookupEnv, sandholdComponentActive
@@ -258,11 +295,12 @@ func TestSandholdDashboardNotConnected(t *testing.T) {
 		sandholdKeystoreOpen, sandholdLookupEnv, sandholdComponentActive = savedKS, savedEnv, savedActive
 	})
 	code, body := sandholdDashCall(t, http.MethodGet, "/api/terminal/sandbox/sandhold", "", "")
-	if code != 200 || !strings.Contains(body, `"connected":false`) || !strings.Contains(body, `"component_active":false`) || !strings.Contains(body, `"offers":[]`) {
+	if code != 200 || !strings.Contains(body, `"connected":false`) || !strings.Contains(body, `"component_active":false`) || !strings.Contains(body, `"offers":[]`) ||
+		!strings.Contains(body, `"offer":"First month free on SandHold`) || !strings.Contains(body, `"default_node":"https://`) {
 		t.Fatalf("place view %d %s", code, body)
 	}
 	code, body = sandholdDashCall(t, http.MethodGet, "/api/terminal/sandbox/sandhold/advise", "", strings.Repeat("ef", 32))
-	if code != http.StatusConflict || !strings.Contains(body, "observer sandbox connect <node-url>") {
+	if code != http.StatusConflict || !strings.Contains(body, "observer sandbox connect") {
 		t.Fatalf("questions without a connection %d %s", code, body)
 	}
 	for _, rt := range sandholdDashboardRoutes("") {

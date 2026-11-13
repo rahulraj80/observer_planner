@@ -38,8 +38,51 @@ import (
 // sandholdAdviseTimeout bounds one call to the node.
 const sandholdAdviseTimeout = 20 * time.Second
 
-// sandholdConnectCommand is the exact command the panel shows.
-const sandholdConnectCommand = "observer sandbox connect <node-url>"
+// sandholdConnectCommand is the exact command the panel shows: with no
+// node it connects to SandHold's public node (sandhold.DefaultNode), where
+// a new person signs up in the same browser step.
+const sandholdConnectCommand = "observer sandbox connect"
+
+// sandholdOfferText is the first-month offer shown before connecting. The
+// node's own numbers are printed by connect; these are SandHold's defaults
+// (SandHold note 44).
+const sandholdOfferText = "First month free on SandHold: 30 days at no charge, up to $80 of use, and no card needed for your first 5 sandboxes (after that a card is checked with a $1 charge, refunded at once)."
+
+// sandholdPlanView is where the connected account stands in the
+// first-month offer, as the node last said (at connect, or the panel's
+// refresh). Nil for an org without the offer.
+type sandholdPlanView struct {
+	Summary     string `json:"summary"`
+	InFreeMonth bool   `json:"in_free_month"`
+	DaysLeft    int    `json:"days_left"`
+	FreeUntil   string `json:"free_until,omitempty"`
+	CardGate    bool   `json:"card_gate"`
+	SkipsLeft   int    `json:"skips_left"`
+	CardSkips   int    `json:"card_skips"`
+	CardNeeded  bool   `json:"card_needed"`
+	// Card is none, checked, unchecked or failed.
+	Card string `json:"card"`
+	// CardLine is what the person may do about a card ("" when nothing).
+	CardLine   string `json:"card_line,omitempty"`
+	AddCardURL string `json:"add_card_url,omitempty"`
+	CheckedAt  string `json:"checked_at,omitempty"`
+}
+
+func sandholdPlanOf(p *sandhold.Plan) *sandholdPlanView {
+	if p == nil {
+		return nil
+	}
+	v := &sandholdPlanView{Summary: sandhold.PlainLine(p.Summary), InFreeMonth: p.InFreeMonth, DaysLeft: p.DaysLeft,
+		CardGate: p.CardGate, SkipsLeft: p.SkipsLeft, CardSkips: p.CardSkips, CardNeeded: p.CardNeeded,
+		Card: sandhold.PlainLine(p.Card), CardLine: sandhold.PlainLine(p.CardLine()), AddCardURL: sandhold.PlainLine(p.AddCardURL)}
+	if p.FreeUntil != nil {
+		v.FreeUntil = p.FreeUntil.UTC().Format(time.RFC3339)
+	}
+	if !p.CheckedAt.IsZero() {
+		v.CheckedAt = p.CheckedAt.UTC().Format(time.RFC3339)
+	}
+	return v
+}
 
 // The bounds of a set of answers the daemon forwards.
 const (
@@ -84,6 +127,12 @@ type sandholdPlaceView struct {
 	ComponentActive bool   `json:"component_active"`
 	ConnectCommand  string `json:"connect_command"`
 	ConfirmToken    string `json:"confirm_token"`
+	// DefaultNode is where the connect command goes with no node named.
+	DefaultNode string `json:"default_node"`
+	// Offer is the first-month offer, shown while nothing is connected.
+	Offer string `json:"offer,omitempty"`
+	// Plan is the connected account's offer state (nil without one).
+	Plan *sandholdPlanView `json:"plan,omitempty"`
 }
 
 // sandholdDashboardRoutes are the row's routes on the dashboard. The
@@ -97,6 +146,7 @@ func sandholdDashboardRoutes(configPath string) []dashapi.ExtraRoute {
 		}},
 		{Pattern: "GET /api/terminal/sandbox/sandhold/advise", Capability: dashapi.CapabilityLocal, Section: sec, Handler: sandholdAdviseQuestionsHandler},
 		{Pattern: "POST /api/terminal/sandbox/sandhold/advise", Capability: dashapi.CapabilityLocal, Section: sec, Handler: sandholdAdviseHandler},
+		{Pattern: "GET /api/terminal/sandbox/sandhold/plan", Capability: dashapi.CapabilityLocal, Section: sec, Handler: sandholdPlanHandler},
 	}
 }
 
@@ -112,7 +162,7 @@ var sandholdComponentActive = func(cfgPath string) bool {
 
 // sandholdPlace is the row's view over local facts only.
 func sandholdPlace(observerDir string, now time.Time) sandholdPlaceView {
-	v := sandholdPlaceView{Offers: []sandholdOfferView{}, ConnectCommand: sandholdConnectCommand}
+	v := sandholdPlaceView{Offers: []sandholdOfferView{}, ConnectCommand: sandholdConnectCommand, DefaultNode: sandhold.DefaultNode}
 	conn, err := sandholdLoadConnection(observerDir)
 	v.FromEnv = sandholdEnvKeySet()
 	switch {
@@ -127,6 +177,7 @@ func sandholdPlace(observerDir string, now time.Time) sandholdPlaceView {
 			v.ExpiresAt = conn.ExpiresAt.UTC().Format(time.RFC3339)
 			v.Expired = conn.Expired(now)
 		}
+		v.Plan = sandholdPlanOf(conn.Plan)
 		for _, o := range conn.Offers {
 			v.Offers = append(v.Offers, sandholdOfferView{
 				Tier: sandhold.PlainLine(o.Tier), Title: sandhold.TierTitle(sandhold.PlainLine(o.Tier)),
@@ -138,6 +189,9 @@ func sandholdPlace(observerDir string, now time.Time) sandholdPlaceView {
 		if node := sandholdNode(observerDir); node != "" {
 			v.Connected, v.Node = true, node
 		}
+	}
+	if !v.Connected && v.Problem == "" {
+		v.Offer = sandholdOfferText
 	}
 	return v
 }
@@ -180,16 +234,54 @@ func sandholdAdviseClient(w http.ResponseWriter) (*sandhold.Client, string, bool
 // it at a fake node).
 var sandholdNewClient = sandhold.NewClient
 
-// sandholdAdviseQuestionsHandler serves GET /api/terminal/sandbox/sandhold/advise.
-func sandholdAdviseQuestionsHandler(w http.ResponseWriter, r *http.Request) {
-	// A GET that calls the node needs the confirm token too: a page on
-	// another site could otherwise make the browser send it (an image, a
-	// link) and so make this daemon call the node. The token's header is
-	// one no other site can set.
+// sandholdGetConfirmed checks the confirm token of a GET that calls the
+// node: a page on another site could otherwise make the browser send it
+// (an image, a link) and so make this daemon call the node. The token's
+// header is one no other site can set.
+func sandholdGetConfirmed(w http.ResponseWriter, r *http.Request) bool {
 	h := strings.TrimSpace(r.Header.Get(hostedConfirmHeader))
 	ck, err := r.Cookie(hostedConfirmCookie)
 	if h == "" || err != nil || subtle.ConstantTimeCompare([]byte(h), []byte(strings.TrimSpace(ck.Value))) != 1 {
 		sandholdDashJSON(w, http.StatusForbidden, map[string]string{"error": "missing or mismatched confirm token", "fix": "reload the page"}, "")
+		return false
+	}
+	return true
+}
+
+// sandholdPlanHandler serves GET /api/terminal/sandbox/sandhold/plan: the
+// account's first-month offer, read from the node now (the panel's
+// refresh button) and kept in the connection record.
+func sandholdPlanHandler(w http.ResponseWriter, r *http.Request) {
+	if !sandholdGetConfirmed(w, r) {
+		return
+	}
+	c, key, ok := sandholdAdviseClient(w)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sandholdAdviseTimeout)
+	defer cancel()
+	p, err := c.Offer(ctx)
+	if err != nil {
+		sandholdWriteNodeError(w, err, key)
+		return
+	}
+	if p != nil {
+		p.CheckedAt = time.Now().UTC()
+	}
+	// Kept for the panel and status, only for the node the record names.
+	if obs, err := hostedObserverDir(); err == nil {
+		if conn, err := sandholdLoadConnection(obs); err == nil && conn != nil && conn.URL == c.URL {
+			conn.Plan = p
+			_ = sandholdSaveConnection(obs, *conn)
+		}
+	}
+	sandholdDashJSON(w, http.StatusOK, map[string]any{"node": c.URL, "plan": sandholdPlanOf(p)}, key)
+}
+
+// sandholdAdviseQuestionsHandler serves GET /api/terminal/sandbox/sandhold/advise.
+func sandholdAdviseQuestionsHandler(w http.ResponseWriter, r *http.Request) {
+	if !sandholdGetConfirmed(w, r) {
 		return
 	}
 	c, key, ok := sandholdAdviseClient(w)
@@ -268,7 +360,7 @@ func sandholdAnswersProblem(in sandhold.AdviseRequest) string {
 func sandholdWriteNodeError(w http.ResponseWriter, err error, key string) {
 	var ae *sandhold.APIError
 	if errors.As(err, &ae) {
-		sandholdDashJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": sandhold.PlainLine(ae.Msg), "fix": sandhold.PlainLine(ae.Fix), "node_status": ae.Status}, key)
+		sandholdDashJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": sandhold.PlainLine(ae.Msg), "fix": sandhold.PlainLine(ae.Fix), "node_status": ae.Status, "code": ae.Code}, key)
 		return
 	}
 	sandholdDashJSON(w, http.StatusBadGateway, map[string]string{"error": sandhold.PlainLine(err.Error())}, key)
