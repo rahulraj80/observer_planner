@@ -6481,22 +6481,8 @@ func validateObservabilityJudges(cfg Config) error {
 }
 
 func Validate(cfg Config) error {
-	if cfg.Observer.DBPath == "" {
-		return errors.New("config: observer.db_path is required")
-	}
-	switch cfg.Observer.LogLevel {
-	case "debug", "info", "warn", "error":
-	default:
-		return fmt.Errorf("config: observer.log_level %q not in {debug, info, warn, error}", cfg.Observer.LogLevel)
-	}
-	if cfg.Observer.Watch.PollIntervalSeconds < 0 {
-		return errors.New("config: observer.watch.poll_interval_seconds must be >= 0")
-	}
-	if cfg.Observer.Hooks.TimeoutMS <= 0 {
-		return errors.New("config: observer.hooks.timeout_ms must be > 0")
-	}
-	if cfg.Proxy.Enabled && (cfg.Proxy.Port <= 0 || cfg.Proxy.Port > 65535) {
-		return fmt.Errorf("config: proxy.port %d out of range", cfg.Proxy.Port)
+	if err := validateObserverCore(cfg); err != nil {
+		return err
 	}
 	if err := validateProxyUpstreams(cfg.Proxy); err != nil {
 		return err
@@ -6576,6 +6562,29 @@ func Validate(cfg Config) error {
 	// save path never writes a bad value. Load is the component-aware side:
 	// it sets aside a bad section of an inactive component before this runs.
 	return validateComponentSections(&cfg)
+}
+
+// validateObserverCore checks the [observer] basics and the proxy port,
+// the first checks Validate runs.
+func validateObserverCore(cfg Config) error {
+	if cfg.Observer.DBPath == "" {
+		return errors.New("config: observer.db_path is required")
+	}
+	switch cfg.Observer.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("config: observer.log_level %q not in {debug, info, warn, error}", cfg.Observer.LogLevel)
+	}
+	if cfg.Observer.Watch.PollIntervalSeconds < 0 {
+		return errors.New("config: observer.watch.poll_interval_seconds must be >= 0")
+	}
+	if cfg.Observer.Hooks.TimeoutMS <= 0 {
+		return errors.New("config: observer.hooks.timeout_ms must be > 0")
+	}
+	if cfg.Proxy.Enabled && (cfg.Proxy.Port <= 0 || cfg.Proxy.Port > 65535) {
+		return fmt.Errorf("config: proxy.port %d out of range", cfg.Proxy.Port)
+	}
+	return nil
 }
 
 // validateMCPRelay checks the [mcp_relay] block: closed mode / audit_mode

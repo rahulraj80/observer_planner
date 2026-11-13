@@ -180,7 +180,7 @@ func (c *Client) send(ctx context.Context, rq request) (*http.Response, error) {
 	if len(rq.query) > 0 {
 		u += "?" + rq.query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, rq.method, u, rq.body)
+	req, err := http.NewRequestWithContext(ctx, rq.method, u, rq.body) //nolint:gosec // G704: false positive; u is the SandHold node the person connected to (c.URL) plus a fixed API path
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func (c *Client) send(ctx context.Context, rq request) (*http.Response, error) {
 	if err := c.authorize(ctx, rq.method, c.URL+rq.path, req.Header); err != nil {
 		return nil, err
 	}
-	res, err := c.httpClient().Do(req)
+	res, err := c.httpClient().Do(req) //nolint:gosec // G704: false positive; the request to the connected node built above, redirects never followed with the key
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

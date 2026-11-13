@@ -133,20 +133,18 @@ func (p *streamProcess) read() {
 	r := bufio.NewReaderSize(p.body, 64<<10)
 	event := ""
 	var data strings.Builder
-	exited := false
 	for {
 		line, err := readLine(r, maxEventLine)
 		if err != nil {
-			if !exited {
-				p.code, p.err = -1, fmt.Errorf("the command's output stream ended before its exit: %s", PlainLine(err.Error()))
-			}
+			// The exit event returns below, so a stream that ends here
+			// ended before it.
+			p.code, p.err = -1, fmt.Errorf("the command's output stream ended before its exit: %s", PlainLine(err.Error()))
 			return
 		}
 		switch {
 		case line == "":
 			if event != "" || data.Len() > 0 {
 				if p.dispatch(event, data.String()) {
-					exited = true
 					return
 				}
 			}

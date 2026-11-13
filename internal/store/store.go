@@ -43,7 +43,6 @@ import (
 // watcher-attached indexer keeps full control of its batch path.
 type Store struct {
 	db          *sql.DB
-	dbPath      string
 	indexer     *indexing.Indexer
 	stamper     *identity.Stamper
 	cacheEngine *cachetrack.Engine

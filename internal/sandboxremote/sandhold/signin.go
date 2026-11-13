@@ -95,24 +95,9 @@ func (s *SignIn) Run(ctx context.Context) (Grant, error) {
 	}
 	c := *s.Client
 	c.Key = "" // the tool-side endpoints take no credential
-	var start Start
-	err := c.Do(ctx, http.MethodPost, "/v1/device/code", map[string]string{"client_id": s.ClientID}, &start)
-	var ae *APIError
-	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
-		return Grant{}, ErrNoBrowserSignIn
-	}
+	start, page, err := requestCode(ctx, &c, s.ClientID)
 	if err != nil {
 		return Grant{}, err
-	}
-	if start.DeviceCode == "" || start.UserCode == "" {
-		return Grant{}, fmt.Errorf("%s answered the sign-in without a code", c.URL)
-	}
-	page := start.Complete
-	if page == "" {
-		page = start.URI
-	}
-	if !strings.HasPrefix(page, "https://") && !strings.HasPrefix(page, "http://") {
-		return Grant{}, ErrBadPage
 	}
 	if s.Shown != nil {
 		s.Shown(start, SameNode(c.URL, page))
@@ -161,6 +146,32 @@ func (s *SignIn) Run(ctx context.Context) (Grant, error) {
 			return Grant{}, ErrExpired
 		}
 	}
+}
+
+// requestCode asks the node for a sign-in code and returns it with the page
+// the person opens: ErrNoBrowserSignIn when the node has no browser sign-in,
+// ErrBadPage when the page is not a web address.
+func requestCode(ctx context.Context, c *Client, clientID string) (Start, string, error) {
+	var start Start
+	err := c.Do(ctx, http.MethodPost, "/v1/device/code", map[string]string{"client_id": clientID}, &start)
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+		return Start{}, "", ErrNoBrowserSignIn
+	}
+	if err != nil {
+		return Start{}, "", err
+	}
+	if start.DeviceCode == "" || start.UserCode == "" {
+		return Start{}, "", fmt.Errorf("%s answered the sign-in without a code", c.URL)
+	}
+	page := start.Complete
+	if page == "" {
+		page = start.URI
+	}
+	if !strings.HasPrefix(page, "https://") && !strings.HasPrefix(page, "http://") {
+		return Start{}, "", ErrBadPage
+	}
+	return start, page, nil
 }
 
 // SameNode reports whether page is under node (the address the person
