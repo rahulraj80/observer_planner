@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -159,7 +160,13 @@ func TestOCIInitOOBHandsTheSocketToTheLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = gl.Close() }()
-	argv := []string{"/usr/bin/observer", sandbox.GuestVerb, "--gateway-port", "39911", "--gateway-sock", gw, "--", "/usr/bin/observer", "claude"}
+	// A port the kernel just handed out, not a fixed one: 39911 sits in the
+	// ephemeral range, so any connection on the host (or the other build's
+	// copy of this test) could hold it, and -count's previous run releases
+	// it only when the forward's context close lands, after stop returns.
+	// Either way the init's listen failed and it fell back to the plain argv.
+	port := strconv.Itoa(freeLoopbackPort(t))
+	argv := []string{"/usr/bin/observer", sandbox.GuestVerb, "--gateway-port", port, "--gateway-sock", gw, "--", "/usr/bin/observer", "claude"}
 	environ := []string{"TERM=xterm", envOOBBoxSock + "=" + sock, envOOBBoxAuth + "=boxtoken", envOOBFD + "=3", envOOBAuth + "=host-secret"}
 	run, env, extra, stop := ociInitOOB(argv, environ)
 	defer stop()
@@ -171,10 +178,10 @@ func TestOCIInitOOBHandsTheSocketToTheLauncher(t *testing.T) {
 			t.Fatalf("the launcher sees %s", kv)
 		}
 	}
-	if !slices.Contains(env, envOOBFD+"=3") || !slices.Contains(env, envOOBAuth+"=boxtoken") || !slices.Contains(env, "HTTPS_PROXY=http://127.0.0.1:39911") {
+	if !slices.Contains(env, envOOBFD+"=3") || !slices.Contains(env, envOOBAuth+"=boxtoken") || !slices.Contains(env, "HTTPS_PROXY=http://127.0.0.1:"+port) {
 		t.Fatalf("env %v", env)
 	}
-	if c, err := net.Dial("tcp", "127.0.0.1:39911"); err != nil {
+	if c, err := net.Dial("tcp", "127.0.0.1:"+port); err != nil {
 		t.Fatalf("the init does not serve the guest's gateway forward: %v", err)
 	} else {
 		_ = c.Close()
