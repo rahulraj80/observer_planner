@@ -114,7 +114,12 @@ func createRequest(spec sandboxremote.BoxSpec) (CreateRequest, error) {
 	if _, ok := netWords[spec.Tier]; !ok {
 		return CreateRequest{}, fmt.Errorf("sandhold: no network tier %q on a SandHold node (none, proxy_only or internet)", spec.Tier)
 	}
-	if spec.Tier == vocab.TierInternet {
+	// The internet tier lets the box reach out but asks for no more than
+	// the setup gives: a named template's network (its allow list) stands,
+	// since a create's own network wins over the template's on the node,
+	// and a starter account is refused an open network outright. Only with
+	// no template does the tier ask for an open one.
+	if spec.Tier == vocab.TierInternet && spec.Template == "" {
 		req.Network = &CreateNetwork{Open: true}
 	}
 	return req, nil

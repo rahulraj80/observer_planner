@@ -507,6 +507,39 @@ func TestBoxCreateLostAnswer(t *testing.T) {
 	}
 }
 
+// TestCreateRequestTemplateNetworkStands: on the internet tier a named
+// template's network stands (no open network asked for: the node lets the
+// create's network win over the template's, and refuses a starter account
+// an open one); with no template the tier asks for an open network, and
+// the closed tiers ask for none.
+func TestCreateRequestTemplateNetworkStands(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		spec     sandboxremote.BoxSpec
+		wantOpen bool
+	}{
+		{"internet with a template", sandboxremote.BoxSpec{Template: "onb-vault", Tier: vocab.TierInternet}, false},
+		{"internet, no template", sandboxremote.BoxSpec{Tier: vocab.TierInternet}, true},
+		{"none with a template", sandboxremote.BoxSpec{Template: "onb-vault", Tier: vocab.TierNone}, false},
+		{"proxy_only, no template", sandboxremote.BoxSpec{Tier: vocab.TierProxyOnly}, false},
+	} {
+		req, err := createRequest(c.spec)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := req.Network != nil && req.Network.Open; got != c.wantOpen {
+			t.Errorf("%s: open network asked = %v, want %v (network %+v)", c.name, got, c.wantOpen, req.Network)
+		}
+		if c.spec.Template != "" && req.Network != nil {
+			t.Errorf("%s: a network was sent over the template's: %+v", c.name, req.Network)
+		}
+		b, _ := json.Marshal(req)
+		if c.spec.Template != "" && strings.Contains(string(b), `"network"`) {
+			t.Errorf("%s: the request carries a network over the template's: %s", c.name, b)
+		}
+	}
+}
+
 // TestLaunchScriptRunsInSh runs the terminal's launch script in a real sh
 // (no terminal, so the agent form): the environment, the directory, the
 // argv as given and the exit code in its file.

@@ -103,9 +103,11 @@ func TestContractBoxCreateFull(t *testing.T) {
 	old := fullWait
 	fullWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
 	t.Cleanup(func() { fullWait = old })
+	// No template, so the internet tier asks for an open network, as the
+	// full vector's request does.
 	spec := sandboxremote.BoxSpec{
 		RunID: "run1", Labels: map[string]string{sandboxremote.LabelKey: "run1"},
-		Template: "py-tests", TimeoutSeconds: 600, Tier: vocab.TierInternet, Isolation: vocab.ClassContainer,
+		TimeoutSeconds: 600, Tier: vocab.TierInternet, Isolation: vocab.ClassContainer,
 	}
 
 	_, err := contractNode(t, full).CreateSandbox(context.Background(), CreateRequest{Isolation: "shielded", Network: &CreateNetwork{Allow: []string{"pypi.org"}, Open: true}})
@@ -114,7 +116,7 @@ func TestContractBoxCreateFull(t *testing.T) {
 		t.Fatalf("got %v (%+v), want a 503 that asks for 30 s", err, ae)
 	}
 
-	got, err := contractBox(t, full, loadVector(t, "sandbox-create")).Create(context.Background(), spec)
+	got, err := contractBox(t, full, loadVector(t, "sandbox-create-open-not-granted")).Create(context.Background(), spec)
 	if err != nil || got.ID != contractID || len(waits) != 1 || waits[0] != 30*time.Second {
 		t.Fatalf("full then made: %+v %v, waits %v; want the box after one 30 s wait", got, err, waits)
 	}
