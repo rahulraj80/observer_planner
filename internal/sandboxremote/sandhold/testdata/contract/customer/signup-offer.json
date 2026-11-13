@@ -1,0 +1,56 @@
+{
+  "name": "signup-offer",
+  "about": "Before an account exists: whether the node takes sign-ups (closed in test mode unless with an invite), the starter limits and the first-month offer (free days, the fair-use allowance in dollars, sandboxes before a card, the refundable card check).",
+  "method": "GET",
+  "path": "/app/api/signup",
+  "status": 200,
+  "response": {
+    "closedReason": "Sign-up is closed: this node runs in test mode and takes no real customers yet. If an operator sent you a sign-up invite, enter its code.",
+    "emailVerified": false,
+    "inviteAccepted": true,
+    "offer": {
+      "allowanceUsd": 80,
+      "cardCheckUsd": 1,
+      "cardSkips": 5,
+      "freeDays": 30
+    },
+    "selfServe": true,
+    "signupClosed": true,
+    "starter": {
+      "allow": [
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "crates.io",
+        "index.crates.io",
+        "static.crates.io",
+        "rubygems.org",
+        "index.rubygems.org",
+        "repo.maven.apache.org",
+        "repo1.maven.org",
+        "deb.debian.org",
+        "security.debian.org",
+        "archive.ubuntu.com",
+        "security.ubuntu.com",
+        "api.anthropic.com",
+        "api.openai.com",
+        "generativelanguage.googleapis.com"
+      ],
+      "cpu": "1",
+      "creditHours": 1509.4,
+      "creditUsd": 80,
+      "hourUsd": 0.053,
+      "isolation": "sealed",
+      "maxSandboxes": 2,
+      "memory": "1Gi",
+      "network": "limited"
+    }
+  }
+}

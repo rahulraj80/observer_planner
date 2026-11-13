@@ -1,0 +1,12 @@
+{
+  "name": "offer-none",
+  "about": "An org that is not a self-serve account has no offer.",
+  "method": "GET",
+  "path": "/v1/offer",
+  "status": 404,
+  "response": {
+    "code": "no_offer",
+    "error": "this org has no first-month offer: it is not a self-serve account",
+    "fix": "nothing to do: the org's terms are its own"
+  }
+}

@@ -205,6 +205,10 @@ func (b *Box) Create(ctx context.Context, spec sandboxremote.BoxSpec) (sandboxre
 			return sandboxremote.BoxInfo{}, fmt.Errorf("the node is %w: %w", sandboxremote.ErrFull, err)
 		case errors.As(err, &ae) && ae.Status == http.StatusNotFound && spec.Template != "":
 			return sandboxremote.BoxInfo{}, fmt.Errorf("%w: %w", sandboxremote.ErrTemplateUnavailable, err)
+		case isPlanRefusal(err):
+			// The account's plan, not the node or the spec: only the person
+			// can fix it, in the node's portal, so it is said as such.
+			return sandboxremote.BoxInfo{}, fmt.Errorf("the node refused the sandbox: your SandHold account needs attention: %w", err)
 		case errors.As(err, &ae) && ae.Status == http.StatusTooManyRequests:
 			return sandboxremote.BoxInfo{}, fmt.Errorf("%w: %w", sandboxremote.ErrRateLimited, err)
 		case errors.As(err, &ae), errors.Is(err, ErrNotSent), errors.Is(err, ErrRedirect):
@@ -228,6 +232,8 @@ func (b *Box) Create(ctx context.Context, spec sandboxremote.BoxSpec) (sandboxre
 	}
 	return info(sb), nil
 }
+
+func isPlanRefusal(err error) bool { _, ok := PlanRefusal(err); return ok }
 
 // notFound maps the node's 404 to ErrNotFound.
 func notFound(err error) error {

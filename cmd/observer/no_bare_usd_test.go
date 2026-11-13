@@ -73,6 +73,8 @@ var noBareUSDAllow = map[string]noBareUSDEntry{
 		"view returns before it."},
 	"cmd/observer/advisor_digest.go": {reason: "the session-start digest is masked with costtext.MaskDollars under " +
 		"the resolved display before it is injected."},
+	"internal/sandboxremote/sandhold/offer.go": {reason: "SandHold's own plan terms (first month free up to a dollar allowance, " +
+		"a refundable card check), the node's price list, not a developer's coding spend."},
 	"cmd/observer/admission.go": {reason: "Plane A admission caps (observer obs admission): an admin-hosted app's " +
 		"authored dollar caps, not a developer's coding spend."},
 	"cmd/observer/cloud.go": {reason: "the Cloud Intelligence preview prints the exact bytes and metrics that " +

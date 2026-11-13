@@ -89,6 +89,9 @@ type Connection struct {
 	// member of an Observer org: no key is kept, each call carries a
 	// short-lived DPoP-bound token from the org's token service (auth.go).
 	OrgToken *OrgToken `json:"org_token,omitempty"`
+	// Plan is the account's first-month offer as the node last told it
+	// (GET /v1/offer, SandHold note 44): nil for an org without one.
+	Plan *Plan `json:"plan,omitempty"`
 }
 
 // OrgToken is where an org member's tokens for the node come from. No
@@ -149,7 +152,7 @@ func (c *Connection) Expired(now time.Time) bool {
 }
 
 // NotConnected is the row's state with no connection.
-const NotConnected = "not connected: run `observer sandbox connect <node-url>`"
+const NotConnected = "not connected: run `observer sandbox connect` (SandHold's public node; first month free) or `observer sandbox connect <node-url>`"
 
 // Settings are what a call to the node would use: the environment wins over
 // the saved sign-in, and a saved key is never sent to another node.

@@ -388,7 +388,11 @@ func newSandboxConnectCmd() *cobra.Command {
 		Long: "Connect this machine to a SandHold node. Observer asks the node for a sign-in code, shows you the node's approval page\n" +
 			"and the code (and opens the page when it is on the node you named), and waits while you approve this machine there.\n" +
 			"The key the node then gives is kept in this machine's keychain and sent only to that node. Observer prints who you\n" +
-			"are signed in as and which isolation the node offers. SANDHOLD_URL and SANDHOLD_API_KEY, when set, win over it (CI).",
+			"are signed in as and which isolation the node offers. SANDHOLD_URL and SANDHOLD_API_KEY, when set, win over it (CI).\n\n" +
+			"With no node named (and none saved or in SANDHOLD_URL), it connects to SandHold's public node, " + sandhold.DefaultNode + "\n" +
+			"(SANDHOLD_DEFAULT_URL names another): it shows the first-month offer, and on the page that opens a new person creates an\n" +
+			"account with a passkey and approves this machine in the same step. Observer then prints the account's plan (days left,\n" +
+			"sandboxes left before a card, where to add one).",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deps, err := sandholdDefaultDeps(cfgPath)
@@ -459,13 +463,26 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	if raw == "" && saved != nil {
 		raw = saved.URL
 	}
+	defaulted := false
 	if strings.TrimSpace(raw) == "" {
-		return errors.New("sandbox connect: which node? observer sandbox connect <node-url>, for example: observer sandbox connect https://sandhold.example.com")
+		// No node named: SandHold's public node (or the one
+		// SANDHOLD_DEFAULT_URL names), where a person signs up in the
+		// same browser step and the first month is free.
+		raw, defaulted = sandhold.DefaultNode, true
+		if deps.lookupEnv != nil {
+			if v, ok := deps.lookupEnv(sandhold.EnvDefaultURL); ok && strings.TrimSpace(v) != "" {
+				raw = v
+			}
+		}
 	}
 	node, err := sandhold.NodeURL(raw)
 	if err != nil {
 		return fmt.Errorf("sandbox connect: %w", err)
 	}
+	if defaulted {
+		fmt.Fprintf(out, "No node given: connecting to SandHold at %s (another node: observer sandbox connect <node-url>).\n", node)
+	}
+	sandholdShowOffer(ctx, out, node)
 	si := &sandhold.SignIn{
 		Client:   sandhold.NewClient(node, ""),
 		ClientID: sandholdClientID(deps.hostname),
@@ -525,6 +542,10 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	} else {
 		conn.TargetsError = sandhold.PlainLine(terr.Error())
 	}
+	if plan, err := c.Offer(ctx); err == nil && plan != nil {
+		plan.CheckedAt = deps.now().UTC()
+		conn.Plan = plan
+	}
 	if err := sandholdSaveConnection(deps.observerDir, conn); err != nil {
 		return fmt.Errorf("sandbox connect: the key is kept, but the connection record could not be written: %w", err)
 	}
@@ -554,6 +575,12 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	if whoErr != nil {
 		fmt.Fprintf(out, "  Note: the node did not say who the key belongs to (%s).\n", sandhold.PlainLine(whoErr.Error()))
 	}
+	if conn.Plan != nil {
+		fmt.Fprintf(out, "  Plan: %s\n", conn.Plan.Summary)
+		if l := conn.Plan.CardLine(); l != "" {
+			fmt.Fprintf(out, "  %s\n", l)
+		}
+	}
 	fmt.Fprintln(out)
 	switch {
 	case terr != nil:
@@ -569,6 +596,30 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	fmt.Fprintln(out, "\nThe node appears in Observer's sandbox backends as \"sandhold\" (observer sandbox status --backend sandhold).")
 	fmt.Fprintln(out, "To run a sandboxed terminal on it, add \"sandhold\" to [terminal.sandbox].backends and choose it by name; the first run asks you to agree to what is sent to the node.")
 	return nil
+}
+
+// sandholdShowOffer prints the node's first-month offer before the
+// browser step, when the node has one (best effort: a node without
+// self-serve sign-up, or one that does not answer quickly, prints nothing).
+func sandholdShowOffer(ctx context.Context, out io.Writer, node string) {
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	info, err := sandhold.NewClient(node, "").Signup(cctx)
+	if err != nil || info == nil || !info.SelfServe {
+		return
+	}
+	if l := info.Offer.Line(); l != "" {
+		fmt.Fprintf(out, "New to SandHold? %s\n", l)
+	}
+	switch {
+	case info.SignupClosed && info.InviteAccepted:
+		fmt.Fprintln(out, "This node takes new accounts by invitation for now: with an invite code, create your account on the page that opens; with an account, just sign in.")
+	case info.SignupClosed:
+		fmt.Fprintln(out, "This node is not taking new accounts right now; with an account, just sign in.")
+	default:
+		fmt.Fprintln(out, "On the page that opens, create your account with a passkey (or sign in) and this machine is connected in the same step.")
+	}
+	fmt.Fprintln(out)
 }
 
 // runSandholdDisconnect is `observer sandbox disconnect`.

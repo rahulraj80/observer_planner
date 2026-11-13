@@ -39,6 +39,9 @@ type sandholdFakeNode struct {
 	tokens  []string // OAuth codes to answer before the grant ("" grants)
 	keyID   string
 	revoked []string // "<key>|<id>" per DELETE /v1/keys/{id}
+	// signup and plan, when set, are GET /app/api/signup and GET
+	// /v1/offer (404 otherwise, as on a node without the offer).
+	signup, plan any
 }
 
 func newSandholdFakeNode(t *testing.T, keyID string, tokens ...string) *sandholdFakeNode {
@@ -82,6 +85,20 @@ func newSandholdFakeNode(t *testing.T, keyID string, tokens ...string) *sandhold
 			{"id": "jail", "tier": "shared", "tierMeans": "a jailed process on the host kernel", "tierRank": 1, "state": "active", "default": true, "capabilities": map[string]any{"isolation": "process", "egressAllowlist": true}},
 			{"id": "gvisor", "tier": "sealed", "tierMeans": "its own user-space kernel", "tierRank": 3, "state": "active", "capabilities": map[string]any{"isolation": "user-kernel", "egressAllowlist": true}},
 		}})
+	})
+	mux.HandleFunc("GET /app/api/signup", func(w http.ResponseWriter, _ *http.Request) {
+		if f.signup == nil {
+			sandholdWriteJSON(w, 404, map[string]string{"error": "not found"})
+			return
+		}
+		sandholdWriteJSON(w, 200, f.signup)
+	})
+	mux.HandleFunc("GET /v1/offer", func(w http.ResponseWriter, _ *http.Request) {
+		if f.plan == nil {
+			sandholdWriteJSON(w, 404, map[string]string{"error": "no first-month offer", "code": "no_offer"})
+			return
+		}
+		sandholdWriteJSON(w, 200, f.plan)
 	})
 	mux.HandleFunc("DELETE /v1/keys/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -186,6 +203,68 @@ func TestSandholdConnect(t *testing.T) {
 				t.Errorf("browser opened %v with --no-browser %v", *opened, tc.noBrowser)
 			}
 		})
+	}
+}
+
+// TestSandholdConnectDefaultNodeAndOffer: with no node named, connect goes
+// to the default node (SANDHOLD_DEFAULT_URL here), shows its first-month
+// offer before the browser step, and keeps and prints the account's plan.
+func TestSandholdConnectDefaultNodeAndOffer(t *testing.T) {
+	deps, opened := sandholdTestDeps(t)
+	f := newSandholdFakeNode(t, "key_1", "")
+	f.signup = map[string]any{"selfServe": true, "signupClosed": true, "inviteAccepted": true,
+		"offer": map[string]any{"freeDays": 30, "allowanceUsd": 80, "cardSkips": 5, "cardCheckUsd": 1}}
+	f.plan = map[string]any{"freeDays": 30, "inFreeMonth": true, "daysLeft": 30, "allowanceUsd": 80, "cardGate": true, "cardSkips": 5,
+		"sandboxesCreated": 0, "skipsLeft": 5, "card": "none", "cardCheckUsd": 1, "addCardUrl": f.srv.URL + "/app/#/billing",
+		"summary": "First month free: 30 days left (until 11 Dec 2026), up to $80 of use; 5 of 5 sandboxes left without a card."}
+	deps.lookupEnv = func(k string) (string, bool) {
+		if k == sandhold.EnvDefaultURL {
+			return f.srv.URL, true
+		}
+		return "", false
+	}
+	var out bytes.Buffer
+	if err := runSandholdConnect(context.Background(), &out, deps, "", false); err != nil {
+		t.Fatalf("connect: %v\n%s", err, out.String())
+	}
+	for _, want := range []string{
+		"No node given: connecting to SandHold at " + f.srv.URL,
+		"New to SandHold? First month free: 30 days at no charge, up to $80 of use. No card needed for your first 5 sandboxes",
+		"by invitation for now",
+		"Plan: First month free: 30 days left",
+		"5 of 5 sandboxes left before a card is needed; add one any time at " + f.srv.URL + "/app/#/billing",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Index(out.String(), "First month free: 30 days at") > strings.Index(out.String(), "approve this machine") {
+		t.Errorf("the offer came after the browser step:\n%s", out.String())
+	}
+	if len(*opened) != 1 {
+		t.Errorf("browser opened %v", *opened)
+	}
+	conn, err := sandholdLoadConnection(deps.observerDir)
+	if err != nil || conn == nil || conn.Plan == nil || conn.Plan.SkipsLeft != 5 || conn.Plan.CheckedAt.IsZero() {
+		t.Fatalf("connection %+v %v", conn, err)
+	}
+
+	// A node without the offer: nothing about it is printed or kept, and
+	// the public node is the default when nothing names another.
+	deps2, _ := sandholdTestDeps(t)
+	g := newSandholdFakeNode(t, "key_2", "")
+	out.Reset()
+	if err := runSandholdConnect(context.Background(), &out, deps2, g.srv.URL, true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "First month") || strings.Contains(out.String(), "Plan:") {
+		t.Errorf("offer shown for a node without one:\n%s", out.String())
+	}
+	if conn, _ := sandholdLoadConnection(deps2.observerDir); conn == nil || conn.Plan != nil {
+		t.Errorf("plan kept: %+v", conn)
+	}
+	if u, err := sandhold.NodeURL(sandhold.DefaultNode); err != nil || u != sandhold.DefaultNode {
+		t.Errorf("default node %q %v", u, err)
 	}
 }
 
@@ -325,7 +404,7 @@ func TestSandholdProbeStates(t *testing.T) {
 		wantReason  string
 		wantHint    string
 	}{
-		{name: "not_connected", wantVerdict: verdictSandholdNotConnected, wantReason: "not connected: run `observer sandbox connect <node-url>`", wantHint: "not connected"},
+		{name: "not_connected", wantVerdict: verdictSandholdNotConnected, wantReason: "or `observer sandbox connect <node-url>`", wantHint: "not connected"},
 		{name: "connected", conn: conn, wantHint: "connected to https://node.example.com as alice in acme; key works until 12 Nov 2026; offers Shared = process, Vault = hw_vm"},
 		{name: "expired", conn: &expired, wantVerdict: verdictSandholdKeyExpired, wantReason: "observer sandbox connect https://node.example.com", wantHint: "expired"},
 		{name: "unreadable", err: errors.New("mode 0644"), wantVerdict: verdictSandholdNotConnected, wantReason: "could not be read (mode 0644)", wantHint: "connect again"},

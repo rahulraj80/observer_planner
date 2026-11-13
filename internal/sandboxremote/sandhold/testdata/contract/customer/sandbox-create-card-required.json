@@ -1,0 +1,13 @@
+{
+  "name": "sandbox-create-card-required",
+  "about": "A self-serve account that started its five sandboxes without a card: 402 card_required, with the page that adds a card (checked with a refundable charge) in fix. Its sandboxes' files and exports still work.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {},
+  "status": 402,
+  "response": {
+    "code": "card_required",
+    "error": "a card is needed to start more sandboxes: you have started 5, and 5 may start without a card. Your first month stays free with a card on file. Running sandboxes, their files and exports are not affected",
+    "fix": "add a card at https://node.example:48000/app/#/billing (it is checked with a $1.00 charge that is refunded at once), then try again"
+  }
+}

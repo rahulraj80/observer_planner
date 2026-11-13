@@ -1,0 +1,24 @@
+{
+  "name": "offer",
+  "about": "A self-serve account's first-month offer, for any of its keys: days left, the allowance and its use, sandboxes left before a card (cardGate: billing is on), the card on file (none, checked, unchecked, failed), where to add one, and a one-line summary.",
+  "method": "GET",
+  "path": "/v1/offer",
+  "status": 200,
+  "response": {
+    "addCardUrl": "https://node.example:48000/app/#/billing",
+    "allowanceUsd": 80,
+    "allowanceUsedUsd": 0,
+    "card": "none",
+    "cardCheckUsd": 1,
+    "cardGate": true,
+    "cardNeeded": false,
+    "cardSkips": 5,
+    "daysLeft": 28,
+    "freeDays": 30,
+    "freeUntil": "<time>",
+    "inFreeMonth": true,
+    "sandboxesCreated": 0,
+    "skipsLeft": 5,
+    "summary": "<offer-summary>"
+  }
+}
