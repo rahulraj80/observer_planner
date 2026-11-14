@@ -1339,6 +1339,7 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// Launch binary paths (dashboard CLI parity follow-up): the [launch.tools.<tool>].path
 	// overrides, Local like every config write, governed with Settings > Terminal.
 	reg("/api/launch/tool-paths", L, secSettings.WithSettings("terminal"), s.handleLaunchToolPaths)
+	reg("/api/telemetry/notice", V, secSettings, s.handleTelemetryNotice)
 	// The node-local update ledger (`observer update history`). Local, not
 	// View: a ledger reason can name a local path, which is exactly why the
 	// org-bound posture carries enums only.

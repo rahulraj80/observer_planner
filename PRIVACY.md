@@ -1,12 +1,13 @@
 # Privacy
 
-SuperBased Observer is **a local Go binary that stores everything on
-your machine**. Today the default install sends us no usage
-statistics, analytics or crash reports, and it never sends your session
-content (prompts, code, responses, file contents) without your explicit
-consent. It needs no account. The project's authors cannot see what you
-ran or what you typed unless you choose to upload it. By default observer makes a few small requests of its own that
-carry none of your data; they are listed under "When observer DOES
+SuperBased Observer is **a local Go binary that stores what it captures
+on your machine**. It never sends your session content (prompts, code,
+responses, file contents) without your explicit consent. By default it
+does send content-free usage telemetry (event names, counts, sizes and
+timings; the `baseline` rung), which one command turns off, and it sends
+no crash reports. It needs no account. The project's authors cannot see
+what you ran or what you typed unless you choose to upload it. Every
+request observer makes by default is listed under "When observer DOES
 make a network call" below. The binary you install from npm is the same
 binary published with SLSA provenance to the public GitHub release:
 what you install is what runs.
@@ -24,13 +25,22 @@ never touches.
   explicit consent (enrolling a machine into your company's managed
   org is one such consent; see "Org enrolment" below). The optional
   API proxy forwards **your** requests
-  unchanged to the AI provider you already use. The few requests
+  unchanged to the AI provider you already use. Two of the requests
   observer makes on its own by default (a daily price-table download
-  and TLS warm-up at proxy start) carry none of your data.
-- **No usage statistics today.** The current default install sends us
-  no usage statistics, analytics or crash reports. The aggregate-share
-  rail (`observer aggregate enable`) is currently off by default and
-  sends nothing without your consent.
+  and TLS warm-up at proxy start) carry none of your data; the third,
+  usage telemetry, carries content-free counters only.
+- **Usage telemetry is on by default, content-free, and yours to turn
+  off.** A default install sends the `baseline` rung of four (`off`,
+  `baseline`, `enrichment`, `deep`): event names, counts, sizes and
+  timings under a published contract that refuses every other field,
+  so no prompt or output text, path, project name or command can be
+  sent. A one-time notice in the daemon output and the dashboard says
+  so before the first batch. `observer telemetry consent off` turns it
+  off, `observer telemetry data` shows what the server holds and
+  `observer telemetry delete --yes` removes it. `enrichment` and `deep`
+  are never on without your own consent. No crash reports are sent.
+  The aggregate-share rail (`observer aggregate enable`) is off by
+  default and sends nothing without your consent.
 - **No accounts required.** You can run observer offline, behind an
   air-gap, without ever signing in to anything.
 
@@ -88,9 +98,10 @@ Per the project's design spec (`superbased-final-spec-v2.md`):
 
 ## When observer DOES make a network call
 
-These are the code paths in the binary that touch the network. The first
-two run by default and carry no session data; every other one is gated
-behind explicit configuration or your own action. `observer privacy`
+These are the code paths in the binary that touch the network. Three run
+by default: the pricing feed and TLS warm-up carry none of your data, and
+usage telemetry carries content-free counters only. Every other one is
+gated behind explicit configuration or your own action. `observer privacy`
 prints this list, with each row's on/off state, for your configuration.
 
 | Feature | When it talks to the network | What it sends | How it is enabled |
@@ -100,6 +111,7 @@ prints this list, with each row's on/off state, for your configuration.
 | **API proxy** | When your AI client points `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` at observer | **Your** API request, forwarded byte-identically to the upstream provider you chose (api.anthropic.com, chatgpt.com, openai.com, …) | `observer init --claude-code/--codex/--cursor` (writes the env-var hint into the AI client's config) |
 | **Message summary** | If `[messagesummary] enabled = true` | A subset of your conversation, to the LLM endpoint **you** configure (`base_url`, `model`, `api_key`) | TOML config; you provide the endpoint and key |
 | **Org enrolment** | If this machine was enrolled with `observer enroll` | To your organization's own server. Individual enrolment: metadata, with content-bearing fields as hashes (raw only under your local `full_content` opt-in). Managed (company) enrolment: the full session record, content included. See "Org enrolment" below | `observer enroll` (explicit; needs the org URL and an enrolment token, link or org sign-in) |
+| **Usage telemetry** | On by default at the content-free `baseline` tier (`[telemetry] enabled = true`, `tier = "baseline"`); a one-time notice in the daemon output and the dashboard says so before the first batch. Off with `observer telemetry consent off`, `[telemetry] enabled = false` or `OBSERVER_TELEMETRY=off` | Content-free usage events under the published telemetry contract (event names, counts, sizes, timings; no prompt or output text) to the `[telemetry] endpoint` (default `https://cloud.superbased.app`, or a self-hosted reporter after `observer telemetry register`), identified by an install id derived from this machine's cloud device key, with no account. Each prompt cycle carries a label (your prompt, a system nudge or a tool call) assigned by a local classifier; the prompt text is never sent for it. Session and token events also say whether the session was started from the app's own terminal (`in_app`) or elsewhere (`external`) | `observer telemetry consent <tier>`; see or delete it with `observer telemetry data` / `observer telemetry delete --yes` |
 | **Cloud intelligence** | After `observer cloud login`, for a session you preview (`observer cloud preview`) and consent to (`observer cloud consent`); uploads on `observer cloud sync` | Exactly the bytes the preview showed you, to the hosted cloud service | Sign-in plus per-session consent |
 | **Aggregate share** | If `[aggregate_share] enabled = true` and a consent receipt exists | A coarsened monthly usage aggregate to `aggregate.superbased.app` | Config plus consent (`observer aggregate`) |
 | **Org update manifest** | When enrolled and `[update] enabled = true` | GETs the signed update manifest (and, when an update applies, the artifact) from your enrolled org server | `observer enroll` |
@@ -116,9 +128,9 @@ prints this list, with each row's on/off state, for your configuration.
 | **SandHold sandboxed run** | When you launch a sandboxed terminal on the `sandhold` backend (listed in `[terminal.sandbox].backends`, chosen by name, after the one-time consent), and only to the node you connected (or `SANDHOLD_URL`) | Creating, reading and deleting the run's sandbox; the workspace files you consented to, the in-box observer and the agent's launch settings written into it (your model key only when you chose to put it in the box); the agent's commands and terminal; the transcripts and diff read back at checkpoints and at the end. The key goes in a header only, never in an address; https and wss only (plain http for localhost only), and no redirect is followed | The consent you gave once for that node; a leftover sandbox is deleted only when you confirm it |
 | **Antigravity gRPC fallback** | When parsing Antigravity sessions on macOS where keychain decrypt fails | Local IPC to a Google-installed gRPC socket, never the internet | Automatic; only fires on Antigravity sessions |
 
-Today, with the pricing feed and TLS warm-up turned off and none of the opt-in
-features configured, observer makes no outbound network calls of its
-own. Verify with:
+With the pricing feed, TLS warm-up and usage telemetry turned off and none of
+the opt-in features configured, observer makes no outbound network calls of
+its own. Verify with:
 
 ```bash
 sudo lsof -p $(pgrep -f 'observer start') -i      # should show ONLY :8820/:8830/:8831 etc. on 127.0.0.1

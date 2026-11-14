@@ -343,10 +343,11 @@ func routingProbeRow(cfg config.Config) privacyEgress {
 
 // buildPrivacyEgress lists every outbound-network capability compiled into
 // this binary. Each row states its gate in plain language and whether the
-// loaded config currently arms it. Two rows run automatically on a default
-// install, and both carry no session data: the pricing feed fetch (standalone
-// nodes only) and the TLS pre-warm HEAD requests at proxy startup. Every
-// other row forwards your own AI tool's traffic or needs an explicit opt-in.
+// loaded config currently arms it. Three rows run automatically on a default
+// install, and none carries session content: the pricing feed fetch
+// (standalone nodes only), the TLS pre-warm HEAD requests at proxy startup,
+// and usage telemetry at the content-free baseline tier. Every other row
+// forwards your own AI tool's traffic or needs an explicit opt-in.
 func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 	orgPushDetail := "Pushes rollup rows (hashed by default; raw content only under a local [org_client.share].full_content/admin_managed opt-in - the org admin can never flip this remotely) and polls the org policy bundle. The same poll also fetches the org's dashboard announcement, if any - a GET on the connection this cycle already opens, no extra request and nothing sent about you; it can only put dismissible text in your dashboard banner, there is no acknowledgment wire back, and [dashboard].org_announcements = false silences it locally. Stated plainly, because it is inherent to any fetch and not something a client-side switch can remove: the server can SEE the request - that your enrolled node polled, and when - exactly as it sees the push. There is no read receipt (whether a banner was shown or dismissed is never reported), but the poll itself is observable to the org you enrolled with. The same cycle also fetches this node's own signed BUDGET policy (GET /api/agent/budget) when [org_client] is on - one more conditional GET on the same already-open connection to the same already-enrolled host, sending nothing about you beyond the bearer that identifies the node. What comes BACK is your effective cap; what goes back UP is an enum-only posture row (enforcement point / guard mode / where the numbers came from / last fetch state / proxy-only coverage) carrying no cap value and no team label. Set [guard.budget].from_org = false and the org's numbers are never applied."
 	switch {
@@ -465,8 +466,8 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 		// F1: internal/proxy.Prewarm fires HEAD requests against
 		// [proxy].prewarm_targets at proxy startup (default non-empty:
 		// chatgpt.com + api.openai.com, see internal/config's Default()).
-		// One of the two automatic, on-by-default outbound calls; the
-		// other is the pricing feed row below (T-931).
+		// One of the three automatic, on-by-default outbound calls; the
+		// others are the pricing feed row below (T-931) and usage telemetry.
 		prewarmRow(cfg),
 		pricingFeedRow(cfg),
 		routingProbeRow(cfg),
@@ -477,6 +478,15 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Gate:   "`observer cloud login` AND a per-session consent receipt (`observer cloud consent`); uploads on `observer cloud sync` (Active reflects only [cloud].base_url being set - run `observer cloud status`)",
 			Active: cfg.Cloud.BaseURL != "",
 			Detail: "Uploads exactly the bytes `observer cloud preview` showed for a consented session to the hosted cloud service and pulls the enrichment results back. Nothing uploads without the preview-then-consent step.",
+		},
+		{
+			// The usage telemetry rail (internal/telemetry,
+			// cmd/observer/telemetry_loop.go): content-free baseline tier on
+			// by default since Step 5.7 (telemetry plan), with a one-time notice.
+			Name:   "usage telemetry",
+			Gate:   "[telemetry].enabled = true AND a tier above off (default: on at the content-free baseline tier; turn off with `observer telemetry consent off`) AND OBSERVER_TELEMETRY unset or \"on\"",
+			Active: cfg.Telemetry.Enabled && cfg.Telemetry.EffectiveTier() != "off",
+			Detail: fmt.Sprintf("Batches content-free usage events (the published telemetry contract: event names, counts, sizes, timings; no prompt or output text) to %s at your consented tier. On by default at the content-free baseline tier; a one-time notice says so before the first batch. Each prompt cycle carries a label (your prompt, a system nudge or a tool call) that a local classifier assigns on this machine; the prompt text is never sent for it. The install is identified by an id derived from this machine's cloud device key (no account); `observer telemetry data` shows what the server holds and `observer telemetry delete --yes` removes it. A node registered with a self-hosted reporter sends there instead.", cfg.Telemetry.Endpoint),
 		},
 		{
 			// F2: internal/guard/notify/egress.go is the single egress
@@ -555,14 +565,17 @@ beyond your config file - it's a report on what the binary CAN do given
 its current configuration, not a live traffic capture.
 
 Your session content (prompts, code, responses, file contents) never leaves
-this machine on this product's behalf without your explicit consent. Two
-automatic background requests run on a default install, and neither carries
-any of your data: the pricing feed fetch of the public model price table
-(once at daemon start, then daily; standalone nodes only - see the "pricing
-feed" row) and the TLS pre-warm HEAD requests the proxy fires at startup
-against [proxy].prewarm_targets (see the "TLS pre-warm" row). Every other
-outbound row below is either forwarding a request your own AI tool already
-made, or something you explicitly configured, consented to, or clicked.`,
+this machine on this product's behalf without your explicit consent. Three
+automatic background requests run on a default install. Two carry none of
+your data: the pricing feed fetch of the public model price table (once at
+daemon start, then daily; standalone nodes only - see the "pricing feed"
+row) and the TLS pre-warm HEAD requests the proxy fires at startup against
+[proxy].prewarm_targets (see the "TLS pre-warm" row). The third is usage
+telemetry at the content-free baseline tier: event names, counts, sizes and
+timings, never prompt or output text (see the "usage telemetry" row;
+'observer telemetry consent off' turns it off). Every other outbound row
+below is either forwarding a request your own AI tool already made, or
+something you explicitly configured, consented to, or clicked.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := deps.loadConfig()
@@ -612,9 +625,10 @@ func writePrivacyText(w io.Writer, report privacyReport) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Two automatic calls run by default, neither carrying session data: the")
-	fmt.Fprintln(w, "pricing feed fetch and the TLS pre-warm HEAD requests above. Everything")
-	fmt.Fprintln(w, "else needs an explicit opt-in or your own tool's request.")
+	fmt.Fprintln(w, "Three automatic calls run by default, none carrying session content: the")
+	fmt.Fprintln(w, "pricing feed fetch, the TLS pre-warm HEAD requests and content-free usage")
+	fmt.Fprintln(w, "telemetry above ('observer telemetry consent off' turns telemetry off).")
+	fmt.Fprintln(w, "Everything else needs an explicit opt-in or your own tool's request.")
 	fmt.Fprintf(w, "Full detail: %s\n", report.DocsURL)
 }
 

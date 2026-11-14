@@ -214,8 +214,9 @@ everything else on this page describes the upstream product. The fork adds:
 
 ## Privacy
 
-SuperBased needs no account. Today the default install sends us no usage statistics, analytics or
-crash reports, and it never uploads your session content without your explicit consent. It stores
+SuperBased needs no account. It never uploads your session content without your explicit consent,
+and it sends no crash reports. By default it sends content-free usage telemetry (counts, sizes and
+timings, no text; the `baseline` rung), which `observer telemetry consent off` turns off. It stores
 paths, commands and short excerpts, scrubs secrets before anything is written, and binds the proxy
 and dashboard to `127.0.0.1` by default. The proxy forwards your own requests, unchanged, to the
 provider you already use. By default it also makes a few small requests of its own that carry none

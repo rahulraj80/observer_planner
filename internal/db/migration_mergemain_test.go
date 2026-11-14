@@ -61,7 +61,7 @@ func oldLineage(t *testing.T, old map[string]string, from int) fstest.MapFS {
 			// observer_planner fork: an old upstream build never carried
 			// the fork's own steps (forklineage.go); the merged run adds
 			// them.
-			if isForkMigration(v) {
+			if isForkStep(v) {
 				continue
 			}
 			b, err := fs.ReadFile(migrations.Files, de.Name())

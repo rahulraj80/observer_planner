@@ -264,7 +264,14 @@ func nonEmpty(list []string) []string {
 
 // Get returns the leaf's current value from cfg.
 func Get(cfg *config.Config, leaf Leaf) any {
-	return reflect.ValueOf(cfg).Elem().FieldByIndex(leaf.index).Interface()
+	field := reflect.ValueOf(cfg).Elem().FieldByIndex(leaf.index)
+	switch leaf.Kind {
+	case KindInt:
+		return field.Int()
+	case KindFloat:
+		return field.Float()
+	}
+	return field.Interface()
 }
 
 // Set writes a value produced by ParseValue onto cfg at leaf.

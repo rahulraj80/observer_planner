@@ -72,6 +72,19 @@ const (
 
 func isForkMigration(v int) bool { return v >= forkFirst && v <= forkLast }
 
+// The fork's own later steps, which were never renumbered: the telemetry
+// rail's staging tables (256, 257). No upstream build carries them.
+const (
+	forkOwnFirst = 256
+	forkOwnLast  = 257
+)
+
+// isForkStep reports whether v is a step only this fork carries: a
+// renumbered fork migration or one of the fork's own later steps.
+func isForkStep(v int) bool {
+	return isForkMigration(v) || (v >= forkOwnFirst && v <= forkOwnLast)
+}
+
 // reconcileForkLineage rewinds a store written by an old fork generation to
 // that generation's base, inside the caller's migration transaction, so a
 // failure later in the batch rolls the rewind back too. An upstream store, a

@@ -274,8 +274,9 @@ func egressRowCompiled(name string) bool {
 
 // TestBuildPrivacyEgressDefault pins the egress table against the
 // zero-config default: the always-on listener rows (proxy forwarding, TLS
-// pre-warm — default prewarm_targets is non-empty) report active; every
-// opt-in feature, including the four new F2 rows, reports inactive.
+// pre-warm — default prewarm_targets is non-empty, the pricing feed, and
+// baseline usage telemetry since Step 5.7) report active; every opt-in
+// feature, including the four new F2 rows, reports inactive.
 func TestBuildPrivacyEgressDefault(t *testing.T) {
 	cfg := config.Default()
 	rows := buildPrivacyEgress(cfg)
@@ -295,6 +296,7 @@ func TestBuildPrivacyEgressDefault(t *testing.T) {
 		"pricing feed":                         true,
 		"cloud intelligence":                   false,
 		"routing upstream probe":               false,
+		"usage telemetry":                      true, // baseline on by default (Step 5.7)
 		"guard cloud webhooks":                 false,
 		"guard cloud LLM judge":                false,
 		"guard cloud reputation lookup":        false,
@@ -725,6 +727,7 @@ func TestBuildPrivacyEgressGatedRowsFlipActive(t *testing.T) {
 		"proxy forwarding": true,
 		"TLS pre-warm":     true,
 		"pricing feed":     true,
+		"usage telemetry":  true, // baseline on by default (Step 5.7)
 	}
 
 	for _, tt := range tests {
@@ -760,8 +763,9 @@ func TestBuildPrivacyReportSchemaAndDocsURL(t *testing.T) {
 	if len(report.Sockets) == 0 {
 		t.Errorf("Sockets is empty")
 	}
-	if len(report.Egress) != 18 {
-		t.Errorf("Egress len = %d, want 18", len(report.Egress))
+	// 19 since the usage telemetry row (telemetry plan Step 5.8).
+	if len(report.Egress) != 19 {
+		t.Errorf("Egress len = %d, want 19", len(report.Egress))
 	}
 }
 
@@ -835,7 +839,7 @@ func TestPrivacyCmdTextOutput(t *testing.T) {
 		"rolling conversation summarization",
 		"pricing feed",
 		"routing upstream probe",
-		"Two automatic calls run by default",
+		"Three automatic calls run by default",
 		"TLS pre-warm HEAD requests",
 		privacyDocsURL,
 	} {

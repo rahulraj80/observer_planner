@@ -124,6 +124,14 @@ var egressLanes = []egressLane{
 		Pins:     []string{"cloud_egress_test.go"},
 	},
 	{
+		// The usage telemetry rail's client collector (contract shared
+		// with observer_reporter).
+		ID: "telemetry.rail", Pkg: "internal/telemetry", Kind: egressRemote,
+		Reaches:  "a self-hosted reporter at [telemetry].endpoint, used once `observer telemetry register` stored an install token: POST /v1/ingest, GET /v1/consent/config (without a token the batches take the cloud lane through internal/cloudgateway)",
+		Triggers: []egressTrigger{trigDaemonLoop},
+		Gate:     "[telemetry].enabled AND a tier above off (default: on at the content-free baseline tier, with a one-time notice before the first batch); `observer telemetry consent off` or the OBSERVER_TELEMETRY kill switch stops it, and the server's consent ceiling can only lower the tier",
+	},
+	{
 		// observer_planner fork: the OPTIONAL LLM analysis connections (daily
 		// briefing narrative and Q&A).
 		ID: "llm.analysis", Pkg: "internal/llmconn", Kind: egressRemote,

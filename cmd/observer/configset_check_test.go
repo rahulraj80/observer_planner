@@ -55,6 +55,7 @@ func TestPlanConfigSet(t *testing.T) {
 		{name: "read-only section on a managed machine", key: "observer.watch.poll_interval_seconds", value: "9", gov: gov, wantErr: "pinned by your organization"},
 		{name: "unknown key", key: "no.such.key", value: "1", wantErr: "unknown"},
 		{name: "map entry", key: "profiles.by_tool.cline", value: "default"},
+		{name: "integer key", key: "telemetry.batch_interval_seconds", value: "30", confirmed: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

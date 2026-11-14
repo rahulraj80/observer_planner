@@ -116,8 +116,9 @@ Click any session to open its detail view. Four of its tabs:
 
 ## Privacy
 
-No account needed. Today the default install sends us no usage statistics, analytics or crash
-reports, and your session content is never uploaded without your explicit consent. SuperBased stores
+No account needed. Your session content is never uploaded without your explicit consent, and no
+crash reports are sent. By default SuperBased sends content-free usage telemetry (counts, sizes and
+timings, no text), which `observer telemetry consent off` turns off. SuperBased stores
 paths, commands and short excerpts, scrubs secrets before writing, and binds the proxy and dashboard
 to `127.0.0.1` by default. The proxy forwards your own requests, unchanged, to the provider you
 already use. By default SuperBased also makes a few small requests of its own that carry none of

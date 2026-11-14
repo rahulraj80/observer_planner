@@ -1,7 +1,7 @@
 {
-  "contract_version": "1.2.0",
+  "contract_version": "1.3.0",
   "deep_disclosure_digest": "4d0de50b944dd1a4abee7536230da7ae8f5d84df36a342cb3a356400233708dc",
-  "digest": "83c745c56882e019364d8b9701ff043dce56b5aeb0b92238bbcd4e21d575d9ef",
+  "digest": "db2bcf1bc3348a9bc25e019a982c5dd9eb0e2383caf8d3dffb48d708fe612061",
   "envelope_version": "v1",
   "events": {
     "app_start": {
@@ -89,13 +89,16 @@
     "session_end": [
       "adapter",
       "duration_ms",
+      "launch",
       "outcome"
     ],
     "session_start": [
-      "adapter"
+      "adapter",
+      "launch"
     ],
     "token_use": [
       "cache_read",
+      "launch",
       "model_tier",
       "role",
       "tokens_in",
@@ -208,6 +211,10 @@
       "db",
       "watcher",
       "batcher"
+    ],
+    "launch": [
+      "external",
+      "in_app"
     ],
     "model": [
       "anthropic",
