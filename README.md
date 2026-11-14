@@ -207,8 +207,8 @@ everything else on this page describes the upstream product. The fork adds:
 - **Org manager Briefing.** The org dashboard composes the org's day from every enrolled node into
   the same document, shipped hash-only under `[org_client.share] briefing_aggregates = true`, plus an
   `observer-org digest --kind briefing` email.
-- **`observer demoseed [-d days] [-u users]`** seeds a deterministic week of multi-user history for
-  demos (default 7 days x 30 users; re-running purges only its own rows).
+- **`observer demoseed [-d days] [-u users]`** seeds deterministic multi-user history for
+  demos (default 5 past days and 20 future-dated days x 30 users; re-running purges only its own rows).
 - **Telemetry contract mirror** (`internal/telemetry/contract/`, `make verify-telemetry-contract`),
   kept identical to the reporter server's contract.
 

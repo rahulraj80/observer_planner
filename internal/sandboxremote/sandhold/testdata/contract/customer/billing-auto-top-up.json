@@ -62,7 +62,7 @@
       "cardNeeded": true,
       "cardSkips": 5,
       "daysLeft": 28,
-      "expect": "The $1.00 card check is refunded at once. Nothing is charged in your free month (until 11 Dec 2026, up to $80 of use). After that, your card is charged $25 each time your balance falls below $5. Change the amounts or turn auto top-up off on the Billing page.",
+      "expect": "The $1.00 card check is refunded at once. Nothing is charged in your free month (until <date>, up to $80 of use). After that, your card is charged $25 each time your balance falls below $5. Change the amounts or turn auto top-up off on the Billing page.",
       "freeDays": 30,
       "freeLimits": {
         "atOnce": 2,

@@ -98,6 +98,16 @@ func TestContractOffer(t *testing.T) {
 	if l := p.CardLine(); !strings.HasPrefix(l, "5 of 5 sandboxes left before a card is needed") {
 		t.Errorf("card line %q", l)
 	}
+	if l := p.LimitsLine(); l != "Free use: each sandbox up to 30 min, 2 vCPU, 4 GiB memory, 10 GiB disk, 2 at a time, 20 a day." {
+		t.Errorf("limits line %q", l)
+	}
+	// A node whose summary already names the sandboxes left must not have
+	// its counts repeated by the card line (the CLI printed both).
+	p.Summary = "First month free: 30 days left, up to $80 of use; 5 of 5 sandboxes left without a card."
+	if l := p.CardLine(); !strings.HasPrefix(l, "Add a card any time at "+c.URL) || strings.Contains(l, "sandboxes left") {
+		t.Errorf("card line repeats the summary: %q", l)
+	}
+	p.Summary = ""
 	if p.BillingOff || p.BalanceUSD != 80 || p.AutoTopUp == nil || !p.AutoTopUp.Enabled || p.AutoTopUp.AmountUSD != 20 || p.AutoTopUp.BelowUSD != 5 ||
 		!strings.HasPrefix(p.ExpectLine(), "The $1.00 card check is refunded at once.") {
 		t.Errorf("prepaid %+v %+v", p, p.AutoTopUp)

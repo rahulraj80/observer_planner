@@ -226,7 +226,43 @@ func (p *Plan) CardLine() string {
 	case p.CardNeeded:
 		return fmt.Sprintf("Add a card to start more sandboxes: %s (%s).", p.AddCardURL, check)
 	}
-	return fmt.Sprintf("%d of %d sandboxes left before a card is needed; add one any time at %s (%s).", p.SkipsLeft, p.CardSkips, p.AddCardURL, check)
+	left := fmt.Sprintf("%d of %d sandboxes left", p.SkipsLeft, p.CardSkips)
+	if strings.Contains(p.Summary, left) {
+		// The node's summary already named the sandboxes left; repeat only
+		// what it did not (where to add a card, and the check's terms).
+		return fmt.Sprintf("Add a card any time at %s (%s).", p.AddCardURL, check)
+	}
+	return fmt.Sprintf("%s before a card is needed; add one any time at %s (%s).", left, p.AddCardURL, check)
+}
+
+// LimitsLine names the limits the node puts on free use, from freeLimits
+// ("" when the node did not send them). It is the same line the dashboard's
+// SandHold plan box shows.
+func (p *Plan) LimitsLine() string {
+	if p == nil || p.FreeLimits == nil || p.FreeLimits.MaxRunMinutes <= 0 {
+		return ""
+	}
+	l := p.FreeLimits
+	parts := []string{fmt.Sprintf("each sandbox up to %d min", l.MaxRunMinutes)}
+	if l.CPU != "" {
+		parts = append(parts, l.CPU+" vCPU")
+	}
+	if l.Memory != "" {
+		parts = append(parts, strings.Replace(l.Memory, "Gi", " GiB", 1)+" memory")
+	}
+	if l.Disk != "" {
+		parts = append(parts, strings.Replace(l.Disk, "Gi", " GiB", 1)+" disk")
+	}
+	if l.AtOnce > 0 {
+		parts = append(parts, fmt.Sprintf("%d at a time", l.AtOnce))
+	}
+	if l.PerDay > 0 {
+		parts = append(parts, fmt.Sprintf("%d a day", l.PerDay))
+	}
+	if l.Total > 0 {
+		parts = append(parts, fmt.Sprintf("%d in all", l.Total))
+	}
+	return "Free use: " + strings.Join(parts, ", ") + "."
 }
 
 // ExpectLine is what to expect, in the node's words ("" when it says

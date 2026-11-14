@@ -338,7 +338,7 @@ func newDashboardCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml")
-	cmd.Flags().IntVar(&port, "port", 8080, "Port to listen on (ignored if --addr is set)")
-	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (e.g. 127.0.0.1:8080)")
+	cmd.Flags().IntVar(&port, "port", 8081, "Port to listen on (ignored if --addr is set)")
+	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (e.g. 127.0.0.1:8081)")
 	return cmd
 }

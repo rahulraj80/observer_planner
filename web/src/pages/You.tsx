@@ -106,7 +106,7 @@ function StateRow<T>({ label, api, show, to }: { label: ReactNode; api: ApiState
 
 export function YouPage() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-4 sm:p-6">
       <PageHeader
         title="You"
         icon={navIcon("you")}

@@ -236,6 +236,10 @@ func TestSandholdConnectDefaultNodeAndOffer(t *testing.T) {
 		"sandboxesCreated": 0, "skipsLeft": 5, "card": "none", "cardCheckUsd": 1, "addCardUrl": f.srv.URL + "/app/#/billing",
 		"expect":  "The $1.00 card check is refunded at once. After that, your card is charged $20 each time your balance falls below $5.",
 		"summary": "First month free: 30 days left (until 11 Dec 2026), up to $80 of use; 5 of 5 sandboxes left without a card.",
+		"freeLimits": map[string]any{
+			"kind": "free", "maxRunMinutes": 30, "cpu": "2", "memory": "4Gi", "disk": "10Gi",
+			"network": "allowlist", "atOnce": 2, "perDay": 20,
+		},
 	}
 	deps.lookupEnv = func(k string) (string, bool) {
 		if k == sandhold.EnvDefaultURL {
@@ -252,13 +256,17 @@ func TestSandholdConnectDefaultNodeAndOffer(t *testing.T) {
 		"New to SandHold? First month free: 30 days at no charge, up to $80 of use. No card needed for your first 5 sandboxes",
 		"by invitation for now",
 		"Plan: First month free: 30 days left",
-		"5 of 5 sandboxes left before a card is needed; add one any time at " + f.srv.URL + "/app/#/billing",
+		"Add a card any time at " + f.srv.URL + "/app/#/billing",
+		"Free use: each sandbox up to 30 min, 2 vCPU, 4 GiB memory, 10 GiB disk, 2 at a time, 20 a day.",
 		"What to expect: The $1.00 card check is refunded at once. Nothing is charged in your free month.",
 		"  What to expect: The $1.00 card check is refunded at once. After that, your card is charged $20 each time your balance falls below $5.",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
+	}
+	if n := strings.Count(out.String(), "5 of 5 sandboxes left"); n != 1 {
+		t.Errorf("the sandboxes-left line appears %d times:\n%s", n, out.String())
 	}
 	if strings.Index(out.String(), "First month free: 30 days at") > strings.Index(out.String(), "approve this machine") {
 		t.Errorf("the offer came after the browser step:\n%s", out.String())

@@ -71,8 +71,7 @@ test("Settings hides only the sections of components not in this build", () => {
   assert.deepEqual(absentSettingsSections(view), []);
 });
 
-test("nav filter drops the pages of inactive components only", () => {
-  const nav = { overview: "core", terminals: "terminals", settings: "core" };
+test("nav filter drops the pages of inactive components only", () => {  const nav = { overview: "core", terminals: "terminals", settings: "core" };
   const ids = inactiveNavIds(view, nav);
   assert.deepEqual(ids, ["terminals"]);
   const groups = [
@@ -83,6 +82,23 @@ test("nav filter drops the pages of inactive components only", () => {
   assert.deepEqual(out.map((g) => g.items.map((i) => i.id)), [["overview"]]);
   assert.equal(filterNavByComponents(groups, []), groups, "identity when nothing is inactive");
   assert.deepEqual(inactiveNavIds(null, nav), []);
+});
+
+// A build without the Plane A observability module lists neither Control
+// page: the generated nav map owns the ids, and the filter drops them.
+test("Policies and Egress leave the nav when obs is absent", async () => {
+  const { NAV_COMPONENTS } = await import("./components.gen.ts");
+  const absent: ComponentsView = {
+    ...view,
+    components: [{ id: "obs", state: "absent", reason: "not_compiled", compiled: false, selected: false, in_base: false }],
+  };
+  const ids = inactiveNavIds(absent, NAV_COMPONENTS);
+  assert.ok(ids.includes("egress") && ids.includes("policies"), ids.join(","));
+  const groups = [{ id: "configure", items: [{ id: "you" }, { id: "policies" }, { id: "egress" }] }];
+  assert.deepEqual(
+    filterNavByComponents(groups, ids).map((g) => g.items.map((i) => i.id)),
+    [["you"]],
+  );
 });
 
 test("parseNotInstalled reads only the component_not_installed class", () => {

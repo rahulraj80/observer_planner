@@ -65,6 +65,9 @@ type sandholdPlanView struct {
 	Card string `json:"card"`
 	// CardLine is what the person may do about a card ("" when nothing).
 	CardLine string `json:"card_line,omitempty"`
+	// FreeLimits names the limits the node puts on free use ("" when the
+	// node did not send them).
+	FreeLimits string `json:"free_limits,omitempty"`
 	// Expect is what to expect at the card check, or from the free
 	// sandboxes on a node with billing off ("" when nothing to add).
 	Expect     string `json:"expect,omitempty"`
@@ -81,7 +84,8 @@ func sandholdPlanOf(p *sandhold.Plan) *sandholdPlanView {
 		Summary: sandhold.PlainLine(p.Summary), InFreeMonth: p.InFreeMonth, DaysLeft: p.DaysLeft,
 		CardGate: p.CardGate, SkipsLeft: p.SkipsLeft, CardSkips: p.CardSkips, CardNeeded: p.CardNeeded,
 		Card: sandhold.PlainLine(p.Card), CardLine: sandhold.PlainLine(p.CardLine()),
-		Expect: sandhold.PlainLine(p.ExpectLine()), BillingOff: p.BillingOff, AddCardURL: sandhold.PlainLine(p.AddCardURL),
+		FreeLimits: sandhold.PlainLine(p.LimitsLine()),
+		Expect:     sandhold.PlainLine(p.ExpectLine()), BillingOff: p.BillingOff, AddCardURL: sandhold.PlainLine(p.AddCardURL),
 	}
 	if p.FreeUntil != nil {
 		v.FreeUntil = p.FreeUntil.UTC().Format(time.RFC3339)

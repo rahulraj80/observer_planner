@@ -98,6 +98,8 @@ export type SandholdPlan = {
   card_line?: string;
   /** What to expect at the card check (or from free sandboxes, billing off). */
   expect?: string;
+  /** The limits the node puts on free use, in its words. */
+  free_limits?: string;
   billing_off?: boolean;
   add_card_url?: string;
   checked_at?: string;
@@ -305,6 +307,9 @@ export function PlanView({
       )}
       {plan.expect && (
         <p className="text-[11px] text-fg-3">What to expect: {plan.expect}</p>
+      )}
+      {plan.free_limits && (
+        <p className="text-[11px] text-fg-3">{plan.free_limits}</p>
       )}
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-3">
         {addCard && plan.card !== "checked" && plan.card_gate && (

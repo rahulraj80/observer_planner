@@ -941,6 +941,13 @@ func newStartCmd() *cobra.Command {
 				// §4 W3): the §3.6 "J" judge-tier seam is build-tag-split
 				// (projects_wire.go/projects_judge_wire.go).
 				projectsJudgeGrade, projectsJudgeGradeReason := projectsDashboardOptions(&cfg)
+				// The proxy port to report is the one actually bound (a --port
+				// flag or an ephemeral :0), not [proxy].port in the config: the
+				// sidebar footer and the Setup rows must name the live listener.
+				proxyPort := cfg.Proxy.Port
+				if bound, ok := proxyPortFromAddr(addr); ok {
+					proxyPort = bound
+				}
 				opts := dashapi.Options{
 					ProcessArchive: processArchive,
 					Projects:       cfg.Projects,
@@ -1053,7 +1060,7 @@ func newStartCmd() *cobra.Command {
 					ArenaPreflight: arenaPreflightSeam(resolvedConfigPath),
 					// OSH-R-005: may an Arena drive skip the harness's permission checks.
 					ArenaPermissionBypass: arenaPermissionBypassSeam(resolvedConfigPath),
-					ProxyPort:             cfg.Proxy.Port,
+					ProxyPort:             proxyPort,
 					// OSH-R-009: the Setup route writers write the client
 					// token form when the node wants client auth.
 					ProxyClientToken: daemonProxyClientToken(cfg),

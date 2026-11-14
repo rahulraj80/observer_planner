@@ -583,6 +583,9 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 		if l := conn.Plan.CardLine(); l != "" {
 			fmt.Fprintf(out, "  %s\n", l)
 		}
+		if l := conn.Plan.LimitsLine(); l != "" {
+			fmt.Fprintf(out, "  %s\n", l)
+		}
 		if l := conn.Plan.ExpectLine(); l != "" {
 			fmt.Fprintf(out, "  What to expect: %s\n", l)
 		}
