@@ -1,0 +1,19 @@
+{
+  "name": "exec-out-of-memory",
+  "about": "A command the kernel killed because the sandbox ran out of memory: the answer says so, with a code and a fix. execd tells the node from inside the sandbox; on an older execd the answer is the bare exit status.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "sandhold-fake-oom"
+  },
+  "status": 200,
+  "response": {
+    "code": "command_out_of_memory",
+    "durationMs": 0,
+    "error": "the command was stopped because the sandbox ran out of memory (1 GiB)",
+    "exitCode": -1,
+    "fix": "run less at once, or use a larger sandbox",
+    "stderr": "",
+    "stdout": "building\n"
+  }
+}

@@ -74,6 +74,42 @@
       {
         "at": "<time>",
         "by": "alice",
+        "text": "Ran a command: the command was stopped because it ran past its time limit (5 seconds)",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: the command was stopped because it ran past its time limit (5 seconds)",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: the command was stopped because the sandbox ran out of memory (1 GiB)",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: the command was stopped because the sandbox ran out of memory (1 GiB)",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: the sandbox reached its process limit while the command ran",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
+        "text": "Ran a command: the sandbox reached its process limit while the command ran",
+        "type": "sandbox.exec"
+      },
+      {
+        "at": "<time>",
+        "by": "alice",
         "text": "Ran a command: exit status 0",
         "type": "sandbox.exec"
       },

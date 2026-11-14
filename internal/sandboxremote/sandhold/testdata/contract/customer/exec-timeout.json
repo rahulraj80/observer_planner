@@ -1,0 +1,20 @@
+{
+  "name": "exec-timeout",
+  "about": "A command that runs past its timeoutSeconds is stopped; the answer says why, with a code and a fix (error, code, fix), not only an exit status.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "sandhold-fake-hang",
+    "timeoutSeconds": 5
+  },
+  "status": 200,
+  "response": {
+    "code": "command_timed_out",
+    "durationMs": 0,
+    "error": "the command was stopped because it ran past its time limit (5 seconds)",
+    "exitCode": 124,
+    "fix": "send a larger timeoutSeconds, or start the command in the background and check on it",
+    "stderr": "",
+    "stdout": "waiting\n"
+  }
+}

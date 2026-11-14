@@ -1,0 +1,19 @@
+{
+  "name": "exec-process-limit",
+  "about": "A command that failed after the sandbox reached its process limit: the answer says so, with a code and a fix.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "request": {
+    "command": "sandhold-fake-pids"
+  },
+  "status": 200,
+  "response": {
+    "code": "sandbox_process_limit",
+    "durationMs": 0,
+    "error": "the sandbox reached its process limit while the command ran",
+    "exitCode": 1,
+    "fix": "start fewer processes at once",
+    "stderr": "",
+    "stdout": "building\n"
+  }
+}

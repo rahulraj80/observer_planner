@@ -1,0 +1,30 @@
+{
+  "name": "exec-timeout-stream",
+  "about": "The same when the output is streamed: the exit event carries error, code and fix.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "accept": "text/event-stream",
+  "request": {
+    "command": "sandhold-fake-hang",
+    "timeoutSeconds": 5
+  },
+  "status": 200,
+  "stream": [
+    {
+      "data": {
+        "text": "waiting\n"
+      },
+      "event": "stdout"
+    },
+    {
+      "data": {
+        "code": "command_timed_out",
+        "durationMs": 0,
+        "error": "the command was stopped because it ran past its time limit (5 seconds)",
+        "exitCode": 124,
+        "fix": "send a larger timeoutSeconds, or start the command in the background and check on it"
+      },
+      "event": "exit"
+    }
+  ]
+}

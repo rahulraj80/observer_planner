@@ -1,0 +1,29 @@
+{
+  "name": "exec-out-of-memory-stream",
+  "about": "The same when the output is streamed: the exit event carries error, code and fix.",
+  "method": "POST",
+  "path": "/v1/sandboxes/<id>/exec",
+  "accept": "text/event-stream",
+  "request": {
+    "command": "sandhold-fake-oom"
+  },
+  "status": 200,
+  "stream": [
+    {
+      "data": {
+        "text": "building\n"
+      },
+      "event": "stdout"
+    },
+    {
+      "data": {
+        "code": "command_out_of_memory",
+        "durationMs": 0,
+        "error": "the command was stopped because the sandbox ran out of memory (1 GiB)",
+        "exitCode": -1,
+        "fix": "run less at once, or use a larger sandbox"
+      },
+      "event": "exit"
+    }
+  ]
+}
