@@ -1,0 +1,103 @@
+{
+  "name": "billing-auto-top-up",
+  "about": "A personal account's auto top-up (its admin, from the portal): on or off, the amount charged to the card (whole dollars, 10 to 1000) and the balance below which it is charged (0 to less than the amount). The answer is the billing state, whose autoTopUp and offer.expect say what will happen.",
+  "method": "PUT",
+  "path": "/v1/billing/auto-top-up",
+  "request": {
+    "amountUsd": 25,
+    "belowUsd": 5,
+    "enabled": true
+  },
+  "status": 200,
+  "response": {
+    "autoTopUp": {
+      "amountUsd": 25,
+      "belowUsd": 5,
+      "enabled": true,
+      "maxUsd": 1000,
+      "minUsd": 10
+    },
+    "billable": true,
+    "billing": "test",
+    "canCreate": false,
+    "card": null,
+    "cardCheck": "none",
+    "code": "card_required",
+    "credit": {
+      "expiredUsd": 0,
+      "leftUsd": 80,
+      "starterUsd": 80,
+      "topUpsUsd": 0,
+      "usedUsd": 0
+    },
+    "fix": "add a card at https://node.example:48000/app/#/billing (it is checked with a $1.00 charge that is refunded at once), then try again",
+    "graceEndsAt": null,
+    "invoices": [],
+    "month": {
+      "costUsd": 0,
+      "from": "<time>",
+      "gibHours": 0.083,
+      "gibUsd": 0,
+      "period": "<period>",
+      "vcpuHours": 0.083,
+      "vcpuUsd": 0
+    },
+    "notice": "Test mode: no real customers or charges. Billing runs in Paddle's sandbox; no card is charged.",
+    "offer": {
+      "addCardUrl": "https://node.example:48000/app/#/billing",
+      "allowanceUsd": 80,
+      "allowanceUsedUsd": 0,
+      "autoTopUp": {
+        "amountUsd": 25,
+        "belowUsd": 5,
+        "enabled": true,
+        "maxUsd": 1000,
+        "minUsd": 10
+      },
+      "balanceUsd": 80,
+      "billingOff": false,
+      "card": "none",
+      "cardCheckUsd": 1,
+      "cardGate": true,
+      "cardNeeded": true,
+      "cardSkips": 5,
+      "daysLeft": 28,
+      "expect": "The $1.00 card check is refunded at once. Nothing is charged in your free month (until 11 Dec 2026, up to $80 of use). After that, your card is charged $25 each time your balance falls below $5. Change the amounts or turn auto top-up off on the Billing page.",
+      "freeDays": 30,
+      "freeLimits": {
+        "atOnce": 2,
+        "cpu": "2",
+        "disk": "10Gi",
+        "kind": "free",
+        "maxRunMinutes": 30,
+        "memory": "4Gi",
+        "network": "allowlist",
+        "perDay": 20
+      },
+      "freeUntil": "<time>",
+      "freeUse": true,
+      "inFreeMonth": true,
+      "sandboxesCreated": 5,
+      "skipsLeft": 0,
+      "summary": "<offer-summary>"
+    },
+    "paddle": {
+      "clientToken": "test_contract",
+      "environment": "sandbox",
+      "scriptUrl": "https://cdn.paddle.com/paddle/v2/paddle.js"
+    },
+    "paymentFailedAt": null,
+    "prices": {
+      "gibHourUsd": 0.013,
+      "vcpuHourUsd": 0.04
+    },
+    "provider": "paddle",
+    "taxExcluded": true,
+    "testMode": true,
+    "topUp": {
+      "maxUsd": 1000,
+      "minUsd": 10
+    },
+    "why": "a card is needed to start more sandboxes: you have started 5, and 5 may start without a card. Your first month stays free with a card on file. Running sandboxes, their files and exports are not affected"
+  }
+}

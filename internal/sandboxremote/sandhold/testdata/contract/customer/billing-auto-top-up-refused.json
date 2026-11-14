@@ -1,0 +1,17 @@
+{
+  "name": "billing-auto-top-up-refused",
+  "about": "A cut-off not below the amount.",
+  "method": "PUT",
+  "path": "/v1/billing/auto-top-up",
+  "request": {
+    "amountUsd": 20,
+    "belowUsd": 20,
+    "enabled": true
+  },
+  "status": 400,
+  "response": {
+    "code": "bad_amount",
+    "error": "amountUsd must be from 10 to 1000, and belowUsd from 0 to less than amountUsd (whole dollars)",
+    "fix": "send {\"enabled\": true, \"amountUsd\": 20, \"belowUsd\": 5}"
+  }
+}

@@ -146,6 +146,7 @@ test("places: the first-month offer before connecting, and the account's plan af
     card_needed: false,
     card: "none",
     card_line: "2 of 5 sandboxes left before a card is needed",
+    expect: "The $1.00 card check is refunded at once.",
     add_card_url: "https://sandhold.example.com/app/#/billing",
   };
   const ok = renderToStaticMarkup(
@@ -157,6 +158,7 @@ test("places: the first-month offer before connecting, and the account's plan af
   );
   assert.match(ok, /28 days left/);
   assert.match(ok, /2 of 5 sandboxes left before a card/);
+  assert.match(ok, /What to expect: The \$1\.00 card check is refunded at once\./);
   assert.match(
     ok,
     /href="https:\/\/sandhold\.example\.com\/app\/#\/billing"[^>]*>Add a card/,

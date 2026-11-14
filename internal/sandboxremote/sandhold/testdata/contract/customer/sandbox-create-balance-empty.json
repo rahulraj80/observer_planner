@@ -1,0 +1,13 @@
+{
+  "name": "sandbox-create-balance-empty",
+  "about": "A personal account whose balance is used up with auto top-up off: 402 balance_empty, with where to turn it on or buy credit in fix (top_up_failed when the last auto top-up failed on the card). Running sandboxes keep running; files and exports still work.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {},
+  "status": 402,
+  "response": {
+    "code": "balance_empty",
+    "error": "your balance is used up and auto top-up is off; new sandboxes are refused (running ones keep running, and their files and exports are not affected)",
+    "fix": "turn auto top-up on or buy credit at https://node.example:48000/app/#/billing"
+  }
+}

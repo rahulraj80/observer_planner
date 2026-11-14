@@ -34,35 +34,81 @@ const (
 	// CodeCreditUsedUp: the credit (the free month's fair use) is used up
 	// and no card is on file.
 	CodeCreditUsedUp = "credit_used_up"
+	// CodeBalanceEmpty: the prepaid balance is used up and auto top-up is
+	// off (SandHold, 2026-11-13).
+	CodeBalanceEmpty = "balance_empty"
+	// CodeTopUpFailed: the card was declined on an auto top-up.
+	CodeTopUpFailed = "top_up_failed"
+	// CodeFreeSandboxesUsed: on a node with billing off, the account
+	// started all its free sandboxes.
+	CodeFreeSandboxesUsed = "free_sandboxes_used"
 )
 
 // PlanRefusal reports whether a refusal is the account's plan (a card is
-// needed, the free month ended, the credit is used up), which only the
-// person can fix, in the node's portal.
+// needed, the free month ended, the credit or balance is used up, a top-up
+// was declined, the free sandboxes are used), which only the person (or the
+// node's operator) can fix.
 func PlanRefusal(err error) (*APIError, bool) {
 	var ae *APIError
 	if !errors.As(err, &ae) {
 		return nil, false
 	}
 	switch ae.Code {
-	case CodeCardRequired, CodeFreeMonthEnded, CodeCreditUsedUp:
+	case CodeCardRequired, CodeFreeMonthEnded, CodeCreditUsedUp, CodeBalanceEmpty, CodeTopUpFailed, CodeFreeSandboxesUsed:
 		return ae, true
 	}
 	return nil, false
 }
 
-// PublicOffer is the offer as a node sets it, before an account exists.
-type PublicOffer struct {
-	FreeDays     int     `json:"freeDays"`
-	AllowanceUSD float64 `json:"allowanceUsd"`
-	CardSkips    int     `json:"cardSkips"`
-	CardCheckUSD float64 `json:"cardCheckUsd"`
+// FreeLimits are the limits a node puts on free use: each sandbox's run
+// time and size, how many at once, a day and (billing off) in all.
+type FreeLimits struct {
+	Kind          string `json:"kind"`
+	MaxRunMinutes int    `json:"maxRunMinutes"`
+	CPU           string `json:"cpu"`
+	Memory        string `json:"memory"`
+	Disk          string `json:"disk"`
+	Network       string `json:"network"`
+	AtOnce        int    `json:"atOnce"`
+	PerDay        int    `json:"perDay"`
+	Total         int    `json:"total,omitempty"`
 }
 
-// Line is the offer in one sentence ("" when the node has no free month).
+// PublicOffer is the offer as a node sets it, before an account exists.
+// A node with billing off offers a number of free sandboxes in all and no
+// free month; Expect is the node's own words on what to expect.
+type PublicOffer struct {
+	FreeDays      int         `json:"freeDays"`
+	AllowanceUSD  float64     `json:"allowanceUsd"`
+	CardSkips     int         `json:"cardSkips"`
+	CardCheckUSD  float64     `json:"cardCheckUsd"`
+	BillingOff    bool        `json:"billingOff"`
+	FreeSandboxes int         `json:"freeSandboxes,omitempty"`
+	FreeLimits    *FreeLimits `json:"freeLimits,omitempty"`
+	TopUpUSD      float64     `json:"topUpUsd,omitempty"`
+	TopUpBelowUSD float64     `json:"topUpBelowUsd,omitempty"`
+	Expect        string      `json:"expect,omitempty"`
+}
+
+// Line is the offer in one sentence ("" when the node has no free month
+// and no free sandboxes).
 // no-bare-usd:allow (SandHold's plan terms, not a developer's coding spend)
 func (o *PublicOffer) Line() string {
-	if o == nil || o.FreeDays <= 0 {
+	if o == nil {
+		return ""
+	}
+	if o.BillingOff {
+		if o.FreeSandboxes <= 0 {
+			return ""
+		}
+		s := fmt.Sprintf("Billing is off on this node: %d free sandboxes in all, no card taken.", o.FreeSandboxes)
+		if l := o.FreeLimits; l != nil && l.MaxRunMinutes > 0 {
+			s = fmt.Sprintf("Billing is off on this node: %d free sandboxes in all (each up to %d min, %s vCPU, %s memory, %d at a time), no card taken.",
+				o.FreeSandboxes, l.MaxRunMinutes, l.CPU, strings.Replace(l.Memory, "Gi", " GiB", 1), l.AtOnce)
+		}
+		return s
+	}
+	if o.FreeDays <= 0 {
 		return ""
 	}
 	s := fmt.Sprintf("First month free: %d days at no charge, up to $%.0f of use.", o.FreeDays, o.AllowanceUSD)
@@ -97,6 +143,9 @@ func (c *Client) Signup(ctx context.Context) (*SignupInfo, error) {
 		return nil, err
 	}
 	out.ClosedReason = PlainLine(out.ClosedReason)
+	if out.Offer != nil {
+		out.Offer.Expect = PlainLine(out.Offer.Expect)
+	}
 	return &out, nil
 }
 
@@ -119,8 +168,28 @@ type Plan struct {
 	CardCheckError string  `json:"cardCheckError,omitempty"`
 	AddCardURL     string  `json:"addCardUrl"`
 	Summary        string  `json:"summary"`
+	// Expect is the node's words on what to expect at the card check (or,
+	// billing off, from the free sandboxes).
+	Expect            string      `json:"expect,omitempty"`
+	BillingOff        bool        `json:"billingOff"`
+	FreeSandboxes     int         `json:"freeSandboxes,omitempty"`
+	FreeSandboxesLeft int         `json:"freeSandboxesLeft,omitempty"`
+	FreeUse           bool        `json:"freeUse,omitempty"`
+	FreeLimits        *FreeLimits `json:"freeLimits,omitempty"`
+	AutoTopUp         *AutoTopUp  `json:"autoTopUp,omitempty"`
+	BalanceUSD        float64     `json:"balanceUsd"`
 	// CheckedAt is when Observer read it (not the node's).
 	CheckedAt time.Time `json:"checkedAt,omitzero"`
+}
+
+// AutoTopUp is the account's auto top-up: the card is charged AmountUSD
+// whenever the balance falls below BelowUSD, while Enabled.
+type AutoTopUp struct {
+	Enabled   bool    `json:"enabled"`
+	AmountUSD float64 `json:"amountUsd"`
+	BelowUSD  float64 `json:"belowUsd"`
+	MinUSD    float64 `json:"minUsd,omitempty"`
+	MaxUSD    float64 `json:"maxUsd,omitempty"`
 }
 
 // Offer reads the account's plan; nil and no error for an org without
@@ -136,7 +205,7 @@ func (c *Client) Offer(ctx context.Context) (*Plan, error) {
 		return nil, err
 	}
 	p.Card, p.CardCheckError, p.Summary = PlainLine(p.Card), PlainLine(p.CardCheckError), PlainLine(p.Summary)
-	p.AddCardURL = PlainLine(p.AddCardURL)
+	p.AddCardURL, p.Expect = PlainLine(p.AddCardURL), PlainLine(p.Expect)
 	if !strings.HasPrefix(p.AddCardURL, c.URL+"/") {
 		// Only the node's own page is ever shown as where to add a card.
 		p.AddCardURL = c.URL + "/app/#/billing"
@@ -158,4 +227,14 @@ func (p *Plan) CardLine() string {
 		return fmt.Sprintf("Add a card to start more sandboxes: %s (%s).", p.AddCardURL, check)
 	}
 	return fmt.Sprintf("%d of %d sandboxes left before a card is needed; add one any time at %s (%s).", p.SkipsLeft, p.CardSkips, p.AddCardURL, check)
+}
+
+// ExpectLine is what to expect, in the node's words ("" when it says
+// nothing, or a checked card on a node with billing on: then it was said
+// already).
+func (p *Plan) ExpectLine() string {
+	if p == nil || (!p.BillingOff && p.Card == "checked") {
+		return ""
+	}
+	return p.Expect
 }

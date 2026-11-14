@@ -1,0 +1,72 @@
+{
+  "name": "signup-offer-billing-off",
+  "about": "Before an account exists, on a node with billing off: billingOff, the free sandboxes in all and their limits, and expect.",
+  "method": "GET",
+  "path": "/app/api/signup",
+  "status": 200,
+  "response": {
+    "closedReason": "Sign-up is closed: this node runs in test mode and takes no real customers yet. If an operator sent you a sign-up invite, enter its code.",
+    "emailVerified": false,
+    "inviteAccepted": true,
+    "offer": {
+      "allowanceUsd": 0,
+      "billingOff": true,
+      "cardCheckUsd": 1,
+      "cardSkips": 0,
+      "expect": "Billing is off on this node, so no card is taken and nothing is charged: 5 free sandboxes in all, each up to 15 min, 1 vCPU, 2 GiB memory, 1 at a time. After that, new sandboxes are refused.",
+      "freeDays": 0,
+      "freeLimits": {
+        "atOnce": 1,
+        "cpu": "1",
+        "disk": "10Gi",
+        "kind": "billing_off",
+        "maxRunMinutes": 15,
+        "memory": "2Gi",
+        "network": "allowlist",
+        "perDay": 5,
+        "total": 5
+      },
+      "freeSandboxes": 5,
+      "topUpBelowUsd": 5,
+      "topUpUsd": 20
+    },
+    "selfServe": true,
+    "signupClosed": true,
+    "starter": {
+      "allow": [
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "crates.io",
+        "index.crates.io",
+        "static.crates.io",
+        "rubygems.org",
+        "index.rubygems.org",
+        "repo.maven.apache.org",
+        "repo1.maven.org",
+        "deb.debian.org",
+        "security.debian.org",
+        "archive.ubuntu.com",
+        "security.ubuntu.com",
+        "api.anthropic.com",
+        "api.openai.com",
+        "generativelanguage.googleapis.com"
+      ],
+      "cpu": "1",
+      "creditHours": 1509.4,
+      "creditUsd": 80,
+      "hourUsd": 0.053,
+      "isolation": "sealed",
+      "maxSandboxes": 2,
+      "memory": "1Gi",
+      "network": "limited"
+    }
+  }
+}

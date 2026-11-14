@@ -1,0 +1,39 @@
+{
+  "name": "offer-billing-off",
+  "about": "A personal account on a node with billing off: billingOff, no free month or card gate, freeSandboxes in all and how many are left, the limits on each (freeLimits), and expect in plain words.",
+  "method": "GET",
+  "path": "/v1/offer",
+  "status": 200,
+  "response": {
+    "addCardUrl": "https://node.example:48000/app/#/billing",
+    "allowanceUsd": 0,
+    "allowanceUsedUsd": 0,
+    "balanceUsd": 0,
+    "billingOff": true,
+    "card": "checked",
+    "cardCheckUsd": 1,
+    "cardGate": false,
+    "cardNeeded": false,
+    "cardSkips": 5,
+    "daysLeft": 0,
+    "expect": "Billing is off on this node, so no card is taken and nothing is charged: 5 free sandboxes in all, each up to 15 min, 1 vCPU, 2 GiB memory, 1 at a time. After that, new sandboxes are refused.",
+    "freeDays": 0,
+    "freeLimits": {
+      "atOnce": 1,
+      "cpu": "1",
+      "disk": "10Gi",
+      "kind": "billing_off",
+      "maxRunMinutes": 15,
+      "memory": "2Gi",
+      "network": "allowlist",
+      "perDay": 5,
+      "total": 5
+    },
+    "freeSandboxes": 5,
+    "freeUse": true,
+    "inFreeMonth": false,
+    "sandboxesCreated": 5,
+    "skipsLeft": 0,
+    "summary": "<offer-summary>"
+  }
+}

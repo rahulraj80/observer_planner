@@ -96,6 +96,9 @@ export type SandholdPlan = {
   card_needed: boolean;
   card: string;
   card_line?: string;
+  /** What to expect at the card check (or from free sandboxes, billing off). */
+  expect?: string;
+  billing_off?: boolean;
   add_card_url?: string;
   checked_at?: string;
 };
@@ -299,6 +302,9 @@ export function PlanView({
         >
           {plan.card_line}
         </p>
+      )}
+      {plan.expect && (
+        <p className="text-[11px] text-fg-3">What to expect: {plan.expect}</p>
       )}
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-3">
         {addCard && plan.card !== "checked" && plan.card_gate && (

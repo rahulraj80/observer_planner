@@ -10,9 +10,23 @@
     "inviteAccepted": true,
     "offer": {
       "allowanceUsd": 80,
+      "billingOff": false,
       "cardCheckUsd": 1,
       "cardSkips": 5,
-      "freeDays": 30
+      "expect": "The $1.00 card check is refunded at once. Nothing is charged in your free month (30 days, up to $80 of use). After that, your card is charged $20 each time your balance falls below $5; you can change the amounts or turn this off.",
+      "freeDays": 30,
+      "freeLimits": {
+        "atOnce": 2,
+        "cpu": "2",
+        "disk": "10Gi",
+        "kind": "free",
+        "maxRunMinutes": 30,
+        "memory": "4Gi",
+        "network": "allowlist",
+        "perDay": 20
+      },
+      "topUpBelowUsd": 5,
+      "topUpUsd": 20
     },
     "selfServe": true,
     "signupClosed": true,

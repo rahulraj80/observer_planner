@@ -45,8 +45,9 @@ const sandholdConnectCommand = "observer sandbox connect"
 
 // sandholdOfferText is the first-month offer shown before connecting. The
 // node's own numbers are printed by connect; these are SandHold's defaults
-// (SandHold note 44).
-const sandholdOfferText = "First month free on SandHold: 30 days at no charge, up to $80 of use, and no card needed for your first 5 sandboxes (after that a card is checked with a $1 charge, refunded at once)."
+// (SandHold note 44; the prepaid balance and billing-off free sandboxes,
+// 2026-11-13).
+const sandholdOfferText = "First month free on SandHold: 30 days at no charge, up to $80 of use, and no card needed for your first 5 sandboxes (after that a card is checked with a $1 charge, refunded at once). After the free month your card is charged $20 each time your balance falls below $5; you can change the amounts or turn this off. A node with billing off gives 5 free sandboxes in all instead, and takes no card."
 
 // sandholdPlanView is where the connected account stands in the
 // first-month offer, as the node last said (at connect, or the panel's
@@ -63,7 +64,11 @@ type sandholdPlanView struct {
 	// Card is none, checked, unchecked or failed.
 	Card string `json:"card"`
 	// CardLine is what the person may do about a card ("" when nothing).
-	CardLine   string `json:"card_line,omitempty"`
+	CardLine string `json:"card_line,omitempty"`
+	// Expect is what to expect at the card check, or from the free
+	// sandboxes on a node with billing off ("" when nothing to add).
+	Expect     string `json:"expect,omitempty"`
+	BillingOff bool   `json:"billing_off,omitempty"`
 	AddCardURL string `json:"add_card_url,omitempty"`
 	CheckedAt  string `json:"checked_at,omitempty"`
 }
@@ -72,9 +77,12 @@ func sandholdPlanOf(p *sandhold.Plan) *sandholdPlanView {
 	if p == nil {
 		return nil
 	}
-	v := &sandholdPlanView{Summary: sandhold.PlainLine(p.Summary), InFreeMonth: p.InFreeMonth, DaysLeft: p.DaysLeft,
+	v := &sandholdPlanView{
+		Summary: sandhold.PlainLine(p.Summary), InFreeMonth: p.InFreeMonth, DaysLeft: p.DaysLeft,
 		CardGate: p.CardGate, SkipsLeft: p.SkipsLeft, CardSkips: p.CardSkips, CardNeeded: p.CardNeeded,
-		Card: sandhold.PlainLine(p.Card), CardLine: sandhold.PlainLine(p.CardLine()), AddCardURL: sandhold.PlainLine(p.AddCardURL)}
+		Card: sandhold.PlainLine(p.Card), CardLine: sandhold.PlainLine(p.CardLine()),
+		Expect: sandhold.PlainLine(p.ExpectLine()), BillingOff: p.BillingOff, AddCardURL: sandhold.PlainLine(p.AddCardURL),
+	}
 	if p.FreeUntil != nil {
 		v.FreeUntil = p.FreeUntil.UTC().Format(time.RFC3339)
 	}

@@ -583,6 +583,9 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 		if l := conn.Plan.CardLine(); l != "" {
 			fmt.Fprintf(out, "  %s\n", l)
 		}
+		if l := conn.Plan.ExpectLine(); l != "" {
+			fmt.Fprintf(out, "  What to expect: %s\n", l)
+		}
 	}
 	fmt.Fprintln(out)
 	switch {
@@ -616,6 +619,9 @@ func sandholdShowOffer(ctx context.Context, out io.Writer, node string) {
 	}
 	if l := info.Offer.Line(); l != "" {
 		fmt.Fprintf(out, "New to SandHold? %s\n", l)
+		if e := info.Offer.Expect; e != "" {
+			fmt.Fprintf(out, "What to expect: %s\n", e)
+		}
 	}
 	switch {
 	case info.SignupClosed && info.InviteAccepted:

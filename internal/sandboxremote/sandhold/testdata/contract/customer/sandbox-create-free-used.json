@@ -1,0 +1,13 @@
+{
+  "name": "sandbox-create-free-used",
+  "about": "A personal account on a node with billing off that started its five free sandboxes: 403 free_sandboxes_used, with the reason and what to do. Other free-use refusals: 429 free_limit_at_once and free_limit_per_day; extending a sandbox past its run time, 403 free_limit_run_time.",
+  "method": "POST",
+  "path": "/v1/sandboxes",
+  "request": {},
+  "status": 403,
+  "response": {
+    "code": "free_sandboxes_used",
+    "error": "billing is off on this node, so a free account may start 5 sandboxes in all, and you have started 5. New sandboxes are refused; running ones, their files and exports are not affected",
+    "fix": "ask the node's operator to lift your account's starter limits, or use a node with billing on"
+  }
+}

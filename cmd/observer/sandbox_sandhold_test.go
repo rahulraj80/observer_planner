@@ -224,11 +224,19 @@ func TestSandholdConnect(t *testing.T) {
 func TestSandholdConnectDefaultNodeAndOffer(t *testing.T) {
 	deps, opened := sandholdTestDeps(t)
 	f := newSandholdFakeNode(t, "key_1", "")
-	f.signup = map[string]any{"selfServe": true, "signupClosed": true, "inviteAccepted": true,
-		"offer": map[string]any{"freeDays": 30, "allowanceUsd": 80, "cardSkips": 5, "cardCheckUsd": 1}}
-	f.plan = map[string]any{"freeDays": 30, "inFreeMonth": true, "daysLeft": 30, "allowanceUsd": 80, "cardGate": true, "cardSkips": 5,
+	f.signup = map[string]any{
+		"selfServe": true, "signupClosed": true, "inviteAccepted": true,
+		"offer": map[string]any{
+			"freeDays": 30, "allowanceUsd": 80, "cardSkips": 5, "cardCheckUsd": 1,
+			"expect": "The $1.00 card check is refunded at once. Nothing is charged in your free month.",
+		},
+	}
+	f.plan = map[string]any{
+		"freeDays": 30, "inFreeMonth": true, "daysLeft": 30, "allowanceUsd": 80, "cardGate": true, "cardSkips": 5,
 		"sandboxesCreated": 0, "skipsLeft": 5, "card": "none", "cardCheckUsd": 1, "addCardUrl": f.srv.URL + "/app/#/billing",
-		"summary": "First month free: 30 days left (until 11 Dec 2026), up to $80 of use; 5 of 5 sandboxes left without a card."}
+		"expect":  "The $1.00 card check is refunded at once. After that, your card is charged $20 each time your balance falls below $5.",
+		"summary": "First month free: 30 days left (until 11 Dec 2026), up to $80 of use; 5 of 5 sandboxes left without a card.",
+	}
 	deps.lookupEnv = func(k string) (string, bool) {
 		if k == sandhold.EnvDefaultURL {
 			return f.srv.URL, true
@@ -245,6 +253,8 @@ func TestSandholdConnectDefaultNodeAndOffer(t *testing.T) {
 		"by invitation for now",
 		"Plan: First month free: 30 days left",
 		"5 of 5 sandboxes left before a card is needed; add one any time at " + f.srv.URL + "/app/#/billing",
+		"What to expect: The $1.00 card check is refunded at once. Nothing is charged in your free month.",
+		"  What to expect: The $1.00 card check is refunded at once. After that, your card is charged $20 each time your balance falls below $5.",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
@@ -403,8 +413,10 @@ func TestSandholdDisconnect(t *testing.T) {
 // connection in the note.
 func TestSandholdProbeStates(t *testing.T) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	conn := &sandhold.Connection{Version: 1, URL: "https://node.example.com", User: "alice", Org: "acme", ExpiresAt: now.Add(24 * time.Hour),
-		Offers: []sandhold.Offer{{Tier: "shared", Class: vocab.ClassProcess}, {Tier: "vault", Class: vocab.ClassHWVM}}}
+	conn := &sandhold.Connection{
+		Version: 1, URL: "https://node.example.com", User: "alice", Org: "acme", ExpiresAt: now.Add(24 * time.Hour),
+		Offers: []sandhold.Offer{{Tier: "shared", Class: vocab.ClassProcess}, {Tier: "vault", Class: vocab.ClassHWVM}},
+	}
 	expired := *conn
 	expired.ExpiresAt = now.Add(-time.Hour)
 	cases := []struct {
@@ -491,14 +503,16 @@ func TestSandholdBackendRow(t *testing.T) {
 		t.Errorf("class %q", got.class)
 	}
 	// Not connected, enabled: credential_missing, in the row's own words.
-	if p := (func() sandboxselect.Probe { row(true); return d.probe(context.Background()) })(); runtime.GOOS == "linux" && (p.Verdict != verdictSandholdNotConnected || !strings.Contains(p.Reason, "observer sandbox connect")) {
+	if p := func() sandboxselect.Probe { row(true); return d.probe(context.Background()) }(); runtime.GOOS == "linux" && (p.Verdict != verdictSandholdNotConnected || !strings.Contains(p.Reason, "observer sandbox connect")) {
 		t.Errorf("not connected, enabled: %+v", p)
 	}
 
 	// Connected and enabled: the note names the node and its isolation, and
 	// the shared ladder decides (no consent yet, so not usable for a run).
-	if err := sandholdSaveConnection(r.observerDir, sandhold.Connection{URL: "https://node.example.com", User: "alice", Org: "acme",
-		Offers: []sandhold.Offer{{Tier: "vault", Class: vocab.ClassHWVM}}}); err != nil {
+	if err := sandholdSaveConnection(r.observerDir, sandhold.Connection{
+		URL: "https://node.example.com", User: "alice", Org: "acme",
+		Offers: []sandhold.Offer{{Tier: "vault", Class: vocab.ClassHWVM}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got = row(true)
