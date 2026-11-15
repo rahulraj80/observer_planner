@@ -80,7 +80,7 @@ export function PrivacyPage() {
           <div className="space-y-1.5">
             <p className="font-medium text-fg-1">Network posture</p>
             <ul className="list-disc space-y-1 pl-4 text-fg-2">
-              <li>The observer and watcher make no network calls - everything is local</li>
+              <li>Your prompts, code and files stay on this machine. By default the daemon sends content-free usage telemetry (counts, sizes and timings) and fetches the public price table; <span className="font-mono">observer privacy</span> lists every outbound call</li>
               <li>The proxy only forwards your AI tool's own traffic to its provider</li>
               {managed ? (
                 <li>
@@ -602,12 +602,12 @@ function OrgPushCard() {
     >
       {!st?.enrolled ? (
         <p className="py-3 text-[12px] text-fg-2">
-          Not enrolled in any org - nothing is shared, ever. Enrolment is an
+          Not enrolled in any org - nothing is shared with an org server. Enrolment is an
           explicit action in{" "}
           <Link to="/settings?section=enrolment" className="font-medium text-accent hover:text-accent-strong">
             Settings &rarr; Enrolment
           </Link>
-          ; until then the observer has no outbound channel at all.
+          ; until then nothing goes to an org server. Usage telemetry is a separate, content-free channel (see Network posture).
         </p>
       ) : (
         <div className="space-y-2 text-[12px]">

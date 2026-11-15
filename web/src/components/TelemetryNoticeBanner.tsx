@@ -51,7 +51,9 @@ export function TelemetryNoticeBanner() {
         <p className="mt-1 text-fg-3">
           See it with <span className="font-mono">observer telemetry data</span>, delete it with{" "}
           <span className="font-mono">observer telemetry delete --yes</span>, turn it off with{" "}
-          <span className="font-mono">observer telemetry consent off</span> or in Settings, Observability.
+          <span className="font-mono">observer telemetry consent off</span> (or{" "}
+          <span className="font-mono">[telemetry] enabled = false</span> in config.toml, or{" "}
+          <span className="font-mono">OBSERVER_TELEMETRY=off</span>).
         </p>
       </div>
       <button

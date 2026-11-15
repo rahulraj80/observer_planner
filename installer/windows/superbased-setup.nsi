@@ -114,7 +114,7 @@ Var Purge
 !define MUI_UNICON "${ICON_FILE}"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Install ${PRODUCT} ${VERSION}"
-!define MUI_WELCOMEPAGE_TEXT "SuperBased records what your AI coding tools do and what they cost, on this computer only.$\r$\n$\r$\nThis installs it for your user account. No administrator rights are needed, and nothing is sent anywhere.$\r$\n$\r$\nIf SuperBased is already installed from npm, pip or the VS Code extension, setup stops and tells you how to upgrade that copy instead."
+!define MUI_WELCOMEPAGE_TEXT "SuperBased records what your AI coding tools do and what they cost, on this computer only.$\r$\n$\r$\nThis installs it for your user account. No administrator rights are needed. Your prompts, code and files stay on this computer; by default it sends content-free usage counts (no text, code or file paths), which the command observer telemetry consent off turns off.$\r$\n$\r$\nIf SuperBased is already installed from npm, pip or the VS Code extension, setup stops and tells you how to upgrade that copy instead."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${LICENSE_FILE}"
 !insertmacro MUI_PAGE_COMPONENTS

@@ -183,7 +183,7 @@ export const HELP_REGISTRY: HelpEntry[] = [
     category: "tab",
     title: "Privacy tab",
     oneLiner: "What the observer captures, what never leaves this machine, and the tools to verify both.",
-    detail: "Three panels: (1) the capture contract - what's stored locally (metadata, paths, capped excerpts), what's never stored (full file contents, full outputs, credentials), and the network posture (observer and watcher make no network calls; Teams push only after explicit enrolment), with this install's live scrubbing/retention flags; (2) the scrub tester - paste anything and see exactly what the secrets scrubber would redact, processed in memory only; (3) Teams sharing - enrolment status and a byte-for-byte view of the last payload actually sent, when enrolled.",
+    detail: "Three panels: (1) the capture contract - what's stored locally (metadata, paths, capped excerpts), what's never stored (full file contents, full outputs, credentials), and the network posture (prompts, code and files never leave the machine; content-free usage telemetry and the price feed run by default and `observer privacy` lists every outbound call; Teams push only after explicit enrolment), with this install's live scrubbing/retention flags; (2) the scrub tester - paste anything and see exactly what the secrets scrubber would redact, processed in memory only; (3) Teams sharing - enrolment status and a byte-for-byte view of the last payload actually sent, when enrolled.",
     related: ["card.privacy_scrub_tester", "card.privacy_org_push", "glossary.settings_secrets", "glossary.settings_org_share"],
   },
   {
@@ -199,7 +199,7 @@ export const HELP_REGISTRY: HelpEntry[] = [
     category: "metric",
     title: "Capture map",
     oneLiner: "The capture contract: stored locally vs never stored vs network posture, with live install flags.",
-    detail: "The bullet lists state the invariants the codebase enforces: only paths, commands, and capped excerpts land in observer.db (never full file contents or full command outputs); secret-shaped strings are scrubbed before any row is written; the observer and watcher make no network calls. The pills show this install's live values - scrubbing on/off, extra pattern count, retention window - read fresh from config.toml.",
+    detail: "The bullet lists state the invariants the codebase enforces: only paths, commands, and capped excerpts land in observer.db (never full file contents or full command outputs); secret-shaped strings are scrubbed before any row is written; no captured content leaves the machine (usage telemetry carries only counts, sizes and timings). The pills show this install's live values - scrubbing on/off, extra pattern count, retention window - read fresh from config.toml.",
     related: ["tab.privacy", "glossary.settings_secrets"],
   },
   {
@@ -215,7 +215,7 @@ export const HELP_REGISTRY: HelpEntry[] = [
     category: "metric",
     title: "Teams sharing",
     oneLiner: "Enrolment status plus the byte-for-byte payload view - see precisely what was last shared.",
-    detail: "When not enrolled, nothing is ever shared - the observer has no outbound channel. When enrolled, pushes carry hashed identifiers by default; raw content/path columns ship only when the node operator sets share.full_content locally (no org server can flip that remotely). The payload button fetches the exact JSON of the most recent push, byte-for-byte, so 'what left this machine' is verifiable rather than asserted.",
+    detail: "When not enrolled, nothing is shared with an org server (usage telemetry is a separate, content-free channel - see the network posture). When enrolled, pushes carry hashed identifiers by default; raw content/path columns ship only when the node operator sets share.full_content locally (no org server can flip that remotely). The payload button fetches the exact JSON of the most recent push, byte-for-byte, so 'what left this machine' is verifiable rather than asserted.",
     related: ["tab.privacy", "glossary.settings_org_share"],
   },
   {

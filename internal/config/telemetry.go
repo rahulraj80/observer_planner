@@ -6,7 +6,7 @@ import (
 )
 
 // DefaultTelemetryEndpoint is the central telemetry ingest the [telemetry]
-// seed points at: the hosted cloud's anonymous telemetry lane (telemetry plan
+// seed points at: the hosted cloud's pseudonymous telemetry lane (telemetry plan
 // Step 5.2, revised 2026-10-17; /v1/telemetry/* on observer-cloud), reached
 // with the device key alone. A node registered with a self-hosted
 // observer_reporter (an install token from `observer telemetry register`)
@@ -17,7 +17,8 @@ const DefaultTelemetryEndpoint = "https://cloud.superbased.app"
 // CLIENT collector (telemetry-rail plan §D2,
 // docs/plans/telemetry-rail-plan-2026-09-13.md, canonical in
 // observer_reporter). The collector batches consent-tiered, content-free
-// events to the independent central ingest (:48089, observer_reporter).
+// events to Endpoint: the hosted cloud (DefaultTelemetryEndpoint) by default,
+// or a self-hosted observer_reporter ingest the node was registered with.
 //
 // Consent model (telemetry plan Step 5.7, 2026-10-18): the content-free
 // baseline tier is ON by default (config Default()); the zero value of the

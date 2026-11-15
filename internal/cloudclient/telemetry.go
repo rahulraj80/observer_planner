@@ -18,7 +18,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/cloudpop"
 )
 
-// TelemetrySigningContext domain-separates the anonymous telemetry exchange
+// TelemetrySigningContext domain-separates the pseudonymous telemetry exchange
 // signature from the account exchange (exchangeSigningContext). The hosted
 // server (internal/cloudserver/api/telemetry.go) verifies exactly these bytes.
 const TelemetrySigningContext = "sbo-telemetry-exchange.v1"
@@ -44,7 +44,7 @@ type TelemetryOptions struct {
 	Clock      func() time.Time
 }
 
-// TelemetryClient is the anonymous baseline-telemetry lane (telemetry plan
+// TelemetryClient is the pseudonymous baseline-telemetry lane (telemetry plan
 // Step 5.2, migration 0042 server side). The device key alone authenticates:
 // no account, no WorkOS. The telemetry token lives only in memory; a process
 // restart re-exchanges. It never touches the account token or sign-in state.

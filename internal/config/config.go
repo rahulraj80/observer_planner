@@ -159,9 +159,10 @@ type Config struct {
 	Pricing PricingSectionConfig `toml:"pricing"`
 	// Telemetry is the [telemetry] surface — the central telemetry rail
 	// CLIENT collector (telemetry-rail plan §D2, canonical in
-	// observer_reporter). LOCAL-ONLY config describing an opt-in node→
-	// internet rail: tier off is the zero value and the default, and with
-	// it nothing is collected, staged, or sent. See internal/telemetry.
+	// observer_reporter). LOCAL-ONLY config for a node→internet rail that
+	// sends the content-free baseline tier by default (Default()); tier off
+	// is the struct's zero value, and with it nothing is collected, staged,
+	// or sent. See internal/telemetry.
 	Telemetry TelemetryConfig `toml:"telemetry"`
 	// Experiments is the [[experiments]] list — productized profile
 	// A/B runs (usability arc P6.4). See experiments.go.

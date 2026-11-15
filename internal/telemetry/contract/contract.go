@@ -72,9 +72,10 @@ type Event struct {
 //	baseline   — Point-2 per-prompt-cycle (prompt_cycle) plus the content-free
 //	             lifecycle / tool / error / token counters. On by default in both
 //	             observer builds for new installs.
-//	enrichment — opt-in prompts + session history for task identification / quality
-//	             inputs, scoped to functionalities. Placeholder tier constant now;
-//	             event set defined in the enrichment work. Never on by default.
+//	enrichment — reserved for further sharing the user opts in to (the plan
+//	             names task identification and quality inputs). Placeholder
+//	             tier constant: today it sends exactly what baseline sends.
+//	             Never on by default.
 //	error      — error classes + batch meta only.
 //	usage      — legacy alias for baseline during the deprecation window (one
 //	             release). EffectiveTier normalizes it to baseline.

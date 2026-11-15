@@ -38,9 +38,9 @@ const telemetryDisclosure = `TELEMETRY — what each tier sends (the sharing lad
               list in the published contract (` + contract.Version + `), which refuses any other
               field: no prompt or output text, paths, project names or commands.
   enrichment  reserved for opt-in enrichment; today it sends what baseline sends.
-  deep        baseline + truncated, scrubbed command lines (its own disclosure,
-              shown above when you choose it; 90-day server-side cap; purged
-              when you step down).
+  deep        baseline + truncated, scrubbed command lines and tool arguments
+              (its own disclosure, shown above when you choose it; 90-day
+              server-side cap; purged when you step down).
 
 WHERE:  SuperBased cloud (the telemetry lane at the [telemetry] endpoint,
         cloud.superbased.app by default), or your self-hosted reporter if you

@@ -1061,9 +1061,10 @@ plugin cannot know, so every manifest here resolves \`observer\` from \`PATH\`.
 - **Wiring only.** $PREREQ_SENTENCE. No artifact here ships, downloads or
   bundles a binary, and each listing says so in those words.
 - **Local by default.** Captured data lands in \`~/.observer/observer.db\`.
-  The MCP server makes no network calls of its own; shipping anything off the
-  machine is a separate, opt-in Teams configuration none of these plugins
-  touch.
+  The MCP server makes no network calls of its own. The Observer daemon sends
+  content-free usage telemetry by default (\`observer telemetry consent off\`
+  turns it off); sharing captured content with an org is a separate, opt-in
+  Teams configuration none of these plugins touch.
 - **No efficiency claims.** No listing here promises an efficiency, context
   or cost benefit of any kind. Observer measures what your agents spend; it
   does not claim to change it.
