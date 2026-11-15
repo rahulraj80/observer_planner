@@ -14,7 +14,10 @@ import (
 // (PRIVACY.md, `observer privacy`) instead of absolute claims such as "no
 // telemetry" or "nothing leaves your machine". A default-on network call
 // (the model price table refresh, the proxy TLS warm-up) already made those
-// claims false; reintroducing one fails here.
+// claims false; reintroducing one fails here. Since 2026-11-15 the
+// content-free baseline usage telemetry is on by default, so "no usage
+// statistics" and "does not collect usage data" are banned too: telemetry is
+// described as four levels with baseline on.
 //
 // Scope: files people read as product copy. Dated records (CHANGELOG
 // entries, plans, handovers, audits, notes), tests, generated bundles and
@@ -22,7 +25,7 @@ import (
 // privacyClaimAllow with its reason.
 func TestNoAbsolutePrivacyClaims(t *testing.T) {
 	root := repoRoot(t)
-	claim := regexp.MustCompile(`(?i)\b(no|zero)[ -]telemetry\b|telemetry[ -]free|sends? no telemetry|no data leaves|nothing (you build here )?(ever )?leaves your (machine|laptop)|never leaves your (machine|laptop|computer)|100% local|zero outbound`)
+	claim := regexp.MustCompile(`(?i)\b(no|zero)[ -]telemetry\b|telemetry[ -]free|sends? no telemetry|no data leaves|nothing (you build here )?(ever )?leaves your (machine|laptop)|never leaves your (machine|laptop|computer)|100% local|zero outbound|no usage statistics|(does|do) not collect usage data|collects? no usage data|sends us nothing|nothing phones home|zero telemetry`)
 	surfaces := []string{
 		"README.md", "PRIVACY.md", "SECURITY.md", "docs", "npm", "pypi", "vscode",
 		"web/src", "webcloud/src", "scripts/install.sh", "scripts/install.ps1",

@@ -17,9 +17,10 @@ never touches.
 
 ## TL;DR
 
-- **Local-only.** Observer's database, logs, and stash live under
-  `~/.observer/` (per-user, per-platform). Today none of it leaves your
-  machine unless **you** explicitly turn on a feature that sends it.
+- **Stored locally.** Observer's database, logs, and stash live under
+  `~/.observer/` (per-user, per-platform). None of it leaves your
+  machine unless **you** explicitly turn on a feature that sends it;
+  usage telemetry (below) is computed from it and carries counts only.
 - **Your content needs your consent.** Session content (prompts, code,
   responses, file contents) leaves your machine only with your
   explicit consent (enrolling a machine into your company's managed
@@ -30,7 +31,8 @@ never touches.
   and TLS warm-up at proxy start) carry none of your data; the third,
   usage telemetry, carries content-free counters only.
 - **Usage telemetry is on by default, content-free, and yours to turn
-  off.** A default install sends the `baseline` rung of four (`off`,
+  off.** From the first release after 1.38.0 (1.38.0 and earlier: no
+  usage telemetry), a default install sends the `baseline` rung of four (`off`,
   `baseline`, `enrichment`, `deep`): event names, counts, sizes and
   timings under a published contract that refuses every other field,
   so no prompt or output text, path, project name or command can be

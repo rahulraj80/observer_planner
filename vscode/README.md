@@ -115,6 +115,9 @@ Click any session to open its detail view. Four of its tabs:
 No account needed. After the binary is in place, the extension talks only to
 `127.0.0.1` on your workspace host; it contacts GitHub Releases only if it finds neither a bundled
 nor a local binary. Remote-SSH, WSL, Dev Containers and Codespaces keep the data on the remote host.
+The `observer` binary sends content-free usage telemetry by default (counts, sizes and timings, never
+text), which `observer telemetry consent off` turns off; [PRIVACY.md](https://github.com/superbasedapp/observer/blob/main/PRIVACY.md)
+lists everything it sends.
 
 ## Learn more
 

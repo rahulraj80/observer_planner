@@ -554,9 +554,12 @@ charts, columns, filters, metrics, calculations, and a glossary.
 
 The extension is **strictly local-first**:
 
-- **No usage data is sent to us today.** The extension currently sends
-  no usage analytics, crash reports, or session-id beacons to SuperBased,
-  and your content never leaves without your consent.
+- **The extension sends no usage data of its own.** It sends no usage
+  analytics, crash reports or session-id beacons to SuperBased, and your
+  content never leaves without your consent. The `observer` it runs sends
+  content-free usage telemetry by default (the `baseline` level, from the
+  first release after 1.38.0); `observer telemetry consent off` turns it
+  off, and [PRIVACY.md](../PRIVACY.md) lists what it sends.
 - **No outbound network calls** at runtime. The only network
   traffic the extension ever generates is the first-install
   binary download from

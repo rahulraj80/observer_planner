@@ -4,6 +4,12 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
+- **Every page says what the telemetry default is.** PRIVACY.md, the VS Code extension's README,
+  walkthrough and guides no longer say that no usage data is sent: versions released after 1.38.0
+  send the content-free `baseline` level of usage telemetry by default (four levels: `off`,
+  `baseline`, `enrichment`, `deep`), and `observer telemetry consent off` turns it off. The
+  privacy-claims drift gate now also fails on "no usage statistics" and "does not collect usage
+  data".
 - **Agent launches without a confirm, when the owner says so.** A new setting,
   `[terminal.launch].auto_confirm_agent` (off by default, read from
   config.toml only), lets a launch an AI agent asked for start at once

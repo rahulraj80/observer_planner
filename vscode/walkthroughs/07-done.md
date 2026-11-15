@@ -35,4 +35,6 @@ You've got SuperBased wired into VS Code end-to-end:
 Your session content stays on your machine unless you consent to
 sending it. Today the extension itself makes no outbound network calls
 except a first-install binary download from GitHub Releases when no
-`observer` is found locally.
+`observer` is found locally. The `observer` it runs sends content-free
+usage telemetry by default (counts, sizes and timings, never text), which
+`observer telemetry consent off` turns off.

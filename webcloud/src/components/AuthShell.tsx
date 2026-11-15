@@ -24,7 +24,7 @@ const AUTH_STEPS: readonly { id: AuthStep; icon: LucideIcon; label: string; line
   { id: "portal", icon: LayoutDashboard, label: "Portal", line: "Results come back here" },
 ];
 
-// TRUST_ROW: the portal's one privacy promise ("Nothing leaves your machine
+// TRUST_ROW: the portal's one privacy promise ("No session data leaves your machine
 // until you preview it and approve it"), split into its three parts. No
 // claim here that the promise itself does not already make.
 const TRUST_ROW: readonly { icon: LucideIcon; label: string }[] = [
@@ -80,7 +80,7 @@ export function TrustRow() {
         ))}
       </ul>
       <p className="text-[11.5px] leading-relaxed text-fg-3">
-        Nothing leaves your machine until you preview it and approve it.{" "}
+        No session data leaves your machine until you preview it and approve it.{" "}
         <a
           className="text-fg-2 underline decoration-line-3 underline-offset-2 transition-colors hover:text-fg-0"
           href="https://superbased.app/privacy"
