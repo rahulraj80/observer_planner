@@ -26,7 +26,8 @@ const DefaultTelemetryEndpoint = "https://cloud.superbased.app"
 // and by the OBSERVER_TELEMETRY kill switch (hard stop, see
 // KillSwitchActive).
 //
-// LOCAL-ONLY config for an OPT-IN egress rail: it is never distributed via
+// LOCAL-ONLY config for an egress rail the user controls (content-free
+// baseline on by default, one command turns it off): it is never distributed via
 // the org policy registry, and the org plane has no authority over it (the
 // server's own consent floor is fetched at batch time and can only
 // DOWNGRADE what this node sends, never upgrade — enforced in the
