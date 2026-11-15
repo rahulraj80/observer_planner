@@ -38,11 +38,11 @@ func TestProcessHelper(t *testing.T) {
 			os.Exit(2)
 		}
 		_, _ = fmt.Fprintln(os.Stdout, "ready")
-		select {}
+		blockForever()
 	case "ignore-term":
 		signal.Ignore(syscall.SIGTERM)
 		_, _ = fmt.Fprintln(os.Stdout, "ready")
-		select {}
+		blockForever()
 	case "exec":
 		_, _ = fmt.Fprintln(os.Stdout, "ready")
 		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
@@ -55,7 +55,17 @@ func TestProcessHelper(t *testing.T) {
 		}
 	default:
 		_, _ = fmt.Fprintln(os.Stdout, "ready")
-		select {}
+		blockForever()
+	}
+}
+
+// blockForever keeps the helper alive until it is signalled. A bare
+// `select {}` is not enough: with no other goroutine and no timer the Go
+// runtime reports "all goroutines are asleep - deadlock!" and the helper
+// exits by itself (exit 2), so the tests saw exits they never caused.
+func blockForever() {
+	for {
+		time.Sleep(time.Hour)
 	}
 }
 
