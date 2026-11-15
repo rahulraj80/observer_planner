@@ -71,6 +71,9 @@ func TestRunTelemetryLoopHonoursConsentLoweredWhileRunning(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := config.Config{}
+	// The watermark lives beside the database; without a path it would land
+	// in the package directory (it was once committed from there).
+	cfg.Observer.DBPath = filepath.Join(t.TempDir(), "obs.db")
 	cfg.Telemetry.Tier = contract.TierUsage
 	cfg.Telemetry.Enabled = true
 	cfg.Telemetry.Endpoint = srv.URL
@@ -171,6 +174,9 @@ func TestRunTelemetryLoopSendsOnceAndAcks(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := config.Config{}
+	// The watermark lives beside the database; without a path it would land
+	// in the package directory (it was once committed from there).
+	cfg.Observer.DBPath = filepath.Join(t.TempDir(), "obs.db")
 	cfg.Telemetry.Tier = contract.TierUsage
 	cfg.Telemetry.Enabled = true
 	cfg.Telemetry.Endpoint = srv.URL
@@ -241,6 +247,9 @@ func TestRunTelemetryLoopDropsPermanentlyRejectedBatch(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := config.Config{}
+	// The watermark lives beside the database; without a path it would land
+	// in the package directory (it was once committed from there).
+	cfg.Observer.DBPath = filepath.Join(t.TempDir(), "obs.db")
 	cfg.Telemetry.Tier = contract.TierUsage
 	cfg.Telemetry.Enabled = true
 	cfg.Telemetry.Endpoint = srv.URL
