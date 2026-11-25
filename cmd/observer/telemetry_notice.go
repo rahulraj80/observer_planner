@@ -71,9 +71,9 @@ func showTelemetryNoticeOnce(configPath string, out io.Writer, logger *slog.Logg
 	if telemetryLoadToken(cfg) != "" {
 		text = telemetryNoticeReporter
 	}
-	fmt.Fprintf(out, text, cfg.Telemetry.Endpoint, every.Round(time.Second))
+	fmt.Fprintf(out, text, cfg.Telemetry.EffectiveEndpoint(), every.Round(time.Second))
 	logger.Info("telemetry: usage telemetry is on (baseline); one-time notice shown",
-		"endpoint", cfg.Telemetry.Endpoint, "tier", cfg.Telemetry.EffectiveTier(),
+		"endpoint", cfg.Telemetry.EffectiveEndpoint(), "tier", cfg.Telemetry.EffectiveTier(),
 		"turn_off", "observer telemetry consent off")
 	_ = os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
 }

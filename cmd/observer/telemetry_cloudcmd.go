@@ -37,7 +37,7 @@ func loadTelemetryConfig() (config.Config, error) {
 // with a self-hosted reporter is refused: its data lives on that reporter.
 func ownTelemetryLane(cfg config.Config) (*cloudgateway.TelemetryLane, error) {
 	if telemetryLoadToken(cfg) != "" {
-		return nil, fmt.Errorf("this node sends to a self-hosted reporter (%s); use that reporter's /v1/me endpoints", cfg.Telemetry.Endpoint)
+		return nil, fmt.Errorf("this node sends to a self-hosted reporter (%s); use that reporter's /v1/me endpoints", cfg.Telemetry.EffectiveEndpoint())
 	}
 	return openTelemetryLane(cfg, func() string { return cfg.Telemetry.EffectiveTier() })
 }
@@ -111,7 +111,7 @@ func newTelemetryDeleteCmd() *cobra.Command {
 func resetCloudTelemetryID(ctx context.Context, cfg config.Config, c *telemetry.Collector) error {
 	gw, err := cloudgateway.Open(cloudgateway.Options{
 		CredDir: cloudCredDir(cfg),
-		BaseURL: trimRight(cfg.Telemetry.Endpoint, "/"),
+		BaseURL: trimRight(cfg.Telemetry.EffectiveEndpoint(), "/"),
 	})
 	if err != nil {
 		return err

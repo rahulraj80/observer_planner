@@ -40,7 +40,7 @@ func newCloudSender(cfg config.Config, collector *telemetry.Collector, logger *s
 func openTelemetryLane(cfg config.Config, consent cloudgateway.TelemetryConsent) (*cloudgateway.TelemetryLane, error) {
 	gw, err := cloudgateway.Open(cloudgateway.Options{
 		CredDir: cloudCredDir(cfg),
-		BaseURL: trimRight(cfg.Telemetry.Endpoint, "/"),
+		BaseURL: trimRight(cfg.Telemetry.EffectiveEndpoint(), "/"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: open cloud gateway: %w", err)

@@ -6473,7 +6473,13 @@ func LoadGovernance(opts LoadOptions) (Config, GovernanceOutcome, error) {
 	// would let a garbage env value shadow a perfectly good flag. Demote to a
 	// one-time warning and restore the file value so validation proceeds.
 	dashAddrFromFile := cfg.Dashboard.Addr
+	// OBSERVER_TELEMETRY_ENDPOINT is not a generic override of
+	// [telemetry].endpoint: it replaces only the shipped default, is
+	// validated, and an explicit endpoint wins. TelemetryConfig.ResolveEndpoint
+	// applies it at use, so keep the file value here.
+	telemetryEndpointFromFile := cfg.Telemetry.Endpoint
 	applyEnvOverrides(&cfg, opts.Env)
+	cfg.Telemetry.Endpoint = telemetryEndpointFromFile
 	if envAddr := strings.TrimSpace(opts.Env("OBSERVER_DASHBOARD_ADDR")); envAddr != "" {
 		if err := ValidateDashboardAddr(cfg.Dashboard.Addr); err != nil {
 			emitConfigWarnOnce(fmt.Sprintf("OBSERVER_DASHBOARD_ADDR=%q ignored (%v); falling back to --dashboard-addr flag / [dashboard].addr / default", envAddr, err))

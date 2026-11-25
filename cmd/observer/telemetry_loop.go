@@ -83,6 +83,11 @@ func runTelemetryLoop(ctx context.Context, collector *telemetry.Collector, cfg c
 	timer := time.NewTimer(jitterInterval(base))
 	defer timer.Stop()
 
+	if ep := cfg.Telemetry.ResolveEndpoint(); ep.Warning != "" {
+		logger.Warn("telemetry: "+ep.Warning, "endpoint", ep.URL, "source", ep.Source)
+	} else if ep.Source != config.TelemetryEndpointSourceDefault {
+		logger.Info("telemetry: endpoint override in force", "endpoint", ep.URL, "source", ep.Source)
+	}
 	sender, err := newTelemetrySender(cfg, collector, logger)
 	if err != nil {
 		// P1: a broken rail never cancels the daemon; it just stays quiet.
@@ -234,7 +239,7 @@ func telemetryLoadToken(cfg config.Config) string {
 // ok is false on any failure (floor unknown → local tier rules, fail-soft).
 func fetchConsentFloor(ctx context.Context, cfg config.Config) (string, bool) {
 	req, err := httpNewRequest(ctx, http.MethodGet,
-		trimRight(cfg.Telemetry.Endpoint, "/")+"/v1/consent/config", telemetryLoadToken(cfg))
+		trimRight(cfg.Telemetry.EffectiveEndpoint(), "/")+"/v1/consent/config", telemetryLoadToken(cfg))
 	if err != nil {
 		return "", false
 	}

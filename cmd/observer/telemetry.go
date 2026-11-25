@@ -63,7 +63,9 @@ func newTelemetryCmd() *cobra.Command {
 		Short: "Show and control usage telemetry (content-free baseline, on by default)",
 		Long: "Inspect and control the usage telemetry collector. The content-free\n" +
 			"baseline tier is on by default; `consent off` or OBSERVER_TELEMETRY=off stops\n" +
-			"it. `show` reports the current posture; `consent` sets the tier after full\n" +
+			"it. OBSERVER_TELEMETRY_ENDPOINT=<https URL> replaces the default endpoint\n" +
+			"(a configured [telemetry] endpoint still wins).\n" +
+			"`show` reports the current posture; `consent` sets the tier after full\n" +
 			"disclosure; `enable`/`disable` gate the daemon batcher; `data` and `delete`\n" +
 			"show or remove what the server holds; `register` points the node at a\n" +
 			"self-hosted reporter; `reset-id` rotates the install id.",
@@ -97,7 +99,11 @@ func newTelemetryShowCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "consent tier:  %s\n", tc.EffectiveTier())
 			fmt.Fprintf(out, "collector:     %s\n", enabledWord(tc.Enabled))
-			fmt.Fprintf(out, "endpoint:      %s\n", tc.Endpoint)
+			ep := tc.ResolveEndpoint()
+			fmt.Fprintf(out, "endpoint:      %s\n", ep.Describe())
+			if ep.Warning != "" {
+				fmt.Fprintf(out, "WARN:          %s\n", ep.Warning)
+			}
 			if tc.Enabled {
 				fmt.Fprintf(out, "batch:         every %ds ±10%%, cap %d bytes compressed\n",
 					tc.BatchIntervalSeconds, tc.MaxBatchBytes)
@@ -320,7 +326,7 @@ func newTelemetryRegisterCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "registered install %s with %s; token stored at %s\n", iid, cfg.Telemetry.Endpoint, telemetryTokenPath(cfg))
+			fmt.Fprintf(cmd.OutOrStdout(), "registered install %s with %s; token stored at %s\n", iid, cfg.Telemetry.EffectiveEndpoint(), telemetryTokenPath(cfg))
 			return nil
 		},
 	}
@@ -339,7 +345,7 @@ func telemetryRegister(cfg config.Config, code string) (token, installID string,
 		}
 	}
 	body, _ := json.Marshal(map[string]string{"enrollment_code": strings.TrimSpace(code)})
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.Telemetry.Endpoint, "/")+"/v1/register",
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.Telemetry.EffectiveEndpoint(), "/")+"/v1/register",
 		strings.NewReader(string(body)))
 	if err != nil {
 		return "", "", fmt.Errorf("register: %w", err)
@@ -524,7 +530,7 @@ func jitterInterval(base time.Duration) time.Duration {
 // other digest), method DELETE revokes (server marks receipts revoked,
 // drops the tier to usage, purges deep raw immediately).
 func postDeepConsent(cfg *config.Config, method, _ string) error {
-	if cfg.Telemetry.Endpoint == "" {
+	if cfg.Telemetry.EffectiveEndpoint() == "" {
 		return fmt.Errorf("no telemetry endpoint configured")
 	}
 	if telemetryLoadToken(*cfg) == "" {
@@ -540,7 +546,7 @@ func postDeepConsent(cfg *config.Config, method, _ string) error {
 		body = strings.NewReader(fmt.Sprintf(`{"disclosure_digest":%q}`, contract.DeepDisclosureDigest()))
 	}
 	req, err := http.NewRequest(method,
-		trimRight(cfg.Telemetry.Endpoint, "/")+"/v1/consent/deep", body)
+		trimRight(cfg.Telemetry.EffectiveEndpoint(), "/")+"/v1/consent/deep", body)
 	if err != nil {
 		return err
 	}
@@ -565,7 +571,7 @@ func postDeepConsent(cfg *config.Config, method, _ string) error {
 // Downgrades from deep are handled server-side by the same endpoint
 // (SetBaseTier routes through RevokeDeep, purging deep raw).
 func postBaseConsent(cfg *config.Config, tier string) error {
-	if cfg.Telemetry.Endpoint == "" {
+	if cfg.Telemetry.EffectiveEndpoint() == "" {
 		return fmt.Errorf("no telemetry endpoint configured")
 	}
 	if telemetryLoadToken(*cfg) == "" {
@@ -573,7 +579,7 @@ func postBaseConsent(cfg *config.Config, tier string) error {
 	}
 	body := fmt.Sprintf(`{"tier":%q}`, tier)
 	req, err := http.NewRequest(http.MethodPost,
-		trimRight(cfg.Telemetry.Endpoint, "/")+"/v1/consent", strings.NewReader(body))
+		trimRight(cfg.Telemetry.EffectiveEndpoint(), "/")+"/v1/consent", strings.NewReader(body))
 	if err != nil {
 		return err
 	}

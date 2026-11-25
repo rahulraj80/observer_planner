@@ -30,7 +30,7 @@ type telemetrySender interface {
 // means a self-hosted reporter; otherwise the cloud lane at the endpoint.
 func newTelemetrySender(cfg config.Config, collector *telemetry.Collector, logger *slog.Logger) (telemetrySender, error) {
 	if tok := telemetryLoadToken(cfg); tok != "" {
-		return &reporterSender{cfg: cfg, collector: collector, transport: &telemetry.Transport{Endpoint: cfg.Telemetry.Endpoint, Token: tok}}, nil
+		return &reporterSender{cfg: cfg, collector: collector, transport: &telemetry.Transport{Endpoint: cfg.Telemetry.EffectiveEndpoint(), Token: tok}}, nil
 	}
 	return newCloudSender(cfg, collector, logger)
 }

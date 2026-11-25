@@ -13,6 +13,9 @@ type TelemetryNoticeResult struct {
 	Active   bool   `json:"active"`
 	Tier     string `json:"tier"`
 	Endpoint string `json:"endpoint"`
+	// EndpointSource says why Endpoint is in force: "default",
+	// "OBSERVER_TELEMETRY_ENDPOINT" or "config" (config.ResolveEndpoint).
+	EndpointSource string `json:"endpoint_source"`
 	// Version bumps when the notice text changes, so the banner re-shows once.
 	Version int `json:"version"`
 }
@@ -35,7 +38,8 @@ func (s *Server) handleTelemetryNotice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res.Tier = cfg.Telemetry.EffectiveTier()
-	res.Endpoint = cfg.Telemetry.Endpoint
+	ep := cfg.Telemetry.ResolveEndpoint()
+	res.Endpoint, res.EndpointSource = ep.URL, ep.Source
 	res.Active = cfg.Telemetry.Enabled && res.Tier != "off" && !config.TelemetryKillSwitchActive()
 	writeJSON(w, res)
 }

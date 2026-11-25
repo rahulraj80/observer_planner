@@ -1,6 +1,10 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -10,8 +14,107 @@ import (
 // Step 5.2, revised 2026-10-17; /v1/telemetry/* on observer-cloud), reached
 // with the device key alone. A node registered with a self-hosted
 // observer_reporter (an install token from `observer telemetry register`)
-// keeps sending there instead. Overridable for a mirror or a test.
+// keeps sending there instead. Overridable for a mirror or a test, and on a
+// development machine by OBSERVER_TELEMETRY_ENDPOINT (see ResolveEndpoint).
 const DefaultTelemetryEndpoint = "https://cloud.superbased.app"
+
+// TelemetryEndpointEnv names the environment variable that replaces the
+// shipped default endpoint (DefaultTelemetryEndpoint) for this process: a
+// development or staging box sets it to its own telemetry server. Absent or
+// empty, nothing changes. It never overrides an endpoint the user or the org
+// configured explicitly in [telemetry] endpoint.
+const TelemetryEndpointEnv = "OBSERVER_TELEMETRY_ENDPOINT"
+
+// Telemetry endpoint sources ResolveEndpoint reports.
+const (
+	// TelemetryEndpointSourceDefault: the shipped default
+	// (DefaultTelemetryEndpoint, or an empty [telemetry] endpoint).
+	TelemetryEndpointSourceDefault = "default"
+	// TelemetryEndpointSourceEnv: OBSERVER_TELEMETRY_ENDPOINT replaced the
+	// shipped default.
+	TelemetryEndpointSourceEnv = TelemetryEndpointEnv
+	// TelemetryEndpointSourceConfig: an explicit [telemetry] endpoint other
+	// than the shipped default (a self-hosted reporter or a mirror).
+	TelemetryEndpointSourceConfig = "config"
+)
+
+// TelemetryEndpoint is the endpoint in force and why.
+type TelemetryEndpoint struct {
+	// URL is the ingest base URL every telemetry call uses ("" only when the
+	// config holds no endpoint and no valid override is set).
+	URL string
+	// Source is one of the TelemetryEndpointSource* values.
+	Source string
+	// Warning is set when OBSERVER_TELEMETRY_ENDPOINT was set but refused;
+	// URL is then the default and the caller should say so.
+	Warning string
+}
+
+// ErrTelemetryEndpointInvalid is what ParseTelemetryEndpointOverride refuses
+// with.
+var ErrTelemetryEndpointInvalid = errors.New("must be an https URL with a host (plain http only to a loopback address) and no credentials, query or fragment")
+
+// ParseTelemetryEndpointOverride validates an OBSERVER_TELEMETRY_ENDPOINT
+// value and returns it normalized (trimmed, no trailing slash). https is
+// required; plain http is accepted only to localhost or a loopback IP, the
+// same rule the cloud client applies to its base URL.
+func ParseTelemetryEndpointOverride(raw string) (string, error) {
+	v := strings.TrimSpace(raw)
+	u, err := url.Parse(v)
+	if err != nil || u.Host == "" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return "", ErrTelemetryEndpointInvalid
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+	case "http":
+		ip := net.ParseIP(u.Hostname())
+		if !strings.EqualFold(u.Hostname(), "localhost") && (ip == nil || !ip.IsLoopback()) {
+			return "", ErrTelemetryEndpointInvalid
+		}
+	default:
+		return "", ErrTelemetryEndpointInvalid
+	}
+	return strings.TrimRight(v, "/"), nil
+}
+
+// ResolveEndpoint is the one place the telemetry endpoint is decided; every
+// telemetry call (sends, consent, register, own-data actions, `observer
+// telemetry show`, `observer privacy`, the dashboard) goes through it.
+// Precedence:
+//
+//  1. an explicit [telemetry] endpoint other than the shipped default
+//     (a self-hosted reporter or a mirror the user or org configured);
+//  2. OBSERVER_TELEMETRY_ENDPOINT, when set, non-empty and valid
+//     (ParseTelemetryEndpointOverride);
+//  3. the shipped default, DefaultTelemetryEndpoint.
+//
+// An invalid override is refused: the default stays in force and Warning
+// says why.
+func (t TelemetryConfig) ResolveEndpoint() TelemetryEndpoint {
+	configured := strings.TrimRight(strings.TrimSpace(t.Endpoint), "/")
+	if configured != "" && configured != DefaultTelemetryEndpoint {
+		return TelemetryEndpoint{URL: t.Endpoint, Source: TelemetryEndpointSourceConfig}
+	}
+	def := TelemetryEndpoint{URL: t.Endpoint, Source: TelemetryEndpointSourceDefault}
+	raw := strings.TrimSpace(os.Getenv(TelemetryEndpointEnv))
+	if raw == "" {
+		return def
+	}
+	u, err := ParseTelemetryEndpointOverride(raw)
+	if err != nil {
+		shown := t.Endpoint
+		if shown == "" {
+			shown = "(none)"
+		}
+		def.Warning = fmt.Sprintf("%s=%q refused (%v); using the default %s", TelemetryEndpointEnv, raw, err, shown)
+		return def
+	}
+	return TelemetryEndpoint{URL: u, Source: TelemetryEndpointSourceEnv}
+}
+
+// EffectiveEndpoint is ResolveEndpoint().URL: the endpoint every telemetry
+// call uses.
+func (t TelemetryConfig) EffectiveEndpoint() string { return t.ResolveEndpoint().URL }
 
 // TelemetryConfig is the [telemetry] surface — the central telemetry rail
 // CLIENT collector (telemetry-rail plan §D2,
@@ -99,4 +202,15 @@ func TelemetryKillSwitchActive() bool {
 		return false
 	}
 	return true
+}
+
+// Describe renders the endpoint with why it is in force, for `observer
+// telemetry show`, `observer privacy` and logs: "<url> (default)",
+// "<url> (OBSERVER_TELEMETRY_ENDPOINT)" or "<url> (config)".
+func (e TelemetryEndpoint) Describe() string {
+	u := e.URL
+	if u == "" {
+		u = "(none)"
+	}
+	return u + " (" + e.Source + ")"
 }
