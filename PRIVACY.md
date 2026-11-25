@@ -1,19 +1,17 @@
 # Privacy
 
-SuperBased Observer is **a local Go binary that stores what it captures
-on your machine** until you connect it to a dashboard. It needs no
-account. It never sends your session content (prompts, code,
-responses, file contents) without your explicit consent. By default it
-does send content-free usage telemetry (event names, counts, sizes and
-timings; the `baseline` rung), which one command turns off, and it
-sends no analytics or crash reports. Every request observer makes by
-default is listed under "When observer DOES make a network call" below.
-If you sign in and connect a machine, it sends its activity to the
-personal dashboard or team you approve, as described below and in the
-full product privacy policy at https://superbased.app/privacy (policy
-version 3). The binary you install from npm is the same binary
-published with SLSA provenance to the public GitHub release: what you
-install is what runs.
+SuperBased Observer is **a local Go binary that stores everything on
+your machine** until you connect it to a dashboard. It needs no
+account. Today the default install sends us content-free usage
+telemetry (below), no analytics or crash reports, and none of your
+session content. By default observer makes a few small requests of its
+own that carry none of your data; they are listed under "When observer
+DOES make a network call" below, with usage telemetry. If you sign in
+and connect a machine, it sends its activity to the personal dashboard
+or team you approve, as described below and in the full product
+privacy policy at https://superbased.app/privacy (policy version 3).
+The binary you install from npm is the same binary published with SLSA
+provenance to the public GitHub release: what you install is what runs.
 
 This document spells out exactly what observer touches and what it
 never touches.
@@ -24,14 +22,13 @@ never touches.
   live under `~/.observer/` (per-user, per-platform). None of it leaves
   your machine unless **you** connect the machine to a dashboard or
   turn on a feature that sends it.
-- **Default requests carry none of your content.** Observer downloads the
+- **Default requests carry none of your data.** Observer downloads the
   public price list (daily) and package-check lists (every 6 hours)
   from superbased.app, checks public package names with OSV and the
   package registries after showing you a notice first, and sends an
   empty `HEAD` request to chatgpt.com and api.openai.com when its proxy
-  starts; none of these carries your data. Usage telemetry (below)
-  carries content-free counters only. Each has an off switch (table
-  below).
+  starts. Each has an off switch (table below). Usage telemetry, the
+  one other default, is described below.
 - **Signing in sends your account details only.** Connecting a machine
   starts sending only after you approve it on a page at
   cloud.superbased.app, and only activity from then on.
@@ -40,18 +37,19 @@ never touches.
   paths and project names as unsalted SHA-256 hashes. A team receives
   prompts, responses and file paths too, and the team's admins can
   read them.
-- **Usage telemetry is on by default, content-free, and yours to turn
-  off.** A default install of this build sends the `baseline` rung of
-  four (`off`, `baseline`, `enrichment`, `deep`): event names, counts, sizes and
+- **Content-free usage telemetry today.** The current default install
+  sends us usage telemetry at the `baseline` level, one of four (`off`,
+  `baseline`, `enrichment`, `deep`): event names, counts, sizes and
   timings under a published contract that refuses every other field,
-  so no prompt or output text, path, project name or command can be
-  sent. A one-time notice in the daemon output and the dashboard says
-  so before the first batch. `observer telemetry consent off` turns it
-  off, `observer telemetry data` shows what the server holds and
-  `observer telemetry delete --yes` removes it. `enrichment` and `deep`
-  are never on without your own consent. No crash reports are sent.
-  The anonymous monthly totals command (`observer aggregate enable`)
-  is off by default and sends nothing without your consent.
+  so no prompt or output text, path, project name or command. A
+  one-time notice in the daemon output and the dashboard says so before
+  the first batch. `observer telemetry consent off` turns it off,
+  `observer telemetry data` shows what the server holds and
+  `observer telemetry delete --yes` removes it; `enrichment` and `deep`
+  are never on without your own consent. It sends no analytics or crash
+  reports. The anonymous monthly totals command
+  (`observer aggregate enable`) is off by default, and the server that
+  would receive them is not running.
 - **No accounts required.** You can run observer offline, behind an
   air-gap, without ever signing in to anything.
 
@@ -110,10 +108,10 @@ Per the project's design spec (`superbased-final-spec-v2.md`):
 ## When observer DOES make a network call
 
 These are the main code paths in the binary that touch the network.
-The first five run by default: four carry none of your data, and usage
-telemetry carries content-free counters only. The others need an
-explicit choice. Run `observer privacy` for a list derived from your
-loaded config.
+The first four run by default and carry none of your data; usage
+telemetry, the fifth, also runs by default and carries content-free
+counters only; the others need an explicit choice. Run
+`observer privacy` for a list derived from your loaded config.
 
 | Feature | When it talks to the network | What it sends | How it is enabled |
 |---|---|---|---|
@@ -135,9 +133,9 @@ loaded config.
 | **SandHold sandboxed run** | When you launch a sandboxed terminal on the `sandhold` backend (listed in `[terminal.sandbox].backends`, chosen by name, after the one-time consent), and only to the node you connected (or `SANDHOLD_URL`) | Creating, reading and deleting the run's sandbox; the workspace files you consented to, the in-box observer and the agent's launch settings written into it (your model key only when you chose to put it in the box); the agent's commands and terminal; the transcripts and diff read back at checkpoints and at the end. The key goes in a header only, never in an address; https and wss only (plain http for localhost only), and no redirect is followed | The consent you gave once for that node; a leftover sandbox is deleted only when you confirm it |
 | **Antigravity gRPC fallback** | When parsing Antigravity sessions on macOS where keychain decrypt fails | Local IPC to a Google-installed gRPC socket, never the internet | Automatic; only fires on Antigravity sessions |
 
-With the four default requests and usage telemetry turned off and none
-of the opt-in features configured, observer makes no outbound network
-calls of its own. Verify with:
+Today, with the four default requests and usage telemetry turned off and
+none of the opt-in features configured, observer makes no outbound
+network calls of its own. Verify with:
 
 ```bash
 sudo lsof -p $(pgrep -f 'observer start') -i      # should show ONLY :8820/:8830/:8831 etc. on 127.0.0.1

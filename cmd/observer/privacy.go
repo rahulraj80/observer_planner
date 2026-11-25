@@ -371,7 +371,7 @@ func routingProbeRow(cfg config.Config) privacyEgress {
 // buildPrivacyEgress lists every outbound-network capability compiled into
 // this binary. Each row states its gate in plain language and whether the
 // loaded config currently arms it. Three rows run automatically on a default
-// install, and none carries session content: the pricing feed fetch
+// install, and none carries session data: the pricing feed fetch
 // (standalone nodes only), the TLS pre-warm HEAD requests at proxy startup,
 // and usage telemetry at the content-free baseline tier. Every other row
 // forwards your own AI tool's traffic or needs an explicit opt-in.
@@ -677,7 +677,7 @@ func writePrivacyText(w io.Writer, report privacyReport) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Four automatic calls run by default, none carrying session content: the")
+	fmt.Fprintln(w, "Four automatic calls run by default, none carrying session data: the")
 	fmt.Fprintln(w, "pricing feed fetch, the package list download, the")
 	fmt.Fprintln(w, "TLS pre-warm HEAD requests and content-free usage telemetry above")
 	fmt.Fprintln(w, "('observer telemetry consent off' turns telemetry off). Everything else")

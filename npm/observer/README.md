@@ -148,9 +148,9 @@ Click any session to open its detail view. Four of its tabs:
 
 ## Privacy
 
-No account needed. No crash reports are sent, and your sessions leave your computer only when you
-connect. By default this build sends content-free usage telemetry (counts, sizes and timings, no
-text), which `observer telemetry consent off` turns off. superbased stores paths,
+No account needed. Today the default install sends us content-free usage telemetry (counts, sizes
+and timings, no text; `observer telemetry consent off` turns it off), no analytics or crash
+reports, and your sessions leave your computer only when you connect. superbased stores paths,
 commands and short excerpts, scrubs secrets before writing, and binds the proxy and dashboard to
 `127.0.0.1` by default. The proxy forwards your own requests, unchanged, to the provider you
 already use. See [PRIVACY.md](https://github.com/superbasedapp/observer/blob/main/PRIVACY.md).

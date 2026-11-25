@@ -114,6 +114,7 @@ var privacyClaimAllow = []struct{ path, line, why string }{
 	{"docs/product-", "Telemetry wording superseded (15 Nov 2026)", "the banner quotes the retired phrasings so nobody reuses them"},
 	{"", "work never leaves", "scoped to the user's work (prompts, code, files), which is true; usage telemetry is content-free"},
 	{"", "history never leaves your machine", "scoped to the captured session history, which stays local"},
+	{"vscode/walkthroughs/01-welcome.md", "session content never leaves your machine without your consent", "upstream's sentence, scoped to session content, which is true; usage telemetry is content-free"},
 	{"cmd/observer/telemetry.go", "no telemetry endpoint configured", "an error message, not a claim"},
 	{"docs/kiro-crew-adapter.md", "Crew ships anonymous telemetry", "describes Kiro Crew's own telemetry"},
 	{"web/src/components/projectdetail/DeliveryTab.tsx", "Nothing is sent anywhere until you con", "scoped to the code-host connection"},

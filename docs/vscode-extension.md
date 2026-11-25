@@ -281,12 +281,12 @@ executable or read a secret off disk.
 
 ## Local-first guarantees
 
-- **The extension sends no usage data of its own.** It sends no usage
-  analytics, crash reports or session-id beacons to SuperBased, and your
-  content never leaves without your consent. The `observer` it runs sends
+- **The extension sends no usage data to us.** The extension currently
+  sends no usage or crash data to SuperBased, and your content never
+  leaves without your consent. The `observer` it runs sends
   content-free usage telemetry by default (the `baseline` level);
-  `observer telemetry consent off` turns it
-  off, and [PRIVACY.md](../PRIVACY.md) lists what it sends.
+  `observer telemetry consent off` turns it off, and
+  [PRIVACY.md](../PRIVACY.md) lists what it sends.
 - **No outbound network calls** except to GitHub Releases on first
   install (for the binary, when none is found locally). **Sign in and
   connect** runs `observer connect`, whose own requests start only when

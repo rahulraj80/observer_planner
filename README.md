@@ -189,7 +189,7 @@ Click any session to open its detail view. Four of its tabs:
 
 `observer_planner` is a feature fork of
 [`superbasedapp/observer`](https://github.com/superbasedapp/observer), maintained by
-`rahulraj80`. Upstream is merged in periodically (last: v1.38.0, released 2026-11-09);
+`rahulraj80`. Upstream is merged in periodically (last: v1.43.1, released 2026-11-24);
 everything else on this page describes the upstream product. The fork adds:
 
 - **Daily Briefing** (`/briefing` in the node and org dashboards). One screen telling the story of
@@ -215,9 +215,9 @@ everything else on this page describes the upstream product. The fork adds:
 
 ## Privacy
 
-SuperBased needs no account. It never uploads your session content without your explicit consent,
-and it sends no crash reports. By default it sends content-free usage telemetry (counts, sizes and
-timings, no text; the `baseline` rung), which `observer telemetry consent off` turns off. It stores
+SuperBased needs no account. Today the default install sends us content-free usage telemetry
+(counts, sizes and timings, no text; `observer telemetry consent off` turns it off), no analytics or
+crash reports, and it never uploads your session content without your explicit consent. It stores
 paths, commands and short excerpts, scrubs secrets before anything is written, and binds the proxy
 and dashboard to `127.0.0.1` by default. The proxy forwards your own requests, unchanged, to the
 provider you already use. By default it also makes a few small requests of its own that carry none

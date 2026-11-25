@@ -6,7 +6,7 @@ tool, on your own machine.**
 SuperBased captures, normalises, and analyses tool-call activity from
 Claude Code, Codex, Cursor, Cline (and forks like Roo Code), Copilot,
 Gemini, Devin, Aider, and 42 more (50 adapters in all), entirely on
-your machine. Your session content leaves your machine only with your consent.
+your machine. Your session content never leaves your machine without your consent.
 
 This walkthrough takes about **5 minutes** and covers:
 

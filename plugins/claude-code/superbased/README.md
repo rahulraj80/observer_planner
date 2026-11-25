@@ -29,11 +29,10 @@ observer start                    # run the local daemon
 | `hooks/hooks.json` | 24 lifecycle hooks: ConfigChange, CwdChanged, InstructionsLoaded, Notification, PermissionDenied, PermissionRequest, PostCompact, PostToolBatch, PostToolUse, PostToolUseFailure, PreCompact, PreToolUse, SessionEnd, SessionStart, Setup, Stop, StopFailure, SubagentStart, SubagentStop, TaskCompleted, TaskCreated, UserPromptExpansion, UserPromptSubmit, WorktreeRemove. Each runs `observer hook claude-code <event>` and records the event locally. |
 
 Captured events are written to the local `~/.observer/observer.db`; the hook
-commands themselves make no network calls. (The Observer daemon itself sends
-content-free usage telemetry by default, which `observer telemetry consent off`
-turns off; `observer privacy` lists every outbound call. Sharing captured
-content with an org is a separate, opt-in Teams configuration this plugin does
-not touch.)
+commands themselves make no network calls. (Shipping captured events off the
+machine is a separate, opt-in Teams/org configuration this plugin does not
+touch. The Observer daemon itself sends content-free usage telemetry by
+default, which `observer telemetry consent off` turns off.)
 
 ## Don't double-wire
 
