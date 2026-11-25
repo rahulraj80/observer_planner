@@ -24,7 +24,14 @@
       "from": "<time>",
       "gibHours": 0,
       "gibUsd": 0,
+      "hibernateGibHours": 0,
+      "hibernateUsd": 0,
+      "pauseFree": true,
+      "pauseFreeUsd": 0,
       "period": "<period>",
+      "projectedRunUsd": 0,
+      "suspendGibHours": 0,
+      "suspendUsd": 0,
       "vcpuHours": 0,
       "vcpuUsd": 0
     },
@@ -36,7 +43,10 @@
     },
     "paymentFailedAt": null,
     "prices": {
+      "freePauseBelowUsd": 5,
       "gibHourUsd": 0.013,
+      "hibernateGibHourUsd": 0.0003425,
+      "suspendGibMonthUsd": 0.063,
       "vcpuHourUsd": 0.04
     },
     "provider": "paddle",
