@@ -190,8 +190,18 @@ DISTRO_GOARCH ?= $(shell $(GO) env GOARCH)
 components-build:
 	$(GO) run ./cmd/sbo-components gen-docs
 
+# Fork change: the public snapshot lacks docs/components.md (superbasedapp/observer
+# ships a partial docs/), so with no reference there only the catalog is checked,
+# against a reference generated under $(BUILD_DIR).
 verify-components:
-	$(GO) run ./cmd/sbo-components check
+	@if [ -f docs/components.md ]; then \
+		$(GO) run ./cmd/sbo-components check; \
+	else \
+		echo "verify-components: docs/components.md is absent (the public snapshot lacks it); checking the catalog only"; \
+		mkdir -p $(BUILD_DIR) && \
+		$(GO) run ./cmd/sbo-components gen-docs -o $(BUILD_DIR)/components.md && \
+		$(GO) run ./cmd/sbo-components check -o $(BUILD_DIR)/components.md; \
+	fi
 
 distro-build:
 	scripts/build-distro.sh $(DISTRO) --goos $(DISTRO_GOOS) --goarch $(DISTRO_GOARCH) --proof

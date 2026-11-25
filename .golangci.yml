@@ -123,6 +123,22 @@ linters:
       - path: internal/store/store\.go
         linters:
           - gocyclo
+      # Fork change: the public snapshot lacks the callers of these helpers
+      # (it drops the private org server's end-to-end tests, the component
+      # tests that call requireInBuild, and the judge wiring that reads
+      # judgeDefaultTimeout), so `unused` flags them in files identical to
+      # upstream's. Kept as upstream ships them.
+      - path: cmd/observer-cloud/e2ehelpers_test\.go
+        linters:
+          - unused
+      - path: cmd/observer/components_require_test\.go
+        text: requireInBuild
+        linters:
+          - unused
+      - path: cmd/observer/judge_wire\.go
+        text: judgeDefaultTimeout
+        linters:
+          - unused
     # Same list for linters and formatters (see formatters.exclusions.paths).
     paths: &excluded-paths
       - testdata

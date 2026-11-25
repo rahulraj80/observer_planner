@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { web2Skip } from "./web2Absent.ts";
 
 // DataTable has ONE owner (shared/primitives/DataTable.tsx). These rows pin
 // the promotion: each app's old path is a one-line re-export shim (so no
@@ -15,7 +16,7 @@ const SHIM = 'export * from "@shared/primitives/DataTable";\n';
 const SHIMS = ["web/src/components/DataTable.tsx", "web2/src/components/DataTable.tsx"];
 
 for (const path of SHIMS) {
-  test(`DataTable shim: ${path} is the one-line re-export`, () => {
+  test(`DataTable shim: ${path} is the one-line re-export`, { skip: web2Skip(path) }, () => {
     assert.equal(read(path), SHIM);
   });
 }
@@ -37,7 +38,7 @@ test("DataTable: the lockfile holds one hoisted @tanstack install and no nested 
 
 test("DataTable: its scrollbar rule is owned by the shared stylesheet, imported by every app", () => {
   assert.match(read("shared/styles/components.css"), /\.table-scroll-x \{/);
-  for (const entry of ["web/src/index.css", "web2/src/index.css", "webcloud/src/styles.css"]) {
+  for (const entry of ["web/src/index.css", "web2/src/index.css", "webcloud/src/styles.css"].filter((f) => !web2Skip(f))) {
     assert.match(read(entry), /@import "\.\.\/\.\.\/shared\/styles\/components\.css";/, entry);
   }
   assert.doesNotMatch(read("web/src/index.css"), /\.table-scroll-x/);

@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { WEB2_ABSENT } from "./web2Absent.ts";
 import { enumParamWrite, pickEnum } from "../../../shared/lib/urlParams.ts";
 
 const TABS = ["overview", "verdicts", "rules", "budgets", "prompt-guard", "mcp", "coverage"] as const;
@@ -84,9 +85,13 @@ test("hook defaults: web useUrlTab pushes on ?tab=, web2 useUrlEnum replaces", (
   const node = readFileSync(new URL("./useUrlTab.ts", import.meta.url), "utf8");
   assert.match(node, /const name = options\.param \?\? "tab";/);
   assert.match(node, /const history = options\.history \?\? "push";/);
-  const org = readFileSync(new URL("../../../web2/src/lib/useUrlState.ts", import.meta.url), "utf8");
-  assert.match(org, /const history = options\.history \?\? "replace";/);
-  for (const src of [node, org]) {
+  const srcs = [node];
+  if (!WEB2_ABSENT) {
+    const org = readFileSync(new URL("../../../web2/src/lib/useUrlState.ts", import.meta.url), "utf8");
+    assert.match(org, /const history = options\.history \?\? "replace";/);
+    srcs.push(org);
+  }
+  for (const src of srcs) {
     assert.match(src, /enumParamWrite\(params, name, v, fallback, history\)/);
     assert.match(src, /if \(write == null\) return;/);
   }

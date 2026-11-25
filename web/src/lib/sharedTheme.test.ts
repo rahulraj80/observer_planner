@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { web2Skip } from "./web2Absent.ts";
 import {
   THEME_APPS,
   themePrepaintBlock,
@@ -104,7 +105,7 @@ test("resolveEffective and parseThemeMode", () => {
 });
 
 test("the app theme files bind a row only (no storage logic of their own)", () => {
-  for (const f of ["web/src/lib/theme.tsx", "web2/src/lib/theme.tsx", "webcloud/src/theme.ts", "webcloud/src/components/ThemeToggle.tsx"]) {
+  for (const f of ["web/src/lib/theme.tsx", "web2/src/lib/theme.tsx", "webcloud/src/theme.ts", "webcloud/src/components/ThemeToggle.tsx"].filter((f) => !web2Skip(f))) {
     const src = readFileSync(repo + f, "utf8");
     assert.doesNotMatch(src, /localStorage|matchMedia|setAttribute/, f);
     assert.match(src, /@shared\/(lib\/useTheme|primitives\/ThemeToggle)/, f);
@@ -116,7 +117,7 @@ test("the app theme files bind a row only (no storage logic of their own)", () =
 // "want" block this test prints into the index.html.
 const HTML: Record<ThemeApp, string> = { web: "web/index.html", web2: "web2/index.html", webcloud: "webcloud/index.html" };
 for (const app of Object.keys(THEME_APPS) as ThemeApp[]) {
-  test(`${HTML[app]} pre-paint theme script is generated from THEME_APPS.${app}`, () => {
+  test(`${HTML[app]} pre-paint theme script is generated from THEME_APPS.${app}`, { skip: web2Skip(HTML[app]) }, () => {
     const html = readFileSync(repo + HTML[app], "utf8").replace(/\r\n/g, "\n");
     const want = themePrepaintScript(app);
     assert.equal(themePrepaintBlock(html), want, `${HTML[app]} must hold exactly:\n${want}`);

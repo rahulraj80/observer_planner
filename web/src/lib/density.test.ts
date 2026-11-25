@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { web2Skip } from "./web2Absent.ts";
 import {
   DENSITY,
   DENSITY_MODES,
@@ -154,7 +155,7 @@ test("DENSITY_STORAGE_KEY has exactly one row per app", () => {
   assert.deepEqual(Object.keys(DENSITY_STORAGE_KEY).sort(), KEYS.map((k) => k.app).sort());
 });
 for (const k of KEYS) {
-  test(`storage key + pre-paint for ${k.app}`, () => {
+  test(`storage key + pre-paint for ${k.app}`, { skip: web2Skip(k.html) }, () => {
     assert.equal(densityStorageKey(k.app), k.key);
     const html = read(k.html);
     assert.ok(

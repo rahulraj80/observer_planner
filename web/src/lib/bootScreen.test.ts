@@ -16,12 +16,13 @@ import {
   bootScreenHtml,
 } from "../../../shared/lib/bootScreen.ts";
 import type { ThemeApp } from "../../../shared/lib/theme.ts";
+import { web2Skip } from "./web2Absent.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 const HTML: Record<ThemeApp, string> = { web: "web/index.html", web2: "web2/index.html", webcloud: "webcloud/index.html" };
 
 for (const app of Object.keys(HTML) as ThemeApp[]) {
-  test(`${HTML[app]} boot screen is generated from shared/lib/bootScreen.ts`, () => {
+  test(`${HTML[app]} boot screen is generated from shared/lib/bootScreen.ts`, { skip: web2Skip(HTML[app]) }, () => {
     const html = readFileSync(join(repo, HTML[app]), "utf8").replace(/\r\n/g, "\n");
     const want = bootScreenHtml(app);
     assert.equal(bootScreenBlock(html), want, `${HTML[app]} must hold exactly:\n${want}`);

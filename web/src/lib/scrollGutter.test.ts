@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { web2Skip } from "./web2Absent.ts";
 
 // T-469: moving between tools in the New Terminal picker made a scrollbar
 // gutter appear and disappear, so the layout jittered (the active row expands
@@ -39,7 +40,7 @@ const REGIONS: { file: string; marker: string; what: string }[] = [
 ];
 
 for (const r of REGIONS) {
-  test(`${r.what} uses the stable scroll gutter`, () => {
+  test(`${r.what} uses the stable scroll gutter`, { skip: web2Skip(r.file) }, () => {
     const src = read(r.file);
     assert.ok(src.includes(r.marker), `${r.file}: ${r.what} does not use STABLE_SCROLL_Y`);
     assert.ok(/import \{ STABLE_SCROLL_Y \} from "((\.\.\/)+lib|@shared\/lib)\/scroll";/.test(src), `${r.file} does not import STABLE_SCROLL_Y`);

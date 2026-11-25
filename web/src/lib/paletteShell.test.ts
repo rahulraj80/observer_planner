@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { web2Skip } from "./web2Absent.ts";
 import { paletteClamp, paletteFlatKeys, paletteMove, type PaletteKey } from "../../../shared/lib/paletteModel.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -40,7 +41,7 @@ test("paletteFlatKeys orders rows section by section", () => {
 });
 
 test("the app palettes supply sources only (the shell owns chrome and keys)", () => {
-  for (const f of ["web/src/components/CommandPalette.tsx", "web2/src/components/CommandPalette.tsx"]) {
+  for (const f of ["web/src/components/CommandPalette.tsx", "web2/src/components/CommandPalette.tsx"].filter((f) => !web2Skip(f))) {
     const src = readFileSync(repo + f, "utf8");
     assert.match(src, /<CommandPaletteShell\b/, f);
     assert.doesNotMatch(src, /createPortal|"ArrowDown"|role="dialog"|framer-motion/, f);

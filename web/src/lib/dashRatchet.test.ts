@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { web2Skip } from "./web2Absent.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -32,7 +33,7 @@ function walk(dir: string, out: string[]): void {
 }
 
 for (const [root, ceiling] of CEILINGS) {
-  test(`dash ratchet: ${root} has at most ${ceiling} em / en dashes`, () => {
+  test(`dash ratchet: ${root} has at most ${ceiling} em / en dashes`, { skip: web2Skip(root) }, () => {
     const files: string[] = [];
     walk(path.join(repo, root), files);
     let n = 0;
