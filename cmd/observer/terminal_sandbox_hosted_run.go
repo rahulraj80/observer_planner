@@ -93,10 +93,6 @@ type hostedPlanFile struct {
 	// ToolStateRel are the tool's HOME-relative state dirs (pulled at each
 	// checkpoint and at teardown).
 	ToolStateRel []string `json:"tool_state_rel"`
-	// ToolCheck is what the box is asked about the agent tool at first
-	// start, and how it may install it (only on the internet tier); nil
-	// when there is nothing to look for (terminal_sandbox_hosted_toolinstall.go).
-	ToolCheck *hostedToolCheck `json:"tool_check,omitempty"`
 	// ToolInstalls are the install ways the tool may use at first start, in
 	// order (only on the internet tier with no template; empty otherwise):
 	// the host helper checks the box for each one's programs before the
@@ -467,11 +463,6 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 	if err != nil {
 		return termsvc.CreateResult{}, err
 	}
-	// What the box is asked about the tool at first start, and how it may
-	// install it under the box user's home (terminal_sandbox_hosted_toolinstall.go):
-	// the refusals above stay upstream's; this check only looks, installs
-	// and verifies.
-	toolCheck := hostedToolCheckPlan(req.Tool, pc.Template, tier)
 	spec, _ := integration.For(req.Tool)
 	if len(spec.Sandbox.StateRW) == 0 {
 		return termsvc.CreateResult{}, fmt.Errorf("terminal_sandbox: tool %q is not sandbox-launchable: %s", req.Tool, spec.Sandbox.Note)
@@ -534,7 +525,7 @@ func (d *hostedDriver) Create(ctx context.Context, req termsvc.PrepareRequest) (
 		Version: hostedPlanVersion, RunID: ws.id, Provider: d.vendor.ID, Endpoint: endpoint, EndpointSPKISHA256: pc.EndpointSPKISHA256, Region: region,
 		Template: pc.Template, Tier: string(tier), Custody: string(custody), TimeoutMinutes: minutes,
 		Root: m.Root, ScopeKey: m.ScopeKey, Files: m.Files, UploadListing: hostedUploadListingFor(d.cfg), BoxBinary: hostedBoxBinaryPath(pc, d.r.observerBin), BoxBinaryInImage: pc.BoxBinaryInImage,
-		ToolStateRel: spec.Sandbox.StateRW, ToolInstalls: install, ToolCheck: toolCheck, ForwardEnv: forward,
+		ToolStateRel: spec.Sandbox.StateRW, ToolInstalls: install, ForwardEnv: forward,
 		CustodySetting: sandboxkey.CustodySetting(keyFacts), CustodyRule: keyVerdict.Resolution.Rule,
 		ToolKeys: inBox && keyFacts.ToolSavedKeys, LoginSeed: inBox && keyFacts.LoginSeed,
 		CheckpointMinutes: d.cfg.CheckpointMinutes, DailyBoxMinutes: d.cfg.DailyBoxMinutes, ObserverDir: d.r.observerDir, Tool: req.Tool,

@@ -339,19 +339,6 @@ func TestHostedCreateRefusesByName(t *testing.T) {
 	if argv, err := hostedToolDelivery("claude-code", "observer-box", vocab.TierNone, e2bRow); err != nil || argv != nil {
 		t.Errorf("named template: %v %v", argv, err)
 	}
-	// The fork's tool check (ensureTool): a named template is checked in
-	// the box at first start (it may lack the tool), never installed into
-	// below the internet tier; with no template it exists only where the
-	// tool can install.
-	if c := hostedToolCheckPlan("claude-code", "", vocab.TierInternet); c == nil || !c.CanInstall || len(c.Installs) == 0 {
-		t.Errorf("internet check: %+v", c)
-	}
-	if c := hostedToolCheckPlan("claude-code", "observer-box", vocab.TierNone); c == nil || c.CanInstall || c.Template != "observer-box" || len(c.Names) == 0 {
-		t.Errorf("named template check: %+v", c)
-	}
-	if c := hostedToolCheckPlan("claude-code", "", vocab.TierProxyOnly); c != nil {
-		t.Errorf("no template on proxy_only: %+v", c)
-	}
 	if calls != 0 {
 		t.Errorf("client built %d times", calls)
 	}

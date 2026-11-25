@@ -492,22 +492,21 @@ func (r *hostedRun) settle() {
 
 // boxEnv is the base environment of every process the run starts.
 func (r *hostedRun) boxEnv() map[string]string {
+	p := path.Dir(r.layout.Binary) + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	if r.npmUnderHome() {
+		// Fork change: the npm install's executables are in the box user's
+		// own prefix (installTool), so the agent is found on PATH there.
+		p += ":" + path.Join(r.layout.Home, hostedNPMPrefixRel, "bin")
+	}
 	return map[string]string{
 		"HOME": r.layout.Home, "LANG": "C.UTF-8", "TERM": "xterm-256color",
-		"PATH": path.Dir(r.layout.Binary) + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"PATH": p,
 	}
 }
 
-// execOK runs argv in the box and requires exit 0.
+// execOK runs argv in the box and requires exit 0. Fork change: a vendor
+// that keeps stderr apart has it captured too, so a failure says why.
 func (r *hostedRun) execOK(ctx context.Context, what string, spec sandboxremote.ExecSpec) error {
-	_, err := r.execOKOut(ctx, what, spec)
-	return err
-}
-
-// execOKOut is execOK that also returns the command's output (its first
-// 64 KiB of stdout, then of stderr when the vendor keeps it apart, redacted),
-// whatever its exit.
-func (r *hostedRun) execOKOut(ctx context.Context, what string, spec sandboxremote.ExecSpec) (string, error) {
 	if spec.Env == nil {
 		spec.Env = r.boxEnv()
 	}
@@ -520,7 +519,7 @@ func (r *hostedRun) execOKOut(ctx context.Context, what string, spec sandboxremo
 	}
 	p, err := r.client.Exec(ctx, r.rec.VendorID, spec)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", what, err)
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	defer p.Close()
 	raw, _ := io.ReadAll(io.LimitReader(p, 64<<10))
@@ -529,14 +528,13 @@ func (r *hostedRun) execOKOut(ctx context.Context, what string, spec sandboxremo
 		raw = append(raw, '\n')
 		raw = append(raw, errBuf.bytes()...)
 	}
-	out := strings.TrimSpace(sandboxremote.Redact(string(raw), r.cred.Secrets()))
 	if err != nil {
-		return out, fmt.Errorf("%s: %w", what, err)
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	if code != 0 {
-		return out, fmt.Errorf("%s exited %d: %s", what, code, out)
+		return fmt.Errorf("%s exited %d: %s", what, code, strings.TrimSpace(sandboxremote.Redact(string(raw), r.cred.Secrets())))
 	}
-	return out, nil
+	return nil
 }
 
 // hostedCappedBuffer keeps the first max bytes written to it; writes never
@@ -836,25 +834,61 @@ func (r *hostedRun) chooseToolInstall(ctx context.Context) error {
 	return nil
 }
 
-// installTool runs the install way chooseToolInstall picked. A plan with
-// the fork's tool check (ToolCheck) goes through ensureTool instead: it
-// looks for the tool first (a template may lack it), installs npm packages
-// under the box user's home (a NoRootExec box such as SandHold's cannot
-// write the image's global prefix), fails a piped script whose fetch
-// failed, and checks the installed tool starts.
+// installTool runs the install way chooseToolInstall picked.
 func (r *hostedRun) installTool(ctx context.Context) error {
-	if r.plan.ToolCheck != nil {
-		return r.ensureTool(ctx)
-	}
 	if r.install == nil {
 		return nil
 	}
 	name := integration.DisplayName(r.plan.Tool)
 	r.say("installing %s from its vendor (first start)", name)
-	if err := r.execOK(ctx, "install the agent tool", sandboxremote.ExecSpec{Argv: r.install.Argv, Cwd: r.layout.Home}); err != nil {
+	spec := sandboxremote.ExecSpec{Argv: r.install.Argv, Cwd: r.layout.Home}
+	cache := ""
+	if r.vendor.NoRootExec && r.install.Channel == "npm" {
+		// Fork change: a NoRootExec box (SandHold's) runs every exec as its
+		// non-root user, who cannot write the image's global npm prefix, so
+		// `npm install -g` there fails with EACCES (live run 2026-11-11).
+		// The tool goes under the box user's home (boxEnv puts its bin on
+		// PATH), and npm's download cache, about half the package's size
+		// again, goes to a directory of its own that is removed afterwards.
+		spec.Env = r.boxEnv()
+		spec.Env["NPM_CONFIG_PREFIX"] = path.Join(r.layout.Home, hostedNPMPrefixRel)
+		cache = path.Join(r.layout.Home, hostedNPMCacheRel)
+		spec.Env["NPM_CONFIG_CACHE"] = cache
+	}
+	err := r.execOK(ctx, "install the agent tool", spec)
+	if cache != "" {
+		if cerr := r.execOK(ctx, "remove npm's install cache", sandboxremote.ExecSpec{Argv: []string{"rm", "-rf", "--", cache}, Cwd: r.layout.Home}); cerr != nil {
+			r.say("npm's install cache stays in the box (%s)", cache)
+		}
+	}
+	if err != nil {
 		return hostedPlainFailure("Installing "+name+" in the box failed, so the agent did not start. Name a template that holds "+name+" for "+r.vendor.Name+" in Terminals > Settings > Hosted sandboxes, or try again.", fmt.Sprintf("%s: %s install: %v", verdictHostedTool, r.install.Channel, err))
 	}
 	return nil
+}
+
+// Fork change: hostedNPMPrefixRel is npm's prefix for an install on a
+// NoRootExec box, relative to the box home (its executables land in its
+// bin), and hostedNPMCacheRel npm's cache for that install, removed after it.
+const (
+	hostedNPMPrefixRel = ".local"
+	hostedNPMCacheRel  = ".cache/observer-npm-install"
+)
+
+// npmUnderHome reports whether this run's agent tool may be installed with
+// npm under the box user's home (a NoRootExec vendor whose plan lists an npm
+// install way). Read from the plan, not the chosen way, so a resumed run's
+// agent gets the same PATH. Fork change.
+func (r *hostedRun) npmUnderHome() bool {
+	if !r.vendor.NoRootExec {
+		return false
+	}
+	for _, c := range hostedPlanInstallChoices(r.plan) {
+		if c.Channel == "npm" {
+			return true
+		}
+	}
+	return false
 }
 
 // hostedPlainFailure is a run's failure as the terminal prints it: the plain
