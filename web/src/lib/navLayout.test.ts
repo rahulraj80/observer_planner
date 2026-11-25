@@ -45,7 +45,7 @@ test("unfolded, Advanced is its sub-groups in order, the heading above the first
   const l = layoutNav(NAV_GROUPS, { open: true });
   const adv = l.sections.filter((s) => s.tier === "advanced");
   assert.deepEqual(adv.map((s) => s.label), NAV_ADVANCED.map((s) => s.label));
-  assert.deepEqual(adv.map((s) => !!s.toggle), [true, false, false]);
+  assert.deepEqual(adv.map((s) => !!s.toggle), [true, false, false, false]);
   for (const [i, s] of adv.entries()) assert.deepEqual(ids(s.items), NAV_ADVANCED[i].items);
 });
 

@@ -16,6 +16,11 @@ bin/
 !npm/observer/bin/observer.js
 !npm/observer-*/bin/
 !npm/observer-*/bin/.gitkeep
+# The superbased short-name wrapper's launcher. Without these lines the
+# bin/ rule hid it, and superbased 3.42.1 was packed from a clean checkout
+# without it (`npx superbased` failed).
+!npm/superbased/bin/
+!npm/superbased/bin/superbased.js
 
 # Same story for the VS Code extension: vscode/bin/ holds a .gitkeep
 # committed to source and gets populated per-target by the
@@ -77,6 +82,10 @@ webcloud/*.log
 # ever be a source of drift.
 website/model-prices/
 website/tokenomics/
+# The one-command connect wrappers, staged from scripts/ at website build time
+# (scripts/website-stage-connect.sh). One source: scripts/connect.{sh,ps1}.
+website/connect.sh
+website/connect.ps1
 model-pricing/web/node_modules/
 model-pricing/web/out/
 
@@ -111,6 +120,8 @@ coverage.html
 # the negation re-include one file.
 **/.claude/*
 !/.claude/settings.json
+# Project skills (invokable by name in any session, e.g. /planea-e2e).
+!/.claude/skills/
 # Negation: keep .claude/ fixture trees under testdata/ tracked.
 # Required by TestSidechain_CrossReferencedFromSubagentFiles in
 # internal/adapter/cowork — the test walks
@@ -282,6 +293,7 @@ model-pricing/scripts/extract-cache/
 /internal/vendorsurface/livecheck/
 /harness-gateway/
 /tests/e2e/orgserver/
+/tests/sdke2e/
 # The org-server load test and the org-only helper packages.
 /cmd/observer-loadtest/
 /internal/loadgen/
@@ -314,11 +326,24 @@ model-pricing/scripts/extract-cache/
 # The adapter-count manifest generator: writes into website/tools/,
 # which is private, and its drift test reads the committed manifest.
 /tools/toolcountgen/
+# The aggregate collector schema generator: writes into deploy/ (private),
+# and its drift test reads the committed schema there.
+/tools/aggregateschemagen/
 # The adapter parity doc generator: rewrites docs/adapter-parity.md
 # (private) and its test reads that doc.
 /tools/adapterparitygen/
 # The shipped-migrations record generator: records private lineages from git.
 /tools/shippedmiggen/
+# The parallel test runner: maintainer tooling for the private CI selection.
+/tools/testrunner/
+# Managed-SaaS structural checks: their tests read the private org server.
+/tools/migcheck/
+/tools/orgstateinv/
+/tools/structcheck/
+# The Track E gate driver: hosted-SaaS operations tooling.
+/tools/gatedriver/
+# The hosted service's canary prober (imports the private org server).
+/tools/canaryprobe/
 # Private CI + release pipelines. ci.yml stays (it is the public
 # contributor gate); ci-private.yml holds the five jobs whose inputs are
 # private-only paths.
@@ -335,6 +360,16 @@ model-pricing/scripts/extract-cache/
 /scripts/ci/release-dispatch.sh
 /scripts/ci/release-dispatch-paths.tsv
 /tests/invariant/release_dispatch_test.go
+# The gate record's private half (L-139); scripts/ci/gate-record.sh is public.
+/scripts/ci/gate-coverage.tsv
+/scripts/ci/release-record.sh
+/tests/invariant/release_record_test.go
+/scripts/ci/gate-shard.sh
+/scripts/ci/gate-host-checks.sh
+/scripts/ci/gate-host-checks.tsv
+/scripts/ci/website-accuracy.sh
+/tests/invariant/website_accuracy_test.go
+/scripts/ci/model-pricing-pg.sh
 # The org-plane half of the copilot harness walkthrough. Its Phase-1
 # sibling (examples/copilot-harness/README.md) stays public.
 /examples/copilot-harness/README-orgplane.md

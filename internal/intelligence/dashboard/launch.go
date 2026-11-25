@@ -569,7 +569,7 @@ func (s *Server) handleSessionLaunch(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "launch unavailable: "+errTerminalUnavailable, http.StatusServiceUnavailable)
+		writeTerminalUnavailable(w, "launch unavailable: ")
 		return
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -702,7 +702,7 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		http.Error(w, "resume unavailable: "+errTerminalUnavailable, http.StatusServiceUnavailable)
+		writeTerminalUnavailable(w, "resume unavailable: ")
 		return
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -787,10 +787,8 @@ func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request, ses
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrLaunchFreshDisabled):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, ErrLaunchToolNotAllowed):
-			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, ErrLaunchFreshDisabled), errors.Is(err, ErrLaunchToolNotAllowed):
+			writeSettingRefusal(w, err, http.StatusForbidden)
 		case errors.Is(err, ErrLaunchProjectRootDenied):
 			// F6: the project root is loaded server-side from the stored session,
 			// so an allow-list rejection is an AUTHORIZATION-policy refusal (403),
@@ -851,6 +849,10 @@ type terminalLaunchRequest struct {
 	WorkspaceSource string `json:"workspace_source"`
 	WorkspaceRemote string `json:"workspace_remote"`
 	WorkspaceBranch string `json:"workspace_branch"`
+	// WorkspaceCloneWhere is where a hosted row clones a clone-remote URL
+	// for this launch (auto, box or home; decision SBXD-5), re-validated
+	// by the hosted driver. Ignored when Sandbox is false.
+	WorkspaceCloneWhere string `json:"workspace_clone_where,omitempty"`
 	// Backend is the isolation row the New Terminal picker chose for this
 	// launch (sandbox plan v2 section 9, rulings P-062 and P-067): absent,
 	// "" or "auto" lets selection pick exactly as before (it never takes a
@@ -868,6 +870,11 @@ type terminalLaunchRequest struct {
 	// sign-in is copied). Ignored when Sandbox is false.
 	SignInSeed *bool `json:"sign_in_seed,omitempty"`
 	SignInAsk  bool  `json:"sign_in_ask,omitempty"`
+	// maskWorkspaceSecrets asks the sandbox to hide the workspace's secret files
+	// (decision D32 of the security assessments plan). Unexported on purpose: no
+	// request body sets it, only the assessments launch, which decides it from the
+	// run's sandbox capability.
+	maskWorkspaceSecrets bool
 }
 
 // signInConsentResponse is the 409 body of a launch that needs the user's
@@ -888,6 +895,14 @@ type terminalLaunchResponse struct {
 	Subcommand string `json:"subcommand"`
 	// HasProjectRoot: see launchResponse (finding 8).
 	HasProjectRoot bool `json:"has_project_root"`
+	// secretMask is what the workspace secret mask covered when the launch asked
+	// for it; never on the wire here (the assessments launch response carries its
+	// own view of it).
+	secretMask *SecretMaskOutcome
+	// backend is the sandbox backend the launcher resolved for a sandboxed
+	// launch ("" when it was not sandboxed or the launcher named none); never on
+	// the wire here, read by the assessments launch to record what ran.
+	backend string
 }
 
 // handleTerminalLaunch serves POST /api/terminal/launch — the F1 fresh-agent
@@ -934,6 +949,23 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		writeErrStatus(w, errors.New("unknown launch kind "+body.Kind), http.StatusBadRequest)
 		return
 	}
+	resp, ok := s.startFreshTerminal(w, r, body, "")
+	if !ok {
+		return
+	}
+	writeJSON(w, resp)
+	// Kick the watcher so a tool whose sessions directory did not exist
+	// at daemon start (just-installed Muse/Prime/…) is hot-added and
+	// scanned. Fire-and-forget; never blocks the launch response.
+	s.kickWatchRootsRefresh()
+}
+
+// startFreshTerminal runs the PTY half of POST /api/terminal/launch for a
+// decoded body whose gates (feature gate, launch kind) already passed, with
+// an optional server-built taskPrompt (the Code security page's "Fix with an
+// agent", security_fix.go). It writes the refusal itself and returns false
+// on every miss; on success the caller writes the response.
+func (s *Server) startFreshTerminal(w http.ResponseWriter, r *http.Request, body terminalLaunchRequest, taskPrompt string) (terminalLaunchResponse, bool) {
 	// The reserved pseudo-tool "shell" (termsvc.ShellTool) requests a fresh
 	// PLAIN SHELL — never a member of the launchable capability set, so it
 	// skips launchSubcommand entirely and is gated by [terminal.launch].
@@ -945,7 +977,7 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		sub, ok = launchSubcommand(body.Tool)
 		if !ok {
 			http.Error(w, "tool "+body.Tool+" is not launchable in the embedded terminal", http.StatusBadRequest)
-			return
+			return terminalLaunchResponse{}, false
 		}
 	}
 	// Model (B5): re-derive the SAME suggestion list the picker itself
@@ -980,10 +1012,10 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		workspaceSource = "live"
 	}
 	if body.Sandbox && !s.sandboxRequestOK(w, r, body, workspaceSource) {
-		return
+		return terminalLaunchResponse{}, false
 	}
 	initiator, parent := s.launchOrigin(r)
-	handle, err := s.opts.LaunchManager.CreateFresh(FreshLaunchSpec{
+	spec := FreshLaunchSpec{
 		Initiator:       initiator,
 		ParentSessionID: parent,
 		Tool:            body.Tool,
@@ -998,22 +1030,36 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		Backend:         sandboxBackendChoice(body),
 		SignInSeed:      body.SignInSeed,
 		SignInAsk:       body.SignInAsk,
-	})
+		TaskPrompt:      taskPrompt,
+	}
+	spec.MaskWorkspaceSecrets = body.Sandbox && body.maskWorkspaceSecrets
+	// SBXD-5: where a hosted row clones a clone-remote URL.
+	spec.WorkspaceCloneWhere = body.WorkspaceCloneWhere
+	res, err := s.createFreshLaunch(spec)
 	if err != nil {
 		var consent *termcore.SignInConsentError
+		var step *dashapi.SandboxStepRefusal
+		var hostedConsent *dashapi.SandboxConsentRefusal
 		switch {
+		case errors.As(err, &hostedConsent):
+			// A hosted launch whose consent is missing or changed (say the
+			// upload scope): 409 with the row and the verdict, so the dialog
+			// shows the consent again for the person to agree to.
+			writeSandboxConsentRefusal(w, hostedConsent)
+		case errors.As(err, &step):
+			// A refusal made before anything started whose fix is a choice
+			// in Terminals > Settings (the hosted model key's custody):
+			// the plain sentence and the place, the detail kept for a
+			// "Technical details" tooltip.
+			writeSandboxStepRefusal(w, step)
 		case errors.As(err, &consent):
 			// The inline sign-in step's question (lane BOXSIGNIN).
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(signInConsentResponse{Error: "sign_in_consent", Tool: consent.Tool, Files: consent.Files, Text: consent.Text})
-		case errors.Is(err, ErrLaunchFreshDisabled):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, ErrLaunchToolNotAllowed):
-			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, ErrLaunchFreshDisabled), errors.Is(err, ErrLaunchToolNotAllowed), errors.Is(err, ErrLaunchShellDisabled):
+			writeSettingRefusal(w, err, http.StatusForbidden)
 		case errors.Is(err, ErrLaunchSandboxRequired):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, ErrLaunchShellDisabled):
 			http.Error(w, err.Error(), http.StatusForbidden)
 		case errors.Is(err, ErrLaunchProjectRootDenied):
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1027,6 +1073,8 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 			// actual spawn) — 501, same class as ErrLaunchSandboxUnavailable
 			// above.
 			http.Error(w, err.Error(), http.StatusNotImplemented)
+		case errors.Is(err, integration.ErrTaskSeed):
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, termcore.ErrWorkspacePrepFailed):
 			// git/clone workspace preparation failed server-side — 500 per
 			// plan §7 (the default branch below already maps to 500; this
@@ -1035,16 +1083,31 @@ func (s *Server) handleTerminalLaunch(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "launch failed: "+err.Error(), http.StatusInternalServerError)
 		}
-		return
+		return terminalLaunchResponse{}, false
 	}
-	writeJSON(w, terminalLaunchResponse{
-		Token: handle, Tool: body.Tool, Subcommand: sub,
-		HasProjectRoot: s.hasProjectRoot(handle),
-	})
-	// Kick the watcher so a tool whose sessions directory did not exist
-	// at daemon start (just-installed Muse/Prime/…) is hot-added and
-	// scanned. Fire-and-forget; never blocks the launch response.
-	s.kickWatchRootsRefresh()
+	return terminalLaunchResponse{
+		Token: res.Handle, Tool: body.Tool, Subcommand: sub,
+		HasProjectRoot: s.hasProjectRoot(res.Handle), secretMask: res.SecretMask, backend: res.Backend,
+	}, true
+}
+
+// createFreshLaunch starts the fresh launch. A sandboxed launch, and one that asks
+// for the workspace secret mask, go through the manager's detailed call so the
+// outcome and the backend that built the box can be read; any other launch goes
+// through CreateFresh, byte for byte as before. A manager that cannot report
+// refuses a launch that asked for the mask (never an unmasked run the caller
+// believes masked), and starts a sandboxed launch that did not with the handle
+// alone: a backend left unnamed is a missing detail, not a missing box.
+func (s *Server) createFreshLaunch(spec FreshLaunchSpec) (FreshLaunchResult, error) {
+	d, detailed := s.opts.LaunchManager.(FreshLaunchDetailer)
+	switch {
+	case spec.MaskWorkspaceSecrets && !detailed:
+		return FreshLaunchResult{}, ErrLaunchUnsupported
+	case detailed && (spec.MaskWorkspaceSecrets || spec.Sandbox):
+		return d.CreateFreshDetailed(spec)
+	}
+	h, err := s.opts.LaunchManager.CreateFresh(spec)
+	return FreshLaunchResult{Handle: h}, err
 }
 
 // sandboxRequestOK runs handleTerminalLaunch's FAIL-CLOSED sandbox validation
@@ -1077,7 +1140,7 @@ func (s *Server) sandboxRequestOK(w http.ResponseWriter, r *http.Request, body t
 			return false
 		}
 	} else if !av.Available {
-		http.Error(w, "sandbox unavailable ("+av.Verdict+"): "+av.Reason, statusForSandboxVerdict(av.Verdict))
+		writeSandboxUnavailable(w, "sandbox unavailable ("+av.Verdict+"): "+av.Reason, av.Verdict, av.Reason)
 		return false
 	}
 	src, ok := sandboxSourceByID(av.Sources, workspaceSource)
@@ -1135,7 +1198,7 @@ func sandboxChosenBackendOK(w http.ResponseWriter, rows []SandboxBackendAvail, c
 			http.Error(w, "sandbox backend "+choice+" is not offered yet", http.StatusBadRequest)
 			return false
 		case !b.Available:
-			http.Error(w, "sandbox backend "+choice+" unavailable ("+b.Verdict+"): "+b.Reason, statusForSandboxVerdict(b.Verdict))
+			writeSandboxUnavailable(w, "sandbox backend "+choice+" unavailable ("+b.Verdict+"): "+b.Reason, b.Verdict, b.Reason)
 			return false
 		}
 		return true
@@ -1172,6 +1235,9 @@ var sandboxVerdictStatus = map[string]int{
 	"tool_unmapped":        http.StatusNotImplemented,
 	"disabled_by_config":   http.StatusForbidden,
 	VerdictNotInBuild:      http.StatusNotImplemented,
+	// A choice the person makes (how a hosted run's model key reaches the
+	// agent), not a capability this daemon lacks.
+	"custody_unsatisfiable": http.StatusConflict,
 }
 
 // statusForSandboxVerdict resolves sandboxVerdictStatus with a fail-closed
@@ -1204,11 +1270,11 @@ func sandboxSourceByID(sources []SandboxSourceAvail, id string) (src SandboxSour
 // [handoff].allow_dashboard_launch = false, or no PTY backend on this OS.
 // The pre-ConPTY copy ("run the daemon under WSL/Linux") is WRONG since
 // 2026-07-04 — a native-Windows daemon runs these terminals. The switch is
-// named where the dashboard edits it (Settings > Terminal, under More
+// named where the dashboard edits it (Settings > Session attach, under More
 // settings; dashboard CLI parity plan section 3), with the key in
 // parentheses for readers of the file.
 const errTerminalUnavailable = "the in-dashboard terminal is off on this daemon " +
-	"(turn on dashboard launch in Settings > Terminal, under More settings: " +
+	"(turn on dashboard launch in Settings > Session attach, under More settings: " +
 	"[handoff].allow_dashboard_launch, then restart the daemon) or unsupported on this OS " +
 	"(Windows before 10 version 1809 has no ConPTY)"
 
@@ -1329,7 +1395,7 @@ func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) 
 		// Two causes, both honest (DI-16): the operator turned the launch
 		// surface off, or this OS cannot build a PTY. JSON so the SPA can read
 		// the reason instead of rendering "no launchable tools" (DI-05).
-		writeErrStatus(w, errors.New(errTerminalUnavailable), http.StatusServiceUnavailable)
+		writeTerminalUnavailable(w, "")
 		return
 	}
 	// Surface the operator's canonicalized [terminal.launch].allowed_project_roots
@@ -1499,11 +1565,11 @@ func (s *Server) handleTerminalInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		writeErrStatus(w, errors.New(errTerminalUnavailable), http.StatusServiceUnavailable)
+		writeTerminalUnavailable(w, "")
 		return
 	}
 	if s.opts.AllowToolInstall == nil || !s.opts.AllowToolInstall() {
-		writeErrStatus(w, errors.New(errGuidedInstallOff), http.StatusForbidden)
+		writeGuidedInstallOff(w)
 		return
 	}
 	var body terminalInstallRequest
@@ -1617,7 +1683,7 @@ func (s *Server) handleSandboxReadoptTerminal(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if s.opts.LaunchManager == nil {
-		writeErrStatus(w, errors.New(errTerminalUnavailable), http.StatusServiceUnavailable)
+		writeTerminalUnavailable(w, "")
 		return
 	}
 	var body struct {

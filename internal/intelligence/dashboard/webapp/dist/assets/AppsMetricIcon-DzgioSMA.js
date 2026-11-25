@@ -1,0 +1,1 @@
+import{j as a}from"./vendor-react-DcQPdiaM.js";import{E as r,cW as e,d$ as t,g8 as o,fK as n,fZ as i,cp as c,c_ as p,f8 as m,cu as u}from"./index-B2zhNH9a.js";const f={traces:m,spans:p,duration:c,errorRate:i,latency:n,endUsers:o,runs:t,items:e,datasets:r};function x({metric:s}){return a.jsx(u,{icon:f[s],size:"sm"})}export{x as A};

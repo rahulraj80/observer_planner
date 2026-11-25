@@ -307,6 +307,7 @@ var purgeSessionDecisions = []purgeSessionDecision{
 	{table: "compaction_events", column: "session_id", kind: purgeKeepSession, otherSource: "tool <> ?", reason: "this adapter's compaction events are candidates; another tool's keep the session"},
 	{table: "failure_context", column: "session_id", kind: purgeKeepSession, otherSource: "action_id IN (SELECT id FROM actions WHERE tool <> ?)", reason: "deleted with its action (dependency protocol); one on another tool's action keeps the session"},
 	{table: "api_turns", column: "session_id", kind: purgeKeepSession, reason: "proxy capture is another source: the session it points at is kept"},
+	{table: "api_turns_planea_legacy", column: "session_id", kind: purgeKeepSession, reason: "AI Apps rows agent migration 256 moved out of api_turns: another source, so the session it points at is kept"},
 	{table: "otel_content", column: "session_id", kind: purgeKeepSession, reason: "OTel content capture is another source: the session it points at is kept"},
 	// Derived from the session's capture: they go with the session.
 	{table: "task_transitions", column: "session_id", kind: purgeDeleteWithSession, reason: "derived from the session's todo snapshots"},
@@ -335,6 +336,7 @@ var purgeSessionDecisions = []purgeSessionDecision{
 	{table: "handoffs", column: "source_session_id", kind: purgeDeleteWithSession, reason: "a handoff is derived from its source session"},
 	{table: "session_annotations", column: "session_id", kind: purgeDeleteWithSession, reason: "the operator's note, rating and title of a session that no longer exists"},
 	{table: "session_tags", column: "session_id", kind: purgeDeleteWithSession, reason: "tags of a session that no longer exists"},
+	{table: "local_session_holds", column: "session_id", kind: purgeDeleteWithSession, reason: "a node-local retention hold (agent migration 251) protects the session from retention pruning, not from the user's explicit adapter purge; with the session gone the hold means nothing"},
 	{table: "session_pid_bridge", column: "session_id", kind: purgeDeleteWithSession, reason: "transient process to session map"},
 	{table: "terminal_run_session", column: "session_id", kind: purgeDeleteWithSession, reason: "launch to session correlation; the launch record itself stays"},
 	{table: "guard_prompt_presend", column: "session_id", kind: purgeDeleteWithSession, reason: "transient prompt dedup state"},

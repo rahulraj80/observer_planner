@@ -282,7 +282,7 @@ export type ProjectCaptureInfo = {
   // Project detail only: the full scan health behind the banner.
   commit_scan?: CommitScanInfo;
   // "none": no editor-reported human LOC capture for this project (never
-  // render an AI share against it). "vscode": the SuperBased VS Code
+  // render an AI share against it). "vscode": the superbased VS Code
   // extension has reported saves for it.
   human_loc: "none" | "vscode";
 };
@@ -721,6 +721,9 @@ export type ProjectPromptGradeAvailable = {
   judge: boolean;
   cloud: boolean;
   reason?: string;
+  /** Where the judge tier is turned on while it is off (needsSetting.fixOf). */
+  settings?: string;
+  settings_label?: string;
 };
 
 export type ProjectPromptRow = {
@@ -993,6 +996,9 @@ export type ProjectPromptGradeRequest = {
 export type ProjectPromptGradeResponse = {
   status: "ok" | "not_available" | "queued";
   reason?: string;
+  /** Where the judge tier is turned on (read with needsSetting.fixOf). */
+  settings?: string;
+  settings_label?: string;
   alignment?: ProjectPromptAlignment;
 };
 
@@ -3052,6 +3058,15 @@ export type SessionGuardEvent = {
   reason?: string;
   target_excerpt?: string;
   taint_origin?: string;
+  /** The session the row is stored under (the root for a sub-agent's hook verdict). */
+  session_id?: string;
+  /** The `<root>:agent:<agent>` session whose call a root-stored hook verdict judged. */
+  subagent_session_id?: string;
+  /** Policy layer that produced the verdict (org | local | project | pack | builtin | judge | other). */
+  layer?: string;
+  layer_label?: string;
+  overridable?: boolean;
+  org_locked?: boolean;
 };
 
 export type SessionGuardEventsResponse = {
@@ -4064,6 +4079,8 @@ export type EnrolmentStatus = {
   org_name?: string;
   /** Display name (never an id); see orgDisplayLabel in lib/orgName.ts. */
   org_display?: string;
+  /** "managed" | "individual": the connection kind (lib/getStarted.ts reads "managed"). Absent from an older daemon. */
+  tenancy?: string;
   org_server_url?: string;
   user_email?: string;
   enrolled_at?: string;
@@ -4439,7 +4456,7 @@ export type ToolPreflight = {
   // them). The dialog phrases its own copy from these and does not render
   // `notes`, which stay on the wire for observer adapters / doctor. ---
   /**
-   * GUI rows only: whether a launch would deliver the SuperBased proxy route
+   * GUI rows only: whether a launch would deliver the superbased proxy route
    * to the app — the launcher's own wrap verdict, dry-run. Absent = unknown.
    */
   routing_reaches_app?: boolean;
@@ -4682,7 +4699,7 @@ export type TerminalSessionsMeta = {
 
 // ModelSuggestion is one entry in ToolModels.models — either a model the tool
 // has actually been launched with before ("history", carrying the observed
-// count + last-used timestamp) or a model SuperBased knows the tool supports
+// count + last-used timestamp) or a model superbased knows the tool supports
 // but has no local usage for ("known"). `count`/`last_used` are present only
 // for source "history".
 export type ModelSuggestion = {
@@ -4721,6 +4738,67 @@ export type SandboxSourceAvail = {
 export type SandboxToolAvail = {
   available: boolean;
   reason?: string;
+  /**
+   * Set when a hosted sandbox launch of this tool meets something on its
+   * model key under the chosen key custody (the launch's own rule, said
+   * before Start): a refusal (severity blocking or absent) or a line that
+   * does not block (severity advisory). Absent when there is nothing to
+   * say, when no hosted row is listed, or from a daemon that predates it.
+   */
+  hosted_key?: SandboxKeyNotice;
+};
+
+/**
+ * SandboxHookNotice is one tool's hook line on a hosted row
+ * (dashapi.SandboxHookNotice): gated says guard checks the agent's
+ * commands in the box; code is the closed reason, technical the internal
+ * detail for "Technical details".
+ */
+export type SandboxHookNotice = {
+  gated: boolean;
+  code: string;
+  message: string;
+  technical?: string;
+};
+
+/**
+ * SandboxKeyNotice is a refusal a person reads before Start: the closed
+ * code, the plain sentence, and the technical detail (config keys and
+ * commands, shown only under "Technical details").
+ */
+export type SandboxKeyNotice = {
+  code: string;
+  message: string;
+  technical?: string;
+  /**
+   * "blocking" (a refusal the launch would meet) or "advisory" (said before
+   * Start, does not block it). Absent from a daemon that predates it, which
+   * sent only refusals: absent reads as blocking.
+   */
+  severity?: "blocking" | "advisory";
+  /**
+   * The settings place (lib/settingsPlaces PLACES id) where the fix is
+   * made; absent from a daemon that predates it, when the dialog links to
+   * its own default for the notice.
+   */
+  place?: string;
+  /**
+   * The key custody this launch resolved to ("home_relay" or
+   * "in_box_api_key"; decision SBXD-1), for "Technical details" and the
+   * line's controls. Absent from a daemon before it.
+   */
+  custody?: string;
+  /**
+   * Providers whose key, once stored on this machine, keeps the key here:
+   * the line's paste field. Set only while credential injection is on.
+   */
+  keep_home?: { id: string; label: string }[];
+  /**
+   * The tool's opt-in in-box key sources (decision SBXD-4), present when
+   * its registry row grounds one and the key goes in the box.
+   */
+  tool_keys?: { on: boolean };
+  login_seed?: { on: boolean };
 };
 
 // SandboxAvailability is the reply from GET /api/terminal/sandbox (B9) — the
@@ -4729,7 +4807,9 @@ export type SandboxToolAvail = {
 // closed vocabulary: "available" | "unsupported_platform" | "backend_missing"
 // | "backend_too_old" | "userns_denied" | "netns_denied" | "tool_unmapped" |
 // "disabled_by_config" | "runtime_init_failed" | "workspace_prep_failed" |
-// "not_in_build" (a build without terminals.sandbox, D-514). `reason` names the exact
+// "not_in_build" (a build without terminals.sandbox, D-514) | "probe_timed_out" |
+// "probe_failed" (the read route's own answers when the probe does not answer
+// in time or stops with an internal error; never a launch verdict). `reason` names the exact
 // gap in human terms (which sysctl is denied, which bwrap version was found,
 // …) so the dialog's disabled copy can quote it verbatim rather than being
 // generic.
@@ -4776,6 +4856,21 @@ export type SandboxOrgValue = {
   value: string;
 };
 
+// SandboxCloneWhere is a hosted row's clone location facts
+// (dashapi.SandboxCloneWhere, decision SBXD-5). Values: auto, box, home.
+export type SandboxCloneWhere = {
+  /** setting is [terminal.sandbox.hosted].clone_where in force. */
+  setting: string;
+  /** fixed: the setting is box or home, so a launch cannot choose. */
+  fixed: boolean;
+  /** choices are the values a launch on this row can take now. */
+  choices: string[];
+  /** notes say, per value not in choices, why (plain words). */
+  notes?: Record<string, string>;
+  /** rule is the setting's rule in plain words. */
+  rule: string;
+};
+
 // SandboxBackendAvail is one row of SandboxAvailability.backends
 // (dashapi.SandboxBackendAvail).
 export type SandboxBackendAvail = {
@@ -4806,6 +4901,53 @@ export type SandboxBackendAvail = {
   egress?: string[];
   capture_by_tier?: Record<string, string>;
   component: string;
+  /**
+   * The workspace sources this row takes (a hosted row: the live tree
+   * uploaded, or the vendor's own deliveries). Absent means every source
+   * the machine offers; a launch on the row with another source is refused.
+   */
+  workspace_sources?: string[];
+  /**
+   * How each source in workspace_sources reaches the box (a hosted row):
+   * "sync" (or a vendor row's "upload_snapshot") uploads a copy of a git repository's files, whose changes come
+   * back as a diff; "remote_clone" is a clone made in the box. The dialog
+   * labels and checks a source by it, never by the row id.
+   */
+  source_deliveries?: Record<string, string>;
+  /**
+   * Why, in plain words and keyed by source, a source the row delivers is
+   * not in workspace_sources now (a hosted box-side clone with the
+   * remote-clone switch off, on a tier with no route to the git host, or
+   * with no git hosts listed).
+   */
+  workspace_source_notes?: Record<string, string>;
+  /**
+   * Where the row's "Clone a remote URL" source may clone (decision SBXD-5):
+   * a hosted row that can clone in its box or on this machine. Absent on
+   * every other row and from a daemon that predates it.
+   */
+  clone_where?: SandboxCloneWhere;
+  /**
+   * Per tool name, the refusal a launch of that tool on this row meets
+   * before any box is made because the tool cannot reach the box (no
+   * template and no install way that can work there). Only refused tools.
+   */
+  tool_notices?: Record<string, SandboxKeyNotice>;
+  /**
+   * Per sandbox-launchable tool, whether this machine's guard checks the
+   * agent's commands in this row's box on a launch now, with the sentence
+   * shown before Start (lane HOOKS, SBXD-6). Where gating does not apply
+   * the sentence is the no_hook_gating disclosure's, said here per tool
+   * instead of in `disclosures`. A hosted row only; absent from an older
+   * daemon.
+   */
+  hook_notices?: Record<string, SandboxHookNotice>;
+  /**
+   * What the person is told before Start about the box's own network at
+   * the configured tier (a hosted row), the same sentences the consent
+   * screen shows. Shown as served.
+   */
+  network_notes?: string[];
   // hint is the driver's note about a known issue on this host that does
   // not make the row unavailable (sandboxoci's runtime hint table; empty
   // today).
@@ -4844,7 +4986,8 @@ export type LaunchIsolation = {
   capture_degraded?: boolean;
   capture_causes?: string[];
   // seccomp is what the syscall filter gave the run (the closed
-  // sandboxvocab.SeccompRun vocabulary: observer_default, engine_default,
+  // sandboxvocab.SeccompRun vocabulary: observer_default, the strace
+  // switch's observer_seize_pidns and observer_seize_yama, engine_default,
   // off, not_applicable, none); absent from an older daemon or a run that
   // recorded none.
   seccomp?: string;
@@ -5222,12 +5365,18 @@ export type UpdateOrgRefusal = {
 // both read the same two endpoints — defined once here rather than forked
 // per component.
 
-// GuardRule is one /api/guard/rules catalog row — the rule's definition
-// (doc) and remediation hint (advice). Multi-row IDs (e.g. R-152's write +
-// read rows) arrive once per row. `source`/`enforced` are effective-view
-// extras (?effective=1): which policy layer defined the rule (builtin |
-// user | project | trusted_project | org) and whether it's per-rule
-// enforced even in observe mode.
+// GuardRule is one /api/guard/rules row — the rule's definition (doc) and
+// remediation hint (advice). Multi-row IDs (e.g. R-152's write + read rows)
+// arrive once per row, and a project-scoped org rule once per project.
+// `source`/`enforced`/`project`/`overridable`/`org_locked` are effective-view
+// fields (the default; ?catalog=1 is the built-in table): which policy layer
+// defined the rule (builtin | user | project | trusted_project | org), whether
+// it's per-rule enforced even in observe mode, the org project a
+// project-scoped org rule applies to, whether the org marked it overridable,
+// and whether the organization locks it on this node (no local disable or
+// override, pages/security/orgLock.ts). `org_named` says the organization's
+// bundle sets the rule itself; a rule locked but not named runs at its own
+// decision (every rule on a managed node is locked).
 export type GuardRule = {
   id: string;
   category?: string;
@@ -5238,6 +5387,10 @@ export type GuardRule = {
   advice?: string;
   source?: string;
   enforced?: boolean;
+  project?: string;
+  overridable?: boolean;
+  org_locked?: boolean;
+  org_named?: boolean;
 };
 
 export type GuardRulesResponse = { rules: GuardRule[] | null };

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/llmwire"
 )
 
 // Defaults for the shared client (mirrors the judge client's posture).
@@ -284,7 +286,7 @@ func (c *Client) buildRequest(model, prompt string) (string, http.Header, []byte
 		raw, err := json.Marshal(body)
 		return url, hdr, raw, err
 	}
-	url += "/chat/completions"
+	url += llmwire.ChatPath
 	messages := []map[string]string{}
 	if c.system != "" {
 		messages = append(messages, map[string]string{"role": "system", "content": c.system})

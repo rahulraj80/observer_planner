@@ -73,8 +73,11 @@ var defaultPatterns = []pattern{
 	// header-length value gets the bearer_token marker, a short one
 	// ("Bearer token auth", "Bearer of") stays a bare redaction exactly as
 	// before, so prose is never promoted to a finding.
-	{re: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-._~+/]{8,}=*`), replace: TypedRedactedMarker("bearer_token")},
-	{re: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-._~+/]+=*`)},
+	// A match whose whole value is one English word ("Bearer tokens are
+	// accepted", "Bearer authentication") is prose and stays
+	// (bearerprose.go, operator ruling 2026-11-15).
+	{re: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-._~+/]{8,}=*`), replace: TypedRedactedMarker("bearer_token"), validate: bearerNotProse},
+	{re: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-._~+/]+=*`), validate: bearerNotProse},
 	// Common API key prefixes: sk-..., pk-..., ak-..., api_key=..., etc.
 	// Allow underscores AND hyphens inside the body: pk_test_abc123... and
 	// Anthropic's sk-ant-api03-... both carry separators past the prefix.
@@ -346,32 +349,27 @@ func (s *Scrubber) String(v string) string {
 // Fast path (cache-friendly): scrub with String. When nothing matched —
 // output byte-identical to input, the common case — return the input
 // slice unchanged so the proxy's prefix-cache byte stability is
-// preserved. When something matched but the result is still valid JSON,
-// return it. ONLY when String corrupted otherwise-valid JSON do we fall
-// back to a structure-aware pass (unmarshal → scrub each string value in
-// isolation via [Scrubber.JSONValue] → re-marshal), which can never break
-// JSON structure because json.Marshal re-escapes every string. Unlike
-// [Scrubber.RawJSON] this never truncates — the forward path must not
-// silently drop a large legitimate body. Non-JSON input falls through to
-// String's output (best effort; the proxy hard-guard is the final
+// preserved. When something matched, String's output is accepted only
+// when it has the SAME JSON SHAPE as the input (same delimiters, keys and
+// literals in the same order; only ordinary string values changed; kept
+// values byte-identical). "Still valid JSON" is not enough: a greedy
+// `\S+` row can swallow whole array items and leave valid JSON behind
+// (lane sr-openai-n2). Otherwise the body is scrubbed token by token and
+// only the changed tokens are spliced back into the original bytes:
+// member names go through String, string values follow the
+// [Scrubber.JSONValue] rules, and structure, key order and kept values are
+// never rewritten (forward.go). The one kept value is a string that is the
+// DIRECT value of a member named literally `encrypted_content`, which
+// String's own shield already covers.
+// Unlike [Scrubber.RawJSON] this never truncates — the forward path must
+// not silently drop a large legitimate body. Non-JSON input falls through
+// to String's output (best effort; the proxy hard-guard is the final
 // backstop).
+//
+// A body bound for the LLM provider that produced its reasoning or
+// thinking items uses [Scrubber.ScrubProviderRequest] instead.
 func (s *Scrubber) ScrubForward(raw []byte) []byte {
-	scrubbed := s.String(string(raw))
-	if scrubbed == string(raw) {
-		return raw
-	}
-	if json.Valid([]byte(scrubbed)) {
-		return []byte(scrubbed)
-	}
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return []byte(scrubbed)
-	}
-	out, err := json.Marshal(s.JSONValue(decoded))
-	if err != nil {
-		return []byte(scrubbed)
-	}
-	return out
+	return s.scrubForward(raw, false)
 }
 
 // fernetEncryptedContentRE matches a JSON string-valued
@@ -449,6 +447,15 @@ func paddedIdx(n int) string {
 // Non-string values are returned unchanged.
 func (s *Scrubber) JSONValue(v any) any {
 	return s.jsonValue(v, "")
+}
+
+// IsSensitiveKey reports whether a JSON or attribute key names a secret
+// (password, token, api key, ...): the rule JSONValue applies to decide that
+// a string value under the key is redacted whatever its content. Exported so
+// a caller that handles some values outside JSONValue (numbers) applies the
+// same rule.
+func IsSensitiveKey(key string) bool {
+	return key != "" && sensitiveKeyRE.MatchString(key)
 }
 
 func (s *Scrubber) jsonValue(v any, parentKey string) any {

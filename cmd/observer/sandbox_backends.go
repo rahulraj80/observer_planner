@@ -377,6 +377,7 @@ func sandboxBackendListWith(cfg config.TerminalSandboxConfig, av sandbox.Availab
 		e := dashapi.SandboxBackendAvail{
 			ID: row.ID, Label: row.Label, Class: string(row.Iso.Class), Location: string(row.Iso.Location),
 			Maturity: string(row.Maturity), Phase: row.Phase, Component: sandboxComponent,
+			MasksWorkspaceSecrets: row.CanMaskWorkspaceSecrets(),
 		}
 		for _, t := range row.Net.Egress {
 			e.Egress = append(e.Egress, string(t))
@@ -396,6 +397,7 @@ func sandboxBackendListWith(cfg config.TerminalSandboxConfig, av sandbox.Availab
 			}
 		}
 		e.Disclosures = sandboxDisclosuresFor(row, vocab.GatewayMode(e.GatewayMode))
+		hostedFillProbeRow(&e, row, cfg, tier)
 		e.Enabled = slices.Contains(listed, id)
 		in := sandboxSelectInputWith(cfg, av, sources, id, tier, drivers)
 		res := sandboxselect.Select(in)

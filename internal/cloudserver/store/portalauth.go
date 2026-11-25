@@ -13,8 +13,12 @@ import (
 // short: an auth transaction only has to survive one AuthKit round-trip, and a
 // step-up authorization only has to survive the user clicking "confirm".
 const (
-	// DefaultAuthTransactionTTL bounds the OAuth leg (plan: ≤10 min).
-	DefaultAuthTransactionTTL = 10 * time.Minute
+	// DefaultAuthTransactionTTL bounds the OAuth leg. It was 10 minutes (plan
+	// §3 W1); a sign-up with email verification (find the code, come back) runs
+	// past that, so it is 30 (L-142). The state is still single-use, bound to
+	// its cookie and PKCE-protected; the window only decides how long a
+	// started sign-in may take.
+	DefaultAuthTransactionTTL = 30 * time.Minute
 	// DefaultStepUpTTL bounds a minted step-up authorization (plan: ≤5 min).
 	DefaultStepUpTTL = 5 * time.Minute
 	// authTransactionSweepBatch bounds one opportunistic expired-row delete so a
@@ -59,8 +63,14 @@ type AuthTransactionInput struct {
 	ReturnTo     string // same-origin path, validated by the caller; may be ""
 	SessionID    string // step-up only
 	AccountID    string // step-up only
-	TTL          time.Duration
-	Now          time.Time
+	// ForceReauth records that the authorize request sent the provider
+	// prompt=login and max_age=0 (a step-up always; a login when the platform
+	// OIDC issuer asked for a fresh sign-in). It is kept server-side so the
+	// callback, not the browser, decides whether the sign-in it completes was
+	// a fresh authentication (store.WithFreshAuthentication).
+	ForceReauth bool
+	TTL         time.Duration
+	Now         time.Time
 }
 
 // AuthTransaction is a consumed OAuth transaction: everything the callback
@@ -76,7 +86,10 @@ type AuthTransaction struct {
 	RedirectURI  string
 	NonceHash    string
 	PKCEVerifier string
-	ExpiresAt    time.Time
+	// ForceReauth is AuthTransactionInput.ForceReauth as recorded at start
+	// (false on a transaction minted before cloud migration 0083).
+	ForceReauth bool
+	ExpiresAt   time.Time
 }
 
 // CreateAuthTransaction mints a single-use pre-auth transaction row. It runs on
@@ -129,12 +142,12 @@ func (s *Store) CreateAuthTransaction(ctx context.Context, in AuthTransactionInp
 			ctx,
 			`INSERT INTO auth_transactions
 			   (state_hash, pkce_verifier_enc, nonce_hash, redirect_uri, purpose,
-			    action, return_to, session_id, account_id, created_at, expires_at)
+			    action, return_to, session_id, account_id, created_at, expires_at, force_reauth)
 			 VALUES ($1, $2, $3, $4, $5,
-			         nullif($6, ''), nullif($7, ''), nullif($8, '')::uuid, nullif($9, '')::uuid, $10, $11)
+			         nullif($6, ''), nullif($7, ''), nullif($8, '')::uuid, nullif($9, '')::uuid, $10, $11, $12)
 			 RETURNING txn_id::text`,
 			in.StateHash, sealed, in.NonceHash, in.RedirectURI, in.Purpose,
-			in.Action, in.ReturnTo, in.SessionID, in.AccountID, now, now.Add(ttl),
+			in.Action, in.ReturnTo, in.SessionID, in.AccountID, now, now.Add(ttl), in.ForceReauth,
 		).Scan(&txnID)
 	})
 	if err != nil {
@@ -166,11 +179,11 @@ func (s *Store) ConsumeAuthTransaction(ctx context.Context, stateHash string, no
 			  WHERE state_hash = $1 AND consumed_at IS NULL AND expires_at > $2
 			  RETURNING txn_id::text, purpose, action, return_to,
 			            session_id::text, account_id::text, redirect_uri,
-			            nonce_hash, pkce_verifier_enc, expires_at`,
+			            nonce_hash, pkce_verifier_enc, expires_at, force_reauth`,
 			stateHash, now).Scan(
 			&out.ID, &out.Purpose, &action, &returnTo,
 			&sessionID, &accountID, &out.RedirectURI,
-			&out.NonceHash, &sealed, &out.ExpiresAt,
+			&out.NonceHash, &sealed, &out.ExpiresAt, &out.ForceReauth,
 		)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -303,17 +316,39 @@ func (s *Store) CreateStepUpAuthorization(ctx context.Context, accountID, sessio
 // unexpired, unconsumed — so a step-up minted for another session, another
 // action, or already spent matches zero rows and yields ErrStepUpInvalid.
 func consumeStepUpTx(ctx context.Context, tx pgx.Tx, accountID, sessionID, action, authzID string, now time.Time) error {
+	return stepUpTx(ctx, tx,
+		`UPDATE step_up_authorizations SET consumed_at = $5
+		  WHERE `+stepUpUsable+`
+		  RETURNING authz_id::text`, "consume step-up", accountID, sessionID, action, authzID, now)
+}
+
+// stepUpUsable is the one predicate of a usable step-up authorization: bound
+// to the account, the authorization, the session and the action, unexpired
+// and unconsumed ($1 account, $2 authorization, $3 session, $4 action, $5
+// now).
+const stepUpUsable = `account_id = $1::uuid AND authz_id = $2::uuid
+		    AND session_id = $3::uuid AND action = $4
+		    AND consumed_at IS NULL AND expires_at > $5`
+
+// checkStepUpTx reports, without consuming it, whether a step-up
+// authorization is usable now (the same predicate as consumeStepUpTx). The
+// account deletion checks it before it cancels the account's subscriptions
+// at Paddle (ORGDEL-7), so no billing is canceled on an unauthorized
+// request; it consumes the authorization in its deletion transaction.
+func checkStepUpTx(ctx context.Context, tx pgx.Tx, accountID, sessionID, action, authzID string, now time.Time) error {
+	return stepUpTx(ctx, tx,
+		`SELECT authz_id::text FROM step_up_authorizations WHERE `+stepUpUsable,
+		"check step-up", accountID, sessionID, action, authzID, now)
+}
+
+// stepUpTx runs a one-row step-up statement over stepUpUsable's parameters:
+// no row is ErrStepUpInvalid.
+func stepUpTx(ctx context.Context, tx pgx.Tx, sql, what, accountID, sessionID, action, authzID string, now time.Time) error {
 	if authzID == "" || sessionID == "" {
 		return ErrStepUpInvalid
 	}
 	var claimed string
-	e := tx.QueryRow(ctx,
-		`UPDATE step_up_authorizations SET consumed_at = $6
-		  WHERE account_id = $1::uuid AND authz_id = $2::uuid
-		    AND session_id = $3::uuid AND action = $4
-		    AND consumed_at IS NULL AND expires_at > $5
-		  RETURNING authz_id::text`,
-		accountID, authzID, sessionID, action, now, now).Scan(&claimed)
+	e := tx.QueryRow(ctx, sql, accountID, authzID, sessionID, action, now).Scan(&claimed)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return ErrStepUpInvalid
 	}
@@ -323,7 +358,7 @@ func consumeStepUpTx(ctx context.Context, tx pgx.Tx, accountID, sessionID, actio
 		if isInvalidUUIDErr(e) {
 			return ErrStepUpInvalid
 		}
-		return fmt.Errorf("consume step-up: %w", e)
+		return fmt.Errorf("%s: %w", what, e)
 	}
 	return nil
 }

@@ -1,4 +1,5 @@
 import type { NavGroup, NavItem } from "./nav.ts";
+import { PRODUCT_NAMES } from "../../../shared/lib/productNames.ts";
 
 // Where each page sits in the sidebar. nav.ts stays the one table of pages
 // (ids, paths, labels and icons: a governance contract, and upstream's); this
@@ -6,7 +7,7 @@ import type { NavGroup, NavItem } from "./nav.ts";
 // open every day and folds the rest under one "Advanced" section:
 //
 //   main      always listed, no heading
-//   advanced  folded by default, in three headed sub-groups; a page a person
+//   advanced  folded by default, in four headed sub-groups; a page a person
 //             uses often can be kept in the main list ("pins")
 //   foot      the account and settings strip at the bottom
 //
@@ -68,6 +69,23 @@ export const NAV_ADVANCED: { id: string; label: string; items: string[] }[] = [
     label: "Control",
     items: ["egress", "policies", "agent-config", "remote"],
   },
+  // Upstream's AI apps pages (v1.43, Plane A lane B5), listed only while app
+  // observability is on (APPS_NAV_IDS). Egress and Policies joined that
+  // group upstream; here they stay under Control.
+  {
+    id: "apps",
+    label: PRODUCT_NAMES.planea_local,
+    items: [
+      "app-traces",
+      "app-sessions",
+      "app-analytics",
+      "app-end-users",
+      "app-evals",
+      "app-scores",
+      "app-prompts",
+      "app-alerts",
+    ],
+  },
 ];
 
 /** Where a page this file does not name goes, by its nav.ts group. */
@@ -76,6 +94,7 @@ const GROUP_FALLBACK: Record<string, string> = {
   analyze: "insights",
   optimize: "optimize",
   configure: "control",
+  apps: "apps",
 };
 
 const MAIN = new Set<string>(NAV_MAIN_IDS);

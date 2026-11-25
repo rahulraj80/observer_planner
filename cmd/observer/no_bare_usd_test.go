@@ -71,12 +71,16 @@ var noBareUSDAllow = map[string]noBareUSDEntry{
 		"the token view leaves the column out (printCostSummaryAs)."},
 	"cmd/observer/predict.go": {reason: "predictBandRow prints the dollar row only in the dollar view; the token " +
 		"view returns before it."},
+	"cmd/observer/predict_projection_cli.go": {reason: "projUSD is reached only when the token-usage display is " +
+		"off (every caller checks !tokens first); the token view prints tokens or a share instead."},
 	"cmd/observer/advisor_digest.go": {reason: "the session-start digest is masked with costtext.MaskDollars under " +
 		"the resolved display before it is injected."},
 	"internal/sandboxremote/sandhold/offer.go": {reason: "SandHold's own plan terms (first month free up to a dollar allowance, " +
 		"a refundable card check), the node's price list, not a developer's coding spend."},
 	"cmd/observer/admission.go": {reason: "Plane A admission caps (observer obs admission): an admin-hosted app's " +
 		"authored dollar caps, not a developer's coding spend."},
+	"cmd/observer/obs_traces.go": {reason: "Plane A app traces (observer obs traces): the recorded model spend of " +
+		"an app the developer hosts, not the developer's own coding spend, as admission.go's caps."},
 	"cmd/observer/cloud.go": {reason: "the Cloud Intelligence preview prints the exact bytes and metrics that " +
 		"would leave the machine (two-digest truth); re-denominating them would make the preview lie."},
 	"cmd/observer/cloudconsent.go": {reason: "not money: a flag help string naming an environment variable ($SBO_CLOUD_BASE_URL)."},

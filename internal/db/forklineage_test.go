@@ -29,11 +29,25 @@ func TestForkLineageStoreReconciles(t *testing.T) {
 		// store can be in this state.
 		upstreamRanTo int
 	}
+	all, err := readMigrationEntries()
+	if err != nil {
+		t.Fatalf("readMigrationEntries: %v", err)
+	}
+	upstreamHead := 0 // upstream's highest step (v1.43.1: 261)
+	for _, e := range all {
+		if !isForkStep(e.version) && e.version > upstreamHead {
+			upstreamHead = e.version
+		}
+	}
 	var shapes []shape
 	for _, g := range forkGenerations {
 		shapes = append(shapes, shape{forkGeneration: g})
 		if g.marker != 0 {
-			shapes = append(shapes, shape{forkGeneration: g, upstreamRanTo: 248})
+			for _, to := range []int{248, upstreamHead} {
+				if to > g.max {
+					shapes = append(shapes, shape{forkGeneration: g, upstreamRanTo: to})
+				}
+			}
 		}
 	}
 	for _, g := range shapes {
@@ -103,9 +117,10 @@ func TestForkLineageStoreReconciles(t *testing.T) {
 				}
 				// An upstream binary run on the store since then read the
 				// fork's records as its own steps, skipped those, and ran and
-				// recorded everything above them.
+				// recorded everything above them (never a fork step: no
+				// upstream build carries one).
 				for _, e := range entries {
-					if e.version > g.max && e.version <= g.upstreamRanTo {
+					if e.version > g.max && e.version <= g.upstreamRanTo && !isForkStep(e.version) {
 						run(e)
 						record(e.version)
 						recorded = e.version
@@ -124,27 +139,34 @@ func TestForkLineageStoreReconciles(t *testing.T) {
 			if v != latest {
 				t.Fatalf("version = %d, want %d", v, latest)
 			}
-			// Upstream's 081/082, 166, 169, 177 and 212 (each skipped by an
-			// old watermark or a fork step record) are present, beside the
-			// fork's own tables.
+			// Upstream's 081/082, 166, 169, 177, 212, 251 and 259 (each
+			// skipped by an old watermark or a fork step record) are present,
+			// beside the fork's own tables.
 			for _, table := range []string{
 				"org_policy_resource_state", "org_enrolment_grant", "project_remotes", "pull_requests", "sec_findings",
 				"process_rollups", "process_capture_stats",
-				"briefing_snapshots", "analysis_calls", "license_usage",
+				"local_session_holds", "settings_proposals",
+				"briefing_snapshots", "analysis_calls", "license_usage", "telemetry_staged",
 			} {
 				var n int
 				if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
 					t.Errorf("table %s missing after reconcile (n=%d, err=%v)", table, n, err)
 				}
 			}
-			// Upstream's 080, 212 and 215 columns and the fork's turn_kind and
-			// dispatch-benefit columns all exist.
+			// Upstream's 080, 212, 215, 250, 253, 254 and 261 columns and the
+			// fork's turn_kind, dispatch-benefit and telemetry dedup columns
+			// all exist.
 			for _, c := range [][2]string{
 				{"session_annotations", "rating"},
 				{"process_runs", "capture_class"},
 				{"codeintel_nodes", "complexity"},
+				{"sessions", "authority_org_key"},
+				{"guard_events", "project_root"},
+				{"cloud_sync_last", "budget_unit"},
+				{"org_enrolment", "owner_managed"},
 				{"api_turns", "turn_kind"},
 				{"router_decisions", "realized_delta_usd"},
+				{"telemetry_staged", "dedup_key"},
 			} {
 				var n int
 				if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c[0], c[1]).Scan(&n); err != nil || n != 1 {
@@ -175,10 +197,10 @@ func TestForkLineageStoreReconciles(t *testing.T) {
 	}
 }
 
-// TestReconciledForkStoreIsNotRewoundAgain pins the ledgered generation's
-// marker: a store this build migrated has briefing_snapshots (the fork's 249)
-// and a version record above every generation, and its upstream 212-218
-// records must stay.
+// TestReconciledForkStoreIsNotRewoundAgain pins the ledgered generations'
+// markers: a store this build migrated has briefing_snapshots (the fork's
+// 262) and a version record above every generation, and its upstream 212-218
+// and 250-256 records must stay.
 func TestReconciledForkStoreIsNotRewoundAgain(t *testing.T) {
 	ctx := context.Background()
 	database, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "fresh.db")+"?_pragma=busy_timeout(30000)&_txlock=immediate")
@@ -225,6 +247,22 @@ func TestReconciledForkStoreIsNotRewoundAgain(t *testing.T) {
 		migplan.StepKey(212), migplan.StepKey(213), migplan.StepKey(215), migplan.StepKey(217), migplan.StepKey(218)).Scan(&kept); err != nil || kept != 5 {
 		t.Errorf("records kept = %d of 5 (err=%v): a migrated store with upstream's orphan records was rewound", kept, err)
 	}
+
+	// Upstream reserves 249 for a line not merged yet. Should it ship a 249,
+	// a store this build migrated records it beside its 262, and the fourth
+	// generation (marker 249) must leave upstream's 250-256 records alone.
+	if _, err := conn.ExecContext(ctx, `INSERT INTO schema_meta(key, value) VALUES (?, ?)`, migplan.StepKey(249), migplan.RecordApplied); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileForkLineage(ctx, conn); err != nil {
+		t.Fatalf("reconcileForkLineage with an upstream 249 record: %v", err)
+	}
+	for _, v := range []int{249, 250, 251, 253, 254, 255, 256} {
+		var got string
+		if err := conn.QueryRowContext(ctx, `SELECT value FROM schema_meta WHERE key = ?`, migplan.StepKey(v)).Scan(&got); err != nil || got != migplan.RecordApplied {
+			t.Errorf("step %d record = %q (err=%v) after reconcile on a current store with a 249 record, want applied", v, got, err)
+		}
+	}
 }
 
 // TestUpstreamStoreInForkRangeIsNotRewound pins the probe: an upstream-
@@ -261,5 +299,30 @@ func TestUpstreamStoreInForkRangeIsNotRewound(t *testing.T) {
 				t.Fatalf("version record = %s after reconcile on an upstream store, want %d", got, version)
 			}
 		})
+	}
+}
+
+// TestForkGenerationsPinned pins every old numbering of the fork's steps that
+// a store in the field may carry: dropping a row would leave that store with
+// upstream's same-numbered steps skipped, and TestForkLineageStoreReconciles
+// builds its shapes from the table, so it would not notice.
+func TestForkGenerationsPinned(t *testing.T) {
+	want := []forkGeneration{
+		{base: 77, max: 85},
+		{base: 163, max: 170},
+		{base: 211, max: 218, marker: 213, next: 249},
+		{base: 248, max: 257, marker: 249, next: 262},
+	}
+	if len(forkGenerations) != len(want) {
+		t.Fatalf("forkGenerations has %d rows, want %d: %+v", len(forkGenerations), len(want), forkGenerations)
+	}
+	for i, g := range want {
+		if forkGenerations[i] != g {
+			t.Errorf("forkGenerations[%d] = %+v, want %+v", i, forkGenerations[i], g)
+		}
+	}
+	// The current numbering starts at the last generation's next.
+	if last := want[len(want)-1]; forkFirst != last.next {
+		t.Errorf("forkFirst = %d, want %d (the last generation's next)", forkFirst, last.next)
 	}
 }

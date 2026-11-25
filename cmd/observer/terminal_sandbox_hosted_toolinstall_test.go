@@ -40,7 +40,7 @@ func hostedClaudeScript(t *testing.T) integration.InstallHint {
 // installed into.
 func TestHostedToolInstallChoice(t *testing.T) {
 	script := hostedClaudeScript(t)
-	internet, err := hostedToolDelivery("claude-code", "", vocab.TierInternet, "")
+	internet, err := forkToolCheck("claude-code", "", vocab.TierInternet)
 	if err != nil || internet == nil {
 		t.Fatalf("internet check: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestHostedToolInstallChoice(t *testing.T) {
 			"use a box image", "that has claude-code, or one with npm or curl",
 		}},
 	}
-	withTemplate, err := hostedToolDelivery("claude-code", "sealed-box", vocab.TierInternet, "")
+	withTemplate, err := forkToolCheck("claude-code", "sealed-box", vocab.TierInternet)
 	if err != nil || withTemplate == nil || !withTemplate.CanInstall {
 		t.Fatalf("a template on the internet tier is checked and may install: %+v %v", withTemplate, err)
 	}
@@ -78,7 +78,7 @@ func TestHostedToolInstallChoice(t *testing.T) {
 		argv    []string
 		refusal []string
 	}{"template set, internet, only curl", *withTemplate, has("curl", "bash"), script.Argv, nil})
-	below, err := hostedToolDelivery("claude-code", "sealed-box", vocab.TierProxyOnly, "")
+	below, err := forkToolCheck("claude-code", "sealed-box", vocab.TierProxyOnly)
 	if err != nil || below == nil || below.CanInstall {
 		t.Fatalf("a template below the internet tier is checked, not installed into: %+v %v", below, err)
 	}
@@ -347,4 +347,10 @@ func TestHostedSpaceNote(t *testing.T) {
 	if _, sp := parseHostedToolRun([]byte("space x 1\nspace 5 0\n")); sp != (hostedSpace{}) {
 		t.Errorf("a bad space line parsed: %+v", sp)
 	}
+}
+
+// forkToolCheck is the fork's tool check for a launch (hostedToolCheckPlan);
+// upstream's hostedToolDelivery owns the refusals since the v1.43.1 merge.
+func forkToolCheck(tool, template string, tier vocab.Tier) (*hostedToolCheck, error) {
+	return hostedToolCheckPlan(tool, template, tier), nil
 }

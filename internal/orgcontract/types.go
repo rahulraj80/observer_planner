@@ -20,6 +20,29 @@ type EnrollRequest struct {
 	// without DisallowUnknownFields and ignores it, and an older node sends
 	// none, so the server never offers it a field it would fail to verify.
 	Capabilities []string `json:"capabilities,omitempty"`
+
+	// AttachGrant is the one-step attach grant (internal/attachgrant) the
+	// SuperBased cloud handed this machine when its owner clicked Connect
+	// for this dashboard (Getting started v2). It replaces OneTimeToken: a
+	// request carries one or the other. omitempty both ways: an older server
+	// ignores it (and then refuses the request for its missing token, which
+	// the node reads as "this server takes no grant"), and an older node
+	// never sends it.
+	AttachGrant string `json:"attach_grant,omitempty"`
+	// AttachProof is the device proof that rides with AttachGrant: the
+	// device key the connect request was made with, and its signature over
+	// the grant and AgentPublicKey (attachgrant.ProofMessage). A copied
+	// grant without the device key is useless.
+	AttachProof *AttachProof `json:"attach_proof,omitempty"`
+}
+
+// AttachProof is the wire shape of attachgrant.Proof (orgcontract does not
+// import the grant package; the server converts).
+type AttachProof struct {
+	// DevicePublicKey is the raw 32-byte Ed25519 device key, base64url.
+	DevicePublicKey string `json:"device_public_key"`
+	// Signature is the device key's Ed25519 signature, base64url.
+	Signature string `json:"signature"`
 }
 
 // EnrollResponse is the 200 body of POST /api/agent/enroll. The bearer is
@@ -60,6 +83,28 @@ type EnrollResponse struct {
 	// AUTHORITIES it unlocks live in the SIGNED Grant.Authority, and the node
 	// honours them only when it recorded ConsentMode=managed from this field.
 	Tenancy string `json:"tenancy,omitempty"`
+
+	// OwnerManaged is true when this organization's only admin and its only
+	// developer are the same person (a personal organization, managed by its
+	// owner since the 2026-11-19 ruling: orgkind's OwnerManaged row
+	// capability). It grants NOTHING: the authority is in the signed Grant,
+	// honoured only under managed tenancy as for any team. It changes only
+	// the words on the consent screen, so the owner reads that the
+	// organization asking is their own. omitempty on both sides of the
+	// compat invariant: an older server never sends it (the screen keeps its
+	// team wording) and an older agent ignores it.
+	OwnerManaged bool `json:"owner_managed,omitempty"`
+
+	// SDKKeys says whether a member's own machine can get the member's SDK
+	// key from this organization (POST AgentSDKCredentialPath):
+	// SDKKeysMember when it can, SDKKeysAdminOnly when the server issues no
+	// member keys and an admin creates app keys instead, SDKKeysNotOnPlan
+	// when the organization's plan does not include AI Apps (a hosted server).
+	// A node that does not know a value prints its "unknown" wording.
+	// enrolling (SR-9): it never gates a request. omitempty on both sides of
+	// the compat invariant: an older server never sends it (the node then
+	// says it does not know) and an older agent ignores it.
+	SDKKeys string `json:"sdk_keys,omitempty"`
 
 	// ConsentMode / ConsentActor record HOW this enrolment was consented to
 	// when the server itself knows the answer, which today means exactly one
@@ -886,6 +931,12 @@ type PushEnvelope struct {
 	// directions.
 	SandboxPosture    []SandboxPostureRow   `json:"sandbox_posture,omitempty"`
 	SandboxCapability *SandboxCapabilityRow `json:"sandbox_capability,omitempty"`
+	// SandboxEgressRefusals is the OPTIONAL per-day egress refusal count by
+	// tier and closed rule (audit CG-15, decision D-11), sent only by a
+	// MANAGED node. Enums and counts only; no host, port, path or run. See
+	// sandboxegress.go. Optional both directions: an old agent omits it, an
+	// old server ignores the key.
+	SandboxEgressRefusals []SandboxEgressRefusalDayRow `json:"sandbox_egress_refusals,omitempty"`
 	// SecurityPosture / SecurityFindings / AIChangeRecords are the OPTIONAL
 	// security pillar wire (security plan 7.4, lane SEC-E2), composed through
 	// the SecurityOrgProviders seam only while the security module is active
@@ -1089,6 +1140,18 @@ type PushResponse struct {
 	// push — the fleet-ACK signal the server's posture-activation gate reads.
 	GrantReplacement *GrantReplacement `json:"grant_replacement,omitempty"`
 
+	// Reconsent is the OPTIONAL advisory that this organization now offers
+	// the calling node an enrolment it does not hold, which the developer
+	// must accept on the machine before anything changes (budget enforce
+	// consistency, 2026-11-19). Today it has one reason,
+	// ReconsentOwnerManaged: a personal organization's machine that
+	// enrolled as an individual before a personal org was managed by its
+	// owner. It carries no authority and the node NEVER acts on it by itself:
+	// it only shows the local dashboard's "Review and accept" prompt, whose
+	// click runs an ordinary re-connect and consent screen. omitempty on both
+	// sides of the compat invariant.
+	Reconsent *ReconsentOffer `json:"reconsent,omitempty"`
+
 	// BreakGlassLeases is the OPTIONAL delivery seam for approved break-glass
 	// credential leases owed to THIS node (Plane B design §4.2 rung 3, operator
 	// Q5, P6). It rides the same already-authenticated push round trip as
@@ -1185,6 +1248,21 @@ type PushResponse struct {
 	// an older server never sends it (the node keeps its enrolment name) and
 	// an older node ignores the unknown key.
 	OrgName string `json:"org_name,omitempty"`
+
+	// OwnerManaged is whether this organization is the developer's own: its
+	// only admin and its only developer are the same person (a personal
+	// organization of one, orgkind's OwnerManaged row), the same fact as
+	// EnrollResponse.OwnerManaged, restated on every accepted push so a node
+	// that enrolled before it stored the fact (agent migration 261), or
+	// whose organization's answer changed, records the current one
+	// (store.SetEnrolmentOwnerManaged, bound to the enrolment's org id). It
+	// grants no authority: on a managed enrolment it only picks the owner
+	// audience of the managed-default visibility table (finding F12). A
+	// POINTER so an explicit false can clear the node's record while an
+	// absent key (an older server, or a push whose org-kind read failed)
+	// changes nothing. omitempty on both sides of the compat invariant: an
+	// older node ignores the unknown key.
+	OwnerManaged *bool `json:"owner_managed,omitempty"`
 }
 
 // Rail keys of PushResponse.RailVersions / PolicyVersionsDoc.RailVersions.
@@ -2226,6 +2304,17 @@ type ObsSummaryRow struct {
 	ErrorTraces      int64   `json:"error_traces"`
 	DurationMsSum    int64   `json:"duration_ms_sum"` // sum+count → server derives mean
 	DurationMsCount  int64   `json:"duration_ms_count"`
+
+	// TracesPrimary / ErrorTracesPrimary count each trace in exactly ONE row
+	// of a push: the row of the trace's primary (model, provider) bucket
+	// (finding F17). Traces above counts every trace that TOUCHED this
+	// bucket, so it double-counts a trace that used two models; summing it
+	// over models inflates the total. A server sums the *Primary fields for
+	// totals. nil = a pre-F17 agent (the server then falls back to the
+	// per-group MAX of Traces, a never-inflated lower bound). Old servers
+	// ignore the keys (compat invariant, both directions).
+	TracesPrimary      *int64 `json:"traces_primary,omitempty"`
+	ErrorTracesPrimary *int64 `json:"error_traces_primary,omitempty"`
 }
 
 // ObsTraceRow is the T2 trace skeleton (STRUCTURE, hashes only). ProjectRoot
@@ -2246,6 +2335,24 @@ type ObsTraceRow struct {
 	SpanCount   int64   `json:"span_count"`
 	TotalTokens int64   `json:"total_tokens"`
 	CostUSD     float64 `json:"cost_usd"`
+
+	// Identity contract (W1a-2, finding F11; key lists in internal/otelident).
+	// Service / Environment / Release are the app's deployment labels and
+	// always ship. EndUser (PII) and Tenant (the customer's own tenant), and
+	// since D23 their org-bound hashes too, ship ONLY under
+	// shipsRawContent() (PrepareForWire clears both below it). Tags and Metadata
+	// are free-form customer text and are gated like the raw values. All are
+	// additive and omitempty: an old server ignores them, an old agent sends
+	// none (compat invariant). Apply the gate with PrepareForWire.
+	Service     string            `json:"service,omitempty"`
+	Environment string            `json:"environment,omitempty"`
+	Release     string            `json:"release,omitempty"`
+	EndUser     string            `json:"end_user,omitempty"`      // gated by shipsRawContent()
+	EndUserHash string            `json:"end_user_hash,omitempty"` // gated by shipsRawContent() (D23)
+	Tenant      string            `json:"tenant,omitempty"`        // gated by shipsRawContent()
+	TenantHash  string            `json:"tenant_hash,omitempty"`   // gated by shipsRawContent() (D23)
+	Tags        []string          `json:"tags,omitempty"`          // gated by shipsRawContent()
+	Metadata    map[string]string `json:"metadata,omitempty"`      // gated by shipsRawContent()
 }
 
 // ObsSpanRow is the T2 span skeleton. RequestID is the CONTENT-FREE soft join
@@ -2416,6 +2523,17 @@ type ObsAdmissionRow struct {
 	// (content-free SHA-256 hex). RowHash doubles as the server-side dedup key.
 	PrevHash string `json:"prev_hash,omitempty"`
 	RowHash  string `json:"row_hash"`
+	// CredID / WorkspaceID / EnvironmentID / VerdictID are set ONLY on an org
+	// SDK verdict record (POST /v1/sdk/admit, source org_sdk) that the org
+	// server itself publishes to its durable log (R-A06, ruling D22): the
+	// asking ingest credential, its workspace and environment, and the
+	// verdict id the API returned. Non-secret ids, content-free. A node never
+	// sets them and ingest ignores them on a node push; on an SDK record
+	// ingest computes RowHash / PrevHash itself (a per-credential chain).
+	CredID        string `json:"cred_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	EnvironmentID string `json:"environment_id,omitempty"`
+	VerdictID     string `json:"verdict_id,omitempty"`
 
 	// --- Content-bearing (PII / prose) — ship ONLY under shipsRawContent() ---
 	// Tenant is the hosted-app tenant identifier.
@@ -2737,6 +2855,35 @@ type LocalGuardPosture struct {
 	// AllowListCount is how many [guard.prompt].allow patterns are
 	// configured. The count only: the pattern text never travels.
 	AllowListCount int `json:"allow_list_count"`
+
+	// RuleChanges is the gen9 field (localrules.go): every rule change the
+	// machine makes for itself, in its config's `[guard.rules] disable`
+	// list, its user policy file, a project policy file or the trusted
+	// per-project layer, with whether the machine runs it. Ids, closed
+	// enums and project identity hashes only. A gen8 server 400s it
+	// (DisallowUnknownFields), which the node's generation ladder probes
+	// for. Nil = no local change, or a node that predates the field.
+	RuleChanges []LocalRuleChange `json:"rule_changes,omitempty"`
+	// RuleChangesTruncated (gen9) says the node cut RuleChanges to
+	// MaxLocalRuleChanges, or left out a change whose rule id is not
+	// reportable, so the list is partial.
+	RuleChangesTruncated bool `json:"rule_changes_truncated,omitempty"`
+	// RemovedDisables (gen9) is the `[guard.rules] disable` ids the daemon
+	// removed from this managed machine's config file at its last start,
+	// because the organization manages those rules and did not allow a local
+	// change to them; RemovedDisablesAt is when (RFC3339). Empty when the
+	// daemon removed nothing.
+	RemovedDisables   []string `json:"removed_disables,omitempty"`
+	RemovedDisablesAt string   `json:"removed_disables_at,omitempty"`
+	// Inputs (gen9) summarises the guard engine inputs the machine sets for
+	// itself (boundary, network, database, proxy, taint and MCP settings)
+	// as shapes, counts, enums and bools (LocalGuardInputs). Nil = not
+	// reported (an individual node, or one that predates the field).
+	Inputs *LocalGuardInputs `json:"inputs,omitempty"`
+	// Node (gen9) summarises the node-local settings that shape policy and
+	// enforcement outside the rule layers (LocalNodePosture). Nil = not
+	// reported.
+	Node *LocalNodePosture `json:"node,omitempty"`
 }
 
 // Local guard weakening keys: the closed vocabulary of a LocalGuardPosture
@@ -2749,6 +2896,15 @@ const (
 	LocalGuardKeyPromptMode    = "guard.prompt.mode"
 	LocalGuardKeyDetectors     = "guard.prompt.detectors"
 	LocalGuardKeyAllow         = "guard.prompt.allow"
+	// LocalGuardKeyRules (gen9): the machine relaxes or disables a rule for
+	// itself (LocalGuardPosture.RuleChanges with Loosens), applied or not.
+	LocalGuardKeyRules = "guard.rules"
+	// LocalGuardKeyInputs (gen9): a guard engine input is weaker than the
+	// shipped default (LocalGuardInputWeakenings names which).
+	LocalGuardKeyInputs = "guard.inputs"
+	// LocalGuardKeyNode (gen9): a node setting is weaker than the shipped
+	// default (LocalNodeWeakenings names which).
+	LocalGuardKeyNode = "node.settings"
 )
 
 // localGuardPromptRank orders the prompt-guard modes from weakest to
@@ -2816,6 +2972,9 @@ func LocalGuardWeakenings(p *LocalGuardPosture, pinned map[string]string) []stri
 		{LocalGuardKeyPromptMode, localGuardPromptRank[p.PromptMode] < localGuardPromptRank[localGuardPromptFloor]},
 		{LocalGuardKeyDetectors, weakDetector},
 		{LocalGuardKeyAllow, p.AllowListCount > 0},
+		{LocalGuardKeyRules, len(LocalRuleLoosenings(p)) > 0},
+		{LocalGuardKeyInputs, len(LocalGuardInputWeakenings(p.Inputs)) > 0},
+		{LocalGuardKeyNode, len(LocalNodeWeakenings(p.Node)) > 0},
 	}
 	var out []string
 	for _, c := range checks {
@@ -3034,3 +3193,16 @@ type OrgAnnouncementDoc struct {
 	// agent on first receipt (enrolment-channel trust).
 	PublicKey string `json:"public_key"`
 }
+
+// ReconsentOffer is PushResponse.Reconsent: an advisory, never authority.
+type ReconsentOffer struct {
+	// Reason is one of the Reconsent* constants; a node that does not know
+	// the reason shows nothing.
+	Reason string `json:"reason"`
+}
+
+// ReconsentOwnerManaged is the reason a personal organization's machine,
+// enrolled as an individual, is offered a re-consent: its organization is
+// managed by its owner, so an Enforce budget there can block only after the
+// machine re-connects and the owner accepts the managed grant.
+const ReconsentOwnerManaged = "owner_managed"

@@ -34,7 +34,7 @@ func TestOpenShellOrgRow(t *testing.T) {
 		{"capture full through the relay", c.Capture == Capture{Ceiling: vocab.CaptureFull, HookPath: HookRelay, Relay: RelayExecStdio}},
 		{"read back provider", c.ReadBack == ReadBackProvider},
 		{"lifetime 7200 fixed", c.LifetimeCapSeconds == 7200},
-		{"disclosures", slices.Equal(c.Discloses, []Disclosure{DiscloseDataLeaves, DiscloseAccountLogin, DiscloseOrgCompute, DiscloseOrgSharedGateway})},
+		{"disclosures", slices.Equal(c.Discloses, []Disclosure{DiscloseDataLeaves, DiscloseAccountLogin, DiscloseOrgCompute, DiscloseOrgSharedGateway, DiscloseNoHookGating})},
 		{"no paid tier", !slices.Contains(c.Discloses, DisclosePaidTier)},
 		{"keystore grant service", slices.Equal(c.KeystoreServices, []string{"sbo-openshell-org-grant-v1"})},
 		{"beta on Linux and WSL2 with the G-L register", func() bool {
@@ -57,7 +57,7 @@ func TestOpenShellOrgRow(t *testing.T) {
 // TestOrgHostedRowLeavesHostedRowAlone: the wrapper does not change the
 // three vendor rows' shape (they keep phase P7 and the paid tier).
 func TestOrgHostedRowLeavesHostedRowAlone(t *testing.T) {
-	for _, id := range []string{BackendE2B, BackendModal, BackendVercelSandbox} {
+	for _, id := range []string{BackendE2B, BackendModal, BackendVercelSandbox, BackendDockerSandboxes, BackendInstaBox, BackendDaytona} {
 		c, _ := Get(id)
 		if c.Phase != "P7" || !slices.Contains(c.Discloses, DisclosePaidTier) || c.Net.Enforcer != EnforcerProvider {
 			t.Errorf("%s changed: %+v", id, c)

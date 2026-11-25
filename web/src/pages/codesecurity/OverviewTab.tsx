@@ -18,6 +18,7 @@ import { problemCounts, scannerProblems, type ScannerProblem, type ScannerProble
 import { coverageSummary, hasCoverage, reasonGroups } from "@/lib/secCoverage";
 import type { CodeSecurityTab } from "@/lib/nodePageTabs";
 import { toneOf } from "@shared/lib/tone";
+import { SecAssessCard } from "@/components/secassess/SecAssessCard";
 import { NamedLoading } from "./NamedLoading";
 import { ScanJobSummary } from "./ScanJobSummary";
 import { SEVERITY_TONE } from "./ProjectsCard";
@@ -143,7 +144,14 @@ export function ProblemList({ problems, onOpenTab }: { problems: ScannerProblem[
       )}
       {off.length > 0 && (
         <div className="min-w-0 space-y-0.5">
-          <p className="m-0 text-[11.5px] font-medium text-fg-3">Off on this machine</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="m-0 text-[11.5px] font-medium text-fg-3">Off on this machine</p>
+            {off[0]?.action && (
+              <Button size="sm" variant="ghost" onClick={() => onOpenTab(off[0]!.action!.tab)}>
+                Turn on in Scanners
+              </Button>
+            )}
+          </div>
           <ul className="m-0 min-w-0 list-none space-y-0.5 p-0 text-fg-3" aria-label="Scanners that are off">
             {off.map((p) => (
               <li key={`${p.driver}|${p.reason}`} className="min-w-0 break-words">
@@ -402,6 +410,8 @@ export function OverviewTab({
             <ScanJobSummary job={scan.job} onOpenScan={onOpenScan} steps={steps} />
           </ChartState>
         </Card>
+
+        <SecAssessCard projects={projects} />
       </div>
     </div>
   );

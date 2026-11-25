@@ -5,8 +5,8 @@ All notable changes to SuperBased Observer are documented here.
 ## [Unreleased]
 
 - **Every page says what the telemetry default is.** PRIVACY.md, the VS Code extension's README,
-  walkthrough and guides no longer say that no usage data is sent: versions released after 1.38.0
-  send the content-free `baseline` level of usage telemetry by default (four levels: `off`,
+  walkthrough and guides no longer say that no usage data is sent: this build
+  sends the content-free `baseline` level of usage telemetry by default (four levels: `off`,
   `baseline`, `enrichment`, `deep`), and `observer telemetry consent off` turns it off. The
   privacy-claims drift gate now also fails on "no usage statistics" and "does not collect usage
   data".
@@ -127,6 +127,1263 @@ All notable changes to SuperBased Observer are documented here.
     scheduler beside the org digest that sends the composed briefing for the
     last completed UTC day.
   - `web2` Daily Briefing page (`/briefing`) + sidebar entry.
+
+## [1.43.1] - 2026-11-24
+
+Patch release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). It fixes two things found when superbased's hosted service moved to
+1.43.0: the AI Apps gateway that 1.43.0 announced for hosted organizations could not start there,
+and a fleet alert mailed an organization every 30 minutes for as long as one node stayed silent.
+Nothing changes on a developer's machine. Like 1.37.x to 1.43.0 it needs macOS 13 Ventura or
+later: a Mac on macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Upgrade notes
+
+- **Org servers run one database migration** (SQLite 382, PostgreSQL 0560). It adds
+  `obs_alert_rules.notified_findings`, the open findings a fleet rule's last notification covered.
+  It only adds a column, so 1.43.0 still runs on the migrated database.
+- **The built-in "Nodes out of contact" rule now reminds once a day.** A rule still at its shipped
+  30 minutes moves to one day once, on the next sweep; its on or off state is kept. A rule an
+  admin changed keeps its interval.
+- No node migration and no change to the node's push.
+
+### Fixed
+
+- **A fleet alert no longer repeats every interval while the same nodes stay silent.** A fleet
+  rule notifies at once when a node newly enters its state (a node goes silent, or a closed
+  finding opens again), and otherwise only when its interval elapses, as a reminder: the email
+  says "Alert reminder", the webhook carries `"reminder": true` and the audit entry `reminder=1`.
+  An admin-authored fleet rule keeps its own interval and gains the same new-node test. A rule
+  with no window no longer says "over the last 0 day(s)" in its email.
+- **A pooled org server's collector can serve the AI Apps gateway.** In 1.43.0 a pooled
+  `--role collector` with `[gateway]` enabled refused to start: only a process with the api role
+  could admit gateway traffic. The collector now builds its own read-only admission, each
+  organization's entitlement, platform pause and quotas, read from what the api process stores.
+  It re-reads the pause and entitlements every 30 seconds and an organization's quota state at
+  most every minute, and writes none of them. A pooled gateway with no admission still refuses to
+  start. The collector's gateway also sits behind the same tenant host router as the api's, so
+  an unknown host answers 404 and another organization's key is refused. `observer-org supports
+  pooled-gateway-collector-admission` answers yes on this release.
+
+### superbased's hosted service
+
+- **The AI Apps gateway goes live on each organization's own address.** 1.43.0 announced it, but
+  the hosted service ran 1.43.0 with the gateway off because it could not start (see Fixed). Once
+  the hosted service is on 1.43.1, `https://<your-org>.superbased.app/v1/traces` (and `/v1/logs`,
+  `/v1/metrics`, `/v1/sdk/`) accept data from the superbased SDKs and any OpenTelemetry exporter,
+  as the 1.43.0 notes describe.
+- **A failed server process no longer takes every hosted address down.** During the 1.43.0
+  update, one org process failing to start left the shared front proxy stopped for about 30
+  seconds, so every hosted address answered 521. The front proxy now starts whatever happens to
+  the processes behind it, and only the failed process's routes answer an error.
+
+## [1.43.0] - 2026-11-24
+
+Minor release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). Everything below is new since 1.42.1. It fixes what the 2026-11-23
+ship-readiness audit found: OpenAI sessions through the proxy that failed on every follow-up turn
+with conversation compression on, a restart that cut off the AI tools routed through the proxy,
+hook registration that dropped a developer's own hook settings, and hints that named commands and
+pages a user cannot reach. superbased's hosted service gets an AI Apps gateway on each
+organization's own address and an org dashboard that no longer tells a hosted admin to do what
+only a server operator can, and the opt-in community cost aggregate now has a live collector. The superbased SDKs are on the
+package registries for the first time (0.1.0 on PyPI and npm, and a tagged Go module), and every
+npm and PyPI package of this release is published with provenance. Like
+1.37.x to 1.42.1 it needs macOS 13 Ventura or later: a Mac on macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Upgrade notes
+
+- **`observer service restart` now takes the proxy routes off first** and puts them back once the
+  new daemon's proxy answers (see Fixed). On a managed machine whose organization maintains its
+  routes it refuses and names `observer service restart --keep-routes`, which restarts with the
+  routes left on, as before; `observer service stop` refuses there too without `--keep-routes`.
+  Both refuse inside a session the daemon started, such as a dashboard terminal: run them from a
+  terminal the daemon did not start.
+- **A hooks file Observer cannot edit without guessing is now left untouched.** Before, `observer
+  start` replaced a Cursor `hooks` member it could not read. Now a `hooks` member that is not an
+  object, an event listed twice or not holding a list, or an entry that is not an object is
+  refused with a message that names the file and says "nothing was written; fix the file by hand,
+  then re-run".
+- **Agent migration 261 runs at the first start.** It is node-local: it records whether the
+  organization a machine is enrolled with is the developer's own personal dashboard (see Fixed).
+  A machine already connected to one learns it on its next push, without enrolling again.
+- **Org servers have no database migration.** A member's own SDK key now needs the server's AI
+  Apps gateway on (`[gateway].enabled`): with it off, the key is refused and the enrolment hint
+  sends members to an admin. superbased's hosted service also runs cloud migration 0154, an
+  additive step for its staff console's availability changes; it changes nothing until superbased
+  staff issue one.
+
+### Security
+
+- **The proxy's forward secret scrub skips only what the provider wrote and verifies.** With
+  conversation compression on, a request going back to its provider is scrubbed for secrets. That
+  scrub now leaves the fields the provider verifies byte for byte: OpenAI `encrypted_content` on
+  reasoning and compaction items (kept wherever it appears, as before) and, only at their place in
+  the provider's protocol, Anthropic `thinking` text with its `signature`, `redacted_thinking`
+  data, and Gemini thought signatures. The provider refuses any change to them, so scrubbing them
+  broke the session and protected nothing. Thinking and signature look-alikes inside tool input
+  or tool output, the other fields of those blocks, and JSON keys are still scrubbed.
+- **superbased's hosted service: an SDK key works only on its own organization's address.** On
+  another organization's host the AI Apps gateway refuses it exactly like an unknown key, and a
+  stream of such requests cannot slow down other organizations' key checks.
+
+### Fixed
+
+- **`npx superbased` works again.** The `superbased` 3.42.1 package was packed without its
+  launcher, `bin/superbased.js`, so `npx superbased` failed; 3.43.0 includes it.
+- **OpenAI sessions through the proxy no longer fail on every follow-up turn.** With conversation
+  compression on, a Codex or other Responses API session got HTTP 400 "encrypted content could not
+  be verified" from its second turn on once its history held a tool output ending in a
+  secret-like line such as `OPENAI_API_KEY=…`: the scrub broke the request's JSON, then redacted
+  part of an encrypted reasoning item, and the client resent that item every turn. Anthropic
+  thinking blocks and Gemini thought signatures were open to the same failure and are now kept
+  the same way (see Security).
+- **The scrub never deletes part of a request.** A secret pattern could swallow whole items and
+  still leave valid JSON, so a reasoning item and the user's next message could vanish without an
+  error. The scrub now keeps its rewrite only when the JSON shape is unchanged, and otherwise
+  replaces just the changed values in place, keeping keys, key order and escapes.
+- **Compression keeps reasoning with its answer.** It never drops, compresses or re-encodes a
+  Responses `reasoning` or `compaction` item, or any item carrying `encrypted_content`, nor the
+  item right after a reasoning item, and a rolling summary never splits such a pair. Items it
+  leaves alone are sent on without HTML escaping.
+- **A restart no longer cuts off the AI tools routed through the proxy.** The daemon is the
+  proxy, so restarting it gave a routed session `ConnectionRefused`, and the safe order existed
+  only as a script in the source checkout. `observer service restart` now does it as one step: it
+  takes off the routes that reach this proxy (Claude Code, Codex, Kimi Code, Qwen Code and
+  Crush), so live sessions reach their providers directly; restarts the daemon through systemd or
+  launchd, or in place (same terminal, log and arguments) when no service manager runs it; waits
+  for the new proxy (`--timeout`, 90 seconds by default); and puts the routes back. `--dry-run`
+  shows the plan. It now also works on macOS and without a service manager. `observer service
+  stop` takes the routes off before stopping, and `observer service start` puts them back.
+- **A restart never loses a route or your settings.** Routes your organization wrote stay on. A
+  route comes off only when putting it back is proven to restore every setting and comment in the
+  file, so a Codex provider table holding your own keys keeps its route on. The file's original
+  bytes go back when nothing else wrote it, and a value changed during the restart is never
+  written over. An interrupted restart leaves the routes still off in
+  `~/.observer/route-hold.json` (no file contents), and the daemon puts them back itself once its
+  proxy answers; `observer doctor` warns while any are off. Only one restart, stop or start runs
+  at a time.
+- **Every restart hint names the shipped command.** The CLI, `observer doctor`, the npm
+  postinstall and the installers pointed at the source checkout's restart script or an internal
+  runbook. They now name `observer service restart`, or `observer service stop` and `start`
+  around work that needs the daemon down. On native Windows, which has no in-place restart, they
+  say to quit the daemon and run `observer start` again between AI turns. The dashboard's Restart
+  button still leaves the routes on, and its dialog now names `observer service restart`.
+- **Hook registration keeps your own hook settings.** `observer start` registers hooks for every
+  detected AI tool, and several writers rewrote the file through a shape that held only
+  Observer's own fields. A developer's entries lost their `timeout`, `matcher`, `type`, `env` and
+  any other field in Cursor's `hooks.json` (and its Windows copy for a WSL daemon), Claude Code's
+  Windows `settings.json`, the Gemini CLI, Qwen Code and Qoder settings, and Codex's
+  `hooks.json`, which also lost every top-level key beside `hooks` and was rewritten at every
+  start. Native Claude Code lost group keys such as `description`, and Kiro lost unknown
+  top-level keys. Now every entry stays as written, only Observer's own handlers are added,
+  refreshed or removed, an unchanged file is not rewritten, and commands are no longer
+  HTML-escaped. Cursor's `version` is written only when the file has none.
+- **A refresh replaces Observer's hook where it sits.** When a developer's handler shared
+  Observer's matcher group, a refresh moved Observer's handler out, the next start counted the
+  leftover group as a conflict, and that tool's hooks kept running the old binary. Codex, which
+  trusts a handler by its position, also stopped running the developer's handler. Observer's
+  stale handler is now replaced in place and the group stays whole; a file the old refresh split
+  recovers on the next start. Kiro's uninstall no longer deletes the file while it holds a key of
+  yours, and a hosted sandbox box's seeded hooks no longer keep a stale Observer hook beside the
+  fresh one.
+- **A machine connected to your own personal dashboard keeps its AI apps pages.** Connecting made
+  the machine organization-managed with a team member's defaults, which hid the Your AI apps
+  pages (Egress and Policies included), Routing, and Settings > Routing and Settings > AI Apps, so
+  the SDK's `score()`, `feedback()` and `get_trace_cost()` failed. On a machine its owner manages
+  they now stay visible. A team's machines keep the team defaults, and an organization's explicit
+  setting still wins.
+- **Hints name only commands that exist and pages you can open.**
+  - `observer stop, then observer start` (there is no `observer stop`) now reads `observer service
+    restart`, or stop `observer start` and run it again; `observer db check` now reads `observer
+    doctor db`.
+  - About 115 CLI strings and the local dashboard's help cited `docs/*.md` files that exist only
+    in the source repository. They now link the matching page on superbased.app/docs, name a
+    command that helps (`observer handoff --help`, `observer guard lint` and others), or drop the
+    path. That includes the comments Observer writes into Codex's `config.toml` and into the
+    `[org_client]` block of `config.toml`, and the header of the guard policy files the dashboards
+    compose.
+  - `observer apps` linked a page that does not exist; it now links
+    `https://superbased.app/docs/sdk/quickstart-machine`.
+  - `observer init` ends with `https://github.com/superbasedapp/observer` and its issues page.
+  - Help and messages no longer carry internal tracker ids, `observer admission` says what observe
+    and enforce modes do, and the local dashboard drops its stale MCP tool counts.
+- **The SDK key hint after enrolling says what applies to you.** It told every member to run
+  `observer sdk sign-in`, which fails where the organization gives members no keys of their own.
+  It now follows the organization's answer: run `observer sdk sign-in` (or Settings > AI Apps >
+  Get my SDK key); ask an admin for a key (Machine identities, in the organization's dashboard
+  settings); or, when the organization's plan does not include AI Apps (`not_on_plan`), its
+  billing owner changes the plan on the organization's own page in the superbased portal. With no
+  answer (an older server, or `observer org status`) it gives the first two. When `observer sdk
+  sign-in` is refused because the organization gives members no keys, it says to ask an admin.
+
+### Added
+
+- **The superbased SDKs install from the package registries.** SDK 0.1.0 is published with this
+  release: `pip install superbased-sdk` (PyPI), `npm install @superbased/sdk` and `npm install
+  @superbased/feedback-widget` (npm), and `go get github.com/superbasedapp/observer/sdk/go` (the
+  module tag `sdk/go/v0.1.0` on the public repository). Before, every install line said to install
+  from a checkout, and PyPI held only a 0.0.1 name placeholder that broke `sb.init()`; that
+  placeholder is yanked once 0.1.0 is verified. The Java SDK is not on Maven Central yet and
+  still installs from a checkout.
+- **A live collector for the community cost aggregate.** `observer aggregate submit` sent to
+  `https://aggregate.superbased.app/v1/submit`, which answered 404; the collector now runs there.
+  The rail stays off until you run `observer aggregate enable`, read the preview and type `yes`,
+  and a month is sent only when you run `observer aggregate submit`. The collector stores no IP
+  address and no time finer than the day, and its rollup keeps a total only when enough
+  submissions contribute (50 to start) and none dominates. `/docs/reference/aggregate-rail`
+  describes what is sent, what is kept and for how long, and how submissions are admitted.
+
+### Changed
+
+- **npm and PyPI packages are published from the public repository with trusted publishing.**
+  Every npm package of the release (`@superbased/observer`, its five platform packages, the
+  `superbased` short name and the two SDK packages) and both PyPI projects (`superbased-observer`,
+  `superbased-sdk`) are published by the public repository's release workflow without a stored
+  token: each npm version carries provenance and each PyPI file an attestation naming the release
+  workflow that published it. The `superbased` short name is no longer published by hand.
+- **The consent screen lists what a managed machine hides.** On a managed enrolment, the local
+  dashboard's consent card and the CLI list exactly which dashboard pages and Settings sections
+  start hidden or read-only on this machine, from the same table the machine applies. For your own
+  personal dashboard it also says which pages stay visible and why.
+- **The sandbox backend list and the New Terminal Isolation picker say which backends need an
+  image you build.** Docker or Podman and gVisor need a container image you build and pin by
+  digest, Apple container a linux/arm64 image you build, and the Cloud Hypervisor microVM a guest
+  image set you build and import: Observer publishes no default image for them yet. No option is
+  removed.
+
+### superbased's hosted service
+
+These reach hosted organizations when superbased's hosted service is updated to 1.43.0,
+shortly after this release.
+
+- **An AI Apps gateway on each organization's own address.** Apps and agents send OpenTelemetry
+  traces, logs and metrics to `https://<your-org>.superbased.app/v1/traces` (and `/v1/logs`,
+  `/v1/metrics`), and the superbased SDKs reach their control API under `/v1/sdk/` on the same
+  host. Langfuse SDKs send to `https://<your-org>.superbased.app/api/public/otel/v1/traces`.
+  Settings > Apps & SDKs shows the organization's own address, and says so when AI apps tracing
+  is not set up for the organization yet, as do the AI apps empty states.
+- **Members get their own SDK keys.** A hosted organization issued none. `observer sdk sign-in`
+  and Settings > AI Apps > Get my SDK key now mint a member's key on a hosted organization whose
+  plan includes AI Apps, addressed to the organization's own host; a member who is not active
+  gets none. On a plan without AI Apps no key is minted, and enrolment answers `not_on_plan` so
+  the hint names the plan (see Fixed).
+- **Alert emails reach the organization's admins.** A hosted organization's budget and AI Apps
+  alert emails went to nobody. Each now goes to that organization's active admins and its
+  super-admin seat holder, never to another organization or a shared inbox; an organization with
+  no such address gets none.
+- **The org dashboard is honest about what a hosted organization gets.** Self-hosted org servers
+  are unchanged.
+  - A feature a hosted organization's server does not serve shows one panel, "Not available on
+    hosted organizations yet", naming the feature and what to do instead, never a raw
+    `not_available_in_pooled` 404 or a Retry that cannot succeed.
+  - Pages a hosted organization cannot use leave the navigation (AI gateway, Assistant,
+    Deployment, My connections and Change records), and so do the Enforcement mode, Server
+    maintenance and Org-hosted OpenShell sections of Settings; a direct link shows the panel. A
+    page that needs a permission a hosted organization never holds shows it too, not "Access
+    denied".
+  - Controls whose route is refused are disabled with the reason, for example re-price Apply and
+    Revert, an integration's Test connection and Run now, and approving an MCP server's pending
+    tool list.
+  - A fix only a server operator can make (edit the server config, run `observer-org`, restart
+    the server) reads in hosted words: what superbased does, where to go instead, or that it is
+    not available yet, with contact@superbased.app. The sign-in page's lockout note points at your
+    superbased account and its recovery codes, and first-run setup says a hosted organization
+    needs no setup.
+  - Publishing managed security settings, managed sandbox settings or AI tool settings warns "Not
+    delivered to machines yet": machines connected to a hosted organization do not receive them
+    yet. The publish still goes through.
+  - Approvals stays, and lists and decides held MCP tool calls.
+- **Code security stays off for a hosted organization by default,** and its switch says
+  superbased's default decides until an admin chooses, instead of naming a server config file.
+- **Deleting your account cancels its billing first.** Deleting a superbased account removed the
+  record of its personal subscription without canceling it at Paddle, so Paddle kept billing.
+  Before anything is deleted, every subscription Paddle may still bill is now canceled: the
+  account's own plan, its personal dashboard's Personal Pro, a team already being deleted, and a
+  refunded or charged-back subscription (a refund or chargeback ends the plan, but Paddle would
+  renew it). A live team still blocks the deletion. If Paddle does not confirm a cancellation,
+  nothing is deleted and the console says why and what to do. An account whose personal dashboard
+  pays for Personal Pro can now be deleted; it was refused as paying for a team. Deleting a team
+  also cancels a refunded or charged-back subscription.
+- **A renewal never moves a plan to an older version.** An organization's Paddle renewal, update
+  or cancellation could write its subscription back to an older version of its plan; the version
+  now only moves forward.
+
+### Docs and website
+
+- **Every SDK install line gives the registry command** instead of "from a checkout: not on PyPI
+  yet": the machine dashboard's AI Apps card, the org dashboard's Apps & SDKs page, `/docs/sdk`,
+  the SDK READMEs, the website and the AI Apps examples (which still install the SDK beside them,
+  so they test that code).
+- **The Teams docs say what a team server receives for each kind of enrolment.** An individual
+  enrolment sends hashes and metadata, with raw values only when that machine turns on full
+  content; a team (managed) enrolment sends the full session record under the organization's
+  signed grant, shown at consent and in `observer org status`. The getting-started, comparison and
+  glossary pages said metadata only.
+- **The install page** says `go install` must use the module path the public `go.mod` declares,
+  `github.com/marmutapp/superbased-observer`, and that a source build is the public edition,
+  without AI Apps.
+- **`/download`** shows the Claude Code plugin's second step, `/plugin install
+  superbased@superbased`.
+- **The AI Apps machine quickstart** turns AI Apps on with `observer apps on`, which needs no
+  restart, and the Langfuse page gives the hosted address,
+  `https://<your-org>.superbased.app/api/public/otel/v1/traces`.
+- **The browser extension is described as a preview,** in no store and loaded unpacked from the
+  public repository, and the OpenCode plugin's README says its npm package is published by hand
+  and can lag behind a release.
+- **The `examples/copilot-harness` README** installs a release build and uses only commands that
+  exist.
+
+### Known issues
+
+- The macOS launchd hand-over and `observer service restart` through launchd are covered by tests
+  but have not been run on a Mac yet.
+- On native Windows, `observer service restart` refuses: the daemon cannot restart itself there.
+  Quit it and run `observer start` again between AI turns.
+- The safe restart does not take off the Windows-side Claude Code and Codex routes a WSL daemon
+  wrote, or Cline's VS Code route: those stay on through a restart. `observer proxy start` (the
+  standalone proxy) does not put held routes back.
+- Machines connected to a hosted organization do not receive its managed security, sandbox or AI
+  tool settings yet; the org dashboard says so when you publish them.
+- On superbased's hosted service, AI Apps (the gateway and member SDK keys) works only for an
+  organization whose plan includes it.
+- The superbased SDKs are not on PyPI, npm or Maven Central yet: install them from a checkout
+  (`docs/sdk/README.md`).
+- On Windows, `observer sdk sign-in` keeps no key file: set `SUPERBASED_API_KEY` in the app.
+- After AI Apps is turned on in a running daemon, admission, egress routing, alerts and
+  organization share tiers wait for the next daemon start; the dashboard lists them.
+- An SDK experiment's items do not link to the traces its task produced.
+- An org server is tested on PostgreSQL 16, which every shipped deployment uses. On PostgreSQL
+  18 its database migration can stop with "out of shared memory" at the default
+  `max_locks_per_transaction`: stay on PostgreSQL 16 for now.
+
+## [1.42.1] - 2026-11-23
+
+Patch release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). It fixes the findings of the 2026-11-22 security reviews: commands a
+coding agent could get past the guard, an org member's access outliving their deactivation, and
+an update path that could leave a supervised node down or roll every update back. Like 1.37.x to
+1.42.0 it needs macOS 13 Ventura or later: a Mac on macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Upgrade notes
+
+- **A node run by `observer service install` takes 1.42.1 once by hand.** On a systemd unit or a
+  launchd agent, install 1.42.1 with the installer, or run `observer service upgrade` and then
+  `observer service restart` if it says a restart is needed. From 1.42.1 on, `observer update
+  apply` hands the running daemon over to the new binary and the service stays up. Until a node
+  has done this, an in-place update is refused before it starts, with a reason that names the fix
+  (`observer update history`, `observer update status` and `observer doctor` show it), and the
+  node stays on its current version.
+- An in-place update from 1.42.1 back to 1.42.0 or older still rolls back: the older binary checks
+  its own version the old way.
+
+### Security
+
+- **The guard judges more of what a coding agent runs.**
+  - A command behind an exec prefix (`sudo VAR=value`, `env -`, `timeout`, `nice` and the others,
+    with their value flags) is judged as the command itself. A delete, a device command or an
+    interpreter one-liner behind a prefix the guard does not know asks.
+  - A command substitution before a subcommand no longer hides it: `git $(…) push --force`,
+    `git $(…) reset --hard`, `kubectl $(…) delete`, `npm $(…) publish` and the like get the
+    verdict they get without it, and `git $(…) commit` is a commit for the commit gate.
+  - R-171's exemption for an upload to this machine holds only for a plain `http`, `https`, `ws`
+    or `wss` upload. A command substitution in the upload, a proxy variable set elsewhere in the
+    line, a sourced file, an IPFS or cache file, or a reroute ends it, and in PowerShell it binds
+    to `-Uri` only. `wget --post-file` and `--body-file` are judged as uploads.
+  - PowerShell: a parenthesised argument (`iwr -Uri ('http://' + 'x')`) no longer splits the
+    command, `powershell "<command>"` is read as `-Command`, `-Name:value` reads like
+    `-Name value`, and a word that names an executable file is never resolved as an alias.
+  - A rename onto a guard-override startup file, and the destination of an `apply_patch` rename,
+    are judged as content the guard has not seen.
+  - The commit gate treats a computed folder (`cd $(…)`, `git -C $(…)`, `env -C $(…)`) as
+    unknown, not as the current folder.
+- **Sandboxed terminals refuse cloud metadata addresses** even when an egress allow-list covers
+  their range (IPv6 and 6to4 forms included), and an OpenShell box's allowed IPs leave them out.
+- **Deactivating an org member ends their access.** Their dashboard sessions, bearer tokens and AI
+  gateway keys are revoked. The AI gateway refuses an inactive member's key, or a key whose user
+  has no member row, with `403 member_inactive` before any policy runs, and a key mint or rotation
+  for a member who is not active is refused, with the server's reason on the AI Gateway page.
+  "Sign this member out" and "Sign everyone out" now end every session, older cookies included.
+- **superbased's hosted service** hardens its database functions against temporary-table
+  shadowing and runs its expired-evidence sweep.
+
+### Changed
+
+- **New guard asks:** `rm -rf "$(mktemp -d)"` and `Remove-Item -Recurse -Force (Join-Path $PWD
+  build)` ask, because their target is computed. Every `wget` upload asks, and so does an upload to
+  this machine in a line that sources a file.
+
+### Fixed
+
+- **In-place updates of a real release no longer roll back.** The new binary compared the
+  manifest's `v1.42.0` with its own `1.42.0` and failed its self-check.
+- **A systemd service stays up across an update,** and `observer service stop` after an update
+  waits for the daemon to drain (systemd 245 to 255). On macOS the launchd agent restarts from the
+  new binary instead of stopping the new daemon.
+- **A failed update target backs off** (20 minutes, doubling, at most 6 hours), across a restart
+  too, instead of being retried every interval. `observer update apply` by hand clears it.
+- **`observer update rollback` in a supervised daemon** exits so that its supervisor restarts it,
+  and no longer migrates the restored database to the newer schema.
+- **`observer service upgrade` restarts a daemon still running under the old unit** when the
+  proxy is idle, and otherwise says that a restart is needed and why.
+- **OpenCode and zcode capture skip a malformed row** instead of stopping for good on it. The
+  skipped rows are counted in the watcher log, as Kilo Code's now are.
+- **`observer init`'s interactive checklist** no longer offers a Codex proxy route under Qwen
+  Code's or Kimi Code's name, and no longer creates `~/.codex/config.toml` when Codex is not
+  installed.
+- **The install checks** no longer read a command substitution as a package (`apt-get install -y
+  $(cat pkgs)` raised S-753), and still check `npm $(…) install <package>`.
+
+### Known issues
+
+- The macOS launchd hand-over is covered by tests but has not been run on a Mac yet.
+- AI Apps is not offered on superbased's hosted service yet. The AI gateway runs only on a
+  self-hosted org server, off by default.
+- On Windows, `observer sdk sign-in` keeps no key file: set `SUPERBASED_API_KEY` in the app.
+- After AI Apps is turned on in a running daemon, admission, egress routing, alerts and
+  organization share tiers wait for the next daemon start; the dashboard lists them.
+- An SDK experiment's items do not link to the traces its task produced.
+- An org server is tested on PostgreSQL 16, which every shipped deployment uses. On PostgreSQL
+  18 its database migration can stop with "out of shared memory" at the default
+  `max_locks_per_transaction`: stay on PostgreSQL 16 for now.
+
+## [1.42.0] - 2026-11-21
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). Everything below is new since 1.41.0. It builds out AI Apps: Observer
+now keeps traces, cost, evals and prompts for the LLM apps and agents you build, on your own
+machine or on your organization's server, sent by the superbased SDKs or any OpenTelemetry SDK.
+AI Apps is off until you turn it on, and it can be turned on in a running daemon. Like 1.37.x to
+1.41.0 it needs macOS 13 Ventura or later: a Mac on macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Highlights
+
+- **AI Apps: observe the apps and agents you build.** Your app sends OpenTelemetry spans to this
+  machine's receiver (`127.0.0.1:4318`) or to your organization's AI Apps ingest gateway. The local
+  dashboard shows them under Your AI apps, the org dashboard under AI apps, apart from your
+  coding-agent data (`docs/deployment-models.md`).
+- **One switch to turn it on.** `observer apps on|off|status`, Settings > AI Apps, the VS Code
+  command "Turn on AI Apps", `install.sh --apps`, `install.ps1 -Apps` and `SBO_CONNECT_APPS=1` for
+  the connect scripts all use it. The Overview's Get started then waits for your app's first trace
+  and shows its cost; Settings > General > Focus picks whether coding agents or AI apps come first.
+- **SDKs for Python, TypeScript, Go and Java.** They release on their own `sdk-v*` tags and are not
+  on PyPI, npm or Maven Central yet: install them from a checkout (`docs/sdk/README.md`). This
+  release has what they talk to:
+  - on the machine, loopback discovery and `observer sdk sign-in`, which gets your own SDK key from
+    your organization;
+  - on the org server, the `/v1/sdk/*` API for `admit()`, scores, prompts, datasets, experiments
+    and trace cost, with scoped keys;
+  - both receivers read Langfuse attributes too, so a Langfuse-instrumented app can send unchanged.
+- **Cost you can trace back.** Every AI Apps cost cell says where its number came from: gateway
+  exact, proxy exact, computed from the price book, or reported by the app. A span nothing could
+  price reads Unpriced, never $0. The org Cost page shows, per service, the coding-agent spend that
+  built it beside what it costs to run.
+- **Evals and prompts.** Scores and end-user feedback, SDK experiments with a CI gate, online eval
+  rules over a sample of new traces, and review queues with several reviewers and adjudication (a
+  new `write:reviews` permission lets members review). A prompt registry adds versions, labels,
+  diff, staged rollout, rollback and an optional approval before production.
+- **Explorer and alerts.** The trace explorer filters by tag, metadata, service, environment,
+  release and end user, searches full text, saves views, follows new traces live and shows each
+  trace's admission decision. Alerts can be scoped to a model, end user, tag or service and sent to
+  Slack or PagerDuty.
+- **Budgets for an app's end users and services.** The org Budgets page sets dollar or token caps
+  per end user, per service or both, with one default cap for every end user. The AI gateway and
+  the org's `admit()` enforce them.
+- **A compact Sessions table.** Monitor > Sessions fits its window: a Columns picker (remembered per
+  browser), one Tokens column in place of four by default, and Favorite and Session pinned when the
+  table scrolls sideways.
+
+### Changed
+
+- **Denied topics in an admission policy match whole words.** `hack` no longer fires on "hacking";
+  plurals still match, and `hack*` matches the start of a word. Add `*` to any topic that relied on
+  the old substring match.
+- **The AI Apps ingest gateway keeps trace content by default.** With no capture policy stored,
+  traces keep their content (scrubbed for secrets); logs and metrics stay metadata only. To keep
+  traces metadata only, store that policy on the Telemetry Ingest page.
+- **Upgrading an org server on PostgreSQL:** stop every older org server binary, run
+  `observer-org migrate`, then start the new one; a score's key widens in two steps
+  (`docs/planea/evals-and-scores.md`). The new AI gateway audit column is added without a long lock.
+- **A span's cost is the price book's cost whenever its model is priced.** An app's reported cost
+  is used only for a model the price book does not list.
+- **On the machine, app span content follows its own key,** `[observability].store_content` (on,
+  kept on the machine). The organization share switches still decide what is pushed.
+- **The developer edition includes AI Apps,** off until you turn it on. Settings > Observability is
+  now Settings > AI Apps, and Policies and Egress move into the Your AI apps group.
+- **An AI agent changes settings through proposals.** `observer config get|list` and the MCP tools
+  `get_settings` and `set_setting` (experimental) are new. A security-sensitive key set by an agent
+  waits for your approval in Settings or with `observer config proposals`.
+- **Applying an admission policy on the Policies page also saves it,** so a restart keeps it.
+- **A personal dashboard's Enforce budgets apply on its machine,** as a team's do, without full
+  content. An already connected machine changes only after you accept again
+  (`observer connect --reconsent`).
+- **Budget problems link to their fix,** on the local dashboard ("Budgets not updated") and on the
+  org Budgets page.
+- **The AI gateway** accepts upstream kind `openai` and answers a refusal in the caller's own error
+  shape, with its request id.
+- **New commands:** `observer obs traces|prompts|alerts|views`; on the org server
+  `observer-org prompts`, `review-queues`, `datasets`, `budgets`, `obs alerts`, `runtime-settings`,
+  `gateway-usage`, `ai-gateway upstreams` and `log reset-consumer`.
+
+### Fixed
+
+- **An app's model calls no longer count as coding-agent spend.** SDK and OTLP spans used to add
+  coding-agent rows that were pushed to the organization. A migration moves the old rows to a local
+  table, and the organization removes its copies.
+- **App traces sent to the wrong address are refused, not dropped,** on the org server and on a
+  build without AI Apps. `observer doctor` reports a receiver port clash.
+- **The machine's OTLP receiver refuses requests from a web page,** and app span content is
+  scrubbed for secrets before it is stored.
+- **The org server never trims durable-log records a consumer has not applied.** `/readyz` reports
+  the fault, and `observer-org log reset-consumer` resets the consumer.
+- **The AI gateway answers `502 upstream_unavailable`** when it cannot reach the upstream (it
+  answered an empty 200).
+- **`observer config set` accepts every integer key.** Many were refused with "wants an integer".
+- **Agent Access on PostgreSQL 18** reports a blocked delete as a constraint error, not a raw
+  database error.
+- **Smaller fixes:**
+  - a pooled org server no longer answers 500 to a budget pull or push when one optional read fails;
+  - the dashboard reports the proxy port the daemon binds, `--port` included;
+  - the macOS 13 notice shows only on macOS;
+  - the restart overlay keeps trying until the new daemon answers;
+  - Settings help reads in plain words;
+  - the org dashboard's first-visit tour never opens over a shared link;
+  - the Tokenomics explorer serves its own fonts, so its build no longer downloads Google Fonts.
+
+### Known issues
+
+- AI Apps is not offered on superbased's hosted service yet. The AI gateway runs only on a
+  self-hosted org server, off by default.
+- On Windows, `observer sdk sign-in` keeps no key file: set `SUPERBASED_API_KEY` in the app.
+- After AI Apps is turned on in a running daemon, admission, egress routing, alerts and
+  organization share tiers wait for the next daemon start; the dashboard lists them.
+- An SDK experiment's items do not link to the traces its task produced.
+- An org server is tested on PostgreSQL 16, which every shipped deployment uses. On PostgreSQL
+  18 its database migration can stop with "out of shared memory" at the default
+  `max_locks_per_transaction`: stay on PostgreSQL 16 for now.
+
+## [1.41.0] - 2026-11-19
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). Everything below is new since 1.40.0. Sandboxed terminals close
+their gaps: hosted boxes take plain folders and remote clones, say what they will do before
+Start, and bring their changes home. An org budget now says honestly what a machine does about
+it, with a one-click way to make it enforce. Like 1.37.x to 1.40.0 it needs macOS 13 Ventura or
+later: a Mac on macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Highlights
+
+- **Hosted sandboxes take any folder and any public repository.**
+  - A folder that is not a git repository is uploaded as it is, without being changed.
+  - A remote URL can be cloned in the box or on this machine (`[terminal.sandbox.hosted].clone_where`),
+    with the clone consent asked inside the New Terminal dialog.
+  - A changed consent is offered again in the dialog, naming what changed.
+- **The New Terminal dialog says what a hosted run will do before Start:** the upload, the tool
+  install, the folder, the network tier, guard's hooks in the box, and where each model key is
+  kept (key custody resolved per launch).
+- **Changes come home.**
+  - A Changes panel on the Terminals page lists what sandboxed runs returned. A hosted diff can be
+    opened as a branch.
+  - Returned copies can be removed by age or all at once. The count of copies that are safe to
+    remove uses the same rule as the removal itself.
+- **Org budgets tell the truth on the machine.**
+  - The node banner says what this machine does about a hard org cap, instead of claiming requests
+    are blocked when they are not.
+  - The org Budgets page offers a real fix for a budget a developer's machine does not apply: one
+    click publishes the enforcement pins it needs.
+
+### Changed
+
+- **Guard's hooks go into a hosted box** (`[terminal.sandbox.hosted].guard_hooks = auto | on | off`),
+  and the dialog says per launch when they do not apply.
+- **The hosted internet tier denies the cloud metadata address and private ranges.**
+- **The sandbox module can be turned on from the Sandbox isolation card,** and a settings link lands
+  on the setting it names, highlighted.
+- **`observer sandbox credentials add` cleans a pasted key** (bracketed-paste markers and stray
+  control characters) and names the one rule a bad key breaks. `credentials list` says plainly when
+  keys are in owner-only files because no OS keychain was found.
+
+### Fixed
+
+- **A hosted run that ends says which side ended it:** the agent's own exit, the box's helper hanging
+  up, or the provider's side. The run's relay log keeps the helper's own end record.
+- **Warning boxes no longer squeeze their text** to one word per line in narrow dialogs.
+- **The New Terminal dialog** gives the real reason a workspace source is unavailable, checks a clone
+  URL before Start, and no longer shows "Unexpected end of JSON input" after agreeing to a consent.
+- **The sandbox settings editor re-reads its configuration after a setup step,** and a save conflict
+  reads in plain words with a reload button.
+- **An org machine's unidentified spend is attributed** when it is the only machine, and budget
+  coverage reports who can fix an unenforced cap.
+
+## [1.40.0] - 2026-11-18
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). Everything below is new since 1.39.0. It gives the local dashboard a
+first run: two ways in on an empty machine, a live ribbon for the agent you are running, and a
+launchpad that starts your first agent with one consent. Every "this is off" message now says
+where to turn it on. Sign-in and connect are steadier, and the brand reads lowercase superbased
+everywhere. Like 1.37.x to 1.39.0 it needs macOS 13 Ventura or later: a Mac on macOS 12 stays
+on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Highlights
+
+- **A first run for the local dashboard.** On a machine with no AI coding history yet, the
+  Overview offers two doors: start a coding agent here, or explore with sample data (your real
+  data stays untouched). On a machine that has history, it shows what it found ("We found 2,199
+  sessions from Claude Code, Codex and 36 more") as it reads it.
+- **A live ribbon.** The top bar shows the agent you are running now (tool, project, tokens and
+  cost so far) with a link to its live view, or "Start one" when nothing is running. Your first
+  prompt gets a receipt with what it cost.
+- **The launchpad starts your first agent.** Choosing an agent and a folder asks one
+  first-launch consent that lists exactly what changes (allow the tool, allow fresh launches,
+  allow the folder, create it if needed), shows the exact config change before it is saved, and
+  then installs the tool when it is missing and opens it in a docked terminal.
+- **No more dead ends.** A status or refusal that says something is off now names the place to
+  turn it on and links there: launch policy, SSH and remote systems, explain, messages, OTel
+  export, routing, guard, process capture, team AI summaries and more. On a team, a setting
+  only an admin can change says so and links to the team dashboard. Installing an agent no
+  longer needs the Remote dashboard.
+- **Two dashboards, one set of words.** `connect.sh`, the CLI, the local dashboard and the
+  console all describe "this local dashboard" and the team or personal dashboard the same way.
+  `connect.sh` shows the local dashboard first, then connects, then restarts Observer so the
+  machine starts sending.
+
+### Changed
+
+- **The tour never starts by itself** and is five steps.
+- **The brand is lowercase superbased** in the apps, the server, the CLI, email, the marketing
+  site and the Agent Access sign-in page.
+- **Get started on the account console counts down ten seconds** and says it opens the WorkOS
+  sign-up page, with "Continue now" and "Stay on this page".
+
+### Fixed
+
+- **A machine with a wrong clock can connect.** Proof-of-possession is signed on the server's
+  clock and retried once.
+- **On Linux a new user never meets a keyring prompt:** the 0600 file store is the default
+  credential store.
+- **A sign-in that cannot finish returns to the sign-in page,** and a started sign-in lives 30
+  minutes.
+- **The hosted team dashboard stays signed in under parallel requests.** A session check that
+  cannot reach its store answers 503 with `Retry-After` instead of 401, and the hosted API's
+  connection pools fit inside its database logins' limits.
+
+- **Hosted sign-in, console and website side.** "Get started" on superbased.app now opens the
+  account console's sign-up screen (`cloud.superbased.app/portal/sign-up`) instead of the sign-in
+  page, and the sign-in page shows a visible "Create an account" action. "Start a team" lands on
+  the create-a-team form after sign-in or sign-up (an older `/?intent=team` link still works).
+  Every "Open your dashboard" button opens a link the console server builds (`open_url`), so the
+  console no longer composes a dashboard address itself. The console's theme now offers light,
+  dark and system (system is the default), and the theme control also appears on the sign-in,
+  sign-up and machine-connect pages. "connected to your personal dashboard" is no longer
+  capitalised mid-sentence.
+- **Hosted org dashboards sign in with your SuperBased account.** Opening any dashboard link
+  (`/`, `/me/profile`, `/people-access?tab=invites`) on a hosted organization now starts the
+  SuperBased account sign-in and returns you to that page, instead of stopping on a password
+  form your account cannot use. `/login` leads with "Continue with your SuperBased account",
+  keeps the password form behind "Sign in with a password instead" (open by itself when the
+  account sign-in is unavailable), says "Personal dashboard" on a personal organization, and
+  carries `next` on every sign-in link. Signing out lands on `/login?signed_out=1`, which never
+  signs you straight back in. `GET /auth/rails` names the account rail "SuperBased account" and
+  reports the hosted organization's kind (`org_kind`). Self-hosted organization servers behave
+  as before.
+
+## [1.39.0] - 2026-11-17
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). Everything below is new since 1.38.0. It adds agent-run security
+assessments, Fix with an agent for Code security findings, one-step sign in and connect (one
+command and one browser approval to see a machine online), pairing codes,
+per-organization attribution of captured sessions, managed-node guard locking, and, for
+self-hosted organization servers, the tenancy baseline: an explicit migrate step and a one-time
+migration with downtime. Like 1.37.x and 1.38.0 it needs macOS 13 Ventura or later: a Mac on
+macOS 12 stays on v1.36.0.
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Highlights
+
+- **Agent-run security assessments (new module):** start your own coding agent in a dashboard
+  terminal on a threat model, a local penetration test or red team exercise against a sandboxed
+  copy of your app, a read-only cloud posture review or instrumented tests, and Observer checks
+  what it writes before anything is imported.
+- **Fix Code security findings with an agent,** plus a project SBOM (export and scan), a local
+  licence report, npm and PyPI provenance, and passive DAST findings that are now stored.
+- **Getting started in one step:** `curl -fsSL https://superbased.app/connect.sh | sh` (or
+  `irm https://superbased.app/connect.ps1 | iex`, or `observer connect` after an npm or pip
+  install) installs Observer, asks for one browser approval that signs you in and chooses where
+  the machine's data goes (your personal dashboard by default, or one of your teams), and starts
+  it. The local dashboard, the VS Code extension and the account console all lead with "Sign in
+  and connect".
+- **Pairing codes:** a member makes a 15-minute code on the org dashboard and attaches a machine
+  with no browser on it.
+- **Switching organizations never ships earlier rows,** a switch or leave sends the old
+  organization its pending rows first, and `observer sessions hold` keeps a session from local
+  retention.
+- **Org server:** the tenancy baseline behind an explicit `observer-org migrate` step, the new
+  `admin:fleet` key, opt-in MFA step-up for privileged writes, a guarded client for every outbound call, tenant
+  export and import, and the multi-tenant (pooled) foundations SuperBased's hosted service runs on.
+- **Managed nodes:** every local guard loosening is ignored and reported, the organization sees
+  each machine's own policy settings, and orgs can author their own guard rules.
+- **Three more hosted sandbox rows (beta):** Docker Sandboxes, InstaBox and Daytona, and an opt-in
+  switch that lets `strace` run in sandboxed terminals.
+
+### Read this before upgrading
+
+- **This release still requires macOS 13 Ventura or later**, as 1.37.x and 1.38.0 did. A Mac on
+  macOS 12 stays on v1.36.0; the installer refuses macOS 12 with a plain message.
+- **Self-hosted organization servers need a planned window.** The server no longer migrates its
+  database at boot, and this release's first `observer-org migrate` applies the tenancy baseline
+  (PostgreSQL steps 0183 to 0479). Follow "Upgrading a self-hosted org server" below. Developer
+  machines need nothing special.
+- **A server whose IdP, SAML metadata, webhook receiver or LLM provider sits on a private or
+  loopback address** stops reaching it until you list that range in `[outbound]
+  allow_private_cidrs` (default empty). Metadata and link-local addresses are never dialled.
+- **The first `observer start` or `observer init` creates `~/observer-workspace`** (setting
+  `[workspace].default_dir`) and makes it its own repository, when that folder is missing or
+  empty. A folder that already holds files without Observer's marker is never touched.
+- **On an organization-managed machine, local guard loosenings stop applying.** A `[guard.rules]
+  disable` entry, a user policy file relaxation or a trusted per-project relaxation of a built-in
+  or pack rule is ignored with a load issue, and at start the daemon removes such disables from
+  `~/.observer/config.toml` (keeping a `.bak`) and records a guard event. The organization also
+  sees the machine's own policy settings now, whatever its share switch. Individual machines are
+  unchanged.
+- **Switching or leaving an organization sends the old organization its pending rows first.**
+  When that cannot finish, nothing changes and the refusal says why; `--drop-unsent` (or "Switch
+  anyway" / "Leave anyway") proceeds and keeps those rows on this machine only. Sessions captured
+  before this release are attributed to the organization the machine is enrolled with when it
+  first runs 1.39.0 (agent migration 250); personal history stays with the first organization
+  that claims it.
+- **The passive DAST accept text is now version 2,** so `observer security dast` asks for the
+  accept once more.
+- **A CLI command now refuses to hand work to a daemon that serves a different database** (409),
+  so a script run with a throwaway `HOME` can no longer drive your live daemon.
+- **Agent migrations 250, 251, 253, 254 and 255** run at the first start. All five are node-local.
+- **`observer enroll`, `observer org enroll` and `observer cloud login` are hidden from help.**
+  They still work; `observer connect` is the one command the docs use.
+
+### Upgrading a self-hosted org server
+
+What changes: `observer-org serve` verifies the schema at start and refuses a database that is
+unmigrated, behind or ahead of the binary; `observer-org migrate` is the only command that
+migrates. The 1.39.0 lineage adds 83 PostgreSQL steps (0183 to 0479; the numbers have gaps),
+among them the tenancy baseline (an `org_id` key on every tenant table, composite keys and
+conflict targets), the tenancy roles and policies, and non-transactional `CREATE INDEX
+CONCURRENTLY` steps. The first migrate is one migration with downtime: keep every writer stopped
+until it finishes. After it, a 1.38 binary cannot start against the database (it refuses a
+schema newer than its own); going back to 1.38 is a restore of the backup from step 1, not a
+redeploy. From 1.39.0 on, `migrate` records how far back the schema stays compatible
+(`schema_meta` key `compat_floor`), and a 1.39.0 or later binary starts against a newer schema
+only when every newer step is declared backward compatible down to it; otherwise it refuses
+with the reason, and the rollback is again a restore. `observer-org schema-check` answers,
+read-only, whether a binary will start against your database (exit 0, 2 when a migration is
+owed, 3 when the database is too new for it).
+
+Before the window:
+
+1. Take a restorable backup of every org database (control and data, if they are separate) and
+   of the sealing, signing and auth keys, with your own pipeline (`pg_dump`, a managed-database
+   snapshot or a point-in-time recovery mark). Test that it restores.
+2. With the **1.39.0** binary or image, against the database you have now (read-only; it applies
+   nothing):
+
+   ```bash
+   export OBSERVER_CONTROL_STORE_DSN='postgresql://...'
+   export OBSERVER_DATA_STORE_DSN='postgresql://...'   # the same URL under --role all
+   observer-org upgrade preflight --config /etc/observer-org/config.toml --skip-backup
+   ```
+
+   `--skip-backup` acknowledges the backup you took in step 1 (on PostgreSQL the command never
+   writes one, and refuses without the flag). It validates the config against the new binary,
+   lists the pending steps with an estimate of each one's time and locks, reports the deployment
+   shape and the enrolled machines below `[server].min_agent_version`. Fix every REFUSE row first.
+3. Decide the deployment shape. A single-organization server stays `[platform].tenancy =
+   "single"` (the default). If the migrating login has `CREATEROLE`, the first migrate creates six
+   cluster-wide roles named `sbo_owner`, `sbo_migrator`, `sbo_rt`, `sbo_host`, `sbo_ops` and
+   `sbo_ctx` (none can bypass row-level security, none gets a password) and the server runs the
+   single shape with row-level security; without `CREATEROLE` it takes the single shape without
+   it, which is supported. A second deployment on the same PostgreSQL cluster must set its own
+   prefix first (`ALTER DATABASE <db> SET sbo.role_prefix = '<name>'`). `[platform].rls = "auto"`
+   (the default) follows whatever the database carries; `required` refuses to start without the
+   roles and policies.
+
+The window:
+
+1. Stop every `observer-org` process (all roles), and the `observer-mcpgw` companion if you run
+   Agent Access.
+2. Run the migrate with the 1.39.0 binary or image:
+   `observer-org migrate --config /etc/observer-org/config.toml --store all`. It holds an advisory
+   lock and commits per step, so a concurrent run waits and an interrupted run resumes where it
+   stopped. It ends with `migrations applied; schema version = 341`.
+   - **Docker Compose:** the shipped `deploy/observer-org/docker-compose.yaml` runs this as the
+     one-shot `migrate` service; `docker compose up -d` runs it and starts `org` only after it
+     succeeded.
+   - **Helm:** chart 0.4.0 runs it as a pre-upgrade Job (`migrate.enabled`, default on) with the
+     out-of-band PostgreSQL Secret, and stops the release if it fails.
+3. Add `[outbound] allow_private_cidrs` if your IdP, webhook receiver or LLM provider is on a
+   private address, then start the 1.39.0 server and check `/readyz`, a sign-in and one node push.
+
+Still on a SQLite org database (a server from before PostgreSQL became required): stop the old
+server, make a checkpointed copy of the database file with no `-wal` or journal file beside it,
+run `observer-org migrate` against the new PostgreSQL database, then `observer-org
+migrate-from-sqlite <copy>` (a read-only plan) and the same command with `--execute`. The copy is
+verified table by table, is bound to the source's SHA-256 and resumes safely on retry. Keep the
+SQLite copy offline until you are sure. See the PostgreSQL migration runbook shipped with the org
+server.
+
+Rolling back: there is no in-place downgrade from schema 341. Before deploying an older build,
+run the 1.39.0 server's `observer-org upgrade preflight --rollback-to <version>`, which refuses
+while a feature the older build cannot honour is in force. Then stop the server, restore the
+backup from step 1 and deploy the old image. Writes accepted after the upgrade are lost unless
+you recover them from the durable log. Never start 1.38.0 against a database already migrated by
+1.39.0.
+
+Permissions after the upgrade: the new `admin:fleet` key is granted wherever `admin:deployment`
+was, so no role loses reach; the routes that change the server itself (maintenance jobs, update
+mirror writes, restart, server info) now need the admin role plus `admin:deployment`.
+
+### Compatibility
+
+- **1.38.0 (and older) machines keep working with a 1.39.0 org server.** The server replays the
+  recorded push envelopes of every release from 1.31.0 to 1.38.0 in its tests; the support window
+  is the last six minor releases or 90 days, whichever reaches further back.
+  `[server].min_agent_version` stays the one switch that ends support for a version.
+- **1.39.0 machines keep working with a 1.38.0 org server.** New push fields are optional and an
+  older server ignores them; the policy-state report steps down its generation ladder when an
+  older server refuses a newer field, for the rest of the daemon's life. Pairing codes are minted
+  only by a 1.39.0 server; against an older one, enrol with an enrolment token as before.
+- **Rotating an organization's policy signing key** still means re-enrolling every machine (the
+  node pins the key on first use).
+- **The VS Code extension** gains "SuperBased: Sign in and connect" and "Connect to a team..."
+  (see Node and CLI); it bundles the 1.39.0 binary and never runs it over a newer one you
+  installed. **The browser extension** has no change of its own and moves to 1.39.0 in lockstep.
+- **One-step attach to a team needs a 1.39.0 org server** that pins the hosted service's attach
+  grant key (`attach_grant_pubkey_file`). Against any other server `observer connect` falls back
+  to that server's own sign-in, as before.
+
+### Node and CLI
+
+- **`observer connect` with no address is one step.** It opens one approval page on
+  cloud.superbased.app (or prints a code to enter at cloud.superbased.app/connect from any phone or
+  computer, with `--no-browser` or when there is no browser), where you sign in, choose your
+  personal dashboard (the default) or one of your teams, and read what that choice shares.
+  Nothing leaves the machine until you approve. Choosing a team attaches the machine in the same
+  approval: the hosted service hands the node a signed, single-use attach grant bound to the
+  machine's key and valid for 10 minutes, which the team's server checks instead of asking you to
+  sign in again. `--json` reports each step for scripts and the dashboard. The local status now
+  remembers the dashboard's name and online address (agent migration 255); a personal
+  dashboard's own host is never printed, it opens from cloud.superbased.app.
+- **`observer disconnect`** stops sending from the machine and removes its connection, in the same
+  never-blocking order as leaving an organization. Your sign-in, `config.toml` and local data
+  stay, and nothing already sent is deleted online.
+- **`install.sh --connect [team]` and `install.ps1 -Connect [team]`** install, run `observer
+  connect`, register the background service that starts when you sign in, and open the local
+  dashboard. `https://superbased.app/connect.sh` and `connect.ps1` are those installers with
+  `--connect` already set (append `-s -- <team>` for a team).
+- **`observer privacy`** lists every network lane the node can use, what each sends and what turns
+  it on.
+- **`observer connect [<server>]` is the front door.** It runs `observer enroll` against the
+  server (with a pairing code, or else the organization's own IdP device-code sign-in), and
+  `--identity-only` runs `observer cloud login` alone (signing in never moves data). `observer
+  connect --status`, `observer status` and the dashboard's new Connect card say one sentence such
+  as "Acme (managed) as dev@acme.example". Switching an organization-managed machine asks you to
+  confirm the old organization (`--yes` in scripts). See `docs/teams-getting-started.md`
+  "Pairing codes and `observer connect`".
+- **`observer connect` with no address finds your organizations.** With no address and no company
+  preset it signs you in to SuperBased, lists the organizations your account belongs to, offers
+  the one you have, lets you choose when there are several, and when there are none offers to
+  create your personal organization, waits for it and attaches to it with your sign-in. It never
+  asks SuperBased anything when you give an address or your company preset names one. The
+  dashboard's Connect card points at the command.
+- **Pairing codes.** The node reads a code only from `SBO_PAIR_CODE` or `--pair-file <file>` (a
+  file other users cannot read); a code on the command line is refused. A code is single use,
+  lives 15 minutes, is bound to one member, is throttled per source and per organization, and a
+  code for another organization is refused unspent (`403 wrong_org`). The organization, never the
+  code, decides whether the machine is managed.
+- **Company-managed attach policy.** Managed config (the same per-OS source as the ceiling) may
+  carry `[attach]` `org_url`, `method` (`idp`) and `locked` (plist `OrgURL`, `AttachMethod`,
+  `Locked`; registry the same names). An unlocked URL is the default target of a bare `observer
+  enroll`; a locked one refuses attaching elsewhere and leaving, on the CLI and the dashboard,
+  naming the managing source. The plist and registry reads are unit-tested, not checked on real
+  hosts.
+- **Sessions keep the organization they were captured under.** Agent migration 250 adds
+  `sessions.authority_org_key`, stamped once and never rewritten. Every org-bound path (push,
+  re-send, org intelligence, `observer org backfill --all --confirm`) sends only rows captured
+  under the organization the machine is enrolled with now. Personal history, and a session that
+  was live at enrolment, is claimed by the first organization enrolled and never moves again.
+- **A switch or leave sends the old organization its pending rows first.** `observer enroll` to
+  a different organization, `observer unenroll`, and the dashboard's Enrol, Sign in and Leave
+  report "Sent N pending rows to <org> before switching." When that fails nothing changes and the
+  refusal names the count and the reason; `--drop-unsent` (or "Switch anyway" / "Leave anyway")
+  proceeds and leaves those rows on the machine, never sent to the new organization.
+- **`observer sessions hold <id-prefix> [--note]`, `release` and `holds`** (all `--json`) keep a
+  session from this machine's retention passes. The hold is local only (agent migration 251,
+  never on the org wire) and saves nothing on an org server; every command says so.
+- **A default workspace folder.** `observer start` and `observer init` create
+  `[workspace].default_dir` (default `~/observer-workspace`) when missing or empty, mark it and
+  make it its own git repository, for steps that need a folder that is not one of your projects
+  (the hosted sandbox consent step). A folder holding files without the marker is never touched.
+  See `docs/sandboxed-terminals.md` "Default workspace".
+- **A CLI hands work only to the daemon that serves its own database** (a daemon serving another
+  one answers 409), so a throwaway `HOME` can no longer drive your live daemon. `observer org
+  push-now` now runs in the running daemon and wakes its push loop past a backoff.
+- **`observer predict` prints the run-out projection** for each budget, in the cap's own
+  timezone.
+
+### Security assessments
+
+- **A new Security assessments card on Code security > Overview** starts one of Observer's coding
+  agents in a dashboard terminal on a project, through the same launch path as "Fix with an agent"
+  (one project per launch, the New terminal dialog in task mode). Kinds: threat model
+  (read-only), penetration test and red team exercise against your own app (sandboxed, required),
+  cloud posture review (read-only, using the cloud CLI session already signed in in that
+  terminal) and instrumented tests (security assertions in a scratch worktree; not full IAST).
+  Runtime protection (RASP) is listed as not agent-shaped and has no launch. Observer runs no
+  scanner here: the agent works, and Observer reads the files it writes under
+  `.observer/assessments/<run id>/`. It adds no migration and no egress lane. See
+  `docs/code-security.md` "Security assessments" and the plan of record
+  `docs/plans/security-assessments-module-plan-2026-11-13.md`.
+- **The pen test and red team are confined.** A launch is refused, with the rule's sentence,
+  unless a sandbox exists that gives the agent no route out except Observer's model proxy
+  (`proxy_only`), the agent can be sandboxed and is routed through that proxy, and the backend is
+  one grounded for it (today bubblewrap, local). There is no unsandboxed fallback, and the target
+  is an in-box copy of your app on a loopback address you confirm.
+- **Observer checks the result before it counts.** Validate on the run's row checks the agent's
+  `assessment.json` (`observer.threatmodel.v1` or `observer.pentest.v1`) against Observer's own
+  rules and cited file references, keeps a checked copy, and offers a model view (threat table,
+  element matrix, data-flow diagram, attack trees; for a pen test the coverage matrix and each
+  finding beside Observer's evidence), a comparison with an earlier run, and Markdown and JSON
+  downloads rendered by Observer from the checked copy. `observer security assess check <file>`
+  lets the agent check its own file. Import is your click and goes through the SARIF import as
+  low-confidence flags that close nothing.
+- **Request helper, CVSS 4.0, retest and the red team chain.** A pen test's requests can go
+  through a small helper that logs them, so each finding reads "Helper log matches" or "No log"
+  (the log is a file the agent can write, so a match is not proof). Pen test and red team findings
+  carry a CVSS 4.0 base vector, and Observer computes the score and band itself. A retest replays
+  a finding's stored requests and labels it reproduced or not; it changes nothing on the earlier
+  run. A red team run takes an objective and records its chain of steps.
+- **Limits on every run.** A time box per kind (threat model 60 minutes, pen test 45, red team 60)
+  with Stop on the row, or `time_box_action = "auto_close"`; a git check before and after the run
+  that never calls a run clean; stored evidence you can delete; `.env` and key files masked in a
+  bubblewrap box by default (`workspace_secret_mode = "mask"`, or `warn` where the sandbox cannot
+  hide them); and a request budget and pace for the pen test.
+- **Guardrails for one run, only with consent.** A pen test or red team may ask to lift R-179 (the
+  scanner rule) or widen the sandbox tier for that run, as one scoped, time-limited approval, and
+  only after `relax_pentest_local` or `relax_red_team_local` and `scoped_approval` are turned on.
+  On a managed node the organization approves it, the scope is the session and the window at most
+  60 minutes. R-177, R-178, R-174, R-170, R-172, R-168 and R-165 are never offered. A launch that
+  ticks nothing behaves as before.
+- **Settings** live in `[security.assessments]` (`docs/configuration.md`, Code security >
+  Settings); an agent can never change one (R-165), and an organization can pin the policy keys
+  lower. A managed node writes a content-free audit row per run phase to the guard events.
+- **What has been checked live (beta).** One operator, WSL2 with bubblewrap, Claude Code, a seeded
+  fixture: a pen test found 13 of 14 seeded weaknesses with no false positives, under the guard in
+  `enforce` too; a threat model and a retest ran; a red team run met its objective and was then
+  stopped by the model provider's own safeguard, so the chain view has not been seen on a real
+  run. Not run: your own projects, a managed node, another backend, OS or agent. The register is
+  in `docs/code-security.md` "Live verification register (security assessments)".
+
+### Guard
+
+- **Every managed node locks local loosenings, with or without an org bundle.** A `[guard.rules]
+  disable` entry, a user policy file relaxation or a trusted per-project relaxation of a built-in
+  or pack rule is ignored with a load issue; at start the daemon removes such stale disables from
+  the config file (a `.bak` is kept) and records a guard event. Individual nodes are unchanged.
+- **The organization sees each managed machine's own rule changes** (layer, kind, decisions,
+  whether it loosens and whether it applied), its guard engine inputs, the guard pin and approval
+  registers, and its policy state, routing summary and sandbox posture whatever its share switch.
+  A local loosening opens the `local_weakening` finding. See `docs/guard.md` "What the
+  organization sees".
+- **Org custom guard rules.** An org bundle can carry its own `[[rule]]` definitions, authored on
+  the org dashboard (Policies > Guard, Custom rules) with the same editor as the node's Add rule.
+  On a managed machine they are org-locked unless the bundle grants an override; `enforce = true`
+  applies one on a machine that still observes. `observer guard rules` and `/api/guard/rules` list
+  them, and a rule the organization sets offers no Disable or Override.
+- **R-179 also asks about** `ffuf`, `gobuster`, `feroxbuster`, `hydra`, `wfuzz` and the ZAP
+  launchers.
+- **Verdicts name the approval that covers them** (`[approved: approval #N (<grantor>) covers
+  this rule for this scope]`), and each guard event records the project the gate matched grants on
+  (agent migration 253).
+- **One grant per scope.** A request or proposal that a grant in force already covers is refused
+  with `already_granted` naming that grant; the node's request form says so before sending.
+- **`observer guard events --session-less`** lists verdicts no session shows (a rejected bundle,
+  posture, a disabled hook), and `observer guard status` points at it.
+- **The session's Messages tab names each guard block's policy layer**, its org lock and, for
+  Claude Code, the sub-agent; a sub-agent's hook verdicts now show on the sub-agent.
+- **A week's guard replay takes seconds, not minutes** (one profiled week: 60 s to 7.8 s), and
+  the Recipes card shows its progress; identical replays share one run.
+
+### Sandboxed terminals
+
+- **Docker Sandboxes hosted row (beta, opt-in)** (`docker-sandboxes`, component
+  `terminals.sandbox.docker`): runs the agent in one of Docker's cloud sandboxes (Docker Agentic
+  Platform, billed per second) through Docker's Sandboxes API. Like the other hosted rows, your
+  workspace files leave this machine for Docker's only after a consent, and hooks and model
+  requests come back through the capture relay. Built from Docker's documentation; its wire client
+  passed a live smoke on a real account (which found, and the row now closes, an open egress on the
+  `none` and `proxy_only` tiers), and no agent has run on the row yet.
+- **InstaBox hosted sandboxes (beta):** another hosted row, `instabox`, runs sandboxed terminal
+  launches in an InstaBox microVM through InstaBox's REST API and terminal WebSocket (component
+  `terminals.sandbox.instabox`, inactive in every distro; credential `INSTABOX_API_KEY` or
+  `observer sandbox hosted connect instabox`). Internet tier only, because InstaBox documents no
+  network policy; its free plan pauses a machine after 30 idle minutes and 480 minutes of running.
+  Built from InstaBox's documentation; its wire client passed an API-level live smoke, and no agent
+  has run on the row yet.
+- **Daytona hosted sandboxes (beta).** Another hosted row, `daytona`, runs a sandboxed terminal in
+  a Daytona sandbox (a container) on Daytona's machines, through Daytona's REST API and its SSH
+  access tokens from Go (never Daytona's AGPL Go SDK). It is opt-in: the component
+  `terminals.sandbox.daytona` is off in every distro, the row must be in
+  `[terminal.sandbox].backends`, and a launch needs a Daytona API key (`observer sandbox hosted
+  connect daytona`, or `DAYTONA_API_KEY`) and your consent to the upload. What leaves this machine
+  is the same consented workspace upload as the other hosted rows; every box is ephemeral, with a
+  wall-clock TTL equal to the box timeout and auto-stop off. Built from Daytona's documentation;
+  one client-level smoke ran with a real key, and the live checks are owed (register REM-DAY-1 to
+  REM-DAY-3). See `docs/sandboxed-terminals.md`, "Hosted sandboxes", Daytona.
+- **strace in sandboxed terminals (opt-in, off by default).** A new switch on Terminals >
+  Settings, "Allow strace in sandboxed terminals" (`[terminal.sandbox].seccomp_allow_seize`),
+  lifts PTRACE_SEIZE, and nothing else, from Observer's syscall filter, so `strace <cmd>` works
+  with strace 6.14 and later. Attaching to a running process (`strace -p`) stays blocked. It
+  applies only when tracing cannot reach a process outside the sandbox (a sandbox with its own
+  process list, or Yama `ptrace_scope` 1 or more); otherwise the launch keeps the full filter and
+  says why. Set only from the dashboard on the machine itself: not by `observer config set`, an
+  organization or an AI agent. Each run records the ground it used.
+- **Workspace secret files can be hidden in a bubblewrap box.** A launch can ask the box to bind
+  `/dev/null` over the workspace's `.env`, private key and token files, so a read inside the box
+  fails and the host file is untouched. Off by default and a per-launch option (the security
+  assessments use it); see `docs/sandboxed-terminals.md` "Workspace secret files".
+- **The sandbox setup consent step asks for its project** (the most-used one by default) and
+  starts only on a ready default workspace; a consent or sign-in run reads as a run, not an install.
+- **Managed nodes push sandbox egress refusal counts** to the organization, shown on a card on the
+  org's Policy page.
+
+### Code security
+
+- **Fix with an agent.** On the Findings tab, hand one finding, a group or everything the filter
+  shows to a coding agent in a dashboard terminal in the finding's project. The task is built by
+  the daemon from its own rows (open findings only, at most 30, under 24 KiB, every field fenced
+  as scanner data), and every New terminal gate still applies. The Fix attempts panel shows what
+  each launch's findings became after a rescan; an attempt never changes a finding. See
+  `docs/code-security.md` "Fix with an agent".
+- **Project SBOM.** `observer security sbom export [--project <dir>] [--out <file>]` writes
+  CycloneDX 1.5 JSON from the last dependency scan's inventory (also a download on the Projects
+  tab), and `observer security sbom scan <file>` matches a CycloneDX or SPDX SBOM another tool
+  wrote against the local OSV database; its findings are stored as "From an SBOM" and close
+  nothing. See `docs/dependency-scanning.md` "Project SBOM".
+- **Licences, local only.** `observer security licenses [--project <dir>] [--json] [--record]`
+  reads the licence fields the project already holds (npm lockfiles and installed packages,
+  `composer.lock`, Python metadata, vendored crates), normalizes them to SPDX and classes them.
+  With a `[security.licenses]` policy (`deny`, `allow`, `unknown`), each daemon dependency scan
+  records licence findings (flag only, never hold a commit); with the defaults nothing is flagged.
+- **npm and PyPI provenance.** Online checks also record whether the installed version carries a
+  provenance attestation (`present`, `absent`, `regressed`, `unknown`; a presence fact, never a
+  verification). S-757 flags a `regressed` package without changing the verdict
+  (`[security.deps] provenance`, default `flag`). See `docs/package-checks.md` "Provenance".
+- **Passive DAST findings are stored against the project.** `observer security dast <url>` now
+  stores its findings (Code security > Findings, flag only) unless `--no-store`, a complete run
+  closes what that origin no longer reports, and `observer security dast candidates` lists dev
+  servers the project's files name without contacting anything. The Scanners tab has a DAST card.
+  The accept text is now version 2, so an earlier accept is asked again.
+- **SARIF import carries CWE ids** from a rule's tags, and a code finding whose CWE is an
+  input-handling weakness asks the agent for a test (a fuzz test where the language has one); a
+  test the agent only adds counts toward the fix's verification.
+
+### Dashboard
+
+- **Get started panel.** Until the machine is connected, the dashboard leads with one "Sign in and
+  connect this machine" action, shows the approval's progress live and then the dashboard's name
+  and online address. The top bar keeps a Sign in button at every width; the panel can be
+  dismissed and comes back after 7 days, and never blocks a page. Settings > Account holds the
+  same controls, the connection's details and Disconnect. It replaces the Connect card.
+- **A Default workspace card** shows the folder and its set-up.
+- **Requests and exceptions read the grant's live state,** name budgets instead of ids, say how
+  far a grant reaches and which grant already covers it, and show a budget increase as base plus
+  increase.
+- **Clearer words:** the Total spend tile explains its reliability, an unpriced model says how it
+  can be priced, enrolment and route texts point at Settings > Connected tools, and links to pages
+  an organization hides are gated.
+
+### Org server and org dashboard
+
+- **`observer-org migrate` is now its own step: the server verifies the schema at boot and never
+  migrates.** A database that is unmigrated, behind or ahead of the binary refuses to start, with
+  the command to run. The shipped compose files carry a one-shot `migrate` service, Helm chart
+  0.4.0 runs it as a pre-install and pre-upgrade Job (`migrate.enabled`, default on), and `serve
+  --migrate` is for development only. This release adds PostgreSQL steps 0183 to 0477 (the
+  tenancy baseline: `org_id` keys, roles, row-level security policies), so the first migrate is a
+  downtime window; see "Upgrading a self-hosted org server" above. `observer-org upgrade
+  preflight` now reports the deployment shape and estimates each pending step's time and locks.
+- **The SQLite org engine is gone for every server process.** Production has required PostgreSQL
+  since well before 1.38; now the development opt-in `OBSERVER_ALLOW_SQLITE_TEST_ENGINE=1` no
+  longer lets `serve`, the AI gateway, `migrate` or an admin command open a SQLite org database
+  either, and each refuses with the remedy, `observer-org migrate-from-sqlite <snapshot>`.
+- **Every outbound call to a configured URL goes through one guarded client** (webhooks, SAML
+  metadata, OIDC, analytics pollers, org LLM providers). It never dials metadata or link-local
+  addresses, and dials private or loopback space only inside `[outbound] allow_private_cidrs`
+  (default empty). **A server whose IdP or webhook receiver is on a private address needs that
+  list after upgrading.**
+- **`admin:fleet` is a new permission key,** the fleet half of `admin:deployment`: machine
+  identities and ingest credentials, fleet and version reads, the OTLP ingest gateway settings,
+  vendor exports and Feature and Component grant approval. Existing `admin:deployment` grants are
+  copied to it. The routes that change the server itself (maintenance jobs, the update mirror's
+  writes, restart, server info) now need the admin role and `admin:deployment`.
+- **Privileged-action step-up (opt-in).** With `[auth].privileged_step_up = true` (set in the
+  shipped production template; off when absent) a write using `admin:identity`,
+  `admin:deployment`, `write:pricing`, `admin:integrations`, `admin:grants`, `admin:roles` or
+  `write:policy` needs a sign-in from the last 15 minutes in which the IdP reported MFA; the API
+  answers `403 step_up_required` with a URL that forces a fresh sign-in, and the dashboard follows
+  it and comes back. See `docs/teams-getting-started.md` 5.3.
+- **Sign-in.** OIDC presets for PingOne, Auth0, JumpCloud, Keycloak, authentik and WorkOS; ES256,
+  ES384, ES512 and EdDSA id_tokens; OIDC and SAML sign-in transactions in a shared table so HA app
+  nodes can complete them, and a replayed SAML assertion is refused. A held SSO sign-in gets an
+  approval-pending page, and a listed `admin_emails` address held once an admin exists says why.
+- **Pairing codes on the org dashboard.** Your access > Connect a machine (`/me/install`) mints a
+  code and shows the one-line attach; an admin with `admin:bearers` may mint one for another
+  member, and the machine then enrols as that member.
+- **Tenant export, import and verify.** `observer-org tenant export|import|verify` moves one
+  organization between PostgreSQL databases from one consistent snapshot, with a per-table digest.
+  See `docs/teams-operations.md` section 17.
+- **Operator recovery link and support access.** `observer-org tenant recovery-link` issues a
+  single-use, 30-minute sign-in for one active admin (`docs/recovery-link-runbook.md`). Settings >
+  Identity > Support access grants and revokes SuperBased support sessions, and the Audit page's
+  Operator actions tab lists what the operator did; every admin can read it.
+- **`observer-org licence status|install|verify`** manage a self-hosted licence file. The server
+  does not read the licence at boot yet.
+- **Multi-tenancy (pooled).** The server supports three deployment shapes (single without
+  row-level security, single with it, pooled), checked at start and recorded at the first
+  migrate. The pooled shape is what SuperBased's hosted service runs: many organizations in one
+  database under row-level security, each with its own host, keyset (`observer-org tenant-key`,
+  `observer-org kek reseal`), sign-in rails, quotas (a full seat count answers `409 seat_limit`)
+  and a Plan and usage page. On a pooled organization 76 routes still answer "not available"
+  (among them org-hosted OpenShell, CI security, the assistant and approvals); Agent Access,
+  integrations, vendor exports, code security, sandboxes, coding, messaging, pricing, SCIM and
+  observability now work there, each family proven to stay inside the requesting organization. A
+  single-organization server behaves as before.
+- **Guard on the org dashboard.** "Browse all built-in rules" lists every rule a node evaluates,
+  "Tighten" adds one, and the developer preview lists every rule a developer's machine runs with
+  its source; People shows a managed machine's own policy settings and names guard settings weaker
+  than the defaults. Guard events show tool, kind, rule source, degradation and grant.
+- **New org views:** relay decisions on developer machines (Agent Access > Discovery, session-less
+  ones included), per-day commit gate counts in code security coverage, and a run-out projection
+  under each budget on the Budgets page (`docs/budgets.md`).
+- **Governance, forms and grants.** The node.governance form can publish a project-scope raise
+  (`scope.unrestricted`, `scope.denylist_remove`; managed nodes holding `extract.scope` only); the
+  org routing policy sets the mode a managed node honours; the providers, egress, admission and
+  security floor forms set the fields they used to drop. Deleting a budget ends the increase
+  grants that raise it, and the super-admin may approve an expiry past a grant type's maximum.
+- **Schema for an upcoming feature.** PostgreSQL steps 0474 to 0477 add tables and columns for
+  a feature that is not switched on in this release (its org-wide setting is off and stays off).
+  Nothing changes for users; the steps run with the rest of the upgrade.
+- **Team setup in one command.** An empty team dashboard and the member install page (`/me/install`,
+  "Set up your computer") show one command per OS that installs Observer and connects it to the
+  team, and wait for the machine live; pairing codes stay under "No browser on that machine?".
+  On the hosted service, invitations are sent as sign-in invitations with their own email, and
+  `/api/org/me` carries the team's short name.
+- **Attach grants.** A server that sets `attach_grant_pubkey_file` accepts the hosted service's
+  signed one-step attach grant: personal dashboards admit only their owner, teams only an
+  existing member, and each grant is spent once (PostgreSQL steps 0478 and 0479).
+- **Personal organizations.** An organization of one (from SuperBased's hosted service) admits
+  exactly one member at every seat (invites, SSO, SCIM, approval and reactivation answer `409
+  member_cap_reached`), and a machine enrolls in it with individual tenancy only. The org
+  dashboard's header has an organization switcher on the hosted service, and a personal
+  organization hides the team-only pages.
+- **`observer-org tenant import-intel --bundle <dir> [--apply]`** copies a personal account's
+  Cloud Intelligence results into its personal organization, once (a rerun writes nothing;
+  PostgreSQL steps 0472 and 0473), and `tenant purge-status` and `tenant purge-plan` show an
+  organization purge's runs and a dry-run plan with counts.
+- **More of the org dashboard checks the organization's plan:** using your own identity provider
+  is a plan capability (the Identity page shows the providers as plan-locked otherwise), one
+  banner shows the organization's quota state, a support banner shows while a SuperBased support
+  session is active, and the operator log records a revoked recovery link.
+- **The dashboard refuses `env:` and `file:` secret references** for the AI gateway and external
+  agents, every bearer route checks the bearer's audience, and a replayed AI gateway audit
+  `request_id` never rewrites recorded spend.
+- **The Agent Access sidecar is re-pinned to agentgateway v1.7.0,** and `golang.org/x/net` and
+  `klauspost/compress` are updated.
+
+### Cloud
+
+- **A long session is fitted to your plan's evidence budget** instead of refused with `413
+  evidence_over_budget` (agent migration 254); the preview and the upload are the same bytes, and
+  `observer cloud status` prints the token windows, the per-session cap and the evidence budget.
+  The portal shows plan v5's token budgets instead of count caps. The gpt-oss routes the budgets
+  name are not bound in production yet, so enrichment still runs on the current provider.
+- **`cloud.superbased.app` moved from Hetzner (Germany) to OVHcloud (France)** on 2026-11-15.
+  Nothing changes on the node: the address is the same, and a 1.38.0 node signed in after the
+  move.
+- **The portal has Teams pages** (create a team, its plan, seats and machines link).
+- **Home is the console's start page:** your machines (with the setup command for this
+  computer's OS, and each machine as it connects), your personal dashboard and your teams. Your
+  personal dashboard is created at your first sign-in. The approval page for `observer connect`
+  lives at cloud.superbased.app/connect. The personal-plane consent screen no longer blocks the
+  console, and the older Cloud Intelligence pages stay reachable under "AI summaries". A device can list its account's organizations and ask for the
+  personal one (`GET /v1/orgs`, `POST /v1/orgs/personal:ensure`).
+- **Team and account deletion.** A team owner deletes a team by typing its address, sees the
+  cooling-off date (30 days, 14 for an unused free team), what is purged and what is kept, and can
+  cancel until it ends; members see the deletion's state. Deleting an account first shows what
+  happens to its teams and is refused while it is the billing owner or only owner of a live team.
+- **A passkey second factor for the portal,** with recovery codes. Team creation can be limited
+  to an allow-list of accounts and domains; on the hosted service it is open to every account.
+- **Live billing:** the hosted service takes payments through Paddle: Personal Pro $9 a month,
+  Team $15 per seat a month (3 seats or more), Business $29 per seat a month (10 or more), tax
+  excluded. The checkout opens at the
+  plan's minimum seats so Team and Business can both be bought, a billing owner gets an "Invoices
+  and billing portal" button, a past-due subscription keeps its plan only for a grace window, and
+  the seat count can follow the organization's members (off by default).
+- **Hosted-service operations:** a staff console with screens for organizations, availability,
+  support access and the audit log (every change shows the value before and after and needs a
+  reason); a restore drill that restores the newest backup into a throwaway database and checks
+  it; a public status page; a spend exporter and canary probes; per-organization background jobs
+  for enrichment, digests, retention and the pricing feed; and `observer-cloud migrate-personal`,
+  the tool that moves each personal-plane account onto its personal organization (cloud step
+  0134).
+
+- **The privacy policy is version 3:** it covers hosted personal dashboards and teams, names
+  OVHcloud in France as the host, lists the hosted service's recipients by category, and names the
+  online package checks and the Software's other downloads.
+
+### Fixed
+
+- **The retention prune pauses longer than SQLite's busy poll between batches,** so a large prune
+  no longer stalls the daemon's writers.
+- **Sandbox boxes on WSL2 hid only some Windows drives (security, ledger SBX-BE-24).** A
+  sandboxed terminal or isolated scan could read, read-only, the Windows drives that no AI-tool
+  home sat on (a data drive such as `D:`), and every drive when `HOME` was a scratch directory.
+  Every box now hides each Windows drive the host's mount table names, wherever it is mounted, and
+  a project on a drive still works. If the mount table cannot be read the launch is refused rather
+  than started with a drive showing. See "Windows drives on WSL2" in `docs/sandboxed-terminals.md`.
+- **The proxy prompt gate judges only what the developer typed.** R-172 blocked Claude Code's own
+  safety-classifier requests, which resend tool output as a new user turn; a value the session's
+  model or tools already produced is no longer read as typed. A secret you type still blocks.
+- **R-151 no longer flags an agent's writes into its own project** when the event carries no
+  project root.
+- **R-170 flags a download only when its content is executed** (`bash -lc 'curl -o f URL; grep
+  ... f'` was denied); it now also catches `bash <(curl ...)` and `curl -o x; bash x`.
+- **S-721 no longer blocks a source line** whose credential-named key holds code (a struct
+  literal, a call, a selector); quoted literals still block.
+- **A managed node's org push failed every cycle** with "push batch too large" once its envelope
+  sections passed 1 MiB; envelopes now stay under `max_push_bytes`, and an oversized single row is
+  cut or skipped and recorded.
+- **A Claude Code session started by the Claude desktop app** is labelled with the desktop's
+  account, not the CLI's cached login.
+- **The commit quick scan of a Windows-drive checkout on a WSL daemon** reads it with Windows git
+  through interop (seconds instead of 25 to 30), and an interop `git.exe` no longer inherits the
+  Windows user's git variables.
+- **A managed enrolment picks up a changed policy accept list without a restart,** and the
+  admission rail and policy-state opt-in follow live config.
+- **`observer guard status` counts rules the way the Rules tab does,** and a rule the organization
+  only locks is labelled apart from one it sets.
 
 ## [1.38.0] - 2026-11-09
 

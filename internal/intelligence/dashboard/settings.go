@@ -432,6 +432,14 @@ func (s *Server) handleConfigSection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// The org-lock gate (guard_orglocked_edits.go): a guard section save
+	// may not newly disable a rule the organization sets on this node.
+	if name == "guard" {
+		if problems := s.guardOrgLockedEdits(r.Context(), "disable", addedIDs(prev.Guard.Rules.Disable, cfg.Guard.Rules.Disable)); len(problems) > 0 {
+			writeOrgLockRefusal(w, problems)
+			return
+		}
+	}
 
 	// T2 credential guard (plan section 4.3 / P0-1). Two failure modes it
 	// closes, in the one place every caller-supplied section body lands:
@@ -910,9 +918,12 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 		// cmd/observer/admission_persist.go — never this seam, CLAUDE.md #4),
 		// Egress, and Alerts.
 		var sec struct {
-			Enabled   *bool                            `json:"Enabled"`
-			Judge     *config.ObservabilityJudgeConfig `json:"Judge"`
-			Admission *struct {
+			Enabled *bool `json:"Enabled"`
+			// StoreContent is the node-local Plane A content key
+			// ([observability].store_content, F07/D8).
+			StoreContent *bool                            `json:"StoreContent"`
+			Judge        *config.ObservabilityJudgeConfig `json:"Judge"`
+			Admission    *struct {
 				Budget *config.AdmissionBudgetConfig    `json:"Budget"`
 				Judge  *config.ObservabilityJudgeConfig `json:"Judge"`
 			} `json:"Admission"`
@@ -922,6 +933,9 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 		}
 		if sec.Enabled != nil {
 			cfg.Observability.Enabled = *sec.Enabled
+		}
+		if sec.StoreContent != nil {
+			cfg.Observability.StoreContent = *sec.StoreContent
 		}
 		if sec.Judge != nil {
 			if sec.Judge.TimeoutMS < 0 || sec.Judge.MaxTokens < 0 || sec.Judge.NumCtx < 0 {
@@ -1600,7 +1614,7 @@ func (s *Server) handleBackfillStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, modeStatus{
 			Mode: "tasks", Flag: "--tasks",
-			Description:    "Re-derive task_items / task_transitions (session-level task/todo/plan tracking, docs/task-tracking.md) from todo_update / post_tool_batch action rows already in the DB. No adapter re-parse, no source-file walk. Idempotent - safe to re-run after enabling [tasks].enabled on a daemon with historical traffic.",
+			Description:    "Re-derive task_items / task_transitions (session-level task/todo/plan tracking) from todo_update / post_tool_batch action rows already in the DB. No adapter re-parse, no source-file walk. Idempotent - safe to re-run after enabling [tasks].enabled on a daemon with historical traffic.",
 			Candidates:     n,
 			CandidatesNote: "todo_update actions rows only - post_tool_batch candidates aren't cheaply countable without the same raw_tool_input scan the backfill itself does",
 		})
@@ -1621,7 +1635,7 @@ func (s *Server) handleBackfillStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, modeStatus{
 			Mode: "loc", Flag: "--loc",
-			Description:    "Count lines of code (added / modified / deleted, comments and blanks separated) for every historical edit_file / write_file action, from the tool input the row already holds (docs/loc-tracking.md). Writes counts and path hashes only, never content. Idempotent; not part of --all.",
+			Description:    "Count lines of code (added / modified / deleted, comments and blanks separated) for every historical edit_file / write_file action, from the tool input the row already holds. Writes counts and path hashes only, never content. Idempotent; not part of --all.",
 			Candidates:     n,
 			CandidatesNote: "edit_file / write_file actions without line counts yet",
 		})
@@ -1662,7 +1676,7 @@ func loadConfigForDashboard(path string) (config.Config, error) {
 	if path == "" {
 		return config.Default(), nil
 	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) { //nolint:gosec // G703: false positive; the daemon's own config path from its options, only stat'd to fall back to defaults
 		return config.Default(), nil
 	}
 	return config.Load(config.LoadOptions{GlobalPath: path})

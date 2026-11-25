@@ -195,6 +195,7 @@ func (a *Adapter) parseV1(ctx context.Context, database *sql.DB, dbPath string, 
 	res.TokenEvents = append(res.TokenEvents, tokens...)
 	res.CacheObservations = append(res.CacheObservations, cacheObservations...)
 	res.SessionLineages = append(res.SessionLineages, lineages...)
+	adapter.NoteMalformedRows(res, models.ToolOpenCode, dbPath, countMalformedV1Rows(ctx, database, fromOffset))
 	return nil
 }
 
@@ -377,6 +378,7 @@ func (a *Adapter) loadUserPromptEvents(ctx context.Context, db *sql.DB, sourceFi
 		  FROM message m
 		  LEFT JOIN session s ON s.id = m.session_id
 		 WHERE m.time_updated > ?
+		   AND json_valid(m.data)
 		   AND json_extract(m.data, '$.role') = 'user'
 		 ORDER BY m.time_updated ASC, m.id ASC`, fromOffset)
 	if err != nil {
@@ -504,6 +506,7 @@ func (a *Adapter) loadReasoningIndex(ctx context.Context, db *sql.DB, fromOffset
 		SELECT p.id, p.message_id, json_extract(p.data, '$.type'), COALESCE(json_extract(p.data, '$.text'), '')
 		  FROM part p
 		 WHERE p.message_id IN (SELECT message_id FROM part WHERE time_updated > ?)
+		   AND json_valid(p.data)
 		   AND json_extract(p.data, '$.type') IN ('reasoning', 'tool', 'text')
 		 ORDER BY p.message_id ASC, p.time_created ASC, p.id ASC`, fromOffset)
 	if err != nil {
@@ -546,6 +549,7 @@ func (a *Adapter) loadToolEvents(ctx context.Context, db *sql.DB, sourceFile str
 		  JOIN message m ON m.id = p.message_id
 		  LEFT JOIN session s ON s.id = p.session_id
 		 WHERE p.time_updated > ?
+		   AND json_valid(p.data)
 		   AND json_extract(p.data, '$.type') = 'tool'
 		 ORDER BY p.time_updated ASC, p.id ASC`, fromOffset)
 	if err != nil {
@@ -661,6 +665,7 @@ func (a *Adapter) loadCompletionEvents(ctx context.Context, db *sql.DB, sourceFi
 		  FROM message m
 		  LEFT JOIN session s ON s.id = m.session_id
 		 WHERE m.time_updated > ?
+		   AND json_valid(m.data)
 		   AND json_extract(m.data, '$.role') = 'assistant'
 		   AND json_extract(m.data, '$.finish') = 'stop'
 		 ORDER BY m.time_updated ASC, m.id ASC`, fromOffset)
@@ -755,6 +760,7 @@ func (a *Adapter) loadAssistantTextEvents(ctx context.Context, db *sql.DB, sourc
 		  JOIN message m ON m.id = p.message_id
 		  LEFT JOIN session s ON s.id = p.session_id
 		 WHERE p.time_updated > ?
+		   AND json_valid(p.data) AND json_valid(m.data)
 		   AND json_extract(p.data, '$.type') = 'text'
 		   AND json_extract(m.data, '$.role') = 'assistant'
 		 ORDER BY p.time_updated ASC, p.id ASC`, fromOffset)
@@ -891,6 +897,7 @@ func (a *Adapter) loadStepFinishEvents(ctx context.Context, db *sql.DB, sourceFi
 		  JOIN message m ON m.id = p.message_id
 		  LEFT JOIN session s ON s.id = p.session_id
 		 WHERE p.time_updated > ?
+		   AND json_valid(p.data)
 		   AND json_extract(p.data, '$.type') = 'step-finish'
 		 ORDER BY p.time_updated ASC, p.id ASC`, fromOffset)
 	if err != nil {
@@ -970,6 +977,7 @@ func (a *Adapter) loadTokenEvents(ctx context.Context, db *sql.DB, sourceFile st
 		  FROM message m
 		  LEFT JOIN session s ON s.id = m.session_id
 		 WHERE m.time_updated > ?
+		   AND json_valid(m.data)
 		   AND json_extract(m.data, '$.role') = 'assistant'
 		 ORDER BY m.time_updated ASC, m.id ASC`, fromOffset)
 	if err != nil {
@@ -1058,6 +1066,7 @@ func (a *Adapter) loadSubtaskEvents(ctx context.Context, db *sql.DB, sourceFile 
 		  JOIN message m ON m.id = p.message_id
 		  LEFT JOIN session s ON s.id = p.session_id
 		 WHERE p.time_updated > ?
+		   AND json_valid(p.data)
 		   AND json_extract(p.data, '$.type') = 'subtask'
 		 ORDER BY p.time_updated ASC, p.id ASC`, fromOffset)
 	if err != nil {

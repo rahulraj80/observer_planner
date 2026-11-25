@@ -221,16 +221,15 @@ export function LLMConnectionsCard({
     <div className="space-y-3">
       <div className="rounded-3 border border-line-2 bg-bg-2 p-4 text-[11.5px]">
         <div className="text-[12px] font-semibold text-fg-1">
-          LLM analysis connections - [llm.connections]
+          LLM analysis connections
           <HelpInd id="card.settings_llm_connections" />
         </div>
         <p className="m-0 mt-0.5 text-fg-3">
           Optional endpoints the daily briefing can point analysis at (narrative upgrade + grounded Q&amp;A).
           Nothing is configured by default - with no connections the briefing is data-only. A loopback host
-          (Ollama / vLLM / llama.cpp) is keyless; a remote provider needs{" "}
+          (Ollama, vLLM or a local llama server) is keyless; a remote provider needs{" "}
           <strong>Allow remote</strong> checked plus a key, which
-          is stored in the OS keychain - <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">config.toml</code>{" "}
-          holds only the label, never the key. Restart required after save.
+          is stored in the OS keychain - the config file holds only the label, never the key. Restart required after save.
         </p>
         {error && <p className="m-0 mt-2 text-danger">{error}</p>}
       </div>

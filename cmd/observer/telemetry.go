@@ -24,7 +24,7 @@ import (
 // telemetryDisclosure is what `observer telemetry consent <tier>` prints
 // before applying. The wording is part of the consent surface: it states
 // exactly what each tier ships and what never leaves.
-const telemetryDisclosure = `TELEMETRY — what each tier sends (the sharing ladder's telemetry rungs):
+const telemetryDisclosure = `TELEMETRY: what each tier sends (the sharing ladder's telemetry rungs):
 
   off         nothing collected, staged, or sent.
   baseline    content-free counters: daily activity, sessions and their
@@ -128,7 +128,7 @@ func newTelemetryConsentCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tier := strings.ToLower(strings.TrimSpace(args[0]))
 			if !contract.ValidTier(tier) {
-				return fmt.Errorf("unknown tier %q — valid: off, baseline, enrichment, deep (legacy: usage, error)", tier)
+				return fmt.Errorf("unknown tier %q; valid: off, baseline, enrichment, deep (legacy: usage, error)", tier)
 			}
 			resolved, err := config.ResolveGlobalPath("")
 			if err != nil {

@@ -107,7 +107,7 @@ function LicensesContent({
     <div className="space-y-6 p-6">
       <PageHeader icon={navIcon("licenses")}
         title="Licenses & Plans"
-        sub="Your license inventory, utilization, and break-even analysis. Configure licenses in [licenses] config."
+        sub="Your license inventory, utilization, and break-even analysis. Licenses are configured in your Observer config file."
         right={
           <Pill>
             {items.length} hourly buckets
@@ -132,8 +132,7 @@ function LicensesContent({
           <div className="rounded-3 border border-line-2 bg-bg-2 px-4 py-6 text-center">
             <p className="text-fg-3 mb-2">No license usage data yet.</p>
             <p className="text-[12px] text-fg-2">
-              Configure licenses in <code className="bg-bg-1 px-1 rounded">config.toml</code>
-              under the <code className="bg-bg-1 px-1 rounded">[licenses]</code> section, then
+              Add your licenses to your Observer config file, then
               generate some API traffic (via proxy or watcher) to populate the usage table.
             </p>
           </div>

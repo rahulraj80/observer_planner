@@ -61,6 +61,10 @@ type updateApplyRequest struct {
 	Force    bool   `json:"force,omitempty"`
 	DryRun   bool   `json:"dry_run,omitempty"`
 	Rollback bool   `json:"rollback,omitempty"`
+	// Auto marks the daemon's own auto-apply loop, which a durable backoff
+	// may hold (FR-SEC-12); every other caller is an operator, whose apply
+	// clears it. Never on the loopback wire.
+	Auto bool `json:"-"`
 }
 
 type updateApplyResponse struct {
@@ -283,7 +287,7 @@ func updateUnderDaemonRefusal(lock diag.LockInfo, dbPath, addr string, rollback 
 	if dashboardInBuild {
 		b.WriteString("  - if the daemon serves its dashboard on another address, point this command at it with OBSERVER_DASHBOARD_ADDR; or\n")
 	}
-	fmt.Fprintf(&b, "  - stop that daemon (take any tool's proxy route off first: docs/daemon-restart-runbook.md), run `observer update %s` again, then start it.\n", verb)
+	fmt.Fprintf(&b, "  - stop that daemon (`observer service stop` takes the proxy routes off first), run `observer update %s` again, then start it (`observer service start` puts them back).\n", verb)
 	b.WriteString("If that pid is not an observer daemon, the lock is stale: remove the lock file and run this again.")
 	return b.String()
 }
@@ -291,9 +295,15 @@ func updateUnderDaemonRefusal(lock diag.LockInfo, dbPath, addr string, rollback 
 // askDaemonToUpdate posts the request to the running daemon.
 //
 // reached=false means no daemon answered, which is a normal condition, not an
-// error: the CLI then performs the apply itself.
+// error: the CLI then performs the apply itself (or refuses, when a daemon
+// still holds this database). Only a daemon serving cfg's database is asked
+// (daemon_handoff.go, L-125): another one would update its own binary.
 func askDaemonToUpdate(ctx context.Context, cfg config.Config, req updateApplyRequest) (updateApplyResponse, bool, error) {
-	addr := resolveDashboardAddr("", cfg.Dashboard.Addr, "127.0.0.1:8081")
+	target := daemonHandoffFor(ctx, cfg.Observer.DBPath, daemonDashboardAddrFor(cfg))
+	if !target.Use {
+		return updateApplyResponse{}, false, nil
+	}
+	addr := strings.TrimPrefix(target.Base, "http://")
 	body, err := json.Marshal(req)
 	if err != nil {
 		return updateApplyResponse{}, false, err
@@ -305,6 +315,7 @@ func askDaemonToUpdate(ctx context.Context, cfg config.Config, req updateApplyRe
 		return updateApplyResponse{}, false, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	target.setDBIdentity(httpReq)
 	client := &http.Client{Timeout: updateDaemonTimeout}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -312,6 +323,11 @@ func askDaemonToUpdate(ctx context.Context, cfg config.Config, req updateApplyRe
 		return updateApplyResponse{}, false, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if isDBIdentityRefusal(resp, target.DBIdentity) {
+		// The address changed hands after the probe: no daemon of this
+		// database answered.
+		return updateApplyResponse{}, false, nil
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		// A daemon that predates this endpoint. Say so rather than silently
 		// applying underneath it, which would swap the binary of a running

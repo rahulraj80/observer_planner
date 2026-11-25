@@ -483,35 +483,56 @@ func TestForVersion(t *testing.T) {
 	}
 }
 
-// TestForOS (demo screenshots 2026-11-12: a "needs macOS 13" banner on
-// Linux): an announcement naming platforms reaches only those; one naming
-// none reaches every platform; an unknown platform name is refused.
-func TestForOS(t *testing.T) {
-	all := with(func(a *Announcement) { a.ID = "all" })
-	mac := with(func(a *Announcement) { a.ID = "mac"; a.OS = []string{"darwin"} })
-	ids := func(list []Announcement) string {
-		var out []string
-		for _, a := range list {
-			out = append(out, a.ID)
+// TestForPlatform: an announcement scoped to some operating systems shows
+// only on them; an unscoped one shows everywhere (U-01).
+func TestForPlatform(t *testing.T) {
+	list := []Announcement{
+		{ID: "mac", Platforms: []string{"darwin"}},
+		{ID: "not-mac", Platforms: []string{"linux", "windows"}},
+		{ID: "always"},
+	}
+	cases := []struct{ goos, want string }{
+		{"darwin", "mac,always"},
+		{"linux", "not-mac,always"},
+		{"windows", "not-mac,always"},
+		{"freebsd", "always"},
+	}
+	for _, tc := range cases {
+		var ids []string
+		for _, a := range ForPlatform(list, tc.goos) {
+			ids = append(ids, a.ID)
 		}
-		return strings.Join(out, ",")
+		if got := strings.Join(ids, ","); got != tc.want {
+			t.Errorf("ForPlatform(%q) = %q, want %q", tc.goos, got, tc.want)
+		}
 	}
-	list := []Announcement{all, mac}
-	if got := ids(ForOS(list, "linux")); got != "all" {
-		t.Errorf("linux sees %q", got)
+	if Validate(with(func(a *Announcement) { a.Platforms = []string{"macos"} })) == nil {
+		t.Fatal("an unknown platform validated")
 	}
-	if got := ids(ForOS(list, "darwin")); got != "all,mac" {
-		t.Errorf("darwin sees %q", got)
+	if err := Validate(with(func(a *Announcement) { a.Platforms = []string{"darwin", "linux"} })); err != nil {
+		t.Fatalf("known platforms refused: %v", err)
 	}
-	if len(list) != 2 {
-		t.Error("ForOS changed its input")
-	}
-	if err := Validate(with(func(a *Announcement) { a.OS = []string{"macos"} })); !errors.Is(err, ErrInvalid) {
-		t.Errorf("unknown os accepted: %v", err)
-	}
-	for _, a := range Release() {
-		if strings.Contains(a.Title, "macOS") && (len(a.OS) != 1 || a.OS[0] != "darwin") {
-			t.Errorf("%s names macOS but reaches %v", a.ID, a.OS)
+}
+
+// TestReleaseMacOSNoticeIsDarwinOnly pins U-01 on the compiled-in rail: the
+// macOS 13 notice never reaches a Linux or Windows machine, and those still
+// hear that code security is on.
+func TestReleaseMacOSNoticeIsDarwinOnly(t *testing.T) {
+	for _, goos := range []string{"linux", "windows", "darwin"} {
+		var macOS, codesec bool
+		for _, a := range ForPlatform(Release(), goos) {
+			if strings.Contains(a.Title+a.Body, "macOS") {
+				macOS = true
+			}
+			if strings.Contains(a.Body, "Code security is now on") {
+				codesec = true
+			}
+		}
+		if macOS != (goos == "darwin") {
+			t.Errorf("%s: macOS notice shown = %v", goos, macOS)
+		}
+		if !codesec {
+			t.Errorf("%s: no code security notice", goos)
 		}
 	}
 }

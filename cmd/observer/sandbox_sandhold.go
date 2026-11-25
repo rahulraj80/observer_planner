@@ -457,24 +457,7 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 		deps.now = time.Now
 	}
 	saved, savedErr := sandholdLoadCredential(deps.observerDir)
-	if raw == "" && deps.lookupEnv != nil {
-		raw, _ = deps.lookupEnv(sandhold.EnvURL)
-	}
-	if raw == "" && saved != nil {
-		raw = saved.URL
-	}
-	defaulted := false
-	if strings.TrimSpace(raw) == "" {
-		// No node named: SandHold's public node (or the one
-		// SANDHOLD_DEFAULT_URL names), where a person signs up in the
-		// same browser step and the first month is free.
-		raw, defaulted = sandhold.DefaultNode, true
-		if deps.lookupEnv != nil {
-			if v, ok := deps.lookupEnv(sandhold.EnvDefaultURL); ok && strings.TrimSpace(v) != "" {
-				raw = v
-			}
-		}
-	}
+	raw, defaulted := sandholdConnectTarget(deps, raw, saved)
 	node, err := sandhold.NodeURL(raw)
 	if err != nil {
 		return fmt.Errorf("sandbox connect: %w", err)
@@ -524,7 +507,7 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	if err != nil {
 		// Never leave a key working that this machine cannot keep.
 		if rerr := c.RevokeKey(ctx, g.KeyID); rerr != nil {
-			return fmt.Errorf("sandbox connect: %w; the new key could not be revoked either (%v): revoke it in the node's portal, %s/app (API access)", err, rerr, node)
+			return fmt.Errorf("sandbox connect: %w; the new key could not be revoked either (%w): revoke it in the node's portal, %s/app (API access)", err, rerr, node)
 		}
 		return fmt.Errorf("sandbox connect: %w (the new key was revoked at the node)", err)
 	}
@@ -561,6 +544,39 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 		}
 	}
 
+	sandholdPrintConnected(out, node, where, conn, g.ExpiresAt, whoErr, terr != nil)
+	return nil
+}
+
+// sandholdConnectTarget picks the node `observer sandbox connect` signs in
+// to: the one named, else SANDHOLD_URL, else the saved connection's node,
+// else the default node (defaulted is then true).
+func sandholdConnectTarget(deps sandholdDeps, raw string, saved *sandhold.Credential) (string, bool) {
+	if raw == "" && deps.lookupEnv != nil {
+		raw, _ = deps.lookupEnv(sandhold.EnvURL)
+	}
+	if raw == "" && saved != nil {
+		raw = saved.URL
+	}
+	defaulted := false
+	if strings.TrimSpace(raw) == "" {
+		// No node named: SandHold's public node (or the one
+		// SANDHOLD_DEFAULT_URL names), where a person signs up in the
+		// same browser step and the first month is free.
+		raw, defaulted = sandhold.DefaultNode, true
+		if deps.lookupEnv != nil {
+			if v, ok := deps.lookupEnv(sandhold.EnvDefaultURL); ok && strings.TrimSpace(v) != "" {
+				raw = v
+			}
+		}
+	}
+	return raw, defaulted
+}
+
+// sandholdPrintConnected prints what `observer sandbox connect` set up:
+// who the key belongs to, where it is kept, the plan and the isolation
+// the node offers.
+func sandholdPrintConnected(out io.Writer, node, where string, conn sandhold.Connection, expires time.Time, whoErr error, targetsFailed bool) {
 	fmt.Fprintf(out, "\nConnected to %s", node)
 	if who, in := conn.Who(); who != "" {
 		fmt.Fprintf(out, " as %s", who)
@@ -570,8 +586,8 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	}
 	fmt.Fprintln(out, ".")
 	fmt.Fprintf(out, "  The key is kept in %s and sent only to %s", where, node)
-	if !g.ExpiresAt.IsZero() {
-		fmt.Fprintf(out, "; it works until %s", g.ExpiresAt.UTC().Format("2 Jan 2006"))
+	if !expires.IsZero() {
+		fmt.Fprintf(out, "; it works until %s", expires.UTC().Format("2 Jan 2006"))
 	}
 	fmt.Fprintln(out, ".")
 	fmt.Fprintln(out, "  Disconnect any time with: observer sandbox disconnect (it revokes the key at the node).")
@@ -592,7 +608,7 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	}
 	fmt.Fprintln(out)
 	switch {
-	case terr != nil:
+	case targetsFailed:
 		fmt.Fprintf(out, "The isolation this node offers could not be read: %s\n", conn.TargetsError)
 	case len(conn.Offers) == 0:
 		fmt.Fprintln(out, "This node offers you no isolation right now (no target is active for you); ask its operator.")
@@ -607,7 +623,6 @@ func runSandholdConnect(ctx context.Context, w io.Writer, deps sandholdDeps, raw
 	}
 	fmt.Fprintln(out, "\nThe node appears in Observer's sandbox backends as \"sandhold\" (observer sandbox status --backend sandhold).")
 	fmt.Fprintln(out, "To run a sandboxed terminal on it, add \"sandhold\" to [terminal.sandbox].backends and choose it by name; the first run asks you to agree to what is sent to the node.")
-	return nil
 }
 
 // sandholdShowOffer prints the node's first-month offer before the

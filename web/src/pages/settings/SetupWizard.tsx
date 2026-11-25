@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, RefObject } from "react";
 import clsx from "clsx";
-import { Link } from "react-router-dom";
+import { GatedLink } from "@/components/GatedLink";
+import { ApiErrorNotice } from "@/components/NeedsSettingNotice";
 import { Button, ConfirmButton, Icon } from "@/components/primitives";
 import { ObsLanding } from "@shared/primitives/ObsFlight";
 import { useApi } from "@/lib/useApi";
 import { localConfirmHeaders } from "@/lib/api";
+import { parseErrorBody, settingsLinkOfBody, type SettingsLink } from "@/lib/needsSetting";
 import { classifyRemoveReply, type RemoveOutcome } from "@/lib/wizardRemove";
 import { classifyWizardReply, type WizardOutcome } from "@/lib/setupWizardPreview";
 import type { CodexHookTrust, CodexHookTrustEntry, ToolWiring } from "@/lib/types";
@@ -55,7 +57,7 @@ const STEPS: StepText[] = [
     id: "mcp",
     title: "MCP server",
     blurb:
-      "On-demand project-knowledge queries inside the tool (13 observer tools).",
+      "On-demand project-knowledge queries inside the tool.",
     note: "Honest trade-off: the registered tool schemas add roughly 1,800 tokens to every turn. Worth it if you use the queries; skip this step if unsure - everything else works without it.",
     action: "Register MCP server",
     body: (tool, force, dry_run) => ({ tool, force, dry_run }),
@@ -318,6 +320,9 @@ function WizardStep({
     error: string | null;
     conflict: boolean;
   }>({ done: false, line: "", loading: true, error: null, conflict: false });
+  // The place that fixes a refusal, when the reply named one (the telemetry
+  // step's receiver-off 412, internal/settingslink): rendered as a button.
+  const [fixAt, setFixAt] = useState<SettingsLink | null>(null);
   useEffect(() => {
     onDoneChange?.(state.done);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -334,6 +339,7 @@ function WizardStep({
         body: JSON.stringify(spec.body(tool, force, dryRun)),
       });
       const text = await res.text().catch(() => "");
+      setFixAt(res.ok ? null : settingsLinkOfBody(parseErrorBody(text)));
       return classifyWizardReply(spec.id, res.status, text, !dryRun);
     },
     [endpoint, spec, tool],
@@ -423,9 +429,9 @@ function WizardStep({
           {spec.noteLink && (
             <>
               {" "}
-              <Link to={spec.noteLink.to} className="font-medium text-accent hover:text-accent-strong">
+              <GatedLink to={spec.noteLink.to} managed={null} className="font-medium text-accent hover:text-accent-strong">
                 {spec.noteLink.label}
-              </Link>
+              </GatedLink>
             </>
           )}
         </p>
@@ -434,9 +440,12 @@ function WizardStep({
         {state.loading
           ? "probing…"
           : state.error
-            ? <span className="text-danger">{state.error}</span>
+            ? fixAt ? null : <span className="text-danger">{state.error}</span>
             : state.line}
       </div>
+      {!state.loading && state.error && fixAt && (
+        <ApiErrorNotice note={{ text: state.error, settings: fixAt }} className="mt-1.5" />
+      )}
     </div>
   );
 }

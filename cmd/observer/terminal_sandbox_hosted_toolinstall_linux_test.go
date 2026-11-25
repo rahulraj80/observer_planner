@@ -78,7 +78,7 @@ func (tb *hostedToolBox) wrap(hh *hostedHarness) {
 // again, and the agent starts.
 func TestHostedHostInstallsTheToolOverCurl(t *testing.T) {
 	hh := newHostedHarness(t, sandboxremote.VendorE2B)
-	check, err := hostedToolDelivery("claude-code", "", vocab.TierInternet, "")
+	check, err := forkToolCheck("claude-code", "", vocab.TierInternet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestHostedHostInstallsTheToolOverCurl(t *testing.T) {
 // in, and the agent starts.
 func TestHostedHostInstallsWithNPMUnderTheBoxHome(t *testing.T) {
 	hh := newHostedHarness(t, sandboxremote.VendorE2B)
-	check, err := hostedToolDelivery("claude-code", "node-image", vocab.TierInternet, "")
+	check, err := forkToolCheck("claude-code", "node-image", vocab.TierInternet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestHostedHostInstallsWithNPMUnderTheBoxHome(t *testing.T) {
 // the tool's own words and the box's free room, and the box is deleted.
 func TestHostedHostRefusesAnInstalledToolThatDoesNotStart(t *testing.T) {
 	hh := newHostedHarness(t, sandboxremote.VendorE2B)
-	check, err := hostedToolDelivery("claude-code", "node-image", vocab.TierInternet, "")
+	check, err := forkToolCheck("claude-code", "node-image", vocab.TierInternet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestHostedHostRefusesAnInstalledToolThatDoesNotStart(t *testing.T) {
 // `observer launch` and `observer terminals show` print).
 func TestHostedHostRefusesABoxThatCannotInstallTheTool(t *testing.T) {
 	hh := newHostedHarness(t, sandboxremote.VendorE2B)
-	check, err := hostedToolDelivery("claude-code", "plain-image", vocab.TierInternet, "")
+	check, err := forkToolCheck("claude-code", "plain-image", vocab.TierInternet)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/marmutapp/superbased-observer/internal/llmconn"
+	"github.com/marmutapp/superbased-observer/internal/llmconn/llmtypes"
 )
 
 // LLMConfig is the [llm] surface — optional LLM analysis connections
@@ -79,39 +79,39 @@ type LLMConnectionConfig struct {
 
 // validLLMKinds is the closed kind vocabulary.
 var validLLMKinds = map[string]bool{
-	"":                               true,
-	string(llmconn.KindAnthropic):    true,
-	string(llmconn.KindOpenAICompat): true,
-	string(llmconn.KindLocalOpenAI):  true,
+	"":                                true,
+	string(llmtypes.KindAnthropic):    true,
+	string(llmtypes.KindOpenAICompat): true,
+	string(llmtypes.KindLocalOpenAI):  true,
 }
 
 // validLLMTaskRoles is the closed task-role vocabulary.
 var validLLMTaskRoles = map[string]bool{
-	string(llmconn.TaskNarrative): true,
-	string(llmconn.TaskAsk):       true,
-	string(llmconn.TaskSummarize): true,
-	string(llmconn.TaskAskPast):   true,
-	string(llmconn.TaskCoach):     true,
-	string(llmconn.TaskTriage):    true,
-	string(llmconn.TaskDiagnose):  true,
-	string(llmconn.TaskQuestions): true,
+	string(llmtypes.TaskNarrative): true,
+	string(llmtypes.TaskAsk):       true,
+	string(llmtypes.TaskSummarize): true,
+	string(llmtypes.TaskAskPast):   true,
+	string(llmtypes.TaskCoach):     true,
+	string(llmtypes.TaskTriage):    true,
+	string(llmtypes.TaskDiagnose):  true,
+	string(llmtypes.TaskQuestions): true,
 }
 
 // Connections converts the static [llm.connections] map into the runtime
 // connection list, sorted by id for deterministic selection.
-func (c LLMConfig) ToConnections() []llmconn.Connection {
+func (c LLMConfig) ToConnections() []llmtypes.Connection {
 	ids := make([]string, 0, len(c.Connections))
 	for id := range c.Connections {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	out := make([]llmconn.Connection, 0, len(ids))
+	out := make([]llmtypes.Connection, 0, len(ids))
 	for _, id := range ids {
 		sc := c.Connections[id]
-		conn := llmconn.Connection{
+		conn := llmtypes.Connection{
 			ID:             id,
 			Name:           sc.Name,
-			Kind:           llmconn.Kind(sc.Kind),
+			Kind:           llmtypes.Kind(sc.Kind),
 			BaseURL:        sc.BaseURL,
 			APIKeyEnv:      sc.APIKeyEnv,
 			APIKeyKeychain: sc.APIKeyKeychain,
@@ -122,7 +122,7 @@ func (c LLMConfig) ToConnections() []llmconn.Connection {
 			Headers:        sc.Headers,
 		}
 		for _, role := range sc.TaskRoles {
-			conn.TaskRoles = append(conn.TaskRoles, llmconn.Task(role))
+			conn.TaskRoles = append(conn.TaskRoles, llmtypes.Task(role))
 		}
 		out = append(out, conn)
 	}

@@ -14,7 +14,8 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${POSTINSTALL_SCRIPT:-$REPO_ROOT/npm/observer/bin/postinstall.js}"
 command -v node >/dev/null 2>&1 || { echo "SKIP: node not installed"; exit 0; }
-[[ "$(uname -s)" == Linux ]] || { echo "SKIP: the postinstall looks only on Linux"; exit 0; }
+[[ "$(uname -s)" == Linux ]] || { echo "SKIP: the stale-daemon look runs only on Linux"; exit 0; }
+NEXT_LINE='Installed. Next: observer start (opens your dashboard, where you sign in)'
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/npm-postinstall-test.XXXXXX")"
 trap 'rm -rf "$T"' EXIT
@@ -57,8 +58,9 @@ command -v setsid >/dev/null 2>&1 || { echo "SKIP: setsid not installed"; exit 0
 # `observer start` restart path (no `observer service upgrade` for a user
 # with no unit).
 run "$PROC"
-if [[ $rc -eq 0 ]] && grep -q "(pids 4101, 4106, 4107)" "$T/out" && grep -q 'run `observer start` again' "$T/out" \
-  && grep -q "turn the proxy route off" "$T/out" && ! grep -q "410[2-5]" "$T/out" && ! grep -q "service upgrade" "$T/out"; then
+if [[ $rc -eq 0 ]] && grep -q "(pids 4101, 4106, 4107)" "$T/out" && grep -q 'restart it with  observer service restart' "$T/out" \
+  && grep -q "takes the proxy routes off first" "$T/out" && ! grep -q "410[2-5]" "$T/out" && ! grep -q "service upgrade" "$T/out" \
+  && ! grep -qF "$NEXT_LINE" "$T/out"; then
   ok "daemons on a deleted, a retired (npm 10 rename-aside) and a not-installed @superbased binary get the observer start restart hint only; current, hook, non-npm and non-observer processes do not"
 else bad "stale daemon hint (rc=$rc)"; cat "$T/out"; fi
 
@@ -75,17 +77,17 @@ proc 4108 "$NPM/.observer-linux-x64-0HMzYhs4/bin/observer (deleted)" "$NPM/obser
 echo "0::/user.slice/user-1000.slice/user@1000.service/app.slice/observer.service" >"$PROC/4108/cgroup"
 mkdir -p "$PROC/self"
 run "$PROC"
-if [[ $rc -eq 0 ]] && grep -q "observer service upgrade" "$T/out" && ! grep -q 'observer start` again' "$T/out"; then
+if [[ $rc -eq 0 ]] && grep -q "observer service upgrade" "$T/out" && ! grep -q 'restart itself in place' "$T/out"; then
   ok "a daemon under the systemd unit gets only the service upgrade line"
 else bad "unit daemon hint (rc=$rc)"; cat "$T/out"; fi
 PROC="$T/proc"
 
 rm -rf "$PROC/4101" "$PROC/4106" "$PROC/4107"
 run "$PROC"
-if [[ $rc -eq 0 ]] && [[ ! -s "$T/out" ]]; then ok "no stale daemon: silent"; else bad "silent when nothing is stale (rc=$rc)"; cat "$T/out"; fi
+if [[ $rc -eq 0 ]] && [[ "$(cat "$T/out")" == "$NEXT_LINE" ]]; then ok "no stale daemon: only the next-step line"; else bad "next-step line when nothing is stale (rc=$rc)"; cat "$T/out"; fi
 
 run "$T/no-such-proc"
-if [[ $rc -eq 0 ]] && [[ ! -s "$T/out" ]]; then ok "an unreadable /proc never fails the install"; else bad "unreadable proc (rc=$rc)"; cat "$T/out"; fi
+if [[ $rc -eq 0 ]] && [[ "$(cat "$T/out")" == "$NEXT_LINE" ]]; then ok "an unreadable /proc never fails the install (next-step line only)"; else bad "unreadable proc (rc=$rc)"; cat "$T/out"; fi
 
 echo
 echo "postinstall.js: $pass passed, $fail failed"

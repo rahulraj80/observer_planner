@@ -26,10 +26,25 @@ type SandboxSetupStep struct {
 	// terminal, elevated, guide, never).
 	Class string `json:"class"`
 	// Channel is sandboxsetup.Channel.
-	Channel    string `json:"channel"`
-	Display    string `json:"display,omitempty"`
+	Channel string `json:"channel"`
+	Display string `json:"display,omitempty"`
+	// DisplayIsCommand: Display is a command line to paste into a terminal,
+	// not a sentence (a surface offers "Copy command" only then).
+	DisplayIsCommand bool `json:"display_is_command,omitempty"`
+	// Fields are the credential names a credential step asks for, in the
+	// order the provider documents them (E2B_API_KEY; MODAL_TOKEN_ID and
+	// MODAL_TOKEN_SECRET; ...). Names only, never a value.
+	Fields []string `json:"fields,omitempty"`
+	// Command is the CLI form of a credential step (`observer sandbox
+	// hosted connect <provider>`), which asks for each field and stores it
+	// the same way; a surface shows it where it cannot take the key itself.
+	Command    string `json:"command,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Disclosure string `json:"disclosure,omitempty"`
+	// Action is the step's button label when its class's own label would
+	// not say what it does ("Put the API key in the box"); omitted
+	// otherwise, and a surface then labels the button by class.
+	Action string `json:"action,omitempty"`
 	// After is what the person must do afterwards ("relogin", "reboot",
 	// "engine_restart", "daemon_restart").
 	After string `json:"after,omitempty"`
@@ -43,6 +58,10 @@ type SandboxSetupStep struct {
 	// Undo is offered or there is nothing to undo). The step's reason holds
 	// the sentence.
 	UndoRefused string `json:"undo_refused,omitempty"`
+	// UndoAlso is what an offered Undo changes beyond this row (a step whose
+	// one setting every hosted row reads), as a sentence the dashboard shows
+	// before the undo runs; absent otherwise.
+	UndoAlso string `json:"undo_also,omitempty"`
 	// Record is the step's latest install record (subject_kind sandbox).
 	Record *ToolInstallRecord `json:"record,omitempty"`
 	// Consent is what a pinned download shows before the click.
@@ -120,6 +139,10 @@ type SandboxSetupRunRequest struct {
 	// Key is the typed API key of a hosted_connect step only; never logged,
 	// never stored outside the keychain.
 	Key string `json:"key,omitempty"`
+	// Fields are the typed credential values of a hosted_connect step whose
+	// provider needs more than one (keyed by the step's Fields names); never
+	// logged, never stored outside the keychain.
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // The closed SandboxSetupStarted.Kind vocabulary.

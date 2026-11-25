@@ -48,9 +48,17 @@ func hookSwitchesAt(ctx *MatchContext, path string) []HookSwitch {
 		return nil
 	}
 	var out []HookSwitch
+	// The path's forms are the same for every switch: derive them once
+	// (a replay asks this for every captured command, demo bug #14).
+	// The split forms too (R3-5): a switch table of N globs splits once.
+	forms := homePathFormSegs(ctx, path)
 	for _, sw := range ctx.Cfg.HookSwitches {
-		if _, ok := pathPatternMatch(path, ctx.Cfg.Home, []pathPattern{{glob: sw.Glob, desc: sw.Desc}}); ok {
-			out = append(out, sw)
+		ps := globSegs(sw.Glob, true)
+		for _, fs := range forms {
+			if matchSegs(ps, fs) {
+				out = append(out, sw)
+				break
+			}
 		}
 	}
 	return out
@@ -77,7 +85,24 @@ func matchHookSwitchWrite(ctx *MatchContext) (bool, string) {
 			return true, switchDetail(sw) + " (" + ev.Target + ")"
 		}
 	}
+	if hasUnseenEdit(ev.Edits) {
+		return true, sws[0].Desc + " file written with content the guard cannot see, by a rename onto it (" + ev.Target + ")"
+	}
 	return false, ""
+}
+
+// hasUnseenEdit reports an edit whose content the boundary cannot see
+// (EditUnknown: the destination of an apply_patch rename, NEW-07). A
+// content rule treats it as content that may set anything, so a rename
+// cannot carry a switch, driver or override past the rule that would judge
+// the same content written directly.
+func hasUnseenEdit(edits []ProposedEdit) bool {
+	for _, e := range edits {
+		if e.Kind == EditUnknown {
+			return true
+		}
+	}
+	return false
 }
 
 // switchDetail is the verdict detail naming the switch and its value.
@@ -314,7 +339,7 @@ func hookSwitchWrites(ctx *MatchContext, cmd *Command, withInline bool) []switch
 	}
 	var out []switchWrite
 	anchors := unitAnchors(ctx, cmd)
-	for _, t := range sensitivePathTokens(cmd) {
+	for _, t := range sensitivePathTokensMemo(ctx, cmd) {
 		if !classifyWrite(cmd, t.text) {
 			continue
 		}

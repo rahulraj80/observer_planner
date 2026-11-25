@@ -97,6 +97,8 @@ const (
 	ownerOrgGovernance  = "your organization's node governance policy (the admin dashboard pins it; the local value is not read)"
 	ownerAutoApply      = "the Settings → Health → Updates \"Update automatically\" switch (PUT /api/update/auto-apply: default, on or off) / config.toml"
 	ownerComponents     = "`observer components select|add|remove` / `observer init --components` / Settings > Components (writes these keys AND runs the teardown of a removed component)"
+	ownerWorkspace      = "the Terminals → Settings \"Default workspace\" card (PUT /api/workspace/default: checks the folder and creates it) / config.toml"
+	ownerStraceSeize    = "the Terminals > Settings sandbox card's strace switch (POST /api/terminal/sandbox/ptrace-seize: a choice you confirm on this machine, never an agent's or your organization's)"
 )
 
 // routingCardOwner names the Settings → Routing card that edits one of the
@@ -214,6 +216,9 @@ var rules = []rule{
 	{prefix: "dashboard", tier: TierPlain, restart: RestartRequired, section: "dashboard"},
 	// Network exposure (§4.2).
 	{prefix: "dashboard.addr", exact: true, tier: TierSensitive},
+	// The live ribbon switch is read on every ribbon request (live, no
+	// restart) and is a plain display preference.
+	{prefix: "dashboard.live_ribbon", exact: true, restart: RestartLive},
 
 	// ------------------------------------------------------------- compression
 	{prefix: "compression", tier: TierPlain, restart: RestartRequired, section: "compression"},
@@ -434,6 +439,8 @@ var rules = []rule{
 	{prefix: "terminal.sandbox.live_run_update_policy", exact: true, tier: TierPlain, enum: []string{"", "defer", "ask_immediately"}},
 	{prefix: "terminal.sandbox.seatbelt.driver", exact: true, enum: []string{"", "sandbox-exec", "mxc-exec-mac"}},
 	{prefix: "terminal.sandbox.workspace_retention_days", exact: true, tier: TierPlain},
+	// SBXD-2 (lane COPIES): the returned-copy age sweep, like its sibling.
+	{prefix: "terminal.sandbox.returned_copy_retention_days", exact: true, tier: TierPlain},
 	// egress_allow_hosts (lane LEFT-SBX): every gateway helper reads the
 	// list from the daemon config its run record names when the run starts
 	// (cmd/observer/terminal_sandbox_egresshosts.go), so a save applies to
@@ -447,6 +454,10 @@ var rules = []rule{
 	// process_lite rows, default off (D7). Sensitive like its neighbours
 	// (it changes what a sandboxed launch runs under).
 	{prefix: "terminal.sandbox.seccomp", exact: true, tier: TierSensitive},
+	// seccomp_allow_seize (lane ptrace, PT-96): lifts PTRACE_SEIZE from that
+	// filter. Written only by its own dashboard route, so the generic editor,
+	// the keys route and `observer config set` read it and never write it.
+	{prefix: "terminal.sandbox.seccomp_allow_seize", exact: true, tier: TierOwnerElsewhere, ownedBy: ownerStraceSeize, prominence: ProminenceExpert},
 	// vendor_forced_native (lane SBX-P3D): a closed choice.
 	{prefix: "terminal.sandbox.vendor_forced_native", exact: true, enum: []string{"", "nest_or_refuse", "refuse"}},
 	// The container driver (lane SBX-P3A): sensitive like the rest of the
@@ -458,8 +469,14 @@ var rules = []rule{
 	{prefix: "terminal.sandbox.mxc.stop_grace_seconds", exact: true, tier: TierPlain, prominence: ProminenceAdvanced},
 	{prefix: "terminal.sandbox.mxc.probe_timeout_seconds", exact: true, tier: TierPlain, prominence: ProminenceAdvanced},
 	// The hosted rows (lane SBX-P7): two closed choices.
-	{prefix: "terminal.sandbox.hosted.key_custody", exact: true, enum: []string{"home_relay", "in_box_api_key", "in_box_oauth_seed", "provider_injected"}},
+	{prefix: "terminal.sandbox.hosted.key_custody", exact: true, enum: []string{"auto", "home_relay", "in_box_api_key", "in_box_oauth_seed", "provider_injected"}},
 	{prefix: "terminal.sandbox.hosted.memory_images", exact: true, enum: []string{"avoid", "refuse"}},
+	// The diff against the box's baseline (lane COPIES); "" means baseline.
+	{prefix: "terminal.sandbox.hosted.diff_against", exact: true, enum: []string{"", "baseline", "head"}},
+	// Guard's hooks in a hosted box (lane HOOKS, SBXD-6): "" reads as auto.
+	{prefix: "terminal.sandbox.hosted.guard_hooks", exact: true, enum: []string{"", "auto", "on", "off"}},
+	// The clone location (decision SBXD-5).
+	{prefix: "terminal.sandbox.hosted.clone_where", exact: true, enum: []string{"auto", "box", "home"}},
 	// The OpenShell row (lane O1A): sensitive like the rest of the sandbox
 	// block (the endpoint names the gateway that builds the box); the
 	// gateway mode is a closed choice: "managed" is Observer's private
@@ -483,6 +500,12 @@ var rules = []rule{
 	// the shell start-up files; the dedicated card/CLI writes both together.
 	// next_spawn: a change reaches the next shell the operator opens.
 	{prefix: "shell_wrap", tier: TierOwnerElsewhere, restart: RestartNextSpawn, section: "terminal", ownedBy: ownerShellWrap, prominence: ProminenceAdvanced},
+	// [workspace] (internal/defaultworkspace): the default workspace folder.
+	// Owner-elsewhere because a key write alone would skip the folder rules
+	// (not the home folder, not in ~/.observer, not inside a git repository)
+	// and would not create the folder; the dedicated card does both. live:
+	// every reader resolves it from the file when it needs it.
+	{prefix: "workspace", tier: TierOwnerElsewhere, restart: RestartLive, section: "terminal", ownedBy: ownerWorkspace},
 
 	// [components] (modular packaging P1): the node's component selection.
 	// Owner-elsewhere because a key write alone would skip the teardown of a
@@ -674,6 +697,8 @@ var rules = []rule{
 	{prefix: "observability.admission.prefilter", prominence: ProminenceAdvanced},
 	{prefix: "observability.alerts.rules", exact: true, tier: TierOwnerElsewhere, ownedBy: ownerFileOnly},
 	{prefix: "observability.alerts.webhook_url", exact: true, tier: TierSensitive},
+	{prefix: "observability.alerts.slack_webhook_url", exact: true, tier: TierSecret, secret: true},
+	{prefix: "observability.alerts.pagerduty_routing_key", exact: true, tier: TierSecret, secret: true},
 	{prefix: "observability.alerts.email", exact: true, tier: TierSensitive},
 	{prefix: "observability.alerts.email_to", exact: true, tier: TierSensitive},
 	// Egress routing (§4.2).
@@ -681,6 +706,15 @@ var rules = []rule{
 	{prefix: "observability.egress.rules", exact: true, tier: TierOwnerElsewhere, ownedBy: ownerFileOnly},
 	{prefix: "observability.egress.targets", exact: true, tier: TierOwnerElsewhere, ownedBy: ownerFileOnly},
 	{prefix: "observability.proxy_turn_traces", exact: true, prominence: ProminenceAdvanced},
+	// Node-local Plane A content capture (F07, D8): a capture/content key,
+	// so sensitive (D19: an agent's MCP write needs the user's approval).
+	{prefix: "observability.store_content", exact: true, tier: TierSensitive, prominence: ProminencePrimary},
+	// [observability.sdk] (D18): where the SDKs send an app's data. Both keys
+	// decide whether spans leave this machine, so both are sensitive (confirm
+	// on the dashboard, --yes on the CLI, an approval for an MCP agent). The
+	// discovery route reads the file on every request, so a save is live.
+	{prefix: "observability.sdk", tier: TierSensitive, restart: RestartLive, prominence: ProminencePrimary},
+	{prefix: "observability.sdk.destination", exact: true, enum: []string{"", "local", "online", "both"}},
 
 	// ----------------------------------------------------------------- selfobs
 	{prefix: "selfobs", tier: TierSensitive, restart: RestartRequired, section: "observability", prominence: ProminenceAdvanced},

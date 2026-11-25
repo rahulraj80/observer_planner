@@ -196,9 +196,31 @@ var selfApprovalVerbs = []selfApprovalVerb{
 		when: func(args, _ []string) bool { return !hasFlag(args, "--enforce") },
 	},
 	{
-		path: []string{"config", "set"}, grant: true, desc: "changes a [guard], [security], [terminal.launch] or [observer.hooks] setting",
+		path: []string{"config", "set"}, grant: true, desc: "changes a [guard], [security], [terminal.launch] or [observer.hooks] setting, or a D19 sharing, capture, egress, admission, budget or SDK destination setting, or another setting that needs your confirm (ask through MCP set_setting, which files a proposal for the person)",
 		when: func(_, words []string) bool { return len(words) > 2 && selfLoweringConfigKey(words[2]) },
 	},
+	// Plane A W2-8 (ruling D19): a settings change an agent asked for through
+	// MCP set_setting waits for the person; approving or rejecting it is
+	// theirs. `config proposals` alone (the list) stays allowed.
+	{path: []string{"config", "proposals", "approve"}, grant: true, desc: "approves and applies a settings change an AI agent asked for"},
+	{path: []string{"config", "proposals", "reject"}, grant: true, desc: "rejects a settings change an AI agent asked for"},
+	// Plane A W2-7 (ruling D18): minting the person's own SDK key on their
+	// organization (which lets apps send data off the machine) and revoking
+	// it are the person's. `sdk status` only prints.
+	{path: []string{"sdk", "sign-in"}, grant: true, desc: "mints your SDK key on your organization, which lets apps send data off this machine"},
+	{path: []string{"sdk", "sign-out"}, grant: true, desc: "revokes your SDK key on your organization"},
+	// Review finding R-C02 (ruling D19): the machine's alert channels are
+	// where alert data (rule, metric, value, dimensions, an end user among
+	// them) is sent off this machine, and the admission setup wizard writes
+	// the admission policy and its judge (where an app's prompts are sent
+	// to be judged). Each is the owner's, like the HTTP routes below; the
+	// test sends stay allowed. cmd/observer's
+	// TestEveryObsWriterIsR165OrExcepted walks every obs route and verb.
+	{path: []string{"obs", "alerts", "slack", "set"}, grant: true, desc: "stores the Slack alert webhook, where alert data is sent off this machine"},
+	{path: []string{"obs", "alerts", "slack", "clear"}, grant: true, desc: "removes the Slack alert webhook, so alerts stop reaching the person"},
+	{path: []string{"obs", "alerts", "pagerduty", "set"}, grant: true, desc: "stores the PagerDuty routing key, where alert data is sent off this machine"},
+	{path: []string{"obs", "alerts", "pagerduty", "clear"}, grant: true, desc: "removes the PagerDuty routing key, so alerts stop reaching the person"},
+	{path: []string{"obs", "admission", "setup"}, grant: true, desc: "writes the admission policy and its judge (where an app's prompts are sent to be judged), a setting you change yourself"},
 	// The repository trust accept flow (security pillar plan section 5.1
 	// item 5): accepting a repository's commands is the developer's call.
 	{path: []string{"security", "trust", "accept"}, grant: true, desc: "accepts a repository's commands for the repository trust check"},
@@ -271,11 +293,11 @@ var selfApprovalVerbs = []selfApprovalVerb{
 	// denied; `observer security lookup` and `lookup status` only print.
 	// `security scan remote accept` is the 13.4 spelling, denied before any
 	// verb carries it.
-	{path: []string{"security", "lookup", "mode"}, grant: true, desc: "chooses the package lookup mode (download the databases, or the SuperBased lookup), recording its consent"},
-	{path: []string{"security", "lookup", "kinds"}, grant: true, desc: "chooses which package kinds the SuperBased lookup covers"},
-	{path: []string{"security", "lookup", "private"}, grant: true, desc: "chooses whether the SuperBased lookup sends private and internal package names, recording its consent"},
+	{path: []string{"security", "lookup", "mode"}, grant: true, desc: "chooses the package lookup mode (download the databases, or the superbased lookup), recording its consent"},
+	{path: []string{"security", "lookup", "kinds"}, grant: true, desc: "chooses which package kinds the superbased lookup covers"},
+	{path: []string{"security", "lookup", "private"}, grant: true, desc: "chooses whether the superbased lookup sends private and internal package names, recording its consent"},
 	{path: []string{"security", "lookup", "withdraw"}, grant: true, desc: "withdraws a package lookup consent"},
-	{path: []string{"security", "scan", "remote", "accept"}, grant: true, desc: "accepts the SuperBased package lookup"},
+	{path: []string{"security", "scan", "remote", "accept"}, grant: true, desc: "accepts the superbased package lookup"},
 	// Lane OS-2 T (plan 6.7): choosing the image driver writes
 	// [security.scan.image] driver, the developer's call like db_source (its
 	// config-set and PUT forms fall under the config set row's [security]
@@ -476,6 +498,9 @@ var consentAskVerbs = []selfApprovalVerb{
 	// verb typed by them). It installs nothing, so the guard asks rather
 	// than denies; `sandbox setup status` (passive facts) stays allowed.
 	{path: []string{"sandbox", "setup", "check"}, desc: "runs a sandbox driver's probe on this machine on the person's word"},
+	// The hosted consent (decision SBXD-5): agreeing to what a hosted run
+	// sends to its provider is the person's; the guard asks.
+	{path: []string{"sandbox", "hosted", "consent"}, desc: "records the person's agreement to what a hosted sandbox run sends to its provider"},
 }
 
 // verbRowMatches reports whether a CLI invocation (args, and their
@@ -653,6 +678,9 @@ var selfLoweringSections = []string{"guard", "security", "terminal.launch", "obs
 // selfLoweringConfigKey reports whether a config key is in one of the
 // selfLoweringSections (the section itself or a dotted key under it).
 func selfLoweringConfigKey(key string) bool {
+	if settingsApprovalConfigKey(key) {
+		return true
+	}
 	for _, sec := range selfLoweringSections {
 		if strings.EqualFold(key, sec) || hasFoldPrefix(key, sec+".") {
 			return true
@@ -754,7 +782,7 @@ var guardGrantRoutes = []guardGrantRoute{
 	// records or withdraws their consents. The 13.4 spelling of the remote
 	// accept route is reserved beside it.
 	{path: "/api/security/lookup", desc: "the package lookup posture route"},
-	{path: "/api/security/scanners/remote", desc: "the SuperBased package lookup accept route"},
+	{path: "/api/security/scanners/remote", desc: "the superbased package lookup accept route"},
 	// The build artifact folders (M3L-2 item 4, ruling 2026-11-05): the
 	// Scanners card's per-folder opt-in; its PUT turns a folder on or off.
 	{path: "/api/security/artifacts", desc: "the build artifact folder opt-in route"},
@@ -771,10 +799,25 @@ var guardGrantRoutes = []guardGrantRoute{
 	// Reserved for the local DAST checker's dashboard card (plan 14.9,
 	// M3L-5): its accept and its runs, under one prefix (a GET is a read).
 	{path: "/api/security/dast", prefix: true, desc: "the local DAST checker's accept and run routes"},
+	// The agent-run assessments: filing or taking back the organization request
+	// of a held run (plan section 13.6). An agent that sends either is asking to
+	// start a run under a lifted guardrail, which is the developer's call.
+	{path: "/api/security/assessments/request", desc: "the security assessment organization request route"},
+	{path: "/api/security/assessments/cancel", desc: "the held security assessment cancel route"},
+	// Stopping a run and deleting the evidence stored for one are the developer's:
+	// an agent that ends its own run record or removes the checked model and git
+	// snapshots of its own run is hiding what it did.
+	{path: "/api/security/assessments/stop", desc: "the security assessment stop route"},
+	{path: "/api/security/assessments/delete-data", desc: "the security assessment stored-evidence delete route"},
 	// The HTTP forms of `observer config set guard.*` and `security.*`.
 	{path: "/api/config/section/guard", dotted: true, desc: "the [guard] settings section"},
 	{path: "/api/config/section/security", dotted: true, desc: "the [security] settings section"},
-	{path: "/api/config/keys", body: guardConfigKeyBody, desc: "a [guard], [security], [terminal.launch] or [observer.hooks] setting"},
+	{path: "/api/config/keys", body: guardConfigKeyBody, desc: "a [guard], [security], [terminal.launch] or [observer.hooks] setting, or a D19 or confirm-tier settings key (ask through MCP set_setting instead)"},
+	// Plane A W2-8 (ruling D19): the dashboard form of `observer config
+	// proposals approve|reject`. A GET of the list is a read.
+	{path: "/api/config/proposals", prefix: true, desc: "the settings proposals an AI agent filed, waiting for the person's approval"},
+	// Plane A W2-7: the dashboard form of `observer sdk sign-in|sign-out`.
+	{path: "/api/sdk/credential", desc: "the SDK key sign-in and sign-out route"},
 	// Lane SEC-GATE5 milestone 3: the settings backup restore swaps the
 	// previous config.toml back in, which can bring back a lower [guard] or
 	// [security] setting (security.feedback.after_write = false among
@@ -811,10 +854,21 @@ var guardGrantRoutes = []guardGrantRoute{
 	// The dashboard form of `observer sandbox credentials add` (lane
 	// GATES-SBX, G24): its POST stores a provider key for injection.
 	{path: "/api/terminal/sandbox/credentials", desc: "the sandbox credential injection key route"},
+	// The sandbox card's strace switch (lane ptrace, PT-96): its POST lifts
+	// PTRACE_SEIZE from the sandbox's syscall filter, the person's call on
+	// this machine. The config file itself is R-160's, and `observer config
+	// set` refuses the key (it is owned by this route).
+	{path: "/api/terminal/sandbox/ptrace-seize", desc: "the sandbox strace switch, which lets sandboxed runs trace processes they start"},
 	// The dashboard forms of `observer sandbox readopt --end`, `checkpoint`
 	// and `restore` (lane GATES-SBX, audit F5): each POST under this prefix
 	// ends, checkpoints or restores a run (the GET list is a read).
 	{path: "/api/terminal/sandbox/readopt", prefix: true, desc: "the sandbox run re-adoption routes (end, checkpoint, restore)"},
+	// The Terminals page's "Changes from sandboxed runs" panel (lane
+	// RETURNS): each POST under this prefix opens a run's saved diff as a
+	// branch of the person's repository, removes a saved diff, or removes a
+	// sandboxed run's copy. An agent that sends one is applying, or erasing,
+	// its own work; the GET list and diff preview are reads.
+	{path: "/api/terminal/sandbox/returns", prefix: true, desc: "the routes that open a sandboxed run's changes as a branch or remove them"},
 	// The dashboard forms of `observer sandbox setup run|undo|update|repair`
 	// and `check` (lane sbxinstall-guard, PT-89, ledger SBXSETUP-1): each
 	// POST under this prefix ({backend}/run, {backend}/check) installs,
@@ -826,6 +880,15 @@ var guardGrantRoutes = []guardGrantRoute{
 	// also the Hosted sandboxes panel's Connect form (cli-parity L3, B-G2;
 	// one route, one row).
 	{path: "/api/terminal/sandbox/hosted/connect", desc: "the hosted sandbox provider key route"},
+	// The hosted consent (sandbox terminal gaps, decision SBXD-5's inline
+	// clone consent): its POST records the person's agreement to what a
+	// hosted run sends to the provider (the upload or the clone, the key
+	// custody, the network), so an agent that sends one agrees for them.
+	// The GET (the consent screen) is a read.
+	{path: "/api/terminal/sandbox/hosted/consent", desc: "the hosted sandbox consent route, which records the person's agreement to what leaves this machine"},
+	// Decision SBXD-4: its POST turns on a tool's own saved keys or its
+	// login as a source of the model key a hosted box gets.
+	{path: "/api/terminal/sandbox/hosted/key-sources", desc: "the hosted sandbox key sources route, which lets an agent's own saved keys or login go into a hosted box"},
 	// Ruling R2 (PT-89, ledger TOOLINSTALL-GUARD-1): the guided install,
 	// uninstall and record of AI tools. The double-submit confirm pair can
 	// be minted by a local process, so without a row an agent could start
@@ -900,6 +963,9 @@ var guardGrantRoutes = []guardGrantRoute{
 	// forms of the same [terminal.launch] keys are a self-approval of the
 	// launches R-168 asks about.
 	{path: "/api/terminal/policy", desc: "the terminal launch policy editor"},
+	// The local dashboard's first-launch consent (launchpad, door A) writes
+	// the same three [terminal.launch] keys in one save.
+	{path: "/api/terminal/first-launch", desc: "the first-launch consent, which allows a tool, fresh launches and a project folder"},
 	{path: "/api/config/section/terminal.launch", dotted: true, desc: "the [terminal.launch] settings section"},
 	{path: "/api/config/section/terminal", body: terminalLaunchSectionBody, desc: "the [terminal] settings section's launch policy"},
 	// Dashboard CLI parity follow-up (plan docs/plans/dashboard-cli-parity-
@@ -911,6 +977,63 @@ var guardGrantRoutes = []guardGrantRoute{
 	// privacy rule's class match nothing. All are the owner's to change.
 	{path: "/api/launch/tool-paths", desc: "the launch binary path editor"},
 	{path: "/api/config/section/routing", body: routingEgressSectionBody, desc: "the [routing] settings section's privacy rules, path classes or local upstreams"},
+	// Plane A review findings R-B01/R-B07 (ruling D19): the section and
+	// policy routes that write a D19 family or a sensitive leaf. Each is
+	// the HTTP form of `observer config set` of keys an agent may only
+	// propose (MCP set_setting); settingsSectionRoutes lists them and the
+	// dashboard's TestEverySectionWriterOfAnApprovalKeyIsR165 walks every
+	// section writer against this table.
+	sectionRoute("observability", nil, "the [observability] settings section (content capture, judges, admission)"),
+	sectionRoute("org", nil, "the [org_client] sharing, scope and policy settings section"),
+	// Found by the drift test (R-B01's "every section writer"): sections that
+	// replace their whole struct (so any body resets a confirm-tier leaf) are
+	// guarded whole; the process section is narrowed to its capture and ETW
+	// listener members. "hooks" is the section id the Settings page writes
+	// [observer.hooks] through (the observer.hooks row above names a path no
+	// section serves).
+	sectionRoute("hooks", nil, "the [observer.hooks] settings section (the gate hooks' registration and timeout)"),
+	sectionRoute("proxy", nil, "the [proxy] settings section (upstreams, org route, client auth)"),
+	sectionRoute("dashboard", nil, "the [dashboard] settings section (its listen address)"),
+	sectionRoute("otel", nil, "the OTel exporter settings section (where telemetry and prompt content are sent)"),
+	sectionRoute("secrets", nil, "the secrets scrubbing settings section"),
+	sectionRoute("intelligence", nil, "the [intelligence] settings section (the summary model's key variable)"),
+	sectionRoute("messages", nil, "the [messages] settings section (read receipts sent to the organization)"),
+	sectionRoute("browser", nil, "the [browser] settings section (the stored capture ceiling)"),
+	sectionRoute("process", sectionMembersBody("CaptureBodies", "ListenAddr", "AllowNonLoopback", "TokenPath"), "the process capture section's network body capture or ETW listener"),
+	// E-24 (ruling D29): observer.db_path joined the D19 family; the
+	// [observer] section writes it as the DBPath member.
+	sectionRoute("observer", sectionMembersBody("DBPath"), "the [observer] settings section's database path"),
+	// The dedicated editors of confirm-tier keys (R-B01's route sweep): the
+	// SSH profiles editor ([terminal.ssh] enabled and profiles), the update
+	// auto-apply switch and the pricing table (what budgets are measured in).
+	{path: "/api/terminal/ssh/profiles", desc: "the SSH terminal profiles editor"},
+	{path: "/api/update/auto-apply", desc: "the update auto-apply switch"},
+	{path: "/api/config/pricing", desc: "the model pricing table, which budgets and cost limits are measured in"},
+	{path: "/api/obs/admission/policy", desc: "the admission policy editor (what an app's requests are checked against, and whether they are blocked)"},
+	{path: "/api/obs/egress/policy", desc: "the egress policy editor (where an app's model requests are routed)"},
+	{path: "/api/obs/alerts/slack", desc: "the Slack alert webhook, where alert data is sent off this machine"},
+	{path: "/api/obs/alerts/pagerduty", desc: "the PagerDuty routing key, where alert data is sent off this machine"},
+}
+
+// sectionMembersBody matches a section save whose body carries any of the
+// named members (at any depth, in any case, as encoding/json reads them), or
+// a body the matcher cannot read.
+func sectionMembersBody(members ...string) func(cmd *Command) bool {
+	anyValue := func(*jsonNode) bool { return true }
+	return func(cmd *Command) bool {
+		for _, m := range members {
+			if bodyMemberLowers(cmd, m, anyValue) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// sectionRoute is a /api/config/section/<name> row (and its dotted
+// /api/config/section/<name>.<sub> form). A nil body matches every write.
+func sectionRoute(name string, body func(cmd *Command) bool, desc string) guardGrantRoute {
+	return guardGrantRoute{path: "/api/config/section/" + name, dotted: true, body: body, desc: desc}
 }
 
 // routingEgressSectionBody: a [routing] section save whose body carries the
@@ -928,11 +1051,11 @@ func routingEgressSectionBody(cmd *Command) bool {
 	return false
 }
 
-// guardConfigKey finds a [guard] or [security] key path named as a key in
-// a config keys request body ({"patches":[{"key":"security.x",...}]},
-// selfLoweringSections): the "key" field's value, not any text that
-// mentions the word (lane sec-gate3 milestone 2b).
-var guardConfigKey = regexp.MustCompile(`(?i)\bkey\\?["']?\s*[:=]\s*\\?["']?\s*(?:guard|security|terminal\.launch|observer\.hooks)(?:\.|\\?["'\s,}&]|$)`)
+// guardConfigKey finds a self-lowering key path (selfLoweringSections, a D19
+// family or a sensitive leaf) named as a key in a config keys request body
+// ({"patches":[{"key":"security.x",...}]}): the "key" field's value, not any
+// text that mentions the word (lane sec-gate3 milestone 2b; R-B07).
+var guardConfigKey = regexp.MustCompile(selfLoweringKeyText())
 
 // securityComponentList finds a security component id, or one of the
 // exact ids in also, in a JSON list field of a components request body:
@@ -1691,9 +1814,17 @@ func matchSelfApprovalInlineHTTP(ctx *MatchContext, cmd *Command) (bool, string)
 // opening quote.
 const sqlSchemaPrefix = `(?:["'\x60\[]?\w+["'\x60\]]?\s*\.\s*)?["'\x60\[]?`
 
+// guardRegisterTables are the registers guardGrantSQL guards, and
+// findingTables the ones findingDropSQL does. Every name must satisfy
+// mayNameGuardRegister (TestGuardRegisterTablesCarryTheHint).
+var (
+	guardRegisterTables = []string{"guard_approvals", "sec_config_baseline", "sec_finding_exceptions", "sec_baselines", "sec_findings", "sec_finding_commits", "sec_change_consent", "sec_change_keys"}
+	findingTables       = []string{"sec_findings", "sec_finding_commits"}
+)
+
 // guardGrantSQL finds SQL that writes a grant into the approvals register.
 var guardGrantSQL = regexp.MustCompile(`(?i)\b(?:insert(?:\s+or\s+\w+)?\s+into|replace\s+into|update(?:\s+or\s+\w+)?)\s+` + sqlSchemaPrefix +
-	`(guard_approvals|sec_config_baseline|sec_finding_exceptions|sec_baselines|sec_findings|sec_finding_commits|sec_change_consent|sec_change_keys)\b`)
+	`(` + strings.Join(guardRegisterTables, "|") + `)\b`)
 
 // findingDropSQL finds SQL that deletes findings outright (lane sec-gate2,
 // decision log P-025): a deleted open finding leaves the commit gate's
@@ -1701,14 +1832,42 @@ var guardGrantSQL = regexp.MustCompile(`(?i)\b(?:insert(?:\s+or\s+\w+)?\s+into|r
 // exception revokes it, which never loosens anything, so only the findings
 // table is named.
 var findingDropSQL = regexp.MustCompile(`(?i)\b(?:delete\s+from|drop\s+table(?:\s+if\s+exists)?|truncate(?:\s+table)?)\s+` + sqlSchemaPrefix +
-	`(?:sec_findings|sec_finding_commits)\b`)
+	`(?:` + strings.Join(findingTables, "|") + `)\b`)
+
+// mayNameGuardRegister is the cheap necessary condition of guardGrantSQL
+// and findingDropSQL (demo bug #14, R3-5): both end in a register table
+// name, and every name holds "ec_" or "_approval", so a text holding
+// neither cannot match either expression. The test is ASCII
+// case-insensitive, which is the regexes' (?i) for these letters exactly:
+// no rune outside ASCII case-folds to e, c, a, p, r, o, v or l (only k and
+// s have non-ASCII fold partners, and the hints avoid both;
+// TestGuardRegisterHintFoldsAreASCII). Before it, two case-insensitive
+// regexes with a leading word boundary scanned every unit's text, a tenth
+// of a week's replay.
+func mayNameGuardRegister(s string) bool {
+	for i := 0; i < len(s); {
+		j := strings.IndexByte(s[i:], '_')
+		if j < 0 {
+			return false
+		}
+		u := i + j
+		if u >= 2 && s[u-2]|0x20 == 'e' && s[u-1]|0x20 == 'c' {
+			return true
+		}
+		if hasFoldPrefix(s[u+1:], "approval") {
+			return true
+		}
+		i = u + 1
+	}
+	return false
+}
 
 // matchSelfApprovalSQL is the R-165 database matcher: a command line,
 // heredoc or interpreter one-liner writing into guard_approvals (or a
 // register beside it), or deleting findings.
 func matchSelfApprovalSQL(_ *MatchContext, cmd *Command) (bool, string) {
 	for _, text := range []string{cmd.Raw, cmd.Heredoc, cmd.Payload} {
-		if text != "" && (guardGrantSQL.MatchString(text) || findingDropSQL.MatchString(text)) {
+		if text != "" && mayNameGuardRegister(text) && (guardGrantSQL.MatchString(text) || findingDropSQL.MatchString(text)) {
 			return true, "SQL writing a grant into the guard exception, repository trust or code security finding register (" + clampDetail(cmd.Base) + ")"
 		}
 	}
@@ -1733,8 +1892,8 @@ var consentRecordPatterns = []pathPattern{
 	{"**/security/trivy-db-consent.json", "the Trivy database accept record"},
 	// Lane RM-2 (plan section 13.10): the SuperBased package lookup's two
 	// records, the lookup itself and the private-names choice.
-	{"**/security/osv-remote-consent.json", "the SuperBased package lookup consent record"},
-	{"**/security/osv-remote-private-consent.json", "the SuperBased package lookup's private-names consent record"},
+	{"**/security/osv-remote-consent.json", "the superbased package lookup consent record"},
+	{"**/security/osv-remote-private-consent.json", "the superbased package lookup's private-names consent record"},
 	{"**/security/online-disclosure.json", "the online package checks' disclosure record"},
 	// Lane SEC-G2: the developer's one-time size consent to the guided
 	// Opengrep install (about 47 MB downloaded on their word).
@@ -1921,12 +2080,14 @@ func matchGuardEnvPersist(ctx *MatchContext, cmd *Command) (bool, string) {
 
 // matchGuardEnvPersistFile is the file-access form: an agent edit or write
 // of a shell startup file whose text (either side of the edit) names
-// OBSERVER_GUARD_.
+// OBSERVER_GUARD_, or whose content the guard cannot see (an apply_patch
+// rename onto the file, EditUnknown), which may name it (FR-SEC-11, review
+// 2026-11-22; the marker HOOKSW-REN-1 added for R-162 and R-114).
 func matchGuardEnvPersistFile(ctx *MatchContext) (bool, string) {
 	if !isWriteEvent(ctx.Event) {
 		return false, ""
 	}
-	desc, ok := pathPatternMatch(ctx.Path, ctx.Cfg.Home, shellStartupPatterns)
+	desc, ok := homePathPatternMatch(ctx, ctx.Path, shellStartupPatterns)
 	if !ok {
 		return false, ""
 	}
@@ -1934,10 +2095,13 @@ func matchGuardEnvPersistFile(ctx *MatchContext) (bool, string) {
 	for _, e := range ctx.Event.Edits {
 		named = named || namesGuardEnv(e.Old) || namesGuardEnv(e.New)
 	}
-	if !named {
-		return false, ""
+	if named {
+		return true, "an OBSERVER_GUARD_ environment override written into " + desc + " (" + ctx.Event.Target + ")"
 	}
-	return true, "an OBSERVER_GUARD_ environment override written into " + desc + " (" + ctx.Event.Target + ")"
+	if hasUnseenEdit(ctx.Event.Edits) {
+		return true, desc + " (" + ctx.Event.Target + ") written with content the guard cannot see, by a rename onto it; it may set an OBSERVER_GUARD_ override"
+	}
+	return false, ""
 }
 
 // selfApprovalRules returns the R-165 rows (appended to the boundary

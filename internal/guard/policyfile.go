@@ -340,8 +340,14 @@ func lintParsed(pf *policyFile, layer string) []string {
 		extra, overrides, _, mergeIssues = mergeLayers(nil, nil, nil, pf)
 		problems = append(problems, mergeIssues...)
 	case layerOrg:
+		// An org bundle is authored for every node, not for this host: it
+		// is linted against the FULL security pillar pack (orgLintPack), so
+		// an override on any S-7xx rule some node can evaluate gets the
+		// built-in one-way checks instead of the "not loaded" refusal the
+		// host's own (usually empty) pack would give it (audit CG-1). The
+		// same pass runs at the server's publish and at a node's accept.
 		var mergeIssues []string
-		extra, overrides, _, mergeIssues = mergeLayers(pf, nil, nil, nil)
+		extra, overrides, _, mergeIssues = mergeLayersWithPack(orgLintPack(), pf, nil, nil, nil)
 		problems = append(problems, mergeIssues...)
 	default:
 		// The user layer has no relaxation check to fail in isolation
@@ -1072,11 +1078,8 @@ func sinkCondition(ctx *policy.MatchContext, sink, desc string) (bool, string) {
 	case "git_push":
 		for i := range ctx.Cmds {
 			c := &ctx.Cmds[i]
-			if c.Base == "git" {
-				pos := c.Positionals()
-				if len(pos) > 0 && pos[0] == "push" {
-					return true, desc
-				}
+			if c.Base == "git" && gitSubcommandWord(c.Positionals()) == "push" {
+				return true, desc
 			}
 		}
 	case policy.SinkGitCommit:
@@ -1097,6 +1100,20 @@ func sinkCondition(ctx *policy.MatchContext, sink, desc string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+// gitSubcommandWord is a git unit's subcommand: its first positional word
+// that is not empty. An empty word is a word that was nothing but a command
+// substitution (`git $(x) push`), which the parser keeps as an empty word
+// whose value it cannot know (policy NF-2); it may be an option, so it does
+// not hide the subcommand.
+func gitSubcommandWord(pos []string) string {
+	for _, w := range pos {
+		if w != "" {
+			return w
+		}
+	}
+	return ""
 }
 
 // hostMatchesDomain reports whether the target's URL host equals dom

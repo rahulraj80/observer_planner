@@ -374,6 +374,14 @@ func claudeCodeRows() []Translation {
 				{Action: ActionAsk, Value: "Bash(nikto:*)"},
 				{Action: ActionAsk, Value: "Bash(nuclei:*)"},
 				{Action: ActionAsk, Value: "Bash(sqlmap:*)"},
+				{Action: ActionAsk, Value: "Bash(ffuf:*)"},
+				{Action: ActionAsk, Value: "Bash(gobuster:*)"},
+				{Action: ActionAsk, Value: "Bash(feroxbuster:*)"},
+				{Action: ActionAsk, Value: "Bash(hydra:*)"},
+				{Action: ActionAsk, Value: "Bash(wfuzz:*)"},
+				{Action: ActionAsk, Value: "Bash(zaproxy:*)"},
+				{Action: ActionAsk, Value: "Bash(zap.sh:*)"},
+				{Action: ActionAsk, Value: "Bash(zap-baseline.py:*)"},
 			},
 		},
 		{
@@ -448,35 +456,35 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "B-601", Fidelity: FidelityNone,
-			Note: "session spend is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "session spend is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-602", Fidelity: FidelityNone,
-			Note: "daily spend is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "daily spend is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-603", Fidelity: FidelityNone,
-			Note: "monthly spend is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "monthly spend is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-604", Fidelity: FidelityNone,
-			Note: "weekly spend is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "weekly spend is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-621", Fidelity: FidelityNone,
-			Note: "session token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "session token usage is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-622", Fidelity: FidelityNone,
-			Note: "daily token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "daily token usage is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-623", Fidelity: FidelityNone,
-			Note: "monthly token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "monthly token usage is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-624", Fidelity: FidelityNone,
-			Note: "weekly token usage is runtime state; budget enforcement is the proxy's (§12.1 hard mode)",
+			Note: "weekly token usage is runtime state; enforced at runtime by the proxy and, on an enforcing managed node, by the pre-send hooks (T-519), never by a static native rule",
 		},
 		{
 			RuleID: "B-625", Fidelity: FidelityNone,

@@ -265,12 +265,13 @@ func grantDisclosure(offer *orgclient.GrantOffer, orgName ...string) orgenrol.Di
 		name = orgName[0]
 	}
 	return orgenrol.BuildDisclosure(orgenrol.GrantFacts{
-		OrgName:   name,
-		OrgID:     offer.Grant.OrgID,
-		ServerURL: offer.Grant.OrgServerURL,
-		ExpiresAt: offer.Grant.ExpiresAt,
-		Authority: offer.Grant.Authority,
-		Managed:   offer.Tenancy == orgcontract.TenancyManaged,
+		OrgName:      name,
+		OrgID:        offer.Grant.OrgID,
+		ServerURL:    offer.Grant.OrgServerURL,
+		ExpiresAt:    offer.Grant.ExpiresAt,
+		Authority:    offer.Grant.Authority,
+		Managed:      offer.Tenancy == orgcontract.TenancyManaged,
+		OwnerManaged: offer.OwnerManaged,
 	})
 }
 
@@ -289,6 +290,10 @@ func printGrantOffer(out io.Writer, offer *orgclient.GrantOffer) {
 	if d.ExpiresAt != "" {
 		fmt.Fprintf(out, "  Expires:      %s (after this, local settings apply again)\n", d.ExpiresAt)
 	}
+	if d.Owner != "" {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, wrapIndented(d.Owner, "", ""))
+	}
 	fmt.Fprintln(out, "\nIf you accept, the organization may:")
 	for _, l := range d.May {
 		fmt.Fprintf(out, "  - %s\n     (%s)\n", l.Text, l.Token)
@@ -299,6 +304,13 @@ func printGrantOffer(out io.Writer, offer *orgclient.GrantOffer) {
 			fmt.Fprintf(out, "  %s\n", w)
 		}
 		fmt.Fprintln(out, wrapIndented(orgenrol.DisclosureConfigWritesNote, "  ", "  "))
+	}
+	if d.ManagedSummary != "" {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, wrapIndented(d.ManagedSummary, "", ""))
+		for _, line := range d.ManagedLines {
+			fmt.Fprintln(out, wrapIndented(line, "  - ", "     "))
+		}
 	}
 	fmt.Fprintln(out, "\nIt may NOT:")
 	for _, line := range d.MayNot {

@@ -258,17 +258,20 @@ func TestCommunityContributionsRLSIsolation(t *testing.T) {
 	// Forged scope: account a's tenant context cannot see account b's row. With
 	// a's context set, exactly one row (a's own) is visible under the api role.
 	var visible int
-	if err := pool.QueryRow(ctx, `SELECT set_config('sbci.account_id', $1, false)`, a).Scan(new(string)); err != nil {
-		t.Fatalf("set tenant a: %v", err)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `SET ROLE sbci_api`); err != nil {
+	if _, err := tx.Exec(ctx, `SET LOCAL ROLE sbci_api`); err != nil {
 		t.Fatalf("set role api: %v", err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM leaderboard_contributions`).Scan(&visible); err != nil {
+	if err := s.SetAccountContext(ctx, tx, a); err != nil {
+		t.Fatalf("set tenant a: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM leaderboard_contributions`).Scan(&visible); err != nil {
 		t.Fatalf("count under tenant a: %v", err)
 	}
-	_, _ = pool.Exec(ctx, `RESET ROLE`)
-	_, _ = pool.Exec(ctx, `SELECT set_config('sbci.account_id', '', false)`)
+	_ = tx.Rollback(ctx)
 	if visible != 1 {
 		t.Fatalf("tenant a saw %d contribution rows, want exactly its own (1)", visible)
 	}
@@ -357,7 +360,8 @@ func TestCommunityBandsFunctionDeployedShape(t *testing.T) {
 		   FROM pg_proc WHERE proname='sbci_community_bands'`).Scan(&owner, &secdef, &cfg); err != nil {
 		t.Fatalf("introspect: %v", err)
 	}
-	if owner != "sbci_defs" || !secdef || cfg != "search_path=pg_catalog, public" {
+	// pg_temp last since 0152 (CLOUD-DEFINER-TEMP-2).
+	if owner != "sbci_defs" || !secdef || cfg != "search_path=pg_catalog, public, pg_temp" {
 		t.Errorf("aggregation fn shape wrong: owner=%q secdef=%v cfg=%q", owner, secdef, cfg)
 	}
 
@@ -652,7 +656,8 @@ func TestCommunityCohortSizeFunctionDeployedShape(t *testing.T) {
 		   FROM pg_proc WHERE proname='sbci_community_cohort_size'`).Scan(&owner, &secdef, &cfg); err != nil {
 		t.Fatalf("introspect: %v", err)
 	}
-	if owner != "sbci_defs" || !secdef || cfg != "search_path=pg_catalog, public" {
+	// pg_temp last since 0152 (CLOUD-DEFINER-TEMP-2).
+	if owner != "sbci_defs" || !secdef || cfg != "search_path=pg_catalog, public, pg_temp" {
 		t.Errorf("cohort_size fn shape wrong: owner=%q secdef=%v cfg=%q", owner, secdef, cfg)
 	}
 	sig := "sbci_community_cohort_size(text,text,int,text)"

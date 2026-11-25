@@ -192,6 +192,22 @@ test("orgBudgetLine never prints an amount", () => {
   assert.equal(orgBudgetLine({ window: "", period: "day", ratio: NaN, enforcement: "report", level: "ok" }).value, "not measured, report only");
 });
 
+// 2026-11-18: an org cap set to block on a machine that cannot block (observe
+// mode, guard off) never reads "blocks at the cap".
+test("orgBudgetLine and guardBudgetLines say what this machine does", () => {
+  const w = { window: "monthly", period: "p", ratio: 42, enforcement: "hard", level: "exceeded" };
+  assert.equal(orgBudgetLine({ ...w, effect: "warn_observe" }).value, "4200% of the cap, set to block, warns only on this machine");
+  assert.equal(orgBudgetLine({ ...w, effect: "warn_guard_off" }).value, "4200% of the cap, set to block, warns only on this machine");
+  assert.equal(orgBudgetLine({ ...w, effect: "blocks" }).value, "4200% of the cap, blocks at the cap");
+  assert.equal(orgBudgetLine({ ...w, effect: "blocks_proxied" }).value, "4200% of the cap, blocks proxied requests at the cap");
+  const usd = (n: number) => "$" + String(n);
+  const g = { session_usd: 0, daily_usd: 10, hard: true, spend_today_usd: 4 };
+  assert.deepEqual(guardBudgetLines({ ...g, guard_mode: "observe" }, true, usd, usd), [
+    { label: "Daily", value: "$4 of $10, set to block, warns only on this machine" },
+  ]);
+  assert.deepEqual(guardBudgetLines({ ...g, guard_mode: "enforce" }, true, usd, usd), [{ label: "Daily", value: "$4 of $10, blocks at the cap" }]);
+});
+
 test("guardBudgetLines follow the display choice and skip unset caps", () => {
   const usd = (n: number) => `$${n}`;
   const tok = (n: number) => `${n} tok`;
@@ -231,4 +247,12 @@ test("consentRows: community sharing not in this build is never agreed", () => {
   const row = rows.find((r) => r.id === "community-sharing");
   assert.equal(row?.state, "not_given");
   assert.equal(row?.detail, "Not in this build");
+});
+
+test("orgBudgetLine links Guard mode when a hard cap only warns on this machine", async () => {
+  const { orgBudgetLine } = await import("./you.ts");
+  const base = { window: "daily", period: "calendar_day", ratio: 1.2, level: "exceeded", enforcement: "hard" };
+  assert.deepEqual(orgBudgetLine({ ...base, effect: "warn_observe" } as never).link, { href: "/security?tab=overview", label: "Open Guard mode" });
+  assert.equal(orgBudgetLine({ ...base, effect: "blocks" } as never).link, undefined);
+  assert.equal(orgBudgetLine({ ...base, enforcement: "soft", effect: "none" } as never).link, undefined);
 });

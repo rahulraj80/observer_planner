@@ -53,12 +53,17 @@ var daemonLoopComponents = map[string][]string{
 	// until the user links an account.
 	"cloud-agents": nil,
 
-	"proxy":          {"capture.proxy"},
-	"dashboard":      {"ui.dashboard"},
-	"guidance-scan":  {"analytics"},
-	"session-score":  {"analytics"},
-	"advisor-digest": {"analytics"},
-	"commit-scan":    {"projects"},
+	"proxy": {"capture.proxy"},
+	// The route hold put-back (routehold_putback.go) puts routes back only
+	// once this daemon's own proxy serves; with capture.proxy inactive the
+	// proxy never serves, so a held route stays off (the doctor names it)
+	// instead of pointing an AI tool at a port nothing answers.
+	"route-hold-putback": {"capture.proxy"},
+	"dashboard":          {"ui.dashboard"},
+	"guidance-scan":      {"analytics"},
+	"session-score":      {"analytics"},
+	"advisor-digest":     {"analytics"},
+	"commit-scan":        {"projects"},
 	// The Projects-page quality trend reads report files and the codeintel
 	// index only; duplication answers not_in_build without codeintel.
 	"code-quality": {"projects"},
@@ -89,7 +94,9 @@ var daemonLoopComponents = map[string][]string{
 
 	"governance-sidecar":     {"org.client"},
 	"budget-warn":            {"org.client"},
+	"policy-state-inputs":    {"org.client"},
 	"policy-state-reporter":  {"org.client"},
+	"policy-state-switch":    {"org.client"},
 	"org-push":               {"org.client"},
 	"policy-freshness":       {"org.client"},
 	"activity-stamp":         {"org.client"},
@@ -458,7 +465,7 @@ var moduleGates = []moduleGate{
 		// a bad [security] value of an inactive module is set aside by
 		// config.Load (component_sections.go).
 		component: "security",
-		loops:     []string{"security.posture", "security.quickscan", "security.exceptions", "security.notify"},
+		loops:     []string{"security.posture", "security.quickscan", "security.exceptions", "security.notify", "security.assessrelax"},
 	},
 	{
 		// Secret detection (security Phase C): the post-write feed, which
@@ -747,3 +754,12 @@ func gatedVerbNames(root *cobra.Command) []string {
 	sort.Strings(out)
 	return out
 }
+
+// allows reports whether the gate starts the named loop at boot.
+func (g *gatedGroup) allows(name string) bool { return loopAllowed(g.snap, name) }
+
+// goOTLPReceiverLater starts the OTLP receiver loop the boot gate kept
+// stopped, once a run-time change (an AI Apps enable that adds its component)
+// has made it allowed. The loop name stays a literal so the daemon-loop
+// classification test can see it.
+func (g *gatedGroup) goOTLPReceiverLater(fn func() error) { g.ng.Go("otlp-receiver", fn) }

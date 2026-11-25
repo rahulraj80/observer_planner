@@ -176,3 +176,11 @@ func sandboxSignInForbiddenSeam(string) func() bool { return nil }
 func sandboxBoxWordsSeam(string) func(string, string, bool) (dashapi.BoxWords, bool) {
 	return nil
 }
+
+// sandboxSeizeHostSeam is nil: a build without terminals has no strace
+// switch rows.
+func sandboxSeizeHostSeam() func() dashapi.SandboxSeizeHost { return nil }
+
+// sandboxGatewayPortFunc answers nil in a build without terminals: there is no
+// in-box gateway whose port a target could collide with.
+func sandboxGatewayPortFunc() func(int) int { return nil }

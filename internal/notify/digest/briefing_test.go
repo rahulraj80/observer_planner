@@ -46,7 +46,7 @@ func TestComposeBriefingContainsKeyLines(t *testing.T) {
 		"Opportunities",
 		"Cards: 2",
 		"Estimated savings: $3.20",
-		"Sent by SuperBased Observer v1.19.0",
+		"Sent by superbased Observer v1.19.0",
 	}
 	for _, w := range wantText {
 		if !strings.Contains(m.Text, w) {

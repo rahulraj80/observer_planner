@@ -29,18 +29,26 @@ import { HelpInd } from "@/components/HelpInd";
 import { CommandJobButton } from "@/components/CommandJobButton";
 import { Summary } from "@/components/Summary";
 import type { Tone } from "@shared/lib/tone";
-import { BUILTIN_PROFILE_NAMES, COMPRESS_TYPES, SECTION_SPECS, type SectionSpec } from "./settings/sectionSpecs";
+import { AI_APPS_SUMMARY, BUILTIN_PROFILE_NAMES, COMPRESS_TYPES, SECTION_SPECS, type SectionSpec } from "./settings/sectionSpecs";
 import { joinList, keepSelected, splitList } from "@/lib/pickerOptions";
 import { usePricedModels } from "@/lib/usePickerSources";
 import { StructuredConfigSection } from "./settings/StructuredConfigSection";
 import { MessageSurfacesCard } from "./settings/MessageSurfacesCard";
+import { LIVE_RIBBON_FIELD, LiveRibbonCard } from "@/components/ribbon/LiveRibbonCard";
 import { SURFACE_SETTINGS } from "@/lib/adminMessages";
 import { SchemaSection } from "./settings/SchemaSection";
 import { AntigravityHelperCard } from "./settings/AntigravityHelperCard";
 import { ETWCapturerCard } from "./settings/ETWCapturerCard";
 import { ProcessCaptureEstimateCard } from "./settings/ProcessCaptureEstimateCard";
 import { ShellWrapCard } from "./settings/ShellWrapCard";
+import { SDK_DESTINATION_FIELDS, SdkDestinationCard } from "./settings/SdkDestinationCard";
+import { FocusSection } from "./settings/FocusSection";
+import { AppsSwitchCard } from "./settings/AppsSwitchCard";
+import { ComponentsSetupCard } from "@/components/ComponentsSetupCard";
+import { PRODUCT_NAMES } from "@shared/lib/productNames";
+import { SettingsProposalsCard } from "./settings/SettingsProposalsCard";
 import { LaunchToolPathsCard } from "./settings/LaunchToolPathsCard";
+import { DefaultWorkspaceCard } from "./settings/DefaultWorkspaceCard";
 import { RoutingShapesCards } from "./settings/RoutingShapesCards";
 import { StatuslineCard } from "./settings/StatuslineCard"; // cli-parity L2
 import { StartAtLoginCard } from "./settings/StartAtLoginCard"; // cli-parity L2
@@ -51,10 +59,9 @@ import { ProjectProfilesCard } from "./settings/ProjectProfilesCard";
 import { RepriceCard } from "./settings/RepriceCard";
 import { LLMConnectionsCard } from "./settings/LLMConnectionsCard";
 import { ConnectedToolsSection } from "./settings/ConnectedToolsSection";
-import { CloudIntelligenceSection } from "./settings/CloudIntelligenceSection";
 import { OrgIntelSection } from "./settings/OrgIntelSection";
 import { OrgDigestsCard } from "@/components/OrgDigestsCard";
-import { EnrolmentSection } from "./settings/EnrolmentSection";
+import { AccountSection } from "./settings/AccountSection";
 import { HealthSection } from "./settings/HealthSection";
 import { StorageSection } from "./settings/StorageSection";
 import { ChartState } from "@/components/ChartState";
@@ -90,6 +97,7 @@ import {
   Plug,
   Plus,
   ScanEye,
+  Compass,
   Share2,
   ShieldCheck,
   SlidersHorizontal,
@@ -121,6 +129,7 @@ import {
   type Governance,
 } from "@/lib/governance";
 import { settingsOfferedWhileUnresolved } from "@/lib/visibility";
+import { ManagedNotice } from "@/components/ManagedNotice";
 import { fmtDateTime, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   BackfillJob,
@@ -145,6 +154,7 @@ import { JOB_STATUS } from "@shared/lib/sessionVocab";
 import { navIcon } from "@/lib/nav";
 
 type SectionId =
+  | "general"
   | "pricing"
   | "backfill"
   | "tools"
@@ -183,15 +193,14 @@ type SectionDef = {
   id: SectionId;
   label: string;
   group: "edit" | "config";
-  // Deployment plane (docs/deployment-models.md). Omitted (the default)
-  // = Plane B: this node's OWN coding-agent usage, the developer-facing
-  // subject of every other section. "admin" = Plane A: general
-  // observability of an admin/org-hosted LLM app whose END-USER requests
-  // route through Observer — a fundamentally different subject, surfaced
-  // here only because the receiver + schema are configured node-side.
-  // The nav renders these under a separate "Observability (admin plane)"
-  // subgroup so an operator never mistakes it for a coding-agent feature.
-  plane?: "admin";
+  // Plane (docs/deployment-models.md). Omitted (the default) = this node's
+  // OWN coding-agent usage, the subject of every other section. "apps" = AI
+  // Apps: the AI apps and agents the developer builds, observed through the
+  // SDKs / any OTel SDK sending spans to this machine's receiver (renamed
+  // from "admin", sweep finding "identifiers that now mislead"). The rail
+  // renders these under their own AI Apps group so they are never mistaken
+  // for a coding-agent feature.
+  plane?: "apps";
   // hot = takes effect immediately on save (cost-engine reload).
   // soft = consumed lazily by the next job, no restart needed.
   // restart = daemon must restart to bind the new value.
@@ -207,9 +216,38 @@ type SectionDef = {
     whenModified: string;
     behavior: string;
   };
+  // mergedInto: the section now renders inside another one and has no rail
+  // row of its own (Getting started v2 folded Cloud Intelligence into
+  // Account). Its id stays, for governance and old links (SECTION_ALIASES).
+  mergedInto?: SectionId;
 };
 
+// SECTION_ALIASES maps a requested `?section=` to the section that renders
+// it: "account" is the user-facing name of the enrolment section, and the
+// old Cloud Intelligence links land on Account, where it lives now.
+const SECTION_ALIASES: Record<string, SectionId> = { account: "enrolment", cloud: "enrolment" };
+
+function resolveSectionAlias(requested: string | null): string | null {
+  if (requested == null) return null;
+  return SECTION_ALIASES[requested] ?? requested;
+}
+
 const SECTIONS: SectionDef[] = [
+  {
+    id: "general",
+    label: "General",
+    group: "edit",
+    status: "hot",
+    icon: Compass,
+    about: {
+      summary:
+        "What you use superbased for: AI coding agents, the AI apps and agents you build, or both. It decides what the Overview's getting-started steps and the navigation show first. Nothing is turned off and no page is hidden.",
+      whenModified:
+        "You came for coding agents and now build an AI app too (or the other way round), or you want the getting-started steps back after Hide.",
+      behavior:
+        "Takes effect at once. The choice is kept on this machine, beside its database, so every browser agrees; it is never sent anywhere.",
+    },
+  },
   {
     id: "pricing",
     label: "Pricing",
@@ -287,25 +325,26 @@ const SECTIONS: SectionDef[] = [
   },
   {
     id: "enrolment",
-    label: "Enrolment",
+    label: "Account",
     group: "edit",
     status: "soft",
     icon: Users,
     about: {
       summary:
-        "Teams & Org Visibility. Enrol this machine in your organization's SuperBased server (enrolment code, link, or sign-in with your organization account), accept or decline the organization's governance request, see what is shared and push now, or leave. An individual enrolment shares counts, costs, timings and hashes unless you opt in to more; an organization-managed enrolment shares full content.",
+        "Your superbased account and where this machine is connected. Sign in and connect this machine to see it in your personal dashboard or your team's online dashboard; what is sent is either Summary only (counts, costs and timings) or Full detail (prompts, responses and file paths, which team admins can read). AI summaries, the optional online names, tags and summaries for your sessions, live here too. Everything works on this machine without an account.",
       whenModified:
-        "Joining, re-joining or leaving an organization. Everything here is also available from the CLI (`observer enroll`, `observer org status`, `observer org push-status`, `observer org push-now`, `observer org backfill`, `observer org resync`, `observer org grant show`, `observer unenroll`) and runs the same code.",
+        "Signing in, connecting this machine or disconnecting it, checking what is sent and when it was last sent, or turning AI summaries on. A self-hosted server is under the Advanced disclosure. The same actions are `observer connect` and `observer status` in a terminal.",
       behavior:
-        "Enrolling checks the server is reachable before the one-time code is spent, writes the default [org_client] block to config.toml, and stores the credential in the OS keychain (or a 0600 file). A daemon that started before enrolment needs a restart to run its push loop; Push now works either way. Leaving deletes the local enrolment + credentials immediately; nothing already shared with the server is deleted.",
+        "Sign in and connect opens an approval page in your browser, where you choose where to connect and see what will be sent before anything is sent. Disconnecting stops sending at once; what was already sent stays with that dashboard. A daemon that started before connecting needs a restart to send on its own schedule; Push now works either way.",
     },
   },
   {
     id: "cloud",
-    label: "Cloud Intelligence",
+    label: "AI summaries",
     group: "edit",
     status: "soft",
     icon: Cloud,
+    mergedInto: "enrolment",
     about: {
       summary:
         "Optional signed-in personal enrichment (Signed-in Free). The Cloud account card at the top is where you sign in and out - the daemon itself never touches the network: Sign in runs the same consent-gated `observer cloud login` you would type, as a subprocess, and the credential stays in the local keychain. The card also carries the two egress preferences (auto-sync, auto-enrich). Below it: consent receipts, the send outbox by state, and any synced enrichment results. Deployment knobs (client id, base URL, callback port) live under an Advanced fold - most people never touch them.",
@@ -317,15 +356,15 @@ const SECTIONS: SectionDef[] = [
   },
   {
     id: "intel",
-    label: "Org enrichment",
+    label: "Team AI summaries",
     group: "edit",
     status: "hot",
     icon: CloudCog,
     about: {
       summary:
-        "Cloud Intelligence run by the organization this machine is enrolled with, on the organization's own server and model: whether it is on, which provider and model, what evidence it sees, and your consent. On an organization-managed machine this is a notice; on an individual enrolment nothing is sent until you accept.",
+        "AI summaries run by the team this machine is connected to, on the team's own server and model: whether they are on, which provider and model, what evidence they see, and your consent. On a team-managed machine this is a notice; on an individual connection nothing is sent until you accept.",
       whenModified:
-        "Reviewing what your organization runs, accepting its terms (or new terms after it widened them), or withdrawing. The same actions are `observer intel status`, `observer intel accept` and `observer intel disable`.",
+        "Reviewing what your team runs, accepting its terms (or new terms after it widened them), or withdrawing. The same actions are `observer intel status`, `observer intel accept` and `observer intel disable`.",
       behavior:
         "Accept records exactly the terms shown (their digest is checked, so a text that changed since it was shown is refused), turns `[intelligence].org_enrichment` on and tells the organization's server. Withdraw records the withdrawal, turns the key off and removes results cached under the old consent. When the organization requires this consent, the alternative is leaving the organization (Settings, Enrolment). Takes effect on the next sync, no restart.",
     },
@@ -424,10 +463,10 @@ const SECTIONS: SectionDef[] = [
     status: "restart",
     icon: MonitorCog,
     about: {
-      summary: "Durable dashboard listen address.",
-      whenModified: "Setting a fixed host:port for the dashboard listener.",
+      summary: "Durable dashboard listen address, and the live ribbon.",
+      whenModified: "Setting a fixed host:port for the dashboard listener, or turning the live ribbon off.",
       behavior:
-        "Restart required - the dashboard listener binds at daemon start. Precedence: --dashboard-addr flag > OBSERVER_DASHBOARD_ADDR env > this config value > default 127.0.0.1:8081.",
+        "Restart required for the listen address - the dashboard listener binds at daemon start. Precedence: --dashboard-addr flag > OBSERVER_DASHBOARD_ADDR env > this config value > default 127.0.0.1:8081. The live ribbon switch applies at once.",
     },
   },
   {
@@ -579,18 +618,21 @@ const SECTIONS: SectionDef[] = [
   },
   {
     id: "observability",
-    label: "Observability",
+    // Renamed "Observability" -> AI Apps (first-run plan revision 2,
+    // section 6, L-8): the name the person turned on is the name they find.
+    label: PRODUCT_NAMES.planea,
     group: "config",
-    plane: "admin",
+    plane: "apps",
     status: "restart",
     icon: ScanEye,
     about: {
-      summary:
-        "Generalized observability (admin plane) - the OTLP /v1/traces receiver, trajectory capture, and the eval plane for an admin/org-hosted LLM app whose END-USER requests route through SuperBased. This is NOT your own coding-agent usage (every other section is); the captured traces + evals are viewed on the admin/org dashboard, not this node dashboard. Opt-in and node-local: trace data never leaves this machine unless you opt into an obs share tier under Org sharing.",
+      // One owner of the section's summary (sweep finding F-20): the
+      // schema spec's description, read here.
+      summary: AI_APPS_SUMMARY,
       whenModified:
-        "Turning the subsystem on or off. The judge model + online-sampling eval knobs ([observability.eval]) are under More settings in this section.",
+        "Turning AI Apps on or off. The judge model and the online-sampling evals are under More settings in this section.",
       behavior:
-        "Restart required - the OTLP receiver and obs_* schema bind at `observer start`. The receiver is SHARED: it also binds whenever [ingest.otel] is enabled (for logs), so turning this toggle off does not stop the receiver if [ingest.otel] is on. Saves write config.toml + .bak.",
+        "Turn on (the AI Apps on this machine card in this section, the Overview, or observer apps on) takes effect at once, with no restart. Turning off, and saving the fields below, take effect at the next start. The trace receiver is shared with log ingest under OTel export, so it keeps listening while log ingest is on. Saves write the config file and a backup.",
     },
   },
   {
@@ -671,7 +713,7 @@ const SECTIONS: SectionDef[] = [
     icon: Sparkles,
     about: {
       summary:
-        "Optional LLM analysis connections for the daily briefing - the narrative upgrade and grounded Q&A. Each connection is one endpoint (anthropic / OpenAI-compatible / local); keys are saved to the OS keychain, so config.toml holds only the label.",
+        "Optional LLM analysis connections for the daily briefing - the narrative upgrade and grounded Q&A. Each connection is one endpoint (anthropic / OpenAI-compatible / local); keys are saved to the OS keychain, so the config file holds only the label.",
       whenModified:
         "Pointing analysis at a new endpoint (Ollama, OpenRouter, a provider), editing a base URL or default model, or saving an API key from the browser.",
       behavior:
@@ -713,7 +755,7 @@ export function SettingsPage() {
   // banner. Mirrors the sessions?session=<id> convention: URL is the
   // source of truth, local state derives from it.
   const [searchParams, setSearchParams] = useSearchParams();
-  const requested = searchParams.get("section");
+  const requested = resolveSectionAlias(searchParams.get("section"));
   // Governed nodes may have Settings sub-sections hidden or locked
   // read-only by their organization. gov.data is {active: false, ...} on an
   // ordinary solo node, and every isSettingsHidden/isSettingsReadOnly call
@@ -728,6 +770,7 @@ export function SettingsPage() {
   const absent = new Set(absentSettingsSections(useComponentState().data?.view));
   const visibleSections = SECTIONS.filter(
     (s) =>
+      !s.mergedInto &&
       !absent.has(s.id) &&
       (posture === "ready" ? !isSettingsHidden(gov.data, s.id) : settingsOfferedWhileUnresolved(s.id)),
   );
@@ -735,6 +778,18 @@ export function SettingsPage() {
   const active: SectionId = visibleSections.some((s) => s.id === requested)
     ? (requested as SectionId)
     : fallback;
+  // A link to a section the organization hid on this machine says so with
+  // the notice a hidden page gets, instead of silently opening the first
+  // shown section (CG-20). Only a KNOWN posture can say "hidden"; until then
+  // the rail fails closed as above.
+  const hiddenRequest: SectionId | null =
+    posture === "ready" &&
+    requested != null &&
+    !absent.has(requested) &&
+    SECTIONS.some((s) => s.id === requested) &&
+    isSettingsHidden(gov.data, requested)
+      ? (requested as SectionId)
+      : null;
   const setActive = (id: SectionId) => {
     setSearchParams(id === "pricing" ? {} : { section: id }, { replace: true });
   };
@@ -780,7 +835,7 @@ export function SettingsPage() {
             </span>
           </Link>
           <SettingsRail
-            active={active}
+            active={hiddenRequest ?? active}
             onChange={setActive}
             sections={visibleSections}
             gov={gov.data}
@@ -809,72 +864,95 @@ export function SettingsPage() {
         </aside>
 
         <main className="min-w-0 p-4 sm:p-6 lg:overflow-y-auto">
-          {posture === "unavailable" && (
-            <ReadOnlyBanner className="mb-4">
-              The dashboard could not read which settings are available on this machine, so only
-              Enrolment and Organization are shown.
-            </ReadOnlyBanner>
+          {hiddenRequest ? (
+            <ManagedNotice gov={gov.data} settingsId={hiddenRequest} />
+          ) : (
+            <>
+              {posture === "unavailable" && (
+                <ReadOnlyBanner className="mb-4">
+                  The dashboard could not read which settings are available on this machine, so only
+                  Enrolment and Organization are shown.
+                </ReadOnlyBanner>
+              )}
+              {readOnly && (
+                <ReadOnlyBanner className="mb-4">
+                  Managed by {governedOrgLabel(gov.data)} - changes to this section cannot be saved from
+                  this machine.
+                </ReadOnlyBanner>
+              )}
+              <SettingsProposalsCard readOnly={readOnly} onSaved={config.reload} />
+              {active === "general" && (
+                <div className="space-y-4">
+                  <FocusSection readOnly={readOnly} />
+                  {/* The components pointer that was on the Overview (plan
+                      section 6): first-run screens are for results. */}
+                  <ComponentsSetupCard />
+                </div>
+              )}
+              {active === "pricing" && (
+                <PricingSection
+                  config={config.data}
+                  loading={config.loading}
+                  error={config.error}
+                  denied={config.denied}
+                  deniedPermission={config.deniedPermission}
+                  onReload={config.reload}
+                  readOnly={readOnly}
+                />
+              )}
+              {active === "pricing" && <RepriceCard />}
+              {active === "backfill" && <BackfillSection />}
+              {active === "tools" && <ConnectedToolsSection icon={sectionIcon("tools")} />}
+              {active === "tools" && <StatuslineCard readOnly={readOnly} />}
+              {active === "health" && <HealthSection icon={sectionIcon("health")} />}
+              {active === "health" && <StartAtLoginCard readOnly={readOnly} />}
+              {active === "storage" && <StorageSection icon={sectionIcon("storage")} />}
+              {active === "enrolment" && (
+                <AccountSection
+                  icon={sectionIcon("enrolment")}
+                  aiSummaries={
+                    !absent.has("cloud") && (posture === "ready" ? !isSettingsHidden(gov.data, "cloud") : false)
+                  }
+                  aiSummariesReadOnly={isSettingsReadOnly(gov.data, "cloud")}
+                />
+              )}
+              {active === "intel" && <OrgIntelSection icon={sectionIcon("intel")} readOnly={readOnly} />}
+              {active === "intel" && <OrgDigestsCard icon={sectionIcon("intel")} />}
+              {active === "intelligence" && (
+                <IntelligenceSection
+                  config={config.data}
+                  schema={schema.data}
+                  loading={config.loading}
+                  error={config.error}
+                  denied={config.denied}
+                  deniedPermission={config.deniedPermission}
+                  onReload={config.reload}
+                  readOnly={readOnly}
+                />
+              )}
+              {active !== "general" &&
+                active !== "pricing" &&
+                active !== "backfill" &&
+                active !== "tools" &&
+                active !== "health" &&
+                active !== "storage" &&
+                active !== "enrolment" &&
+                active !== "cloud" &&
+                active !== "intel" &&
+                active !== "intelligence" && (
+                  <SectionView
+                    section={active}
+                    config={config.data}
+                    schema={schema.data}
+                    onReload={config.reload}
+                    readOnly={readOnly}
+                  />
+                )}
+            </>
           )}
-          {readOnly && (
-            <ReadOnlyBanner className="mb-4">
-              Managed by {governedOrgLabel(gov.data)} - changes to this section cannot be saved from
-              this machine.
-            </ReadOnlyBanner>
-          )}
-          {active === "pricing" && (
-            <PricingSection
-              config={config.data}
-              loading={config.loading}
-              error={config.error}
-              denied={config.denied}
-              deniedPermission={config.deniedPermission}
-              onReload={config.reload}
-              readOnly={readOnly}
-            />
-          )}
-          {active === "pricing" && <RepriceCard />}
-          {active === "backfill" && <BackfillSection />}
-          {active === "tools" && <ConnectedToolsSection icon={sectionIcon("tools")} />}
-          {active === "tools" && <StatuslineCard readOnly={readOnly} />}
-          {active === "health" && <HealthSection icon={sectionIcon("health")} />}
-          {active === "health" && <StartAtLoginCard readOnly={readOnly} />}
-          {active === "storage" && <StorageSection icon={sectionIcon("storage")} />}
-          {active === "enrolment" && <EnrolmentSection icon={sectionIcon("enrolment")} />}
-          {active === "cloud" && <CloudIntelligenceSection icon={sectionIcon("cloud")} readOnly={readOnly} />}
-          {active === "intel" && <OrgIntelSection icon={sectionIcon("intel")} readOnly={readOnly} />}
-          {active === "intel" && <OrgDigestsCard icon={sectionIcon("intel")} />}
-          {active === "intelligence" && (
-            <IntelligenceSection
-              config={config.data}
-              schema={schema.data}
-              loading={config.loading}
-              error={config.error}
-              denied={config.denied}
-              deniedPermission={config.deniedPermission}
-              onReload={config.reload}
-              readOnly={readOnly}
-            />
-          )}
-          {active !== "pricing" &&
-            active !== "backfill" &&
-            active !== "tools" &&
-            active !== "health" &&
-            active !== "storage" &&
-            active !== "enrolment" &&
-            active !== "cloud" &&
-            active !== "intel" &&
-            active !== "intelligence" && (
-              <SectionView
-                section={active}
-                config={config.data}
-                schema={schema.data}
-                onReload={config.reload}
-                readOnly={readOnly}
-              />
-            )}
         </main>
 
-        {helpOpen && <AboutSectionRail def={def} />}
+        {helpOpen && !hiddenRequest && <AboutSectionRail def={def} />}
       </div>
     </div>
   );
@@ -933,12 +1011,13 @@ function AboutSectionRail({ def }: { def: SectionDef }) {
           About this section
         </h2>
         <Pill variant={STATUS_TONE[def.status]}>{STATUS_LABEL[def.status]}</Pill>
-        {def.plane === "admin" && (
+        {def.plane === "apps" && (
           <Pill
             variant="accent"
-            title="Plane A - governs an admin/org-hosted app's end-users, not this node's own coding-agent. See docs/deployment-models.md."
+            case="none"
+            title={`${PRODUCT_NAMES.planea}: the apps and agents you build, not this machine's own coding agents.`}
           >
-            admin plane
+            {PRODUCT_NAMES.planea}
           </Pill>
         )}
       </div>
@@ -984,10 +1063,10 @@ function SettingsRail({
   gov?: Governance | null;
 }) {
   const list = sections ?? SECTIONS;
-  // Plane-A (admin) sections split out of the flat config list into
-  // their own labeled subgroup so the operator sees at a glance that
-  // they govern an admin-hosted app's end-users, not this node's own
-  // coding-agent (docs/deployment-models.md; audit finding M2).
+  // Plane A (AI Apps, plane "admin") sections split out of the flat config
+  // list into their own labeled subgroup so the operator sees at a glance
+  // that they govern the apps the developer builds, not this node's own
+  // coding agents (docs/deployment-models.md; audit finding M2).
   const groups: { id: string; label: string; items: SectionDef[] }[] = [
     {
       id: "edit",
@@ -998,13 +1077,13 @@ function SettingsRail({
       id: "config",
       label: "Config",
       items: list.filter(
-        (s) => s.group === "config" && s.plane !== "admin",
+        (s) => s.group === "config" && s.plane !== "apps",
       ),
     },
     {
-      id: "admin-plane",
-      label: "Observability (admin plane)",
-      items: list.filter((s) => s.plane === "admin"),
+      id: "ai-apps",
+      label: PRODUCT_NAMES.planea,
+      items: list.filter((s) => s.plane === "apps"),
     },
   ].filter((g) => g.items.length > 0);
   // Rendered through the shared SectionRail (promoted from this function,
@@ -2395,11 +2474,19 @@ function SectionView({
               <>
                 <ShellWrapCard readOnly={readOnly} />
                 <LaunchToolPathsCard readOnly={readOnly} />
+                <DefaultWorkspaceCard readOnly={readOnly} />
               </>
             ) : section === "browser" ? (
               <BrowserCaptureCard readOnly={readOnly} />
+            ) : section === "observability" ? (
+              <>
+                <AppsSwitchCard readOnly={readOnly} />
+                <SdkDestinationCard config={config} readOnly={readOnly} onSaved={onReload} />
+              </>
             ) : section === "org" ? (
               <MessageSurfacesCard config={config} readOnly={readOnly} onSaved={onReload} />
+            ) : section === "dashboard" ? (
+              <LiveRibbonCard config={config} readOnly={readOnly} onSaved={onReload} />
             ) : showCodeSecurity ? (
               <Suspense fallback={null}>
                 <CodeSecurityCardLazy
@@ -2418,7 +2505,11 @@ function SectionView({
                 excludeFieldPaths={
                   section === "org"
                     ? withMessageSurfaces(specFieldPaths(spec))
-                    : showCodeSecurity
+                    : section === "dashboard"
+                      ? withFields(specFieldPaths(spec), [LIVE_RIBBON_FIELD])
+                      : section === "observability"
+                      ? withFields(specFieldPaths(spec), SDK_DESTINATION_FIELDS)
+                      : showCodeSecurity
                       ? withFields(specFieldPaths(spec), codeSecurityFieldPaths())
                       : specFieldPaths(spec)
                 }
@@ -2508,9 +2599,7 @@ const ROUTING_RULES_PLACEHOLDER = `# No custom rules yet. Example - route read-o
 # name = "cheap-reads"
 # when.turn_kind = "read_only"
 # action.route_to_tier = "haiku-class"
-# action.reason = "overpowered_read"
-#
-# Recipes: docs/model-routing.md (recipe gallery)`;
+# action.reason = "overpowered_read"`;
 
 function RoutingRulesEditorCard({ readOnly }: { readOnly?: boolean }) {
   const policy = useApi<RoutingPolicyView>("/api/routing/policy");
@@ -2571,9 +2660,7 @@ function RoutingRulesEditorCard({ readOnly }: { readOnly?: boolean }) {
       <p className="m-0 mt-0.5 text-fg-3">
         Custom rows append AFTER the template's rules and are walked top-down, first match wins. Saving replaces ALL
         custom rules (an empty editor clears them); the save is lint-gated - a fragment that would fail the next
-        daemon start is refused with the file untouched. Worked examples:{" "}
-        <code className="rounded-1 bg-bg-1 px-1 font-mono text-[10.5px]">docs/model-routing.md</code> (recipe
-        gallery). Tier overrides, path classes, budgets, privacy rules, local upstreams and fallbacks have their own cards on this page; key pools hold API keys and stay in config.toml.
+        daemon start is refused with the file untouched. Tier overrides, path classes, budgets, privacy rules, local upstreams and fallbacks have their own cards on this page; key pools hold API keys and stay in config.toml.
       </p>
       {policy.error && <p className="m-0 mt-2 text-danger">{String(policy.error)}</p>}
       <Textarea

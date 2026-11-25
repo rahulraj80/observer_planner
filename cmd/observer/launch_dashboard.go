@@ -322,6 +322,12 @@ func (a *launchManagerAdapter) createFresh(spec dashapi.FreshLaunchSpec) (res te
 		SignInSeed:      spec.SignInSeed,
 		SignInAsk:       spec.SignInAsk,
 		Origin:          specOrigin(spec.Initiator, spec.ParentSessionID),
+		TaskPrompt:      spec.TaskPrompt,
+		// D32: the opt-in workspace secret mask (server-decided; a backend
+		// that cannot build it refuses the launch).
+		MaskWorkspaceSecrets: spec.MaskWorkspaceSecrets,
+		// SBXD-5: where a hosted row clones a clone-remote URL.
+		WorkspaceCloneWhere: spec.WorkspaceCloneWhere,
 	})
 	if err != nil {
 		return termsvc.LaunchResult{}, false, mapFreshErr(err)

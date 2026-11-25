@@ -3,6 +3,8 @@
 // derivations both render. No React, no fetch: node --test imports it.
 // Operator reference: docs/you-page.md.
 
+import { PLACES } from "./settingsPlaces.ts";
+
 export type MeToolAccount = {
   email?: string;
   name?: string;
@@ -133,7 +135,7 @@ export function consentRows(i: ConsentInputs, cloudLabel: (purpose: string) => s
     }
   }
 
-  // Package checks: the SuperBased lookup, private names, and the database download.
+  // Package checks: the superbased lookup, private names, and the database download.
   const scanOwner = "/code-security?tab=scanners";
   if (!i.lookup) {
     rows.push(unreadable("package-checks", "Online package checks", scanOwner));
@@ -393,19 +395,40 @@ export type OrgBudgetWindowLike = {
   enforcement: string;
   level: string;
   subject?: string;
+  /** What the cap does on THIS machine (internal/budgetwarn EffectOf);
+   *  absent from an older daemon. */
+  effect?: string;
 };
+
+/** hardRule names what a hard cap does on this machine: an org cap set to
+ *  block reads as a warning on a machine that cannot block (observe mode,
+ *  guard off), never as "blocks" (2026-11-18). */
+function hardRule(effect: string | undefined): string {
+  if (effect === undefined || effect === "blocks") return "blocks at the cap";
+  if (effect === "blocks_proxied") return "blocks proxied requests at the cap";
+  return "set to block, warns only on this machine";
+}
 
 /** orgBudgetLine reads one org budget window as a share of its cap. It never
  *  prints an amount: the amounts follow the organization's display choice and
  *  the share is true in either. */
-export function orgBudgetLine(w: OrgBudgetWindowLike): { label: string; value: string; tone: "neutral" | "warn" | "danger" } {
+export function orgBudgetLine(w: OrgBudgetWindowLike): {
+  label: string;
+  value: string;
+  tone: "neutral" | "warn" | "danger";
+  /** The Guard mode link when the cap only warns here because of this
+   *  machine's guard (budget enforce consistency, 2026-11-19). */
+  link?: { href: string; label: string };
+} {
   const pct = Number.isFinite(w.ratio) ? `${Math.round(w.ratio * 100)}% of the cap` : "not measured";
-  const rule = w.enforcement === "hard" ? "blocks at the cap" : w.enforcement === "soft" ? "warns at the cap" : "report only";
+  const rule = w.enforcement === "hard" ? hardRule(w.effect) : w.enforcement === "soft" ? "warns at the cap" : "report only";
   const who = w.subject ? ` (${w.subject.replace(":", " ")})` : "";
+  const warnsHere = w.enforcement === "hard" && (w.effect === "warn_observe" || w.effect === "warn_guard_off");
   return {
     label: `${w.window || w.period}${who}`,
     value: `${pct}, ${rule}`,
     tone: w.level === "exceeded" ? "danger" : w.level === "warning" ? "warn" : "neutral",
+    ...(warnsHere ? { link: { href: PLACES.security_mode.href, label: "Open Guard mode" } } : {}),
   };
 }
 
@@ -413,6 +436,9 @@ export type GuardBudgetLike = {
   session_usd: number;
   daily_usd: number;
   hard: boolean;
+  /** The guard's mode (off / observe / enforce); a hard cap blocks only in
+   *  enforce mode. Absent from an older daemon. */
+  guard_mode?: string;
   spend_today_usd: number;
   session_tokens?: number;
   daily_tokens?: number;
@@ -432,7 +458,8 @@ export function guardBudgetLines(
   fmtTok: (n: number) => string,
 ): { label: string; value: string }[] {
   const out: { label: string; value: string }[] = [];
-  const rule = g.hard ? "blocks at the cap" : "warns at the cap";
+  const enforcing = g.guard_mode === undefined || g.guard_mode === "enforce";
+  const rule = !g.hard ? "warns at the cap" : enforcing ? "blocks at the cap" : "set to block, warns only on this machine";
   if (dollars) {
     if (g.daily_usd > 0) out.push({ label: "Daily", value: `${fmtUSD(g.spend_today_usd)} of ${fmtUSD(g.daily_usd)}, ${rule}` });
     if (g.session_usd > 0) out.push({ label: "Per session", value: `${fmtUSD(g.session_usd)} cap, ${rule}` });

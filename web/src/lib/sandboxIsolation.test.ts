@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   backendNotes,
   backendState,
+  noPublishedImageNote,
+  offerNotes,
   captureLabel,
   gatewayModeLabel,
   unavailableRows,
@@ -155,6 +157,23 @@ test("backendNotes renders the daemon's sentences in order: prerequisite, hint, 
   );
 });
 
+test("offerNotes puts the no-published-image sentence first on the rows that need a user-built image (SR-26)", () => {
+  for (const id of ["oci-runc", "oci-runsc", "apple-container", "cloud-hypervisor"]) {
+    const note = noPublishedImageNote(id);
+    assert.match(note, /does not publish/, id);
+    assert.match(note, /build/, id);
+    assert.deepEqual(offerNotes({ ...bwrap, id, prerequisite: "P" }), [note, "P"], id);
+  }
+  // A row with no image of its own (a process sandbox, a hosted box) and no
+  // row at all get only the daemon's sentences.
+  for (const id of ["bwrap", "e2b", "openshell"]) {
+    assert.equal(noPublishedImageNote(id), "", id);
+    assert.deepEqual(offerNotes({ ...bwrap, id, hint: "H" }), ["H"], id);
+  }
+  assert.equal(noPublishedImageNote(undefined), "");
+  assert.deepEqual(offerNotes(undefined), []);
+});
+
 test("gatewayModeLabel names the closed modes and passes an unknown one through", () => {
   assert.equal(gatewayModeLabel(undefined), "");
   assert.equal(gatewayModeLabel("managed_local"), "Observer's private gateway");
@@ -223,6 +242,9 @@ test("the run pill names the seccomp state a key-on run got", () => {
     "seatbelt (process sandbox), capture full, seccomp not applicable: not filtered by Observer",
   );
   for (const s of ["off", "none", "engine_default", ""]) assert.equal(seccompRunLabel({ ...base, seccomp: s }), null);
+  // The strace switch (lane ptrace) names the ground the launch recorded.
+  assert.match(seccompRunLabel({ ...base, seccomp: "observer_seize_pidns" }) ?? "", /observer_seize_pidns, strace allowed \(the sandbox has its own process list\)/);
+  assert.match(seccompRunLabel({ ...base, seccomp: "observer_seize_yama" }) ?? "", /observer_seize_yama, strace allowed \(Yama limits it/);
 });
 
 test("backendState tells a backend that only needs enabling from one that cannot run here", () => {

@@ -1,0 +1,1 @@
+import{j as e,i as r}from"./vendor-react-DcQPdiaM.js";import{iD as o}from"./index-B2zhNH9a.js";const i={node:t=>e.jsx("span",{children:o(t.usd,t.tokens)}),text:t=>o(t.usd,t.tokens)},a=r.createContext(i);function u(){return r.useContext(a)}function d({usd:t,tokens:n}){const s=u();return e.jsx(e.Fragment,{children:s.node(n===void 0?{usd:t}:{usd:t,tokens:n})})}export{d as P,u};

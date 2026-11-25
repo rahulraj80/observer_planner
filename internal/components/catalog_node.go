@@ -920,8 +920,21 @@ func nodeRows() []Component {
 			ConfigKeys: []string{"terminal"},
 			Ledger:     []string{"SBX-BE-8", "SBX-BE-16"},
 			Stability:  StabilityPreview,
-			Distros:    dist(out, off, off, off),
+			// A row added after catalog version 4 takes its stage's reach.
+			Reach:   ReachOf(StabilityPreview),
+			Distros: dist(out, off, off, off),
 		},
+		// Docker Sandboxes (lane SBX-DOCKER): Docker's cloud sandboxes
+		// through the Sandboxes API; its process streams ride the module's
+		// existing WebSocket library.
+		hostedDriverRow("terminals.sandbox.docker", "Docker hosted sandboxes (beta)",
+			"Runs sandboxed terminal launches in a Docker cloud sandbox (Docker Agentic Platform) on Docker's machines, through Docker's Sandboxes API. Your workspace files are uploaded after you consent once; hooks reach this machine through the capture relay. Beta: built from Docker's documentation and API reference; its wire client passed a live smoke on a real account (2026-11-11), the full live register is still owed.",
+			"internal/sandboxremote/dockersbx", []string{"github.com/coder/websocket"}),
+		// Daytona (a hosted vendor): REST plus Daytona's SSH access
+		// tokens through golang.org/x/crypto/ssh, never its AGPL Go SDK.
+		hostedDriverRow("terminals.sandbox.daytona", "Daytona hosted sandboxes (beta)",
+			"Runs sandboxed terminal launches in a Daytona sandbox (a container) on Daytona's machines, through Daytona's REST API and SSH access. Your workspace files are uploaded after you consent once; hooks reach this machine through the capture relay. Beta: built from Daytona's documentation; only a client-level smoke has run with a real account.",
+			"internal/sandboxremote/daytona", []string{"golang.org/x/crypto"}),
 		// The org-hosted OpenShell row (tracker F-019, g1-design.md section
 		// 11.4, lane G4): the fourth hosted driver, whose "vendor" is the
 		// organization's own OpenShell gateway behind its validating front.
@@ -1066,12 +1079,17 @@ func nodeRows() []Component {
 			// in the project's signed active pack set; its packages ship
 			// with the module root until a phase splits them for L1.
 			ID: "security.secrets", Class: ClassFeature, Binary: BinaryNode,
-			Title:        "Secret detection",
-			About:        "Finds typed secrets in what an agent writes (before the write, in the hook), in written files, and in the diff a commit or push records, so the commit gate can stop an unscanned secret.",
-			Levels:       lv([]Level{L2, L3}, l1l2l3, "P2"),
-			Requires:     []string{"security"},
-			ConfigKeys:   []string{"security"},
-			Ledger:       []string{"SECP-18", "SECP-25"},
+			Title:      "Secret detection",
+			About:      "Finds typed secrets in what an agent writes (before the write, in the hook), in written files, and in the diff a commit or push records, so the commit gate can stop an unscanned secret.",
+			Levels:     lv([]Level{L2, L3}, l1l2l3, "P2"),
+			Requires:   []string{"security"},
+			ConfigKeys: []string{"security"},
+			// The commit quick scan reads the diff through the core
+			// read-only git envelope (internal/gitview); on a WSL daemon
+			// reading a checkout on a Windows drive that git is the
+			// Windows git.exe through WSL interop (R3-86, SECP-54).
+			Surface:      Surface{Processes: []string{"git (read-only diff of what a commit or push records, through the read-only git envelope; for a checkout on a Windows drive read from WSL, the Windows git.exe through WSL interop)"}},
+			Ledger:       []string{"SECP-18", "SECP-25", "SECP-54"},
 			RestartClass: "restart",
 			Stability:    StabilityPreview,
 			Note:         "No package of its own yet: internal/secdetect, internal/secquickscan and internal/secpostwrite are compiled with the module root, so a build without the root drops them and this row is inactive (L2) otherwise.",
@@ -1103,7 +1121,7 @@ func nodeRows() []Component {
 			// log P-036) after the operator's download rulings PT-19.
 			ID: "security.deps", Class: ClassFeature, Binary: BinaryNode,
 			Title:  "Package checks",
-			About:  "Checks packages an AI agent installs (and dependencies a manifest edit adds) against the signed malicious-packages list, popular names for typosquats, and, unless switched off, the OSV database and the public registry, before the install runs. Private package names never leave the machine.",
+			About:  "Checks packages an AI agent installs (and dependencies a manifest edit adds) against the signed malicious-packages list, popular names for typosquats, and, unless switched off, the OSV database and the public registry (including whether a version lost the build provenance earlier versions carried), before the install runs. Private package names never leave the machine. Also keeps each project's package inventory from its dependency scans, for a CycloneDX SBOM and a local licence check.",
 			Levels: lv(l1l2l3, l1l2l3, ""),
 			Packages: []string{
 				"internal/secfeed", "internal/secfeed/online", "internal/secask",
@@ -1111,6 +1129,10 @@ func nodeRows() []Component {
 				// security.deps owns matching; its two driver children use them.
 				"internal/secscan/depscan", "internal/secscan/depdriver", "internal/secscan/scalibrchild",
 				"internal/secscan/osvdb", "internal/secscan/osvnet",
+				// Project SBOM and licences (security coverage gaps plan items
+				// 2 and 4): the inventory snapshot owner, the SBOM reader and
+				// the local licence check.
+				"internal/secinventory", "internal/secsbom", "internal/seclicense",
 			},
 			DirectModules: []string{"github.com/BurntSushi/toml", "golang.org/x/mod", "gopkg.in/yaml.v3"},
 			Requires:      []string{"security"},
@@ -1122,13 +1144,13 @@ func nodeRows() []Component {
 				},
 				Egress: []Egress{
 					{Host: "api.osv.dev", Purpose: "Online package check: ecosystem, public package name and version", Gate: "default on where the component is active, disclosed at first run, off per node; never on a managed node", Trigger: TriggerAutomatic},
-					{Host: "<public package registries>", Purpose: "Online package check: whether a public package exists and when it was first published", Gate: "as api.osv.dev", Trigger: TriggerAutomatic},
+					{Host: "<public package registries>", Purpose: "Online package check: whether a public package exists, when it was first published and, for npm and PyPI, which versions carry build provenance (PyPI: one more request to pypi.org/simple/<name>/)", Gate: "as api.osv.dev; provenance also needs [security.deps].provenance (default flag)", Trigger: TriggerAutomatic},
 					{Host: "superbased.app", Purpose: "The signed malicious-packages and popular-names lists (signed content channel)", Gate: "where the component is active, with no consent (a plain download of public files, not a query about packages; operator ruling PT-19); [security.deps].index_download = false switches it off and the checks then use the index on disk; never on a managed node", Trigger: TriggerAutomatic},
 				},
-				FilesWritten: []string{"~/.observer/security/content/ (the signed index)", "~/.observer/security/pkgcache.json (online answers for the hook)", "~/.observer/security/deps-settings.json", "~/.observer/security/online-disclosure.json", "~/.observer/security/deps-index-verified.json (the index verified once per version)", "~/.observer/security/deps-notes/ (one marker per session that had the not-set-up note)", "~/.observer/security/deps-feed-etag.json (the feed envelopes' ETags)"},
+				FilesWritten: []string{"~/.observer/security/content/ (the signed index)", "~/.observer/security/pkgcache.json (online answers for the hook)", "~/.observer/security/deps-settings.json", "~/.observer/security/online-disclosure.json", "~/.observer/security/deps-index-verified.json (the index verified once per version)", "~/.observer/security/deps-notes/ (one marker per session that had the not-set-up note)", "~/.observer/security/deps-feed-etag.json (the feed envelopes' ETags)", "~/.observer/security/inventory/<project_root_hash>.json (each project's last dependency inventory: ecosystems, names, versions, dependency file paths; never file contents)"},
 			},
 			Tables:       []string{"sec_pkg_cache"},
-			Routes:       []string{"/api/security/deps"},
+			Routes:       []string{"/api/security/deps", "/api/security/sbom"},
 			Ledger:       []string{"SECP-7", "SECP-22", "SECP-26", "SHR-7"},
 			RestartClass: "restart",
 			Stability:    StabilityPreview,
@@ -1241,18 +1263,18 @@ func nodeRows() []Component {
 			Surface: Surface{
 				Processes: []string{"observer (the scan child, `observer security scan-child`, through the shared runner)", "git (`git ls-files --stage`, read only, for the git submodule pins on an online scan: the Code security scan dialog's \"Also check online\" or `observer security scan --online`)"},
 				Egress: []Egress{
-					{Host: "superbased.app", Purpose: "SuperBased's signed mirror of the OSV database exports (security.osv_export: a base and a cumulative delta per ecosystem; no project data sent)", Gate: "after the developer's one-time accept (the Scanners card's confirm dialog, or `observer security scan db accept`; about 300 MB; never an agent, R-165), then automatic; individual node only, [security.deps] db_source auto (default) or feed; no request while the build carries no content-feed key", Trigger: TriggerAutomatic},
+					{Host: "superbased.app", Purpose: "superbased's signed mirror of the OSV database exports (security.osv_export: a base and a cumulative delta per ecosystem; no project data sent)", Gate: "after the developer's one-time accept (the Scanners card's confirm dialog, or `observer security scan db accept`; about 300 MB; never an agent, R-165), then automatic; individual node only, [security.deps] db_source auto (default) or feed; no request while the build carries no content-feed key", Trigger: TriggerAutomatic},
 					{Host: "osv-vulnerabilities.storage.googleapis.com", Purpose: "The per-ecosystem OSV database exports, the fallback source (no project data sent)", Gate: "after the same accept; individual node only, when db_source = upstream, or db_source = auto with db_fallback_upstream on (default) and the signed mirror not published, not verifiable or unreachable (operator ruling PT-19, static feed mirroring plan section 7)", Trigger: TriggerAutomatic},
 					{Host: "api.osv.dev", Purpose: "Online matching: ecosystem, public package name and version; and git submodules by the commit ids they are pinned to, only those ids (never a submodule's URL, path or name)", Gate: "an online scan only (the Code security scan dialog's \"Also check online\" or `observer security scan --online`), with security.deps online checks on and disclosed, individual node only", Trigger: TriggerOptIn},
 					// Lane RM-2 (plan section 13): the SuperBased package lookup.
-					{Host: "superbased.app", Purpose: "The SuperBased lookup's signed shard manifest and set descriptors (security.osv_shards; the same files for everyone, no project data sent)", Gate: "lookup mode remote or both ([security.deps] match) with the developer's own remote-lookup consent (the Privacy page's Package lookup card or `observer security lookup mode`; never an agent, R-165); individual node only; no request while the build carries no content-feed key", Trigger: TriggerOptIn},
-					{Host: "shards.superbased.app", Purpose: "The SuperBased lookup's advisory shards: a short hash prefix per package name chooses which content-addressed shards are fetched; never a package name, version or code; private names withheld unless the developer separately chose to send them", Gate: "as the shard manifest: lookup mode remote or both with the remote-lookup consent, individual node only; only shards not already in the node-local cache", Trigger: TriggerOptIn},
+					{Host: "superbased.app", Purpose: "The superbased lookup's signed shard manifest and set descriptors (security.osv_shards; the same files for everyone, no project data sent)", Gate: "lookup mode remote or both ([security.deps] match) with the developer's own remote-lookup consent (the Privacy page's Package lookup card or `observer security lookup mode`; never an agent, R-165); individual node only; no request while the build carries no content-feed key", Trigger: TriggerOptIn},
+					{Host: "shards.superbased.app", Purpose: "The superbased lookup's advisory shards: a short hash prefix per package name chooses which content-addressed shards are fetched; never a package name, version or code; private names withheld unless the developer separately chose to send them", Gate: "as the shard manifest: lookup mode remote or both with the remote-lookup consent, individual node only; only shards not already in the node-local cache", Trigger: TriggerOptIn},
 				},
 				FilesWritten: []string{
 					"~/.observer/security/osv/ (the local OSV databases and their epochs)",
 					"~/.observer/security/osv-db-consent.json (the developer's one-time accept of the database download: time, surface, account)",
-					"~/.observer/security/osv-remote-consent.json and osv-remote-private-consent.json (the SuperBased lookup's consents: time, surface, account)",
-					"~/.observer/security/osv-shards/ (the SuperBased lookup's verified shard cache, by digest, capped and evicted least recently used)",
+					"~/.observer/security/osv-remote-consent.json and osv-remote-private-consent.json (the superbased lookup's consents: time, surface, account)",
+					"~/.observer/security/osv-shards/ (the superbased lookup's verified shard cache, by digest, capped and evicted least recently used)",
 					"<user cache>/superbased-observer/scanners/deps/remote/ (a remote lookup's assembled per-ecosystem export, removed after each match)",
 					"~/.observer/security/deps-scan-last.json (each project's last scan per driver, by project hash)",
 					"~/.observer/security/deps-scan.lock (one dependency scan at a time per machine)",
@@ -1363,7 +1385,7 @@ func nodeRows() []Component {
 				// driver reads (the same store as security.scan.scalibr), so
 				// the download is declared on every child that triggers it.
 				Egress: []Egress{
-					{Host: "superbased.app", Purpose: "SuperBased's signed mirror of the OSV database exports osv-scanner reads offline (no project data sent)", Gate: "as security.scan.scalibr: after the developer's one-time accept, then automatic; individual node only, db_source auto or feed", Trigger: TriggerAutomatic},
+					{Host: "superbased.app", Purpose: "superbased's signed mirror of the OSV database exports osv-scanner reads offline (no project data sent)", Gate: "as security.scan.scalibr: after the developer's one-time accept, then automatic; individual node only, db_source auto or feed", Trigger: TriggerAutomatic},
 					{Host: "osv-vulnerabilities.storage.googleapis.com", Purpose: "The per-ecosystem OSV database exports, the fallback source (no project data sent)", Gate: "as security.scan.scalibr: after the same accept; individual node only, db_source upstream, or auto with the fallback on when the signed mirror cannot serve", Trigger: TriggerAutomatic},
 				},
 				FilesWritten: []string{
@@ -1575,16 +1597,17 @@ func nodeRows() []Component {
 			// later step (R-165 reserves /api/security/dast).
 			ID: "security.dast", Class: ClassFeature, Binary: BinaryNode,
 			Title:    "Local passive DAST",
-			About:    "Checks a development server on this machine (localhost, 127.0.0.1 or ::1 with a port; nothing else is ever contacted) with a few plain GET requests: security headers, cookie flags, CORS, exposed .git and .env, directory listings, source maps, framework debug pages and version banners. Passive only: nothing is submitted or fuzzed. Runs only when you start it, after a one-time accept; findings are flag only and printed.",
+			About:    "Checks a development server on this machine (localhost, 127.0.0.1 or ::1 with a port; nothing else is ever contacted) with a few plain GET requests: security headers, cookie flags, CORS, exposed .git and .env, directory listings, source maps, framework debug pages and version banners. Passive only: nothing is submitted or fuzzed. Runs only when you start it (command line or the Code security page), after a one-time accept; findings are flag only and stored against the project. Candidate servers come from the project's own files and, on Linux, the kernel's listen table; nothing is dialed to find them.",
 			Levels:   lv(l1l2l3, l1l2l3, ""),
 			Packages: []string{"internal/secdast", "internal/secdast/dastconsent", "internal/secdastnet"},
 			Requires: []string{"security"},
 			Surface: Surface{
 				Egress: []Egress{
-					{Host: "<the loopback dev server the developer names (localhost, 127.0.0.0/8 or ::1, with a port)>", Purpose: "at most 16 plain GET requests per run (the page with a canary Origin, /.git/HEAD, /.env, one missing page, up to 3 same-origin scripts and their source maps); no cookie, credential or body is sent; refused for any address that is not loopback after resolution, and no redirect off the origin is followed", Gate: "`observer security dast <url>`, started by the developer (never an agent: R-165), after the one-time accept", Trigger: TriggerUserTriggered},
+					{Host: "<the loopback dev server the developer names (localhost, 127.0.0.0/8 or ::1, with a port)>", Purpose: "at most 16 plain GET requests per run (the page with a canary Origin, /.git/HEAD, /.env, one missing page, up to 3 same-origin scripts and their source maps); no cookie, credential or body is sent; refused for any address that is not loopback after resolution, and no redirect off the origin is followed", Gate: "`observer security dast <url>` or the Code security DAST card's Run, started by the developer (never an agent: R-165), after the one-time accept", Trigger: TriggerUserTriggered},
 				},
-				FilesWritten: []string{"~/.observer/security/dast-consent.json (the developer's one-time accept, signed)"},
+				FilesWritten: []string{"~/.observer/security/dast-consent.json (the developer's one-time accept, signed)", "~/.observer/security/dast/<project_root_hash>.json (each origin's last run: the finding keys it reported, its time and outcome)"},
 			},
+			Routes:       []string{"/api/security/dast"},
 			Ledger:       []string{"SHR-3"},
 			RestartClass: "hot",
 			Stability:    StabilityPreview,
@@ -1708,7 +1731,7 @@ func nodeRows() []Component {
 			ConfigKeys: []string{"ingest"},
 			Stability:  StabilityPreview,
 			Distros:    dist(out, off, off, off),
-			Note:       "Ruling D-436: the generic OTLP receiver (internal/ingest/otlp) is core, because it also serves Plane A traces and the observer-edge; this component is the vendor mapping table (internal/otlpvendor), the logs handler and the exporter-config edit (internal/telemetrywire). Compiled out by -tags sbo_omit_ingest_otlp (P2, MP-L1C): the cmd/observer wiring pair (otlp_ingest.go, otlp_proxyroute.go, init_otlp.go, otlp_route_marker.go vs their _omit.go files), the clientwire writer (telemetry_wire.go vs telemetry_omit.go) and the dashboard setup route; [ingest.otel] is then reported at start, never obeyed, and `observer init --otlp-export` refuses. Such a build cannot remove exporter entries an earlier full build wrote: remove ingest.otlp in a build that has it first.",
+			Note:       "Ruling D-436: the generic OTLP receiver (internal/ingest/otlp) is core, because it also serves AI Apps traces and the observer-edge; this component is the vendor mapping table (internal/otlpvendor), the logs handler and the exporter-config edit (internal/telemetrywire). Compiled out by -tags sbo_omit_ingest_otlp (P2, MP-L1C): the cmd/observer wiring pair (otlp_ingest.go, otlp_proxyroute.go, init_otlp.go, otlp_route_marker.go vs their _omit.go files), the clientwire writer (telemetry_wire.go vs telemetry_omit.go) and the dashboard setup route; [ingest.otel] is then reported at start, never obeyed, and `observer init --otlp-export` refuses. Such a build cannot remove exporter entries an earlier full build wrote: remove ingest.otlp in a build that has it first.",
 		},
 		{
 			ID: "export.otel", Class: ClassFeature, Binary: BinaryNode,
@@ -1728,8 +1751,8 @@ func nodeRows() []Component {
 		},
 		{
 			ID: "obs", Class: ClassFeature, Binary: BinaryNode,
-			Title:  "Plane A observability",
-			About:  "General observability of a hosted LLM app: span ingest, input admission, evals, alerts and self-observability. The admin plane, never shown on the node dashboard.",
+			Title:  "AI Apps observability",
+			About:  "Observability of the AI apps and agents you build (SDK and OTLP spans): span ingest, input admission, evals, alerts and self-observability.",
 			Levels: lv([]Level{L1, L3}, l1l2l3, "P2"),
 			Packages: []string{
 				"internal/obs", "internal/obs/admission", "internal/obs/egress", "internal/obs/eval", "internal/obs/span",
@@ -1750,8 +1773,8 @@ func nodeRows() []Component {
 			Verbs:      []string{"obs", "eval"},
 			ConfigKeys: []string{"observability"},
 			Stability:  StabilityPreview,
-			Distros:    dist(out, out, out, off),
-			Note:       "Out of developer per D-389. Compiled out by -tags sbo_omit_obs (no_obs is a one-release alias) and by sbo_omit_judge_client, which obs requires; the binary then reports obs omitted. The self-observability model (internal/selfobs run, keys, shape, conformance, emit) is core and the [selfobs] key belongs to export.otel (D-436); with those packages no longer counted as obs, a -tags sbo_omit_obs build carries none of obs's packages, so obs claims L1 (MP-L1C).",
+			Distros:    dist(out, off, out, off),
+			Note:       "In developer since D7 (plan of record 2026-11-19, amended; supersedes D-389): compiled in, off until [observability].enabled is set from the dashboard or config, so an individual who is not signed in can run AI Apps on their own node. Stays out of minimal (a deliberately small build) and managed (which uses the org gateway); a build without it warns at start and in doctor (observability.build) when [observability] is enabled. Compiled out by -tags sbo_omit_obs (no_obs is a one-release alias) and by sbo_omit_judge_client, which obs requires; the binary then reports obs omitted. The self-observability model (internal/selfobs run, keys, shape, conformance, emit) is core and the [selfobs] key belongs to export.otel (D-436); with those packages no longer counted as obs, a -tags sbo_omit_obs build carries none of obs's packages, so obs claims L1 (MP-L1C).",
 		},
 		{
 			ID: "processobs", Class: ClassFeature, Binary: BinaryNode,
@@ -2029,6 +2052,14 @@ func nodeRows() []Component {
 			Stability:        StabilityStable,
 			Distros:          dist(out, on, out, on),
 		},
+		// The InstaBox hosted driver: the SBX-P7 hosted rows' rule (its own
+		// component, inactive in every distro, opt-in, beta until a live
+		// receipt; nothing calls InstaBox before a user launch or a
+		// leftover-box confirm). Its client links github.com/coder/websocket
+		// for the terminal WebSocket.
+		hostedDriverRow("terminals.sandbox.instabox", "InstaBox hosted sandboxes (beta)",
+			"Runs sandboxed terminal launches in an InstaBox Firecracker microVM on InstaBox's machines, through InstaBox's REST API and terminal WebSocket. Internet tier only: InstaBox documents no way to block a machine's network. Your workspace files are uploaded after you consent once; hooks reach this machine through the capture relay. Beta: built from InstaBox's documentation; its wire client passed an API-level live check, but no agent has run on the row yet.",
+			"internal/sandboxremote/instabox", []string{"github.com/coder/websocket"}),
 	}
 }
 

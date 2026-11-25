@@ -28,7 +28,7 @@ func newComponentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "components",
 		Short: "Show the component catalog: what this build contains and what each component adds",
-		Long: "Lists the named components of SuperBased Observer (features, adapters,\n" +
+		Long: "Lists the named components of superbased Observer (features, adapters,\n" +
 			"integrations that write other tools' config, org server modules, and the\n" +
 			"artifacts installed outside the binary), whether this binary was built\n" +
 			"with each one, and what each adds to a machine: listeners, outbound\n" +
@@ -38,7 +38,7 @@ func newComponentsCmd() *cobra.Command {
 			"undoes what an inactive component wrote into other tools' config, and\n" +
 			"`purge` deletes its data. A prebuilt distro build (minimal, developer,\n" +
 			"managed) compiles in only its own set.\n" +
-			"The same data is in docs/components.md and at GET /api/components.",
+			"The dashboard serves the same data at GET /api/components.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

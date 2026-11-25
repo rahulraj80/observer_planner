@@ -57,7 +57,12 @@ type BoxSpec struct {
 	// TimeoutSeconds is the vendor's own box timeout (never zero).
 	TimeoutSeconds int
 	Tier           vocab.Tier
-	Region         string
+	// DenyCIDRs are the ranges the create asks the vendor to refuse on the
+	// internet tier (PrivateRangeDeny's CIDRs; empty sends no deny). A wire
+	// client renders them in its vendor's documented field, or refuses a
+	// create it cannot render them for (never a silent open box).
+	DenyCIDRs []string
+	Region    string
 	// Isolation is the class the launch asks a SeveralIsolations vendor for
 	// ("" lets the vendor choose); the wire client refuses, and deletes, a
 	// box the vendor reports with less.
@@ -74,7 +79,8 @@ type BoxInfo struct {
 	// Running is false once the vendor reports the box stopped.
 	Running bool
 	Labels  map[string]string
-	// Extra carries vendor identifiers other than the id (never a secret).
+	// Extra carries vendor identifiers other than the id, and vendor state
+	// words such as status and a redacted failure (never a secret).
 	Extra    map[string]string
 	Deadline time.Time
 	// Described is how the vendor says the box runs, in its own words with

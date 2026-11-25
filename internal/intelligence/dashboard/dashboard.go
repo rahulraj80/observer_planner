@@ -36,6 +36,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/notify/feedstate"
 	"github.com/marmutapp/superbased-observer/internal/requestclass"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
+	"github.com/marmutapp/superbased-observer/internal/secfixstate"
 	"github.com/marmutapp/superbased-observer/internal/sessiongauge"
 	"github.com/marmutapp/superbased-observer/internal/sessionmsg"
 	"github.com/marmutapp/superbased-observer/internal/stash"
@@ -73,6 +74,17 @@ type Server struct {
 	// (internal/firstrunstate, T-922), created once per server.
 	firstRunOnce sync.Once
 	firstRun     *firstrunstate.Store
+	// apps holds the daemon's AI Apps seams (apps_enable.go, first-run plan
+	// 3.8), set once by SetApps after New; nil in a process without them.
+	apps atomic.Pointer[appsSeams]
+	// connectFlow owns the one `observer connect --json --no-browser`
+	// subprocess the Get started panel and the top bar start
+	// (connect_flow.go). The zero value is ready.
+	connectFlow connectFlow
+	// secFix is the "Fix with an agent" attempts seam
+	// (internal/secfixstate), created once per server.
+	secFixOnce sync.Once
+	secFix     *secfixstate.Store
 	// installSignals caches Options.InstallSignalTools (setup_installsignal.go).
 	installSignals installSignalCache
 
@@ -90,6 +102,9 @@ type Server struct {
 	// comps caches the live component snapshot the route guard consults
 	// (components_manage.go).
 	comps componentCache
+	// sandboxProbe is the one in-flight sandbox probe GET
+	// /api/terminal/sandbox waits on under its deadline (sandbox.go).
+	sandboxProbe sandboxProbeFlights
 
 	// secScan is the Code security page's "Scan now" job
 	// (security_scan_now.go).
@@ -337,7 +352,11 @@ func (s *Server) Handler() http.Handler {
 	// build's handler chain is unchanged.
 	// analyticsInvalidateOnWrite clears the analytics response cache after a
 	// successful mutation (identity when ReadCaches is off).
-	return s.analyticsInvalidateOnWrite(s.governanceGuard(mux, sections, mux))
+	// dbIdentityGuard refuses a CLI that names another database before any
+	// route runs (db_identity_guard.go, L-125). It rides here, so every way of
+	// serving the loopback handler names its database; the remote handler,
+	// which does not go through Handler, gets it in guardedHandler.
+	return s.dbIdentityGuard(s.analyticsInvalidateOnWrite(s.governanceGuard(mux, sections, mux)))
 }
 
 // sessionSubRouteCapabilities is the DECLARED (documentation + test) suffix→
@@ -716,6 +735,9 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// above, this writes [terminal.sandbox], including authority-expanding
 	// remote-clone / extra-rw-bind escape hatches.
 	reg("/api/terminal/sandbox/config", L, secTerminals.WithTab("settings"), s.handleTerminalSandboxConfig)
+	// The strace switch (lane ptrace, PT-96): owner-local and confirm-token
+	// gated, the only writer of [terminal.sandbox].seccomp_allow_seize.
+	reg("/api/terminal/sandbox/ptrace-seize", L, secTerminals.WithTab("settings"), s.handleTerminalSandboxSeize)
 	// The sandbox egress refusal audit (lane N1, OpenShell plan 05 section
 	// 3.1). LOCAL: the rows name the hosts a sandboxed agent tried to
 	// reach and the run's project root.
@@ -828,6 +850,17 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// mutation. Never hidden as a route (it is the welcome on a fresh node).
 	reg("/api/firstrun", L, secNone, s.handleFirstRun)
 	reg("/api/firstrun/seen", L, secNone, s.handleFirstRunSeen)
+	// The first-run "at a glance" card (firstrun_glance.go): 30-day spend,
+	// top model, busiest project, re-reads. Local, like /api/firstrun.
+	reg("/api/firstrun/glance", L, secNone, s.handleFirstRunGlance)
+	// AI Apps hot-enable (apps_enable.go, first-run plan 3.5 and 3.8): the
+	// one enable seam the dashboard button, `observer apps on|off|status`
+	// and the VS Code action share. Local: enable and disable write the
+	// config, and the status names this machine's receiver addresses. Never
+	// hidden as a route (the first-run surface depends on it).
+	reg("/api/apps/status", L, secNone, s.handleAppsStatus)
+	reg("/api/apps/enable", L, secNone, s.handleAppsEnable)
+	reg("/api/apps/disable", L, secNone, s.handleAppsDisable)
 	// Admin and developer messaging (T-854, messages.go): the Messages
 	// page's own section, which sits on the unhideable floor (D-695), so an
 	// org message is never hidden from the developer it was sent to. Local:
@@ -944,6 +977,34 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// project or on every active one, in the background; the GET lists the
 	// scanners and the job. Runs scanners and writes findings: owner-local.
 	reg("/api/security/scan", L, secCodeSec, s.handleSecurityScan)
+	// "Fix with an agent" (security_fix.go): the fix plan of a selection, one
+	// project's task started as a fresh terminal launch (the New terminal
+	// gates all apply), and the recent attempts with their findings' state.
+	// Starts an agent: owner-local, the launch with the confirm token.
+	reg("/api/security/fix/plan", L, secCodeSec.WithTab("findings"), s.handleSecurityFixPlan)
+	reg("/api/security/fix/launch", L, secCodeSec.WithTab("findings"), s.handleSecurityFixLaunch)
+	reg("/api/security/fix/attempts", L, secCodeSec.WithTab("findings"), s.handleSecurityFixAttempts)
+	// "Security assessments" (security_assess.go): the kinds and recent runs,
+	// one project's plan, the launch of an agent in a dashboard terminal (the
+	// New terminal gates all apply), a run's report as plain text, and the
+	// developer's import of a run's findings file through the SARIF import
+	// seam. Starts an agent: owner-local, the launch and the import with the
+	// confirm token.
+	reg("/api/security/assessments", L, secCodeSec.WithTab("overview"), s.handleSecurityAssess)
+	reg("/api/security/assessments/plan", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessPlan)
+	reg("/api/security/assessments/launch", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessLaunch)
+	reg("/api/security/assessments/report", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessReport)
+	reg("/api/security/assessments/import", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessImport)
+	reg("/api/security/assessments/request", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessRequest)
+	reg("/api/security/assessments/cancel", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessCancel)
+	reg("/api/security/assessments/stop", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessStop)
+	reg("/api/security/assessments/delete-data", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessDeleteData)
+	reg("/api/security/assessments/validate", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessValidate)
+	reg("/api/security/assessments/model", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessModel)
+	// The fix of one checked item (a write-capable agent: the POST is a launch
+	// row, held and asked about) and the export of the checked copy.
+	reg("/api/security/assessments/fix", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessFix)
+	reg("/api/security/assessments/export", L, secCodeSec.WithTab("overview"), s.handleSecurityAssessExport)
 	// The Findings tab's drawer: one finding with its sightings, commits,
 	// lifecycle events and exceptions. Read-only, no evidence.
 	reg("/api/security/findings/{id}", V, secCodeSec.WithTab("findings"), s.handleSecurityFinding)
@@ -1001,6 +1062,17 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// card, and the dashboard accept of the online checks' disclosure.
 	// Local-only: consent is never a remote viewer's action.
 	reg("/api/security/deps", L, secCodeSec.WithTab("scanners"), s.handleSecurityDeps)
+	// The DAST card (security.dast, security coverage gaps plan section 2):
+	// its state and candidates, the accept and one run against a dev server
+	// on this machine. Owner-local: the accept is never a remote viewer's
+	// action and the run sends requests from this machine; every POST needs
+	// the confirm token the GET mints. R-165 reserves the prefix.
+	reg("/api/security/dast", L, secCodeSec.WithTab("scanners"), s.handleSecurityDAST)
+	reg("/api/security/dast/accept", L, secCodeSec.WithTab("scanners"), s.handleSecurityDASTAccept)
+	reg("/api/security/dast/run", L, secCodeSec.WithTab("scanners"), s.handleSecurityDASTRun)
+	// The Projects tab's "Export SBOM" (security.deps, plan section 3): a
+	// download naming the project's packages, owner-local.
+	reg("/api/security/sbom", L, secCodeSec.WithTab("projects"), s.handleSecuritySBOM)
 	reg("/api/guard/summary", V, secSecurity, s.handleGuardSummary)
 	reg("/api/guard/events", V, secSecurity, s.handleGuardEvents)
 	reg("/api/guard/conformance", V, secSecurity.WithTab("coverage"), s.handleGuardConformance)
@@ -1259,6 +1331,20 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// a config mutation. governanceGuard has a body-aware arm for /keys.
 	reg("/api/config/schema", L, secSettings, s.handleConfigSchema)
 	reg("/api/config/keys", L, secSettings, s.handleConfigKeys)
+	// Plane A lane B6 (sdk_settings.go): the SDK discovery read, SDK key
+	// sign-in/out, and the settings proposals an agent filed (D19).
+	// Local (review E-89): the discovery body names the org, the key id,
+	// the gateway URL and the key file's path. The SDKs read it on loopback,
+	// which a Local route keeps; a remote dashboard viewer does not get it.
+	// No section: an org hiding a Settings section must not break the SDKs'
+	// discovery.
+	reg("/api/sdk/destination", L, secNone, s.handleSDKDestination)
+	// The local OTLP receiver's bind state for the AI Apps pages (E-72):
+	// addresses and a bind error only, so a View read.
+	reg("/api/sdk/receiver", V, secNone, s.handleOTLPReceiver)
+	reg("/api/sdk/credential", L, secSettings.WithSettings("observability"), s.handleSDKCredential)
+	reg("/api/config/proposals", L, secSettings, s.handleConfigProposals)
+	reg("/api/config/proposals/", L, secSettings, s.handleConfigProposals)
 	reg("/api/config/backup", L, secSettings, s.handleConfigBackup)
 	reg("/api/config/reload", L, secSettings, s.handleConfigReload)
 	reg("/api/config/profiles", L, secSettings.WithSettings("profiles"), s.handleConfigProfiles)
@@ -1337,9 +1423,13 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// owns the [update] keys.
 	reg("/api/update/auto-apply", L, secSettings.WithSettings("org"), s.handleUpdateAutoApply)
 	// Launch binary paths (dashboard CLI parity follow-up): the [launch.tools.<tool>].path
-	// overrides, Local like every config write, governed with Settings > Terminal.
+	// overrides, Local like every config write, governed with Settings > Session attach.
 	reg("/api/launch/tool-paths", L, secSettings.WithSettings("terminal"), s.handleLaunchToolPaths)
 	reg("/api/telemetry/notice", V, secSettings, s.handleTelemetryNotice)
+	// The default workspace folder ([workspace].default_dir): Local because
+	// the answer names a local path and a save creates a folder; governed
+	// with Settings > Terminal, where its card lives.
+	reg("/api/workspace/default", L, secSettings.WithSettings("terminal"), s.handleDefaultWorkspace)
 	// The node-local update ledger (`observer update history`). Local, not
 	// View: a ledger reason can name a local path, which is exactly why the
 	// org-bound posture carries enums only.
@@ -1361,6 +1451,19 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	reg("/api/backfill/jobs/", V, secSettings, s.handleBackfillJob)
 	reg("/api/health/watcher", V, secNone, s.handleWatcherHealth)
 	reg("/api/enrolment/status", V, secSettings.WithSettings("enrolment"), s.handleEnrolmentStatus)
+	// The front door's one sentence (plan 07 M8.4, connect.go): identity and
+	// destination, the same sentence `observer status` prints.
+	reg("/api/connect/status", V, secSettings.WithSettings("enrolment"), s.handleConnectStatus)
+	// "Sign in and connect this machine" (Getting started v2,
+	// connect_flow.go): start runs `observer connect --json --no-browser
+	// [team]` as a child of this binary, progress reads its latest JSON
+	// line, cancel stops it. All Local: the child stores a credential on
+	// THIS machine and writes its config. start and cancel need the confirm
+	// token. The Enrolment (Account) section is a floor section, so an
+	// organization can never hide these.
+	reg("/api/connect/start", L, secSettings.WithSettings("enrolment"), s.handleConnectStart)
+	reg("/api/connect/progress", L, secSettings.WithSettings("enrolment"), s.handleConnectProgress)
+	reg("/api/connect/cancel", L, secSettings.WithSettings("enrolment"), s.handleConnectCancel)
 	reg("/api/enrolment/last-payload", V, secSettings.WithSettings("enrolment"), s.handleEnrolmentLastPayload)
 	reg("/api/enrolment/unenroll", L, secSettings.WithSettings("enrolment"), s.handleEnrolmentUnenroll)
 	// Mints a one-time enrolment token for a teammate through the org server
@@ -1469,6 +1572,11 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	// writes the privilege-expanding allow_fresh_agent/allowed_tools/
 	// allowed_project_roots block. The runs history is a metadata-only View read.
 	reg("/api/terminal/policy", L, secTerminals, s.handleTerminalPolicy)
+	// The launchpad's first-launch consent (door A): the three launch-policy
+	// opt-ins a first launch needs, previewed and applied as one save, plus
+	// the playground folder created only on consent. Whole-route Local like
+	// the policy editor; the guard's self-approval rule denies it to an agent.
+	reg("/api/terminal/first-launch", L, secTerminals, s.handleTerminalFirstLaunch)
 	reg("/api/terminal/runs", V, secTerminals, s.handleTerminalRuns)
 	// Runtime bounds (max_concurrent / idle_timeout) — a Local write that
 	// live-applies to the PTY manager with no restart, unlike the start-captured

@@ -7,6 +7,8 @@
 // the legacy's per-field labels + help text + option lists, which
 // were lost when the static TomlView replaced the structured form.
 
+import { PRODUCT_NAMES } from "../../../../shared/lib/productNames.ts";
+
 export type FieldKind = "text" | "select" | "bool" | "int" | "list";
 
 // OptionSourceId names a roster a picker field reads from the daemon:
@@ -75,6 +77,9 @@ export type SectionSpec = {
   // section. Resolved at render time. May be empty when the spec is
   // purely a parent for grouped sub-paths (see `groups` below).
   path: string[];
+  // title overrides the card title (the section id, capitalised): the AI
+  // Apps section keeps the id "observability" for links and governance.
+  title?: string;
   description: string;
   // Flat fields. Pages with sub-objects (e.g. compression's 4 layers)
   // use `groups` instead — the renderer prefers `groups` when present.
@@ -318,6 +323,11 @@ const PROCESS_CAPTURE_LIMIT_GROUPS: SectionGroup[] = [
 // Each spec matches a single ConfigViewerSection route in
 // Settings.tsx::sectionData(). The path[] resolves to the same object
 // today's sectionData() returns.
+
+/** AI_APPS_SUMMARY is the ONE owner of the AI Apps section's summary (sweep
+ *  finding F-20: it was written twice, in Settings.tsx and here, and the two
+ *  drifted). Settings.tsx's "About this section" reads this constant. */
+export const AI_APPS_SUMMARY = `${PRODUCT_NAMES.planea}: traces, cost and evals of the LLM apps and agents you build, sent by the superbased SDKs or any OpenTelemetry SDK to this machine's trace receiver. It is not your own coding-agent usage (every other section is); the data shows on the ${PRODUCT_NAMES.planea_local} pages. Off until you turn it on. Trace data stays on this machine unless you turn on an ${PRODUCT_NAMES.planea} share tier under Org sharing.`;
 
 export const SECTION_SPECS: Record<string, SectionSpec> = {
   observer: {
@@ -584,20 +594,20 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         label: "Network capture",
         path: ["Observer", "Process", "Network"],
         description:
-          "Network events for AI-tool sessions. Body excerpts are only available for SuperBased-proxied/plaintext flows; non-proxied TLS remains metadata-only.",
+          "Network events for AI-tool sessions. Body excerpts are only available for superbased-proxied/plaintext flows; non-proxied TLS remains metadata-only.",
         fields: [
           {
             id: "Enabled",
             label: "Enabled",
             kind: "bool",
-            help: "Records network_connect events for attributed sessions, including SuperBased proxy calls. Required for the session API/network calls table.",
+            help: "Records network_connect events for attributed sessions, including superbased proxy calls. Required for the session API/network calls table.",
           },
           {
             id: "CaptureBodies",
             label: "Body capture",
             kind: "select",
             options: ["off", "proxied", "available"],
-            help: "`off` stores metadata only. `proxied` stores capped/scrubbed excerpts for SuperBased proxy flows. `available` is reserved for future plaintext/instrumented backends.",
+            help: "`off` stores metadata only. `proxied` stores capped/scrubbed excerpts for superbased proxy flows. `available` is reserved for future plaintext/instrumented backends.",
           },
           {
             id: "MaxRequestBytes",
@@ -770,7 +780,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         label: "Retention (days)",
         kind: "int",
         min: 0,
-        help: "Days to keep cache_segments / cache_entries / cache_events rows. 0 = never prune. Default 90.",
+        help: "Days to keep the prompt-cache records (segments, entries and events). 0 = never prune. Default 90.",
       },
       {
         id: "CalibrateLogPath",
@@ -784,13 +794,13 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     id: "tasks",
     path: ["Tasks"],
     description:
-      "Session-level todo/plan checklist tracking (docs/task-tracking.md) - decodes claude-code TaskCreate/TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, copilot manage_todo_list, and similar tool calls already captured in actions.raw_tool_input into a per-task lifecycle + cost report (the Tasks tab, and the Analysis page's Tasks section). No new capture surface, no adapter change. A change here needs a daemon restart to take effect - [tasks] has no hot-reload path yet (SetTasksEnabled/SetTasksOptions bind once at daemon startup, the same posture every section except pricing/profiles has).",
+      "Session-level todo/plan checklist tracking - decodes claude-code TaskCreate/TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, copilot manage_todo_list, and similar tool calls already captured in actions.raw_tool_input into a per-task lifecycle + cost report (the Tasks tab, and the Analysis page's Tasks section). No new capture surface, no adapter change. A change here needs a daemon restart to take effect - [tasks] has no hot-reload path yet (SetTasksEnabled/SetTasksOptions bind once at daemon startup, the same posture every section except pricing/profiles has).",
     fields: [
       {
         id: "Enabled",
         label: "Enabled",
         kind: "bool",
-        help: "Decode todo/plan tool calls into task_items/task_transitions as they're captured. Default on. Disabling makes the task-tracking ingest pass a pure no-op; historical rows already decoded stay in the DB. Retrofit history after enabling with Settings > Backfill > tasks.",
+        help: "Decode todo/plan tool calls into tasks and their status changes as they're captured. Default on. Disabling makes the task-tracking ingest pass a pure no-op; historical rows already decoded stay in the DB. Retrofit history after enabling with Settings > Backfill > tasks.",
       },
       {
         id: "MatchMode",
@@ -816,28 +826,28 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         id: "BackfillOnStart",
         label: "Backfill on start",
         kind: "bool",
-        help: "Re-derive task_items/task_transitions from historical actions rows once at daemon startup (the same work as Settings > Backfill > tasks, run automatically). Default off - run that backfill once after enabling this section on a daemon with historical task-tool traffic. Idempotent.",
+        help: "Re-derive tasks and their status changes from past actions once at daemon startup (the same work as Settings > Backfill > tasks, run automatically). Default off - run that backfill once after enabling this section on a daemon with historical task-tool traffic. Idempotent.",
       },
       {
         id: "RetentionDays",
         label: "Retention (days)",
         kind: "int",
         min: 0,
-        help: "Days to keep task_items/task_transitions rows. 0 = never prune (the default - no pruning sweep ships yet; this field exists so one has a home without a future config-shape change).",
+        help: "Days to keep tasks and their status changes. 0 = never prune (the default - no pruning sweep ships yet; this field exists so one has a home without a future config-shape change).",
       },
     ],
   },
   observability: {
     id: "observability",
+    title: PRODUCT_NAMES.planea,
     path: ["Observability"],
-    description:
-      "Generalized observability subsystem (admin plane) - the OTLP /v1/traces receiver, trajectory capture, and the eval plane for an admin/org-hosted LLM app whose end-users route through SuperBased. Distinct from your own coding-agent usage; the captured data is viewed on the admin/org dashboard. Opt-in and node-local: trace data never leaves this machine unless an obs share tier is enabled. The receiver binds at daemon start, so enabling here needs a restart to take effect. Note the receiver is SHARED with the log-ingest path - it also comes alive whenever [ingest.otel] is enabled, so this toggle is not the only thing that binds :4317/:4318.",
+    description: AI_APPS_SUMMARY,
     fields: [
       {
         id: "Enabled",
         label: "Enabled",
         kind: "bool",
-        help: "Turn on the obs subsystem: the OTLP trace receiver (gRPC :4317 / HTTP :4318), the obs_* schema, trajectory ingestion + API, and the eval plane. Default off. The receiver is shared with [ingest.otel] (logs), so it may already be bound from that toggle. The judge model + online-sampling eval config ([observability.eval]) is under More settings below.",
+        help: "Turns on AI Apps: the trace receiver (gRPC and HTTP), its tables, trace capture and evals. Default off. Saving here takes effect at the next start; the AI Apps on this machine card below turns it on now. The receiver is shared with log ingest under OTel export, so it may already be listening. The judge model and online-sampling evals are under More settings below.",
       },
     ],
   },
@@ -1173,7 +1183,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     // touch it (test-pinned).
     path: ["OrgClient"],
     description:
-      "What this node shares with your organization's SuperBased server - and only when enrolled ([org_client] enabled by enrolling in the Enrolment section). The privacy default is metadata-only: sha256 hashes and counts, never raw commands, prose, or paths. Raw-content sharing (full_content) is node opt-in only - the org admin has no remote switch for it. The reporting-tier shares below (routing_summary, obs.summary, etc.) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
+      "What this node shares with your organization's superbased server - and only when enrolled ([org_client] enabled by enrolling in the Enrolment section). The privacy default is metadata-only: sha256 hashes and counts, never raw commands, prose, or paths. Raw-content sharing (full_content) is node opt-in only - the org admin has no remote switch for it. The reporting-tier shares below (routing_summary, obs.summary, etc.) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
     fields: [
       {
         id: "PushIntervalSeconds",
@@ -1883,7 +1893,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     // include that prefix (the strip convention — see compression).
     path: ["Intelligence", "MCP"],
     description:
-      "The on-demand MCP retrieval tools (get_file, get_symbols, get_relations, retrieve_stashed) and their audit log. Settings here bind when an AI client spawns its next observer MCP server - each session runs a fresh one, so saves apply to new sessions without a daemon restart. The 13 observability tools (get_cost_summary, search_past_outputs, …) are always on when MCP is registered and are not filtered here.",
+      "The on-demand MCP retrieval tools (get_file, get_symbols, get_relations, retrieve_stashed) and their audit log. Settings here bind when an AI client spawns its next observer MCP server - each session runs a fresh one, so saves apply to new sessions without a daemon restart. The other observability tools (get_cost_summary, search_past_outputs, …) are always on when MCP is registered and are not filtered here.",
     fields: [
       {
         id: "Features",

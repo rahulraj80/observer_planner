@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // @superbased/observer postinstall: PRINT-ONLY (T-753).
 //
+// On every OS it prints one next-step line (Getting started v2): run
+// `observer start`, which opens the dashboard, where signing in is the
+// recommended next step. It never starts anything itself.
+//
 // `npm install -g` over an older version swaps the platform package's
 // directory underneath a running Observer daemon: the old process keeps
 // running the deleted binary until it is restarted (the rc.3 roll found
 // every npm node in that state). npm must never restart it: the daemon IS the
 // proxy on :8820, and stopping it while an AI session routes through it
-// breaks that session (docs/daemon-restart-runbook.md). So this script only
+// breaks that session (`observer service restart` is the safe restart). So this script only
 // looks (Linux: /proc/<pid>/exe of `observer start` processes running a
 // replaced @superbased package binary, see below) and prints what to run. It
 // never downloads, writes, signals or fails the install.
@@ -114,8 +118,8 @@ function note(pids, procRoot) {
   }
   if (plain) {
     lines.push(
-      '  It was started with `observer start`: when no AI session uses the proxy, turn the proxy route off,',
-      '    stop that process (Ctrl-C in its terminal, or kill ' + which.replace(/^pids? /, '') + '), then run `observer start` again (docs/daemon-restart-runbook.md).'
+      '  It was started with `observer start`: restart it with  observer service restart',
+      '    It takes the proxy routes off first, has the daemon restart itself in place, and puts them back.'
     );
   }
   lines.push('  npm restarts nothing.', '');
@@ -137,11 +141,22 @@ function emit(text) {
   process.stderr.write(text);
 }
 
+// NEXT_STEP is the one line every fresh install prints, on every OS.
+const NEXT_STEP = 'Installed. Next: observer start (opens your dashboard, where you sign in)\n';
+
+// main prints the stale-daemon note when an updated install left a running
+// daemon on the previous binary (Linux only: it reads /proc), and otherwise
+// the next-step line.
 function main() {
-  if (process.platform !== 'linux') return;
-  const root = process.env.OBSERVER_POSTINSTALL_PROC_ROOT || '/proc';
-  const pids = staleDaemons(root, installedBinary());
-  if (pids.length > 0) emit(note(pids, root));
+  if (process.platform === 'linux') {
+    const root = process.env.OBSERVER_POSTINSTALL_PROC_ROOT || '/proc';
+    const pids = staleDaemons(root, installedBinary());
+    if (pids.length > 0) {
+      emit(note(pids, root));
+      return;
+    }
+  }
+  emit(NEXT_STEP);
 }
 
 if (require.main === module) {
@@ -153,4 +168,4 @@ if (require.main === module) {
   process.exit(0);
 }
 
-module.exports = { staleDaemons, note, retiredDir, installedBinary, underServiceUnit };
+module.exports = { staleDaemons, note, retiredDir, installedBinary, underServiceUnit, NEXT_STEP };

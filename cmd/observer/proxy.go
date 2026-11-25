@@ -121,7 +121,7 @@ func newProxyStartCmd() *cobra.Command {
 					// both nil-check to "allowed").
 					loadPolicyResourceLKG(ctx, pcfg, oc, store.New(pdb), admissionHandle, gw, nil, nil, newLogger(pcfg.Observer.LogLevel))
 					pcleanup()
-					go runPolicyResourcePoller(ctx, pcfg, oc, admissionHandle, gw, nil, nil, nil, newLogger(pcfg.Observer.LogLevel))
+					go runPolicyResourcePoller(ctx, pcfg, resolvedPolicyConfigPath(configPath), oc, admissionHandle, gw, nil, nil, nil, newLogger(pcfg.Observer.LogLevel))
 				} else {
 					fmt.Fprintf(cmd.ErrOrStderr(), "policy resource: LKG/poller skipped - db open failed: %v\n", perr)
 				}
@@ -212,10 +212,7 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	}
 	s := store.New(database)
 
-	port := cfg.Proxy.Port
-	if portOverride > 0 {
-		port = portOverride
-	}
+	port := effectiveProxyPort(cfg.Proxy.Port, portOverride)
 	if port <= 0 || port > 65535 {
 		// D-516: the port only matters when the proxy listens. With
 		// capture.proxy inactive (or compiled out) nothing binds it, so a bad

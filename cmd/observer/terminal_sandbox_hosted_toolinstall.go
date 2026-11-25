@@ -71,34 +71,22 @@ var (
 // https address, then the shell it is piped to and that shell's arguments.
 var hostedCurlScriptRE = regexp.MustCompile(`^curl -fsSL (https://[A-Za-z0-9./_~%-]+) \| ((?:bash|sh)(?: -s -- [A-Za-z0-9 -]+)?)$`)
 
-// hostedToolDelivery decides how the agent tool reaches the box (SBX-IMG-1,
-// orchestrator default): no agent CLI is uploaded. With a template the box
-// is checked for the tool at first start (and, on the internet tier, may
-// install it); with none, only the internet tier can install it from its
-// vendor, and any other tier is refused here as tool_unavailable_in_image
-// (S11). A nil check means there is nothing to look for (no grounded
-// names).
-//
-// rule is the vendor's template rule (Vendor.TemplateRule), named in the
-// refusal so a vendor whose templates are restricted says how to make one.
-func hostedToolDelivery(tool, template string, tier vocab.Tier, rule string) (*hostedToolCheck, error) {
+// hostedToolCheckPlan is the check the host helper runs at first start
+// (ensureTool, through installTool): nil when there is nothing to look for
+// (no grounded names), or when no template is set and the tier cannot
+// install the tool (upstream's hostedToolDelivery has already refused that
+// launch, sandboxremote.PlanToolInstall). With a template the box is still
+// checked for the tool (an image may well lack it) and, on the internet
+// tier only, may install it.
+func hostedToolCheckPlan(tool, template string, tier vocab.Tier) *hostedToolCheck {
 	c := hostedToolCheckFor(tool, tier, template)
-	if strings.TrimSpace(template) != "" {
-		if c == nil || len(c.Names) == 0 {
-			return nil, nil
-		}
-		return c, nil
+	if c == nil || len(c.Names) == 0 {
+		return nil
 	}
-	if c != nil && c.CanInstall {
-		return c, nil
+	if strings.TrimSpace(template) == "" && !c.CanInstall {
+		return nil
 	}
-	if c == nil || len(c.Installs) == 0 {
-		return nil, fmt.Errorf("terminal_sandbox: %s: %s has no grounded Linux install command, and no template is set; name a template that holds it in [terminal.sandbox.hosted.<provider>].template", verdictHostedTool, tool)
-	}
-	if rule != "" {
-		return nil, fmt.Errorf("terminal_sandbox: %s: no template is set, and the %s tier cannot reach %s's vendor to install it at first start; %s", verdictHostedTool, tier, tool, rule)
-	}
-	return nil, fmt.Errorf("terminal_sandbox: %s: no template is set, and the %s tier cannot reach %s's vendor to install it at first start; name a template that holds it in [terminal.sandbox.hosted.<provider>].template, or use the internet tier", verdictHostedTool, tier, tool)
+	return c
 }
 
 // hostedToolCheckFor builds the check from the integration registry (nil

@@ -83,14 +83,18 @@ func TestRoleSplitDeployedGrants(t *testing.T) {
 		{"portal_consent_choices", "INSERT"},
 		{"provider_attestations", "INSERT"}, // admission gate records at enqueue
 		{"structural_snapshots", "INSERT"},
-		{"result_revisions", "INSERT"},  // W6c: the correction append (0018)
-		{"result_revisions", "UPDATE"},  // W6c: the deletion tombstone
-		{"result_revisions", "SELECT"},  // W6c: ETag + Sessions detail
-		{"account_profiles", "INSERT"},  // 0033: the sign-in leg upserts the display identity
-		{"account_profiles", "UPDATE"},  // 0033: ON CONFLICT DO UPDATE on every re-login
-		{"account_profiles", "SELECT"},  // 0033: the /portal/api/session bootstrap reads it
-		{"sbci_migrations", "SELECT"},   // 0036: /healthz schema block + schema-check on the service DSN
-		{"budget_pool_spend", "SELECT"}, // 0044: the reservation's spend-ceiling check
+		{"result_revisions", "INSERT"},        // W6c: the correction append (0018)
+		{"result_revisions", "UPDATE"},        // W6c: the deletion tombstone
+		{"result_revisions", "SELECT"},        // W6c: ETag + Sessions detail
+		{"account_profiles", "INSERT"},        // 0033: the sign-in leg upserts the display identity
+		{"account_profiles", "UPDATE"},        // 0033: ON CONFLICT DO UPDATE on every re-login
+		{"account_profiles", "SELECT"},        // 0033: the /portal/api/session bootstrap reads it
+		{"account_verified_emails", "INSERT"}, // 0074: the WorkOS sign-in leg records the provider's address (A4)
+		{"account_verified_emails", "UPDATE"}, // 0074: refreshed on every sign-in
+		{"account_verified_emails", "DELETE"}, // 0074: cleared when a sign-in carries no usable address
+		{"account_verified_emails", "SELECT"}, // 0074: the OIDC issuer reads it
+		{"sbci_migrations", "SELECT"},         // 0036: /healthz schema block + schema-check on the service DSN
+		{"budget_pool_spend", "SELECT"},       // 0044: the reservation's spend-ceiling check
 	}
 	for _, c := range apiHas {
 		if !tablePriv(t, pool, "sbci_api", c.table, c.priv) {
@@ -206,6 +210,10 @@ func TestRoleSplitLeastPrivilege(t *testing.T) {
 		tablePriv(t, pool, "sbci_worker", "account_profiles", "INSERT") {
 		t.Error("sbci_worker holds a grant on account_profiles; the developer's email is never a worker-plane read")
 	}
+	if tablePriv(t, pool, "sbci_worker", "account_verified_emails", "SELECT") ||
+		tablePriv(t, pool, "sbci_worker", "account_verified_emails", "INSERT") {
+		t.Error("sbci_worker holds a grant on account_verified_emails (0074); the developer's email is never a worker-plane read")
+	}
 	// The worker holds a COLUMN-level UPDATE on analysis_results (superseded,
 	// superseded_by — the W6c regeneration supersede path, migration 0018), so
 	// has_table_privilege(...,'UPDATE') is now true; the invariant that matters
@@ -300,9 +308,10 @@ func TestRoleSplitRoleAttributes(t *testing.T) {
 // introspects, identity-link, and the sweeps). The W5 cross-tenant aggregation
 // function + its EXECUTE grant land in the W5 migration, not 0015.
 //
-// sbci_current_account() is deliberately EXCLUDED: it is EXECUTE-to-PUBLIC by
-// design (a STABLE helper that reads the sbci.account_id GUC — it grants no
-// cross-tenant access), so every role including aggregator can call it.
+// sbci_current_account() is deliberately EXCLUDED: it is the RLS context helper
+// (it grants no cross-tenant access), and the aggregator holds an explicit
+// EXECUTE grant on it (0022) to evaluate the tenant policies; 0082 revoked only
+// its PUBLIC grant.
 func TestRoleSplitAggregatorHasNoCrossTenantExecute(t *testing.T) {
 	pool := cloudtestpg.NewDB(t)
 	sigs := []string{
@@ -367,5 +376,74 @@ func TestRoleSplitRuntimeSmoke(t *testing.T) {
 	// NewForRole rejects an invalid role loudly.
 	if _, err := store.NewForRole(pool, store.Role("sbci_bogus")); err == nil {
 		t.Fatal("NewForRole accepted an invalid role; it must fail loudly")
+	}
+}
+
+// TestRoleSplitWorkerCanSweepExpiredEvidence pins CLOUD-01 (findings
+// 2026-11-22): the worker process runs the expired-evidence sweep
+// (jobs.StartEvidenceSweeper), and the worker binds sbci_worker. Before
+// migration 0151 only sbci_app held EXECUTE on sbci_sweep_expired_evidence
+// (0005), so in the role-split deployment the sweep failed with "permission
+// denied for function" and evidence outlived its one-hour TTL whenever its job
+// never reached a terminal state. The test drives the real call path: a
+// worker-bound store sweeps an expired, still-queued job's evidence, and a
+// fresh object is left alone (the sweep deletes by expires_at only).
+func TestRoleSplitWorkerCanSweepExpiredEvidence(t *testing.T) {
+	appStore, pool := newStore(t)
+	ctx := context.Background()
+	acct := makeAccount(t, appStore)
+
+	now := time.Now()
+	// Created two hours ago, so expires_at (created_at + 1h) is an hour past.
+	expired := submitEvid(t, appStore, acct, "rs-expired", []byte(`{"secret":"old"}`), now.Add(-2*time.Hour))
+	fresh := submitEvid(t, appStore, acct, "rs-fresh", []byte(`{"secret":"new"}`), now)
+	if got := blobCount(t, appStore, acct); got != 2 {
+		t.Fatalf("precondition: want 2 evidence blobs, got %d", got)
+	}
+
+	workerStore, err := store.NewForRole(pool, store.RoleWorker)
+	if err != nil {
+		t.Fatalf("NewForRole(worker): %v", err)
+	}
+	n, err := workerStore.SweepExpiredEvidence(ctx, now)
+	if err != nil {
+		t.Fatalf("SweepExpiredEvidence under sbci_worker: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("SweepExpiredEvidence deleted %d blobs, want 1 (the expired one only)", n)
+	}
+
+	type evidenceState struct {
+		deleted  bool
+		hasBlob  bool
+		jobState string
+	}
+	read := func(jobID string) evidenceState {
+		t.Helper()
+		var st evidenceState
+		if err := pool.QueryRow(ctx,
+			`SELECT eo.deleted_at IS NOT NULL,
+			        EXISTS (SELECT 1 FROM evidence_blobs b
+			                 WHERE b.account_id = eo.account_id AND b.blob_ref = eo.blob_ref),
+			        j.state
+			   FROM analysis_jobs j
+			   JOIN evidence_objects eo ON eo.account_id = j.account_id AND eo.id = j.evidence_pk
+			  WHERE j.account_id = $1::uuid AND j.id = $2::uuid`, acct, jobID).
+			Scan(&st.deleted, &st.hasBlob, &st.jobState); err != nil {
+			t.Fatalf("read evidence state of job %s: %v", jobID, err)
+		}
+		return st
+	}
+	if st := read(expired.JobID); !st.deleted || st.hasBlob || st.jobState != "queued" {
+		t.Fatalf("expired evidence after the worker sweep = %+v, want deleted, no blob, job still queued", st)
+	}
+	if st := read(fresh.JobID); st.deleted || !st.hasBlob {
+		t.Fatalf("fresh evidence after the worker sweep = %+v, want untouched", st)
+	}
+	if !funcPriv(t, pool, "sbci_worker", "sbci_sweep_expired_evidence(timestamptz)") {
+		t.Error("sbci_worker MISSING EXECUTE on sbci_sweep_expired_evidence (0151)")
+	}
+	if funcPriv(t, pool, "sbci_api", "sbci_sweep_expired_evidence(timestamptz)") {
+		t.Error("sbci_api holds EXECUTE on sbci_sweep_expired_evidence; the sweep is a worker-plane job (0151 grants the worker only)")
 	}
 }

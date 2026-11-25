@@ -15,7 +15,7 @@ import (
 // observer_planner fork lineage.
 //
 // The fork numbers its own migrations after upstream's highest, and upstream
-// has three times since shipped DIFFERENT migrations under the fork's numbers:
+// has four times since shipped DIFFERENT migrations under the fork's numbers:
 //
 //   - Builds before 2026-10-17 ran the fork's steps as 078-085; upstream
 //     later used 078-163.
@@ -23,13 +23,18 @@ import (
 //     v1.37 release used 164-211.
 //   - Builds from 2026-11-01 to 2026-11-11 ran them as 212-218; upstream's
 //     v1.38 release used 212, 215 and 217-248.
+//   - Builds from 2026-11-11 to 2026-11-25 ran them as 249-255 and the
+//     telemetry rail's two steps as 256-257; upstream's v1.39 to v1.43.1
+//     releases used 250, 251, 253-256 and 259-261, and reserve 249, 252,
+//     257 and 258 for lines not merged yet.
 //
 // A store from one of the first two generations is pre-ledger (its runner
 // kept only the 'version' record), so the ledger would adopt upstream's
 // same-numbered steps as applied without running them. A store from the
 // third generation has a ledger whose per-step records 212-218 describe the
 // fork's steps, so the plan would read upstream's 212, 215, 217 and 218 as
-// recorded and skip them. reconcileForkLineage rewinds such a store to the
+// recorded and skip them; a store from the fourth has fork records 249-257,
+// so upstream's 250, 251 and 253-256 would be skipped the same way. reconcileForkLineage rewinds such a store to the
 // last step both lineages share, so upstream's steps from there on run, and
 // dropExistingAddColumns lets the renumbered fork migrations run again over
 // columns the old build already added.
@@ -54,7 +59,9 @@ type forkGeneration struct {
 	// build also left 213, 214 and 216 records (TestMergeMainLedgerShapes
 	// keeps them as orphans), and once a current fork build has migrated
 	// such a store it holds briefing_snapshots too. It never changes, even
-	// when the fork is renumbered again.
+	// when the fork is renumbered again; a later generation's rewind deletes
+	// this record, so the next of every LATER ledgered generation counts as
+	// moved too (movedKeys).
 	next int
 }
 
@@ -63,27 +70,29 @@ var forkGenerations = []forkGeneration{
 	{base: 77, max: 85},                           // fork steps as 078-085 (before 2026-10-17)
 	{base: 163, max: 170},                         // fork steps as 164-170 (2026-10-17 to 2026-11-01)
 	{base: 211, max: 218, marker: 213, next: 249}, // fork steps as 212-218 (2026-11-01 to 2026-11-11), ledgered
+	// Fork steps as 249-257 (2026-11-11 to 2026-11-25), ledgered. The
+	// marker 249 is the fork's briefing_snapshots step, recorded on every
+	// store of the generation (256 and 257 only since the telemetry merge).
+	// Upstream reserves 249 for a line not merged yet; should it ship one,
+	// a store this build migrated still has 262 and is left alone.
+	{base: 248, max: 257, marker: 249, next: 262},
 }
 
+// The fork's migrations, renumbered on 2026-11-25 above upstream v1.43.1's
+// 261: Briefing through the summaries index (262-268) and the telemetry
+// rail's staging tables (269, 270). No upstream build carries them.
 const (
-	forkFirst = 249 // first renumbered fork migration
-	forkLast  = 255 // last renumbered fork migration
+	forkFirst = 262 // first renumbered fork migration
+	forkLast  = 270 // last renumbered fork migration
 )
 
+// isForkMigration reports whether v is one of the fork's own steps; each
+// replays over columns an older fork build already added
+// (dropExistingAddColumns).
 func isForkMigration(v int) bool { return v >= forkFirst && v <= forkLast }
 
-// The fork's own later steps, which were never renumbered: the telemetry
-// rail's staging tables (256, 257). No upstream build carries them.
-const (
-	forkOwnFirst = 256
-	forkOwnLast  = 257
-)
-
-// isForkStep reports whether v is a step only this fork carries: a
-// renumbered fork migration or one of the fork's own later steps.
-func isForkStep(v int) bool {
-	return isForkMigration(v) || (v >= forkOwnFirst && v <= forkOwnLast)
-}
+// isForkStep reports whether v is a step only this fork carries.
+func isForkStep(v int) bool { return isForkMigration(v) }
 
 // reconcileForkLineage rewinds a store written by an old fork generation to
 // that generation's base, inside the caller's migration transaction, so a
@@ -108,11 +117,11 @@ func reconcileForkLineage(ctx context.Context, conn *sql.Conn) error {
 	if err != nil {
 		return fmt.Errorf("db.reconcileForkLineage: version %q: %w", raw, err)
 	}
-	for _, g := range forkGenerations {
+	for i, g := range forkGenerations {
 		if (g.marker != 0) != (ledgered > 0) {
 			continue
 		}
-		matches, err := g.wrote(ctx, conn, applied)
+		matches, err := g.wrote(ctx, conn, applied, movedKeys(i))
 		if err != nil {
 			return err
 		}
@@ -137,18 +146,45 @@ func reconcileForkLineage(ctx context.Context, conn *sql.Conn) error {
 // numbering that replaced it, whatever the version record says: an upstream
 // binary run on the store since then raises the version past max and leaves
 // the fork's records in place.
-func (g forkGeneration) wrote(ctx context.Context, conn *sql.Conn, applied int) (bool, error) {
+func (g forkGeneration) wrote(ctx context.Context, conn *sql.Conn, applied int, moved []string) (bool, error) {
 	if g.marker == 0 {
 		return applied > g.base && applied <= g.max, nil
 	}
-	var marker, moved int
+	var marker int
 	if err := conn.QueryRowContext(ctx,
-		`SELECT COUNT(*) FILTER (WHERE key = ?), COUNT(*) FILTER (WHERE key = ?) FROM schema_meta WHERE key IN (?, ?)`,
-		migplan.StepKey(g.marker), migplan.StepKey(g.next), migplan.StepKey(g.marker), migplan.StepKey(g.next),
-	).Scan(&marker, &moved); err != nil {
+		`SELECT COUNT(*) FROM schema_meta WHERE key = ?`, migplan.StepKey(g.marker),
+	).Scan(&marker); err != nil {
 		return false, fmt.Errorf("db.reconcileForkLineage: probe marker: %w", err)
 	}
-	return marker > 0 && moved == 0, nil
+	if marker == 0 {
+		return false, nil
+	}
+	for _, key := range moved {
+		var n int
+		if err := conn.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM schema_meta WHERE key = ?`, key,
+		).Scan(&n); err != nil {
+			return false, fmt.Errorf("db.reconcileForkLineage: probe moved: %w", err)
+		}
+		if n > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// movedKeys are the step records that show a store has left the ledgered
+// generation at index i: its own next, and the next of every later ledgered
+// generation (whose rewind deletes the earlier next record, which lies in
+// its range).
+func movedKeys(i int) []string {
+	var out []string
+	for _, g := range forkGenerations[i:] {
+		if g.marker != 0 {
+			out = append(out, migplan.StepKey(g.next))
+		}
+	}
+	return out
 }
 
 // rewind makes the plan run upstream's steps in (base, max]. A pre-ledger

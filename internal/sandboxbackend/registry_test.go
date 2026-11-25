@@ -18,7 +18,10 @@ func TestRowKeysMatchIDsAndVocabulary(t *testing.T) {
 		BackendModal: true, BackendVercelSandbox: true,
 		BackendMXCAppContainer: true, BackendWSLC: true, BackendHCS: true,
 		BackendOpenShell: true, BackendOpenShellOrg: true,
-		BackendSandHold: true,
+		BackendSandHold:        true,
+		BackendDockerSandboxes: true,
+		BackendInstaBox:        true,
+		BackendDaytona:         true,
 	}
 	for key, c := range registry {
 		if key != c.ID {
@@ -59,7 +62,7 @@ func TestPlannedRowsAreNeverOffered(t *testing.T) {
 	for _, c := range Offered() {
 		ids = append(ids, c.ID)
 	}
-	want := []string{BackendAppleContainer, BackendBwrap, BackendCloudHypervisor, BackendE2B, BackendHCS, BackendModal, BackendMXCAppContainer, BackendMXCProcess, BackendOCIRunc, BackendOCIRunsc, BackendOpenShell, BackendOpenShellOrg, BackendProcessLite, BackendSandHold, BackendSeatbelt, BackendVercelSandbox, BackendWSLC}
+	want := []string{BackendAppleContainer, BackendBwrap, BackendCloudHypervisor, BackendDaytona, BackendDockerSandboxes, BackendE2B, BackendHCS, BackendInstaBox, BackendModal, BackendMXCAppContainer, BackendMXCProcess, BackendOCIRunc, BackendOCIRunsc, BackendOpenShell, BackendOpenShellOrg, BackendProcessLite, BackendSandHold, BackendSeatbelt, BackendVercelSandbox, BackendWSLC}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("offered rows = %v, want %v", ids, want)
 	}
@@ -253,12 +256,19 @@ func TestMacOSRowsAreDocVerified(t *testing.T) {
 // offer the host tier, never list provider_injected custody, and carry a
 // lifetime cap (S13).
 func TestHostedRowsAreBetaRemoteAndRelayed(t *testing.T) {
-	for _, id := range []string{BackendE2B, BackendModal, BackendVercelSandbox} {
+	// The class source each row grounds: docker-sandboxes' cloud isolation
+	// is documented nowhere, so it is claimed (dockerHostedRow).
+	classSource := map[string]vocab.ClassSource{BackendDockerSandboxes: vocab.SourceClaimed}
+	for _, id := range []string{BackendE2B, BackendModal, BackendVercelSandbox, BackendDockerSandboxes, BackendInstaBox, BackendDaytona} {
 		c, ok := Get(id)
 		if !ok || !c.Offered() || c.Maturity != MaturityPreview {
 			t.Fatalf("%s: not an offered preview row", id)
 		}
-		if c.Iso.Location != vocab.LocationRemote || !c.Iso.CrossesKernel || c.Iso.ClassSource != vocab.SourceDocumented {
+		want := vocab.SourceDocumented
+		if s, ok := classSource[id]; ok {
+			want = s
+		}
+		if c.Iso.Location != vocab.LocationRemote || !c.Iso.CrossesKernel || c.Iso.ClassSource != want {
 			t.Errorf("%s: isolation %+v", id, c.Iso)
 		}
 		for _, h := range c.Iso.Hosts {
@@ -284,7 +294,7 @@ func TestHostedRowsAreBetaRemoteAndRelayed(t *testing.T) {
 		for _, d := range c.Discloses {
 			disc[d] = true
 		}
-		if !disc[DiscloseDataLeaves] || !disc[DiscloseAccountLogin] || !disc[DisclosePaidTier] {
+		if !disc[DiscloseDataLeaves] || !disc[DiscloseAccountLogin] || !disc[DisclosePaidTier] || !disc[DiscloseNoHookGating] {
 			t.Errorf("%s: disclosures %v", id, c.Discloses)
 		}
 		if c.Term.Resize == ResizeGuest && c.Term.PTYOwner != PTYGuestHelper {
@@ -407,6 +417,9 @@ func TestRefusalAuditIsGroundedPerRow(t *testing.T) {
 		{BackendModal, nil, "the provider enforces egress"},
 		{BackendVercelSandbox, nil, "the provider enforces egress"},
 		{BackendSandHold, nil, "the node enforces egress; Observer's gateway never sees it"},
+		{BackendDockerSandboxes, nil, "the provider enforces egress"},
+		{BackendInstaBox, nil, "the provider's own open egress; internet tier only"},
+		{BackendDaytona, nil, "the provider enforces egress"},
 		{BackendCodespaces, nil, "planned"},
 		{BackendCoder, nil, "planned"},
 		{BackendK8sAgentSandbox, nil, "planned"},

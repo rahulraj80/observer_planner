@@ -28,7 +28,7 @@ type Target struct {
 // generation, whenever PinnableKeys, ShareKeys or Features grows. target_test.go
 // fails when a key is missing from both the first-generation baseline and the
 // since tables.
-const CurrentKeyGen = 6
+const CurrentKeyGen = 7
 
 // FirstKeyGen is the key vocabulary of the first node.governance build
 // (v1.31.0).
@@ -36,9 +36,10 @@ const FirstKeyGen = 1
 
 // pinSince / shareSince / featureSince name the generation at which each key
 // joined its vocabulary; a key absent from its table has been there since
-// FirstKeyGen. Generations 1-5 are released builds (literal key lists in
+// FirstKeyGen. Generations 1-6 are released builds (literal key lists in
 // target_test.go, taken from the tags; 4, v1.36.0, is the first that
-// advertises its generation; 5 is v1.37.0 and v1.37.1); 6 is unreleased.
+// advertises its generation; 5 is v1.37.0 and v1.37.1; 6 is v1.39.0); 7 is
+// unreleased.
 var (
 	pinSince = map[string]int{
 		"guard.strict":          3, // v1.33.0
@@ -119,6 +120,35 @@ var (
 		// whose nodes refuse a whole body naming a key they do not know
 		// (audit FU4-A1).
 		"terminal.sandbox.seccomp": 6,
+		// the agent-run security assessments (plan section 13.3).
+		"security.assessments.relax_pentest_local":             6,
+		"security.assessments.relax_red_team_local":            6,
+		"security.assessments.scoped_approval":                 6,
+		"security.assessments.max_network_tier":                6,
+		"security.assessments.relaxation_max_minutes":          6,
+		"security.assessments.time_box_threat_model_minutes":   6,
+		"security.assessments.time_box_pentest_local_minutes":  6,
+		"security.assessments.time_box_red_team_local_minutes": 6,
+		"security.assessments.time_box_action":                 6,
+		// the depth work's pen test limits (W4).
+		"security.assessments.workspace_secret_mode":  6,
+		"security.assessments.pentest_request_budget": 6,
+		"security.assessments.pentest_pace_rps":       6,
+		"security.assessments.probe_helper":           6,
+		// lane COPIES (decision SBXD-2 and the diff against the box's
+		// baseline), generation 7 (6 shipped).
+		"terminal.sandbox.returned_copy_retention_days": 7,
+		"terminal.sandbox.hosted.diff_against":          7,
+		// decision SBXD-7 (the hosted internet tier's private-range deny).
+		"terminal.sandbox.hosted.allow_private_ranges": 7,
+		// lane HOOKS (SBXD-6: guard's hooks in a hosted box).
+		"terminal.sandbox.hosted.guard_hooks": 7,
+		// lane CLONE2 (decision SBXD-5: the hosted clone location), the
+		// first key of generation 7: generation 6 shipped in v1.39.0.
+		"terminal.sandbox.hosted.clone_where": 7,
+		// decision SBXD-8 (uploading a folder that is not a repository).
+		"terminal.sandbox.hosted.upload_non_git": 7,
+		"terminal.sandbox.hosted.upload_ignore":  7,
 	}
 	shareSince = map[string]int{
 		"full_tool_bodies":            2, // v1.32.0
@@ -134,6 +164,10 @@ var (
 		"obs.egress":                  3, // v1.33.0
 		// lane w5-wire (per-session hook liveness, DEC-5).
 		"hook_activity": 5,
+		// R3-85 (the project-scope raise directives), generation 6: a
+		// v1.37.x node refuses a whole body naming a key it does not know.
+		"scope.unrestricted":    6,
+		"scope.denylist_remove": 6,
 	}
 	featureSince = map[string]int{}
 )
@@ -226,6 +260,8 @@ var capabilityEra = map[int]struct{ MaxSchema, KeyGen int }{
 	11: {3, 4},
 	// Level 12 (the You page): same as level 11.
 	12: {3, 4},
+	// Level 13 (the Your apps pages, Plane A lane B5): same as level 12.
+	13: {3, 4},
 }
 
 // TargetForCapabilities resolves the Target a node advertises, and false when

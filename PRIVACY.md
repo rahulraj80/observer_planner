@@ -1,39 +1,48 @@
 # Privacy
 
 SuperBased Observer is **a local Go binary that stores what it captures
-on your machine**. It never sends your session content (prompts, code,
+on your machine** until you connect it to a dashboard. It needs no
+account. It never sends your session content (prompts, code,
 responses, file contents) without your explicit consent. By default it
 does send content-free usage telemetry (event names, counts, sizes and
-timings; the `baseline` rung), which one command turns off, and it sends
-no crash reports. It needs no account. The project's authors cannot see
-what you ran or what you typed unless you choose to upload it. Every
-request observer makes by default is listed under "When observer DOES
-make a network call" below. The binary you install from npm is the same
-binary published with SLSA provenance to the public GitHub release:
-what you install is what runs.
+timings; the `baseline` rung), which one command turns off, and it
+sends no analytics or crash reports. Every request observer makes by
+default is listed under "When observer DOES make a network call" below.
+If you sign in and connect a machine, it sends its activity to the
+personal dashboard or team you approve, as described below and in the
+full product privacy policy at https://superbased.app/privacy (policy
+version 3). The binary you install from npm is the same binary
+published with SLSA provenance to the public GitHub release: what you
+install is what runs.
 
 This document spells out exactly what observer touches and what it
 never touches.
 
 ## TL;DR
 
-- **Stored locally.** Observer's database, logs, and stash live under
-  `~/.observer/` (per-user, per-platform). None of it leaves your
-  machine unless **you** explicitly turn on a feature that sends it;
-  usage telemetry (below) is computed from it and carries counts only.
-- **Your content needs your consent.** Session content (prompts, code,
-  responses, file contents) leaves your machine only with your
-  explicit consent (enrolling a machine into your company's managed
-  org is one such consent; see "Org enrolment" below). The optional
-  API proxy forwards **your** requests
-  unchanged to the AI provider you already use. Two of the requests
-  observer makes on its own by default (a daily price-table download
-  and TLS warm-up at proxy start) carry none of your data; the third,
-  usage telemetry, carries content-free counters only.
+- **Local until you connect.** Observer's database, logs, and stash
+  live under `~/.observer/` (per-user, per-platform). None of it leaves
+  your machine unless **you** connect the machine to a dashboard or
+  turn on a feature that sends it.
+- **Default requests carry none of your content.** Observer downloads the
+  public price list (daily) and package-check lists (every 6 hours)
+  from superbased.app, checks public package names with OSV and the
+  package registries after showing you a notice first, and sends an
+  empty `HEAD` request to chatgpt.com and api.openai.com when its proxy
+  starts; none of these carries your data. Usage telemetry (below)
+  carries content-free counters only. Each has an off switch (table
+  below).
+- **Signing in sends your account details only.** Connecting a machine
+  starts sending only after you approve it on a page at
+  cloud.superbased.app, and only activity from then on.
+- **Personal dashboard = Summary only; team = Full detail.** A personal
+  dashboard receives tools, models, times, token counts and cost, with
+  paths and project names as unsalted SHA-256 hashes. A team receives
+  prompts, responses and file paths too, and the team's admins can
+  read them.
 - **Usage telemetry is on by default, content-free, and yours to turn
-  off.** From the first release after 1.38.0 (1.38.0 and earlier: no
-  usage telemetry), a default install sends the `baseline` rung of four (`off`,
-  `baseline`, `enrichment`, `deep`): event names, counts, sizes and
+  off.** A default install of this build sends the `baseline` rung of
+  four (`off`, `baseline`, `enrichment`, `deep`): event names, counts, sizes and
   timings under a published contract that refuses every other field,
   so no prompt or output text, path, project name or command can be
   sent. A one-time notice in the daemon output and the dashboard says
@@ -41,8 +50,8 @@ never touches.
   off, `observer telemetry data` shows what the server holds and
   `observer telemetry delete --yes` removes it. `enrichment` and `deep`
   are never on without your own consent. No crash reports are sent.
-  The aggregate-share rail (`observer aggregate enable`) is off by
-  default and sends nothing without your consent.
+  The anonymous monthly totals command (`observer aggregate enable`)
+  is off by default and sends nothing without your consent.
 - **No accounts required.** You can run observer offline, behind an
   air-gap, without ever signing in to anything.
 
@@ -100,39 +109,35 @@ Per the project's design spec (`superbased-final-spec-v2.md`):
 
 ## When observer DOES make a network call
 
-These are the code paths in the binary that touch the network. Three run
-by default: the pricing feed and TLS warm-up carry none of your data, and
-usage telemetry carries content-free counters only. Every other one is
-gated behind explicit configuration or your own action. `observer privacy`
-prints this list, with each row's on/off state, for your configuration.
+These are the main code paths in the binary that touch the network.
+The first five run by default: four carry none of your data, and usage
+telemetry carries content-free counters only. The others need an
+explicit choice. Run `observer privacy` for a list derived from your
+loaded config.
 
 | Feature | When it talks to the network | What it sends | How it is enabled |
 |---|---|---|---|
-| **Pricing feed** | Once every 24 hours on a standalone (not enrolled) node | A plain `GET` of the public, signed model price table from superbased.app; none of your data | On by default; turn off with `[pricing.feed] enabled = false` |
-| **TLS warm-up** | When the proxy starts | Bare `HEAD` requests to `[proxy].prewarm_targets` (default chatgpt.com and api.openai.com); none of your data | On by default; set by `[proxy].prewarm_targets` |
+| **Pricing feed** | Once every 24 hours on a machine not connected to a dashboard or team server (a connected machine gets prices from it instead) | A plain `GET` of the public, signed model price list from superbased.app; none of your data | On by default; turn off with `[pricing.feed] enabled = false` |
+| **Package-check lists** | Every 6 hours | A plain `GET` of the signed malicious-package and popular-name lists from superbased.app; none of your data | On by default; turn off with `[security.deps] index_download = false` |
+| **Online package checks** | When an AI agent installs a package, and for the packages your projects use, only after the first-run notice is acknowledged on the dashboard or CLI | The package's ecosystem, public name and version to `api.osv.dev` and its public registry (npm, PyPI, Go proxy, crates.io, RubyGems); never paths, repo names or private package names | On by default after the notice; turn off with `[security.deps] online = false` |
+| **TLS warm-up** | When the proxy starts | One empty `HEAD` request each to `[proxy].prewarm_targets` (default chatgpt.com and api.openai.com); no body, no key, none of your data | On by default; turn off with `[proxy] prewarm_targets = []` |
+| **Usage telemetry** | On by default at the content-free `baseline` tier (`[telemetry] enabled = true`, `tier = "baseline"`); a one-time notice in the daemon output and the dashboard says so before the first batch. Off with `observer telemetry consent off`, `[telemetry] enabled = false` or `OBSERVER_TELEMETRY=off` | Content-free usage events under the published telemetry contract (event names, counts, sizes, timings; no prompt or output text) to the `[telemetry] endpoint` (default `https://cloud.superbased.app`, or a self-hosted reporter after `observer telemetry register`), identified by an install id derived from this machine's cloud device key, with no account. Each prompt cycle carries a label (your prompt, a system nudge or a tool call) assigned by a local classifier; the prompt text is never sent for it. Session and token events also say whether the session was started from the app's own terminal (`in_app`) or elsewhere (`external`) | `observer telemetry consent <tier>`; see or delete it with `observer telemetry data` / `observer telemetry delete --yes` |
+| **OSV databases** | Every 6 hours, only after the one-time accept | Download of the public OSV databases from superbased.app, falling back to Google's OSV bucket | `observer security scan db accept` or the Code security page |
+| **Package lookup** | Only after its own consent | Requests for blocks of advisory data by a short hash of each package name, from `shards.superbased.app` | `observer security lookup mode` or the Privacy page |
 | **API proxy** | When your AI client points `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` at observer | **Your** API request, forwarded byte-identically to the upstream provider you chose (api.anthropic.com, chatgpt.com, openai.com, …) | `observer init --claude-code/--codex/--cursor` (writes the env-var hint into the AI client's config) |
 | **Message summary** | If `[messagesummary] enabled = true` | A subset of your conversation, to the LLM endpoint **you** configure (`base_url`, `model`, `api_key`) | TOML config; you provide the endpoint and key |
-| **Org enrolment** | If this machine was enrolled with `observer enroll` | To your organization's own server. Individual enrolment: metadata, with content-bearing fields as hashes (raw only under your local `full_content` opt-in). Managed (company) enrolment: the full session record, content included. See "Org enrolment" below | `observer enroll` (explicit; needs the org URL and an enrolment token, link or org sign-in) |
-| **Usage telemetry** | On by default at the content-free `baseline` tier (`[telemetry] enabled = true`, `tier = "baseline"`); a one-time notice in the daemon output and the dashboard says so before the first batch. Off with `observer telemetry consent off`, `[telemetry] enabled = false` or `OBSERVER_TELEMETRY=off` | Content-free usage events under the published telemetry contract (event names, counts, sizes, timings; no prompt or output text) to the `[telemetry] endpoint` (default `https://cloud.superbased.app`, or a self-hosted reporter after `observer telemetry register`), identified by an install id derived from this machine's cloud device key, with no account. Each prompt cycle carries a label (your prompt, a system nudge or a tool call) assigned by a local classifier; the prompt text is never sent for it. Session and token events also say whether the session was started from the app's own terminal (`in_app`) or elsewhere (`external`) | `observer telemetry consent <tier>`; see or delete it with `observer telemetry data` / `observer telemetry delete --yes` |
-| **Cloud intelligence** | After `observer cloud login`, for a session you preview (`observer cloud preview`) and consent to (`observer cloud consent`); uploads on `observer cloud sync` | Exactly the bytes the preview showed you, to the hosted cloud service | Sign-in plus per-session consent |
-| **Aggregate share** | If `[aggregate_share] enabled = true` and a consent receipt exists | A coarsened monthly usage aggregate to `aggregate.superbased.app` | Config plus consent (`observer aggregate`) |
-| **Org update manifest** | When enrolled and `[update] enabled = true` | GETs the signed update manifest (and, when an update applies, the artifact) from your enrolled org server | `observer enroll` |
-| **Dashboard update check** | When you click "Check for updates" in Settings | A GET to `registry.npmjs.org` for the latest version number | Your click |
-| **`observer summarize`** | When you run it | A session, to the Anthropic Messages API with your own key | Your command |
-| **Rolling summarization** | If `[compression.conversation.rolling] enabled = true` and a tool routes through the proxy | Older conversation turns, to the summarizer provider you configure | TOML config |
-| **OTel exporter** | If `[exporter.otel] enabled = true` | Turn-level spans to your OTLP collector | TOML config |
-| **Email / digest alerts** | If `[email] enabled = true` | Alert or digest mail to your SMTP server | TOML config |
-| **Remote notify** | If `[remote.notify] enabled = true` | A webhook / ntfy call on terminal session events | TOML config |
-| **Guard cloud** | If `[guard.cloud] enabled = true` and a webhook, judge or reputation lookup is configured | Redacted guard event summaries to your webhooks; an ask-class event's context to your judge endpoint; package metadata GETs from `registry.npmjs.org` | TOML config |
-| **Generalized observability (Plane A)** | If `[observability] enabled = true` | Judge calls and alert webhooks for a hosted app you are observing | TOML config |
+| **Sign-in and connect** | When you run `observer connect`, click Sign in, or install with `--connect` | To cloud.superbased.app: your account sign-in, and for the approval page this machine's name, OS, processor type, observer version, a public key it made, and the team name you typed | Your action; nothing about sessions is sent until you approve the machine |
+| **Connected machine** | After you approve the machine on the approval page | To your personal dashboard (summary only) or your team (full detail), see "Personal and team dashboards we host" below | `observer connect`; stop with `observer unenroll` |
+| **Your own team server** | If this machine was connected to a server your company runs | To that server; see "Servers you host yourself" below | `observer connect <server>` |
+| **AI summaries, daily totals, community benchmarking** | After sign-in and each feature's own consent | See "AI summaries and other uploads" below | `observer cloud enable`, `observer cloud consent grant` |
 | **SandHold connect** | When you run `observer sandbox connect [<node-url>]` or `observer sandbox disconnect`, and only to the SandHold node you named (with none named, SandHold's public node `sandhold-sb.dynv6.net:48000`, or the one `SANDHOLD_DEFAULT_URL` names); the dashboard's Sandboxes panel calls the connected node again only when you press its Refresh | Before signing in, with no key: the node's sign-up facts and first-month offer (`/app/api/signup`). The sign-in request (what this machine calls itself, "Observer on <hostname>"), then with the key the node gave: who the key belongs to (`/v1/whoami`), which isolation the node offers (`/v1/targets`), the account's plan (`/v1/offer`), and revoking the key (`DELETE /v1/keys/{id}`). No session data, no files. https only (plain http for localhost only), no redirect is followed, and the key is sent only to the node that issued it | Your command; the key is kept in this machine's keychain until you disconnect |
 | **SandHold advisor** | When you press the advisor's button on the dashboard's Terminals > Sandboxes tab, and only to the SandHold node you connected (or `SANDHOLD_URL`) | A request for the node's three questions (`GET /v1/advise`), then your answers (`POST /v1/advise`): what will run, how much you trust the code, and the package sources and hosts you picked. No session data, no files. The key goes from the daemon in a header only and never reaches the browser; https only (plain http for localhost only), no redirect is followed | Your click |
 | **SandHold sandboxed run** | When you launch a sandboxed terminal on the `sandhold` backend (listed in `[terminal.sandbox].backends`, chosen by name, after the one-time consent), and only to the node you connected (or `SANDHOLD_URL`) | Creating, reading and deleting the run's sandbox; the workspace files you consented to, the in-box observer and the agent's launch settings written into it (your model key only when you chose to put it in the box); the agent's commands and terminal; the transcripts and diff read back at checkpoints and at the end. The key goes in a header only, never in an address; https and wss only (plain http for localhost only), and no redirect is followed | The consent you gave once for that node; a leftover sandbox is deleted only when you confirm it |
 | **Antigravity gRPC fallback** | When parsing Antigravity sessions on macOS where keychain decrypt fails | Local IPC to a Google-installed gRPC socket, never the internet | Automatic; only fires on Antigravity sessions |
 
-With the pricing feed, TLS warm-up and usage telemetry turned off and none of
-the opt-in features configured, observer makes no outbound network calls of
-its own. Verify with:
+With the four default requests and usage telemetry turned off and none
+of the opt-in features configured, observer makes no outbound network
+calls of its own. Verify with:
 
 ```bash
 sudo lsof -p $(pgrep -f 'observer start') -i      # should show ONLY :8820/:8830/:8831 etc. on 127.0.0.1
@@ -170,50 +175,118 @@ observer **without** the proxy:
   configured to point at the proxy, so requests go direct to the
   provider.
 
-## Org enrolment (opt-in)
+## Signing in and connecting a machine
 
-Org enrolment lets a team or company roll up activity from each
-developer's observer into your organization's **own** server. Nothing
-goes to that server until a machine is enrolled with `observer enroll`.
-Its endpoint is not pre-configured; there is no default destination,
-and the server belongs to your organization, not to us. What it receives depends on the kind of enrolment.
+Signing in (`observer connect`, the local dashboard's Sign in button,
+the VS Code extension, or cloud.superbased.app) sends us your account
+identifier, email address and name, from our sign-in provider. It
+sends nothing about your coding sessions. Your first sign-in creates
+an empty personal dashboard.
 
-**Individual enrolment: you opt in to content.**
+Connecting a machine always ends on an approval page at
+cloud.superbased.app, where you choose your personal dashboard or one
+of your team dashboards and read what will be sent. Until you click **Connect**,
+nothing about your sessions is sent; after it, only activity from that
+moment on is sent, never what was recorded before. **Not now** leaves
+the machine signed in and sending nothing.
 
-- By default the node pushes metadata: per-session and per-day rows
+## Personal and team dashboards we host
+
+SuperBased hosts every personal dashboard and every hosted team at its
+own address under superbased.app, in France.
+
+**Personal dashboard: Summary only.** Per session and action: tool and
+version, model, timings, counts, success, token counts, cost, lines
+changed and commit counts, stamped with your account email. File
+paths, command targets, project folders and git remotes ship only as
+SHA-256 hashes. The hashes are **not salted**: anyone who knows or
+guesses a path can hash it and match it, so they hide names, they do
+not anonymise them. Git branch names, prompts, responses, code and
+command text are not sent, unless you yourself set
+`[org_client.share].full_content = true` on that machine.
+
+**Team: Full detail.** Everything above plus prompts and responses
+where your AI tool records them, commands, raw file paths, project and
+git details including branches, and pull request titles. The team's
+**admins can read it**; other roles only what an admin grants. The
+team is the controller of its data.
+
+**Who else.** SuperBased support sees a dashboard only on a time-limited
+(72 hours at most), read-only grant from you or a team admin, never
+content, and every page is audited. Engineers who run the service can
+technically reach the database, only to run, back up and restore it.
+
+**Retention.** Activity is deleted after 30 days (personal free), 60
+days (personal paid, Team), 180 days (Business) or 30 days (lapsed
+team). Backups are encrypted and kept at most 30 days. Deleting your
+account deletes your personal dashboard straight away; a team is
+deleted by its owner after a 30-day wait (14 for an idle free team).
+
+## Servers you host yourself
+
+A company can also run the team server itself. Nothing goes to that
+server until a machine is connected to it with `observer connect
+<server>`. There is no default destination, the server belongs to the
+company, and we receive none of its data. What it receives depends on
+the kind of connection.
+
+**Individual connection: you opt in to content.**
+
+- By default the machine pushes metadata: per-session and per-day rows
   such as token counts, costs, models, timings and action counts.
   Content-bearing fields (command targets, file paths, project roots,
-  git remotes and branch names) ship only as sha256 hashes.
+  git remotes) ship only as unsalted sha256 hashes, and branch names
+  are not sent.
 - Raw values for those fields ship only if you set
   `[org_client.share].full_content = true` in your own local
-  `~/.observer/config.toml`. The org admin has no remote switch for
-  that file.
+  `~/.observer/config.toml`. The server's admin has no remote switch
+  for that file.
 
-**Managed (company) enrolment: full content.**
+**Company-managed connection: full content.**
 
-Enrolling a machine into your company's managed org is the explicit
-consent for that machine's session content to go to that org. A
-managed node sends its full session record, content included (raw
+Connecting a machine to your company's managed server is the explicit
+consent for that machine's session content to go there. A managed
+machine sends its full session record, content included (raw
 commands, assistant responses, file paths, project and git details),
-to your organization's own server.
+to your company's own server.
 
-- `observer enroll` writes `full_content = true` into the local config
-  for a managed enrolment (and `false` for an individual one). The
-  value comes from the enrolment itself, and you can read it in the
-  file.
-- A machine enrolled as managed before that default existed is raised
-  to full content by the org's signed `extract.managed` grant. It is
-  shown to you at consent, in `observer org status` and in
+- A managed connection writes `full_content = true` into the local
+  config (and `false` for an individual one). The value comes from the
+  connection itself, and you can read it in the file.
+- A machine connected as managed before that default existed is raised
+  to full content by the company's signed `extract.managed` grant. It
+  is shown to you at consent, in `observer org status` and in
   `observer org grant show`. It never silently rewrites your config, it
-  does nothing on an individual enrolment, and it is refused if its
+  does nothing on an individual connection, and it is refused if its
   signature, pinned key or generation does not verify.
-- The org can lower this again through its signed governance policy,
-  and that lowering wins.
+- The company can lower this again through its signed governance
+  policy, and that lowering wins.
 
-In both cases a single SQL seam in the node builds every pushed row,
+In every case a single SQL seam in the binary builds every pushed row,
 and an invariant test pins the content-bearing columns so a change is
-loud. If you don't want to send anything to an organization's server,
-don't enroll; `observer unenroll` stops it.
+loud. If you don't want to send anything, don't connect;
+`observer unenroll` stops it (a future `disconnect` verb may replace that name).
+
+## AI summaries and other uploads
+
+All need sign-in plus their own consent, and none is on by default.
+
+- **AI summaries** of a session: the exact bytes are previewable first
+  (`observer cloud preview`) and bound to a two-digest consent receipt;
+  the uploaded evidence is deleted within an hour; the model is
+  Anthropic's Claude API, under the provider terms the policy states.
+- **Daily activity totals** (sent with AI summaries, or on their own
+  consent) and **community benchmarking** (one number per measure per
+  month): counts only, no paths, commands or excerpts. The rows carry
+  random ids but are stored under your account and machine, so they are
+  pseudonymous, not anonymous.
+- **Anonymous monthly totals** (`observer aggregate enable`, then
+  `observer aggregate submit`): per model family and tool, no account,
+  a new random id each month, to `aggregate.superbased.app`. Off by
+  default, and the receiving server is not running today, so nothing is
+  collected.
+- Sessions captured while the machine is connected to a dashboard, a
+  team or a company's server are never used for these uploads.
 
 ## Source-of-truth and verification
 
