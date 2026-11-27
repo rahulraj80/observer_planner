@@ -11,3 +11,7 @@ export const WEB2_ABSENT = !existsSync(new URL("../../../web2/", import.meta.url
 export function web2Skip(path: string): string | false {
   return WEB2_ABSENT && path.startsWith("web2") ? "public snapshot lacks web2/" : false;
 }
+
+// WEBSITE_ABSENT: the public snapshot also lacks website/, the marketing
+// site's sources; a test that reads them skips there.
+export const WEBSITE_ABSENT = !existsSync(new URL("../../../website/", import.meta.url));

@@ -84,6 +84,7 @@ export const NAV_ADVANCED: { id: string; label: string; items: string[] }[] = [
       "app-scores",
       "app-prompts",
       "app-alerts",
+      "app-model-calls",
     ],
   },
 ];

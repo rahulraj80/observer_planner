@@ -163,7 +163,7 @@ func (s *Server) ctaRoutingShadowPlan(ctx context.Context) ([]*configapply.Chang
 		engine = cost.NewEngine(config.IntelligenceConfig{})
 	}
 	st := store.New(s.db())
-	sh, err := st.AdviseShadowSignal(ctx, 1, enginePriceFn(engine))
+	sh, err := st.AdviseShadowSignal(ctx, 1, engine.RoutingPriceFn())
 	if err != nil {
 		return nil, false, 0, nil, "", err
 	}

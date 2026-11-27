@@ -123,13 +123,12 @@ import { useConfigSchema, type ConfigSchemaDescriptor } from "@/lib/configSchema
 import {
   isSettingsHidden,
   isSettingsReadOnly,
-  governedOrgLabel,
   useGovernance,
   useGovernanceVisibility,
   type Governance,
 } from "@/lib/governance";
 import { settingsOfferedWhileUnresolved } from "@/lib/visibility";
-import { ManagedNotice } from "@/components/ManagedNotice";
+import { ManagedNotice, ManagedSettingsReadOnly } from "@/components/ManagedNotice";
 import { fmtDateTime, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   BackfillJob,
@@ -874,12 +873,7 @@ export function SettingsPage() {
                   Enrolment and Organization are shown.
                 </ReadOnlyBanner>
               )}
-              {readOnly && (
-                <ReadOnlyBanner className="mb-4">
-                  Managed by {governedOrgLabel(gov.data)} - changes to this section cannot be saved from
-                  this machine.
-                </ReadOnlyBanner>
-              )}
+              {readOnly && <ManagedSettingsReadOnly gov={gov.data} settingsId={active} className="mb-4" />}
               <SettingsProposalsCard readOnly={readOnly} onSaved={config.reload} />
               {active === "general" && (
                 <div className="space-y-4">

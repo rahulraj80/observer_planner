@@ -38,7 +38,21 @@ var notBuildOutKeys = map[string]string{
 	"terminal.sandbox.hosted.sandhold.endpoint_spki_sha256": "this fork's SandHold vendor block; its node is the one `observer sandbox connect` signed in to, not a Plane A build-out key",
 	"terminal.sandbox.hosted.sandhold.region":               "this fork's SandHold vendor block; its node is the one `observer sandbox connect` signed in to, not a Plane A build-out key",
 	"terminal.sandbox.hosted.sandhold.template":             "this fork's SandHold vendor block; its node is the one `observer sandbox connect` signed in to, not a Plane A build-out key",
+	"launch.start_daemon":                                   "the launchers' daemon autostart (L-169, feat/launcher-autostart): a coding-agent launcher setting, not Plane A",
+	"launch.start_daemon_wait_seconds":                      "the launchers' daemon autostart wait (L-169, feat/launcher-autostart): a coding-agent launcher setting, not Plane A",
+	"proxy.app_lanes.budget":                                appLaneKeyReason,
+	"proxy.app_lanes.include_usage":                         appLaneKeyReason,
+	"proxy.app_lanes.models":                                appLaneKeyReason,
+	"proxy.app_lanes.worst_case_output_tokens":              appLaneKeyReason,
 }
+
+// appLaneKeyReason: the machine's local app lane keys (hosted AI gateway arc
+// lane L7, decision 8) sit in the proxy block, not the SDK build-out's
+// observability block; their surface is `observer apps lane add|list|remove`
+// and the dashboard's Model calls page (L9). Widening isPlaneAKey to them
+// shows proxy.app_lanes.models has no UI, CLI or MCP path yet (a follow-up
+// for the lead, named in the arc's final fold report).
+const appLaneKeyReason = "the machine's local app lane (hosted AI gateway arc L7, decision 8): a proxy-block setting whose surface is the apps lane commands and the Model calls page, outside the SDK build-out's observability scope"
 
 // buildOutMachineKeys derives the build-out's machine keys from the schema:
 // every current leaf that is not in the frozen baseline.

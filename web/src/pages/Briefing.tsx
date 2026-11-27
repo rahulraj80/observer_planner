@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import clsx from "clsx";
-import { PageHeader, Pill, StatCard, Toggle } from "@/components/primitives";
-import { GearIcon, SparklesIcon } from "@/components/icons";
+import { Settings, Sparkles } from "lucide-react";
+import { Icon, PageHeader, Pill, StatCard, Toggle } from "@/components/primitives";
 import { fetchJSON } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { fmtCompact, fmtInt, fmtPct, fmtUSD } from "@/lib/format";
@@ -610,7 +610,7 @@ export function BriefingPage() {
                 aria-label="Configure briefing sections"
                 className="flex items-center gap-1.5 rounded-3 border border-line-2 bg-bg-2 px-2 py-1 text-[12px] text-fg-2 transition-colors hover:bg-bg-3 hover:text-fg-1"
               >
-                <GearIcon size={13} />
+                <Icon icon={Settings} size={13} />
                 Sections
               </button>
               {customizing && (
@@ -633,7 +633,7 @@ export function BriefingPage() {
 
       {/* Narrative - pinned. */}
       <div className="flex items-start gap-3 rounded-3 border border-line-2 bg-bg-2 px-4 py-3">
-        <SparklesIcon size={14} className="mt-0.5 shrink-0 text-accent" />
+        <Icon icon={Sparkles} size={14} className="mt-0.5 shrink-0 text-accent" />
         <p className="text-[13px] leading-relaxed text-fg-1">{b.narrative}</p>
       </div>
 

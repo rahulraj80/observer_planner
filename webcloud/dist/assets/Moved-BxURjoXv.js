@@ -1,0 +1,1 @@
+import{ab as e,al as a,dE as o,dF as t}from"./index-BtUQ3FwE.js";import{E as r}from"./EmptyState-B_eFFW0e.js";import{P as s}from"./PageHeader-CBDd4BpF.js";function d(){return e.jsxs(a,{className:"flex flex-col gap-6",children:[e.jsx(s,{title:t.title,icon:o}),e.jsx(r,{icon:o,title:t.cardTitle,body:t.body,to:"/home",toLabel:t.toLabel})]})}export{d as Moved};

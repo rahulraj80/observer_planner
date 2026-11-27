@@ -179,7 +179,7 @@ func (s *Server) loadBriefingFacts(ctx context.Context, opts briefingQueryOption
 	// briefing). The shadow window is [now-24h, now] — approximately the
 	// completed local day; exact-window shadowing is Phase A+ refinement.
 	if st := store.New(s.db()); st != nil {
-		if sh, serr := st.AdviseShadowSignal(ctx, 1, enginePriceFn(engine)); serr == nil && sh.AdviseDecisions > 0 {
+		if sh, serr := st.AdviseShadowSignal(ctx, 1, engine.RoutingPriceFn()); serr == nil && sh.AdviseDecisions > 0 {
 			coverage := 0.0
 			if sh.AdviseDecisions > 0 {
 				coverage = float64(sh.WouldReroute) / float64(sh.AdviseDecisions)

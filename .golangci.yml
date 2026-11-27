@@ -139,6 +139,12 @@ linters:
         text: judgeDefaultTimeout
         linters:
           - unused
+      # v1.44.0 snapshot: the callers of these admission judge helpers are
+      # not in the public snapshot either (same file as upstream's).
+      - path: cmd/observer/admission_judge\.go
+        text: (judgeKindMachine|judgeKindOrg|judgeEndpointHost)
+        linters:
+          - unused
     # Same list for linters and formatters (see formatters.exclusions.paths).
     paths: &excluded-paths
       - testdata
